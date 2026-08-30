@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -9,10 +9,8 @@ import {
   List,
   Typography,
   IconButton,
-  Avatar,
   Collapse,
   Tooltip,
-  InputBase,
   ListItemButton,
   ListItemIcon,
   Divider,
@@ -38,10 +36,8 @@ import {
   TableChart as TableChartIcon,
   MenuBook as MenuBookIcon,
   ExpandLess,
-  ExpandMore,
   Add as AddIcon,
   Close as CloseIcon,
-  Logout as LogoutIcon,
   CalendarToday as CalendarIcon,
   TrendingUp as TrendingUpIcon,
   Store as StoreIcon,
@@ -58,37 +54,47 @@ import {
 import { isAdminRole as isAdminRoleName, getStaffRoleName, getRoleDefaultModules, SALESMAN_ALLOWED_MENU_IDS } from '@/lib/staff-access';
 import { isHqUser } from '@/lib/branch-roles';
 import { exitHqPosMode } from '@/lib/branch-client';
+import { NAV_FN, SIDEBAR, SIDEBAR_WIDTH, SIDEBAR_SECTION_LABELS } from '@/lib/brand-theme';
 
-const COLLAPSED_WIDTH = 64;
-const EXPANDED_WIDTH = 280;
-const SIDEBAR_BG = '#ffffff';
+const COLLAPSED_WIDTH = SIDEBAR_WIDTH.collapsed;
+const EXPANDED_WIDTH = SIDEBAR_WIDTH.expanded;
 
-const SECTION_COLORS = [
-  '#d4ff00', // Lime
-  '#00e676', // Green
-  '#1de9b6', // Teal
-  '#00e5ff', // Cyan
-  '#2979ff', // Blue
-  '#8c52ff', // Indigo
-  '#d500f9', // Violet
-  '#ffd600', // Yellow
-];
+const SECTION_META = {
+  Overview: { fn: 'overview', icon: DashboardIcon },
+  Accounts: { fn: 'accounts', icon: PeopleIcon },
+  Products: { fn: 'inventory', icon: InventoryIcon },
+  Finance: { fn: 'finance', icon: AttachMoneyIcon },
+  Sales: { fn: 'sales', icon: ShoppingCartIcon },
+  Purchase: { fn: 'purchase', icon: ShoppingBagIcon },
+  Cargo: { fn: 'inventory', icon: LocalShippingIcon },
+  'HR Management': { fn: 'hr', icon: BadgeIcon },
+  Reports: { fn: 'reports', icon: PieChartIcon },
+  System: { fn: 'system', icon: PersonIcon },
+};
 
-const PILL_COLORS = [
-  '#d4ff00', // Lime
-  '#00e676', // Green
-  '#1de9b6', // Teal
-  '#00e5ff', // Cyan
-  '#2979ff', // Blue
-  '#8c52ff', // Indigo
-  '#d500f9', // Violet
-  '#ffd600', // Yellow
-];
+const SALES_IDS = new Set(['orders', 'new-sale', 'sales', 'hold-bills', 'sale-returns', 'quotations', 'sales-analytics', 'loaders']);
+const PURCHASE_IDS = new Set(['purchases', 'new-purchase', 'purchase-list', 'purchase-returns', 'vehicles', 'purchase-details']);
+const INVENTORY_IDS = new Set(['products', 'categories', 'sub-categories', 'store-stock', 'stock-transfer', 'stores', 'cargo']);
+const OPERATIONS_IDS = new Set(['day-end', 'day-end-history', 'cash-report', 'bank-report', 'bank-accounts']);
+const FINANCE_IDS = new Set(['expenses', 'expense-titles', 'journal', 'internal-transfer', 'adjustment-management']);
+const ACCOUNTS_IDS = new Set(['customercategory', 'customer-types', 'customers']);
 
-const PILL_WIDTHS = [
-  '95%', '80%', '90%', '74%', '97%', '83%', '88%',
-  '77%', '93%', '85%', '72%', '96%', '79%', '87%',
-];
+const getNavFn = (item) => {
+  const { id, category } = item;
+  if (id === 'dashboard' || id === 'hq') return NAV_FN.overview;
+  if (id === 'ledger') return NAV_FN.ledger;
+  if (SALES_IDS.has(id) || category === 'sales-operations') return NAV_FN.sales;
+  if (PURCHASE_IDS.has(id) || category === 'purchase-operations') return NAV_FN.purchase;
+  if (INVENTORY_IDS.has(id) || category === 'product-management' || category === 'cargo-operations') return NAV_FN.inventory;
+  if (OPERATIONS_IDS.has(id)) return NAV_FN.operations;
+  if (FINANCE_IDS.has(id) || category === 'financial') return NAV_FN.finance;
+  if (ACCOUNTS_IDS.has(id) || category === 'customer-management') return NAV_FN.accounts;
+  if (category === 'reports') return NAV_FN.reports;
+  if (category === 'hr-management') return NAV_FN.hr;
+  if (category === 'system') return NAV_FN.system;
+  if (category === 'main') return NAV_FN.overview;
+  return NAV_FN.overview;
+};
 
 // Map item IDs to their route paths for URL-based active detection
 const ROUTE_MAP = {
@@ -160,7 +166,8 @@ const ROUTE_MAP = {
 const PATH_TO_ITEM = {};
 
 const getItemHref = (itemId) => {
-  if (itemId === 'new-purchase') return '/dashboard/purchases?view=new';
+  if (itemId === 'new-sale') return '/dashboard/sales';
+  if (itemId === 'new-purchase') return '/dashboard/purchases?view=create';
   if (itemId === 'purchase-returns') return '/dashboard/purchases?type=return';
   if (itemId === 'sale-returns') return '/dashboard/sales?type=return';
   if (itemId === 'sub-categories') return '/dashboard/subcategories';
@@ -175,36 +182,14 @@ export default function Sidebar({
   expandedDropdowns,
   setExpandedDropdowns,
   user,
-  handleLogout,
   collapsed,
-  setCollapsed
+  onToggleCollapse,
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   const scrollContainerRef = useRef(null);
-
-  const getItemColor = (item, colorIdx) => {
-    if (item.id === 'orders') return '#006D31'; // Orders
-    if (item.id === 'new-sale' || item.id === 'sales') return '#04371A'; // Sales
-    if (item.category === 'purchase-operations' || item.id === 'purchases') return '#00AC41'; // Purchases
-    if (item.category === 'customer-management' || item.id === 'customers' || item.id === 'customercategory') return '#A434FF'; // Accounts
-    if (item.category === 'reports' || item.id === 'reports-dashboard') return '#0E0061'; // Reports
-    return PILL_COLORS[colorIdx % PILL_COLORS.length];
-  };
-
-  const getSectionColor = (category, sectionIdx) => {
-    if (category === 'sales-operations') return '#04371A'; // Sales
-    if (category === 'purchase-operations') return '#00AC41'; // Purchases
-    if (category === 'customer-management') return '#A434FF'; // Accounts
-    if (category === 'reports') return '#0E0061'; // Reports
-    return SECTION_COLORS[sectionIdx % SECTION_COLORS.length];
-  };
-
-  const isDarkColor = (color) => {
-    const darkColors = ['#006D31', '#04371A', '#00AC41', '#A434FF', '#0E0061', '#8c52ff', '#2979ff', '#d500f9'];
-    return darkColors.includes(color);
-  };
 
   const menuItems = [
     { id: 'hq', name: 'Head Office', icon: StoreIcon, category: 'main', hqOnly: true },
@@ -402,9 +387,38 @@ export default function Sidebar({
     return SALESMAN_ALLOWED_MENU_IDS.has(item.id);
   });
 
-  // Derive activeTab and auto-expand the correct parent section from the URL pathname
-  const detectActiveFromPath = useCallback((currentPath) => {
+  // Derive activeTab from pathname + query (view=create, type=return, etc.)
+  const detectActiveFromPath = useCallback((currentPath, params) => {
     if (!currentPath) return null;
+
+    const view = params?.get?.('view') || null;
+    const type = params?.get?.('type') || null;
+
+    if (currentPath.startsWith('/dashboard/sales/analytics')) {
+      return { id: 'sales-analytics', category: 'sales-operations' };
+    }
+
+    if (currentPath.startsWith('/dashboard/sales')) {
+      if (type === 'return') {
+        return { id: 'sale-returns', category: 'sales-operations' };
+      }
+      // Sidebar "New Sale" opens the sales list; form opens from the list page button
+      return { id: 'new-sale', category: 'main' };
+    }
+
+    if (currentPath.startsWith('/dashboard/purchases')) {
+      if (type === 'return') {
+        return { id: 'purchase-returns', category: 'purchase-operations' };
+      }
+      if (view === 'create' || view === 'new') {
+        return { id: 'purchases', category: 'main' };
+      }
+      return { id: 'purchase-list', category: 'purchase-operations' };
+    }
+
+    if (currentPath.startsWith('/dashboard/orders')) {
+      return { id: 'orders', category: view === 'create' ? 'main' : 'sales-operations' };
+    }
 
     // Order matters: check more specific paths first
     const pathMappings = [
@@ -416,10 +430,7 @@ export default function Sidebar({
       { path: '/dashboard/products', id: 'products', category: 'product-management' },
       { path: '/dashboard/vehicles', id: 'vehicles', category: 'purchase-operations' },
       { path: '/dashboard/finance', id: 'ledger', category: 'main' },
-      { path: '/dashboard/sales/analytics', id: 'sales-analytics', category: 'sales-operations' },
-      { path: '/dashboard/sales', id: 'sales', category: 'sales-operations' },
       { path: '/dashboard/hold-bills', id: 'hold-bills', category: 'sales-operations' },
-      { path: '/dashboard/purchases', id: 'purchases', category: 'purchase-operations' },
       { path: '/dashboard/expense-titles', id: 'expense-titles', category: 'financial' },
       { path: '/dashboard/expenses', id: 'expenses', category: 'financial' },
       { path: '/dashboard/internal-transfer', id: 'internal-transfer', category: 'financial' },
@@ -428,7 +439,6 @@ export default function Sidebar({
       { path: '/dashboard/day-end/history', id: 'day-end-history', category: 'financial' },
       { path: '/dashboard/day-end', id: 'day-end', category: 'financial' },
       { path: '/dashboard/cargo', id: 'cargo', category: 'cargo-operations' },
-      { path: '/dashboard/orders', id: 'orders', category: 'sales-operations' },
       { path: '/dashboard/quotations', id: 'quotations', category: 'sales-operations' },
       { path: '/dashboard/loaders', id: 'loaders', category: 'sales-operations' },
       { path: '/dashboard/reports/sales-by-date', id: 'sales-by-date', category: 'reports' },
@@ -474,17 +484,17 @@ export default function Sidebar({
     return null;
   }, []);
 
-  // Sync active tab and expanded section from pathname
+  // Sync active tab and expanded section from pathname + search params
   useEffect(() => {
-    const match = detectActiveFromPath(pathname);
+    const match = detectActiveFromPath(pathname, searchParams);
     if (match) {
       setActiveTab(match.id);
-      // Only auto-expand the parent section (accordion: only one open)
+      // Auto-expand the parent section for nested items
       if (match.category !== 'main') {
         setExpandedDropdowns({ [match.category]: true });
       }
     }
-  }, [pathname, detectActiveFromPath, setActiveTab, setExpandedDropdowns]);
+  }, [pathname, searchParams, detectActiveFromPath, setActiveTab, setExpandedDropdowns]);
 
   const isSearching = searchQuery.trim().length > 0;
   const filteredItems = isSearching
@@ -519,116 +529,26 @@ export default function Sidebar({
   const drawerWidth = collapsed && !isMobile ? COLLAPSED_WIDTH : EXPANDED_WIDTH;
   const isCollapsed = collapsed && !isMobile;
 
-  const GoldCoin = () => (
-    <Box sx={{
-      width: 30,
-      height: 30,
-      borderRadius: '50%',
-      flexShrink: 0,
-      ml: 1,
-      background: 'radial-gradient(circle at 35% 30%, #fff59d, #ffc107 50%, #e65100)',
-      boxShadow: '0 2px 6px rgba(0,0,0,0.25), inset 0 1px 3px rgba(255,255,255,0.5)',
-      border: '1.5px solid rgba(255,200,50,0.6)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-    }}>
-      <Box sx={{
-        width: 14,
-        height: 14,
-        borderRadius: '50%',
-        background: 'radial-gradient(circle at 40% 35%, #fff9c4, #ffd54f 55%, #ff6f00)',
-        border: '1px solid rgba(255,255,255,0.5)',
-      }} />
-    </Box>
-  );
-
-  // Colorful pill item with icon + text + optional gold coin
-  // Active items are bold + outlined; inactive items are slightly faded
-  const renderPillItem = (item, colorIdx, showCoin = false) => {
-    const color = getItemColor(item, colorIdx);
-    const width = PILL_WIDTHS[colorIdx % PILL_WIDTHS.length];
-    const isActive = activeTab === item.id;
-    const isDark = isDarkColor(color);
-    const href = getItemHref(item.id);
-
-    return (
-      <Box key={`${item.id}-${item.category}`} sx={{ mb: 0.9, px: 1.5 }}>
-        <Link href={href} passHref style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
-          <Box
-            onClick={(e) => {
-              if (!e.ctrlKey && !e.metaKey && e.button === 0) {
-                handleNavigation(item.id);
-              }
-            }}
-            sx={{
-              width,
-              background: `linear-gradient(135deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.1) 40%, rgba(0, 0, 0, 0.15) 100%)`,
-              backgroundColor: color,
-              borderRadius: '28px',
-              display: 'flex',
-              alignItems: 'center',
-              px: 1.5,
-              py: 0.9,
-              cursor: 'pointer',
-              outline: isActive ? (isDark ? '2.5px solid rgba(255,255,255,0.6)' : '2.5px solid rgba(0,0,0,0.35)') : 'none',
-              outlineOffset: '1px',
-              boxShadow: isActive
-                ? `0 6px 20px ${color}b0, inset 0 2px 3px rgba(255,255,255,0.7), inset 0 -2px 3px rgba(0,0,0,0.15)`
-                : `0 3px 10px ${color}70, inset 0 2px 3px rgba(255,255,255,0.5), inset 0 -1.5px 2px rgba(0,0,0,0.1)`,
-              opacity: 1,
-              transform: isActive ? 'scale(1.02)' : 'scale(1)',
-              transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-              '&:hover': {
-                opacity: 1,
-                boxShadow: `0 8px 24px ${color}cc, inset 0 2px 3px rgba(255,255,255,0.8), inset 0 -2px 3px rgba(0,0,0,0.2)`,
-                filter: 'brightness(1.12) contrast(1.05)',
-                transform: 'translateX(5px) scale(1.04)',
-                backgroundColor: color,
-              },
-            }}
-          >
-            <Box sx={{
-              color: isActive 
-                ? (isDark ? 'rgba(255,255,255,0.95)' : 'rgba(0,0,0,0.8)') 
-                : (isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.5)'),
-              display: 'flex',
-              alignItems: 'center',
-              mr: 1.5,
-              flexShrink: 0,
-              transition: 'color 0.2s ease',
-            }}>
-              <item.icon sx={{ fontSize: 21 }} />
-            </Box>
-            <Typography sx={{
-              fontWeight: isActive ? 800 : 600,
-              color: isActive 
-                ? (isDark ? '#fff' : '#000') 
-                : (isDark ? 'rgba(255,255,255,0.85)' : '#333'),
-              flex: 1,
-              fontSize: '0.84rem',
-              letterSpacing: 0.3,
-              lineHeight: 1.3,
-              userSelect: 'none',
-              transition: 'all 0.2s ease',
-            }}>
-              {item.name}
-            </Typography>
-            {showCoin && <GoldCoin />}
-          </Box>
-        </Link>
-      </Box>
-    );
+  const handleToggleCollapse = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof onToggleCollapse === 'function') {
+      onToggleCollapse();
+    }
   };
 
-  // Simple child item with sharp corners (no border radius) and indented alignment
-  const renderChildItem = (item, colorIdx, sectionColor) => {
+  const drawerTransition = theme.transitions.create('width', {
+    easing: theme.transitions.easing.easeInOut,
+    duration: theme.transitions.duration.standard,
+  });
+
+  const renderNavLink = (item, { indent = false } = {}) => {
     const isActive = activeTab === item.id;
-    const isDark = isDarkColor(sectionColor);
     const href = getItemHref(item.id);
+    const fn = getNavFn(item);
 
     return (
-      <Box key={`${item.id}-${item.category}`} sx={{ mb: 0.2 }}>
+      <Box key={`${item.id}-${item.category}`} sx={{ px: 1.5, mb: 0.4 }}>
         <Link href={href} passHref style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
           <Box
             onClick={(e) => {
@@ -637,58 +557,56 @@ export default function Sidebar({
               }
             }}
             sx={{
-              width: '100%',
-              background: isActive
-                ? `linear-gradient(135deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0.1) 40%, rgba(0, 0, 0, 0.1) 100%)`
-                : 'transparent',
-              backgroundColor: isActive ? sectionColor : 'transparent',
-              borderRadius: '0px', // REMOVE CORNERS
               display: 'flex',
               alignItems: 'center',
-              pl: 4.5, // Indent child items
-              pr: 2,
-              py: 1,
+              gap: 1.25,
+              pl: indent ? 1.25 : 1,
+              pr: 1.25,
+              py: 0.65,
+              px: indent ? 1.5 : 1.25,
+              ml: indent ? 0.75 : 0,
+              mr: indent ? 0.5 : 0,
+              borderRadius: 2,
               cursor: 'pointer',
-              borderLeft: isActive 
-                ? (isDark ? `4px solid #fff` : `4px solid #111`) 
-                : `4px solid transparent`,
-              opacity: isActive ? 1 : 0.75,
-              transition: 'all 0.2s ease-in-out',
+              position: 'relative',
+              color: isActive ? SIDEBAR.textOnActive : SIDEBAR.textActive,
+              bgcolor: isActive ? SIDEBAR.bgActive : 'transparent',
+              border: 'none',
+              boxShadow: isActive ? '0 2px 8px rgba(26, 85, 227, 0.25)' : 'none',
+              transition: 'all 0.2s ease',
               '&:hover': {
-                opacity: 1,
-                backgroundColor: isActive ? sectionColor : `${sectionColor}22`,
-                borderLeft: isActive 
-                  ? (isDark ? `4px solid #fff` : `4px solid #111`) 
-                  : `4px solid ${sectionColor}`,
-                transform: 'translateX(4px)',
-                filter: 'brightness(1.05)',
+                bgcolor: isActive ? SIDEBAR.bgActive : SIDEBAR.bgHover,
+                color: isActive ? SIDEBAR.textOnActive : SIDEBAR.textActive,
               },
             }}
           >
-            <Box sx={{
-              color: isActive 
-                ? (isDark ? 'rgba(255,255,255,0.95)' : 'rgba(0,0,0,0.85)') 
-                : 'rgba(0,0,0,0.5)',
-              display: 'flex',
-              alignItems: 'center',
-              mr: 1.5,
-              flexShrink: 0,
-              transition: 'color 0.2s ease',
-            }}>
-              <item.icon sx={{ fontSize: 19 }} />
+            <Box
+              sx={{
+                width: indent ? 28 : 32,
+                height: indent ? 28 : 32,
+                borderRadius: 1.5,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                bgcolor: isActive ? 'rgba(255,255,255,0.2)' : 'transparent',
+                color: isActive ? SIDEBAR.textOnActive : fn.main,
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <item.icon sx={{ fontSize: indent ? 17 : 18 }} />
             </Box>
-            <Typography sx={{
-              fontWeight: isActive ? 700 : 500,
-              color: isActive 
-                ? (isDark ? '#fff' : '#000') 
-                : '#444',
-              flex: 1,
-              fontSize: '0.82rem',
-              letterSpacing: 0.2,
-              lineHeight: 1.3,
-              userSelect: 'none',
-              transition: 'all 0.2s ease',
-            }}>
+            <Typography
+              sx={{
+                flex: 1,
+                fontSize: indent ? '0.8125rem' : '0.8375rem',
+                fontWeight: isActive ? 600 : 500,
+                letterSpacing: 0.02,
+                lineHeight: 1.4,
+                userSelect: 'none',
+                color: 'inherit',
+              }}
+            >
               {item.name}
             </Typography>
           </Box>
@@ -699,8 +617,26 @@ export default function Sidebar({
 
   const renderCollapsedIcon = (item) => {
     const href = getItemHref(item.id);
+    const isActive = activeTab === item.id;
+    const fn = getNavFn(item);
     return (
-      <Tooltip key={item.id} title={item.name} placement="right" arrow>
+      <Tooltip
+        key={item.id}
+        title={item.name}
+        placement="right"
+        arrow
+        slotProps={{
+          tooltip: {
+            sx: {
+              bgcolor: '#0f172a',
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              px: 1.25,
+              py: 0.75,
+            },
+          },
+        }}
+      >
         <Link href={href} passHref style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
           <ListItemButton
             onClick={(e) => {
@@ -710,13 +646,16 @@ export default function Sidebar({
             }}
             sx={{
               borderRadius: 2,
-              mb: 0.5,
-              minHeight: 44,
+              mb: 0.35,
+              minHeight: 42,
               justifyContent: 'center',
               px: 1,
-              backgroundColor: activeTab === item.id ? 'rgba(0,0,0,0.08)' : 'transparent',
-              color: activeTab === item.id ? '#111' : '#888',
-              '&:hover': { backgroundColor: 'rgba(0,0,0,0.05)' },
+              bgcolor: isActive ? SIDEBAR.bgActive : 'transparent',
+              color: isActive ? SIDEBAR.textOnActive : fn.main,
+              border: 'none',
+              boxShadow: isActive ? '0 2px 8px rgba(26, 85, 227, 0.25)' : 'none',
+              transition: 'all 0.2s ease',
+              '&:hover': { bgcolor: isActive ? SIDEBAR.bgActive : SIDEBAR.bgHover },
             }}
           >
             <ListItemIcon sx={{ minWidth: 0, color: 'inherit', justifyContent: 'center' }}>
@@ -728,77 +667,109 @@ export default function Sidebar({
     );
   };
 
-  const renderMenuSection = (category, title, sectionIdx) => {
+  const renderSectionLabel = (label) => {
+    const sectionStyle = SIDEBAR_SECTION_LABELS[label] || SIDEBAR_SECTION_LABELS.Modules;
+    return (
+      <Typography
+        sx={{
+          px: 2,
+          pt: 1.5,
+          pb: 0.75,
+          fontSize: '0.625rem',
+          fontWeight: 700,
+          letterSpacing: '0.12em',
+          textTransform: 'uppercase',
+          color: sectionStyle.color,
+        }}
+      >
+        {label}
+      </Typography>
+    );
+  };
+
+  const renderSectionHeader = (title, { collapsible = false, expanded = true, onToggle, hasActive = false, itemCount = 0 } = {}) => {
+    const meta = SECTION_META[title] || { fn: 'overview', icon: DashboardIcon };
+    const fn = NAV_FN[meta.fn] || NAV_FN.overview;
+    const Icon = meta.icon;
+    const isOpen = collapsible ? expanded : true;
+    const rowActive = hasActive || (collapsible && isOpen);
+
+    return (
+      <Box
+        onClick={collapsible ? onToggle : undefined}
+        role={collapsible ? 'button' : undefined}
+        aria-expanded={collapsible ? isOpen : undefined}
+        sx={{
+          mx: 1,
+          mb: 0.25,
+          px: 1.25,
+          py: 0.85,
+          borderRadius: 2,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          cursor: collapsible ? 'pointer' : 'default',
+          userSelect: 'none',
+          bgcolor: rowActive && collapsible ? SIDEBAR.bgHover : 'transparent',
+          transition: 'background 0.2s ease',
+          ...(collapsible && {
+            '&:hover': { bgcolor: SIDEBAR.bgHover },
+          }),
+        }}
+      >
+        <Icon sx={{ fontSize: 18, color: rowActive ? fn.main : SIDEBAR.textMuted, flexShrink: 0 }} />
+
+        <Typography
+          sx={{
+            flex: 1,
+            fontSize: '0.8375rem',
+            fontWeight: rowActive ? 600 : 500,
+            color: fn.main,
+            lineHeight: 1.3,
+          }}
+        >
+          {title}
+        </Typography>
+
+        {collapsible && (
+          isOpen
+            ? <ExpandLess sx={{ fontSize: 18, color: SIDEBAR.textMuted }} />
+            : <ChevronRightIcon sx={{ fontSize: 18, color: SIDEBAR.textMuted }} />
+        )}
+      </Box>
+    );
+  };
+
+  const renderMenuSection = (category, title) => {
     const items = filteredItems.filter(item => item.category === category);
     if (items.length === 0) return null;
     const isExpanded = isCollapsed ? false : (isSearching ? true : expandedDropdowns[category]);
-    const sectionColor = getSectionColor(category, sectionIdx);
     const hasActiveChild = items.some(item => activeTab === item.id);
-    const isDark = isDarkColor(sectionColor);
+    const meta = SECTION_META[title] || { fn: 'overview' };
+    const fn = NAV_FN[meta.fn] || NAV_FN.overview;
 
     if (isCollapsed) {
       return (
-        <Box key={category} sx={{ mb: 0.5 }}>
+        <Box key={category} sx={{ mb: 0.25 }}>
           {items.map(renderCollapsedIcon)}
-          <Divider sx={{ my: 0.5, borderColor: 'rgba(0,0,0,0.08)' }} />
+          <Divider sx={{ my: 0.75, mx: 1, borderColor: SIDEBAR.border }} />
         </Box>
       );
     }
 
     return (
-      <Box key={category} sx={{ mb: 0.5 }}>
-        {/* Section header — colorful pill */}
-        <Box sx={{ px: 1.5, mb: 0.3, mt: 1 }}>
-          <Box
-            onClick={() => toggleDropdown(category)}
-            sx={{
-              width: '100%',
-              background: `linear-gradient(135deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.1) 40%, rgba(0, 0, 0, 0.15) 100%)`,
-              backgroundColor: sectionColor,
-              borderRadius: '22px',
-              display: 'flex',
-              alignItems: 'center',
-              px: 2,
-              py: 0.9,
-              cursor: 'pointer',
-              boxShadow: hasActiveChild
-                ? `0 5px 15px ${sectionColor}b0, inset 0 2px 3px rgba(255,255,255,0.7), inset 0 -2px 3px rgba(0,0,0,0.15)`
-                : `0 3px 10px ${sectionColor}60, inset 0 2px 3px rgba(255,255,255,0.5), inset 0 -1.5px 2px rgba(0,0,0,0.1)`,
-              outline: hasActiveChild ? `2px solid ${sectionColor}` : 'none',
-              outlineOffset: '1px',
-              transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-              '&:hover': {
-                filter: 'brightness(1.12) contrast(1.05)',
-                boxShadow: `0 6px 18px ${sectionColor}cc, inset 0 2px 3px rgba(255,255,255,0.8), inset 0 -2px 3px rgba(0,0,0,0.2)`,
-                backgroundColor: sectionColor,
-                transform: 'scale(1.02)',
-              },
-            }}
-          >
-            <Typography sx={{
-              color: isDark ? '#fff' : '#111',
-              fontWeight: 800,
-              letterSpacing: 0.6,
-              textTransform: 'uppercase',
-              fontSize: '0.78rem',
-              flex: 1,
-              userSelect: 'none',
-            }}>
-              {title}
-            </Typography>
-            {isExpanded
-              ? <ExpandLess sx={{ fontSize: 18, color: isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.5)', transition: 'transform 0.3s ease' }} />
-              : <ExpandMore sx={{ fontSize: 18, color: isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.5)', transition: 'transform 0.3s ease' }} />}
-            <GoldCoin />
-          </Box>
-        </Box>
+      <Box key={category} sx={{ mb: 0.35 }}>
+        {renderSectionHeader(title, {
+          collapsible: true,
+          expanded: isExpanded,
+          onToggle: () => toggleDropdown(category),
+          hasActive: hasActiveChild,
+          itemCount: items.length,
+        })}
 
-        <Collapse in={isExpanded} timeout={300} easing="cubic-bezier(0.4, 0, 0.2, 1)">
-          <Box sx={{ pt: 0.25, pb: 0.5 }}>
-            {items.map((item) => {
-              const globalIdx = visibleMenuItems.findIndex(i => i === item);
-              return renderChildItem(item, globalIdx, sectionColor);
-            })}
+        <Collapse in={isExpanded} timeout={250}>
+          <Box sx={{ mx: 0.5, mb: 0.5, pl: 1.5, pr: 0.5 }}>
+            {items.map((item) => renderNavLink(item, { indent: true }))}
           </Box>
         </Collapse>
       </Box>
@@ -809,93 +780,136 @@ export default function Sidebar({
   const systemItems = filteredItems.filter(item => item.category === 'system');
 
   const drawerContent = (
-    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: SIDEBAR_BG }}>
-      {/* Header */}
-      <Box sx={{
-        p: isCollapsed ? 1 : 2,
-        borderBottom: '1px solid rgba(0,0,0,0.08)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: isCollapsed ? 'center' : 'space-between',
-        minHeight: 68,
-        bgcolor: '#ffffff',
+    <Box sx={{
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      background: SIDEBAR.background,
+    }}>
+      {/* Toggle + brand */}
+      <Box className="sidebar-header-shell" sx={{
+        flexShrink: 0,
+        borderBottom: `1px solid ${SIDEBAR.border}`,
       }}>
-        {!isCollapsed && (
-          <Box sx={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
-            <Avatar sx={{
-              background: 'linear-gradient(135deg, #cce840, #36c46c)',
-              mr: 1.5,
-              width: 38,
-              height: 38,
-              flexShrink: 0,
-            }}>
-              <DashboardIcon sx={{ color: '#111', fontSize: 20 }} />
-            </Avatar>
-            <Box sx={{ minWidth: 0 }}>
-              <Typography variant="body2" sx={{
-                fontWeight: 800,
-                color: '#111',
-                fontSize: '0.9rem',
-                lineHeight: 1.2,
-                letterSpacing: 0.5,
-              }}>
-                Ittefaq Iron
-              </Typography>
-              <Typography variant="caption" sx={{ color: '#888', fontWeight: 500 }}>
-                POS System
-              </Typography>
-            </Box>
-          </Box>
-        )}
+        <Box className="sidebar-header-accent" aria-hidden="true">
+          <span className="sidebar-header-accent-shine" />
+        </Box>
 
         {!isMobile && (
-          <Tooltip title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} placement="right">
+          <Box
+            sx={{
+              position: 'relative',
+              zIndex: 1,
+              display: 'flex',
+              alignItems: isCollapsed ? 'center' : 'flex-start',
+              justifyContent: 'space-between',
+              gap: 0.75,
+              px: isCollapsed ? 0.75 : 1.25,
+              pt: isCollapsed ? 0.65 : 0.75,
+              pb: isCollapsed ? 1 : 1.1,
+              flexDirection: isCollapsed ? 'column' : 'row',
+            }}
+          >
+            {!isCollapsed ? (
+              <Box className="sidebar-brand" sx={{ flex: 1, minWidth: 0, pt: 0, pb: 0 }}>
+                <Typography component="span" className="sidebar-brand-title" sx={{ display: 'block' }}>
+                  Ittefaq Iron
+                </Typography>
+                <Typography component="span" className="sidebar-brand-sub">
+                  & Cement Store
+                </Typography>
+                <Box className="sidebar-brand-glow" />
+              </Box>
+            ) : (
+              <Typography className="sidebar-brand-collapsed">
+                II
+              </Typography>
+            )}
+
             <IconButton
-              onClick={() => setCollapsed(!collapsed)}
+              onClick={handleToggleCollapse}
+              aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
               size="small"
-              sx={{ color: '#aaa', flexShrink: 0, '&:hover': { color: '#333' } }}
+              sx={{
+                bgcolor: SIDEBAR.collapseBtn,
+                color: '#ffffff',
+                width: 30,
+                height: 30,
+                borderRadius: 1.5,
+                zIndex: 20,
+                flexShrink: 0,
+                mt: isCollapsed ? 0 : 0.15,
+                boxShadow: '0 2px 8px rgba(255, 8, 84, 0.35)',
+                transition: 'transform 0.2s ease, background-color 0.2s ease',
+                '&:hover': {
+                  bgcolor: '#e0074a',
+                  transform: 'scale(1.05)',
+                },
+                '&:active': {
+                  transform: 'scale(0.96)',
+                },
+              }}
             >
-              {isCollapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+              {isCollapsed ? <ChevronRightIcon sx={{ fontSize: 17 }} /> : <ChevronLeftIcon sx={{ fontSize: 17 }} />}
             </IconButton>
-          </Tooltip>
+          </Box>
         )}
 
         {isMobile && (
-          <IconButton onClick={() => setSidebarOpen(false)} sx={{ color: '#888' }}>
-            <CloseIcon />
-          </IconButton>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', px: 1, pt: 0.5, pb: 0.25 }}>
+            <IconButton
+              onClick={() => setSidebarOpen(false)}
+              sx={{ color: SIDEBAR.textMuted, p: 0.5 }}
+            >
+              <CloseIcon sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Box>
+        )}
+
+        {!isCollapsed && !isMobile && (
+          <Box className="sidebar-header-ornament" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </Box>
+        )}
+
+        {isMobile && !isCollapsed && (
+          <Box sx={{ px: 1.5, pb: 1.25, pt: 0.25 }}>
+            <Box className="sidebar-brand">
+              <Typography component="span" className="sidebar-brand-title" sx={{ display: 'block' }}>
+                Ittefaq Iron
+              </Typography>
+              <Typography component="span" className="sidebar-brand-sub">
+                & Cement Store
+              </Typography>
+              <Box className="sidebar-brand-glow" />
+            </Box>
+          </Box>
         )}
       </Box>
 
-      {/* Search */}
+      {/* Search — animated blue border */}
       {!isCollapsed && (
-        <Box sx={{ px: 1.5, py: 1.2, borderBottom: '1px solid rgba(0,0,0,0.07)' }}>
-          <Box sx={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1,
-            px: 1.5,
-            py: 0.7,
-            borderRadius: '20px',
-            border: '1px solid rgba(0,0,0,0.12)',
-            bgcolor: '#f5f5f5',
-            '&:focus-within': { borderColor: '#36c46c', bgcolor: '#f0fff4' },
-          }}>
-            <SearchIcon sx={{ color: '#aaa', fontSize: 17 }} />
-            <InputBase
-              placeholder="Search menu..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              fullWidth
-              sx={{ fontSize: 13, color: '#333' }}
-              inputProps={{ 'aria-label': 'search sidebar menu' }}
-            />
-            {searchQuery && (
-              <IconButton size="small" onClick={() => setSearchQuery('')} sx={{ p: 0.25, color: '#aaa' }}>
-                <CloseIcon sx={{ fontSize: 15 }} />
-              </IconButton>
-            )}
-          </Box>
+        <Box sx={{ px: 1.5, py: 1.25, borderBottom: `1px solid ${SIDEBAR.border}` }}>
+          <div className="sidebar-search-wrap">
+            <div className="sidebar-search-inner">
+              <SearchIcon className="sidebar-search-icon" />
+              <input
+                type="text"
+                className="sidebar-search-input"
+                placeholder="Search menu..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                aria-label="Search sidebar menu"
+              />
+              {searchQuery && (
+                <IconButton size="small" onClick={() => setSearchQuery('')} sx={{ p: 0.25, color: '#94a3b8' }}>
+                  <CloseIcon sx={{ fontSize: 15 }} />
+                </IconButton>
+              )}
+            </div>
+          </div>
         </Box>
       )}
 
@@ -905,155 +919,74 @@ export default function Sidebar({
         sx={{
           flex: 1,
           overflow: 'auto',
-          py: 1,
-          px: isCollapsed ? 0.5 : 0,
+          py: 0.5,
+          px: isCollapsed ? 0.75 : 0,
           scrollBehavior: 'smooth',
-          '&::-webkit-scrollbar': { width: 5 },
-          '&::-webkit-scrollbar-track': { background: 'transparent' },
-          '&::-webkit-scrollbar-thumb': {
-            background: 'rgba(0,0,0,0.12)',
+          scrollbarWidth: 'thin',
+          scrollbarColor: `${SIDEBAR.bgActive} rgba(26, 85, 227, 0.08)`,
+          '&::-webkit-scrollbar': { width: 7 },
+          '&::-webkit-scrollbar-track': {
+            background: 'rgba(26, 85, 227, 0.08)',
             borderRadius: 10,
-            '&:hover': { background: 'rgba(0,0,0,0.2)' },
+            margin: '4px 0',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            background: 'rgba(26, 85, 227, 0.45)',
+            borderRadius: 10,
+            border: '1px solid rgba(255, 255, 255, 0.35)',
+            '&:hover': { background: 'rgba(26, 85, 227, 0.65)' },
           },
         }}
       >
         <List disablePadding>
           {/* Overview */}
           {mainItems.length > 0 && (
-            <Box sx={{ mb: 0.5 }}>
-              {!isCollapsed && (
-                <Box sx={{ px: 1.5, mb: 0.3, mt: 0.5 }}>
-                  <Box sx={{
-                    width: '100%',
-                    background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.25) 0%, rgba(255, 255, 255, 0.05) 50%, rgba(0, 0, 0, 0.15) 100%)',
-                    backgroundColor: '#111',
-                    borderRadius: '22px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    px: 2,
-                    py: 0.9,
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.25), inset 0 1px 2px rgba(255,255,255,0.3)',
-                  }}>
-                    <Typography sx={{
-                      color: '#cce840',
-                      fontWeight: 800,
-                      letterSpacing: 0.6,
-                      textTransform: 'uppercase',
-                      fontSize: '0.78rem',
-                      userSelect: 'none',
-                    }}>
-                      Overview
-                    </Typography>
-                  </Box>
+            <Box sx={{ mb: 0.25 }}>
+              {!isCollapsed && renderSectionLabel('Quick Access')}
+              {!isCollapsed ? (
+                <Box sx={{ mx: 0.5, mb: 0.5, px: 0.5 }}>
+                  {mainItems.map((item) => renderNavLink(item))}
                 </Box>
+              ) : (
+                mainItems.map((item) => renderCollapsedIcon(item))
               )}
-              {mainItems.map((item) => {
-                if (isCollapsed) return renderCollapsedIcon(item);
-                const globalIdx = visibleMenuItems.findIndex(i => i === item);
-                return renderPillItem(item, globalIdx, true);
-              })}
-              {isCollapsed && <Divider sx={{ my: 0.5, borderColor: 'rgba(0,0,0,0.08)' }} />}
+              {isCollapsed && <Divider sx={{ my: 0.75, mx: 1, borderColor: SIDEBAR.border }} />}
             </Box>
           )}
 
-          {renderMenuSection('customer-management', 'Accounts', 0)}
-          {renderMenuSection('product-management', 'Products', 1)}
-          {renderMenuSection('financial', 'Finance', 2)}
-          {renderMenuSection('sales-operations', 'Sales', 3)}
-          {renderMenuSection('purchase-operations', 'Purchase', 4)}
-          {renderMenuSection('cargo-operations', 'Cargo', 5)}
-          {renderMenuSection('hr-management', 'HR Management', 6)}
-          {renderMenuSection('reports', 'Reports', 7)}
+          {!isCollapsed && renderSectionLabel('Modules')}
+
+          {renderMenuSection('customer-management', 'Accounts')}
+          {renderMenuSection('product-management', 'Products')}
+          {renderMenuSection('financial', 'Finance')}
+          {renderMenuSection('sales-operations', 'Sales')}
+          {renderMenuSection('purchase-operations', 'Purchase')}
+          {renderMenuSection('cargo-operations', 'Cargo')}
+          {renderMenuSection('hr-management', 'HR Management')}
+          {renderMenuSection('reports', 'Reports')}
 
           {/* System */}
           {systemItems.length > 0 && (
             <Box sx={{ mb: 1 }}>
-              {!isCollapsed && (
-                <Box sx={{ px: 1.5, mb: 0.3, mt: 1 }}>
-                  <Box sx={{
-                    width: '100%',
-                    background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.08) 50%, rgba(0, 0, 0, 0.15) 100%)',
-                    backgroundColor: '#555',
-                    borderRadius: '22px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    px: 2,
-                    py: 0.9,
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.2), inset 0 1px 2px rgba(255,255,255,0.4)',
-                  }}>
-                    <Typography sx={{
-                      color: '#fff',
-                      fontWeight: 800,
-                      letterSpacing: 0.6,
-                      textTransform: 'uppercase',
-                      fontSize: '0.78rem',
-                      userSelect: 'none',
-                    }}>
-                      System
-                    </Typography>
-                  </Box>
+              {!isCollapsed && renderSectionLabel('System')}
+              {!isCollapsed ? (
+                <Box sx={{ mx: 0.5, mb: 0.5, px: 0.5 }}>
+                  {systemItems.map((item) => renderNavLink(item))}
                 </Box>
+              ) : (
+                systemItems.map((item) => renderCollapsedIcon(item))
               )}
-              {systemItems.map((item) => {
-                if (isCollapsed) return renderCollapsedIcon(item);
-                const globalIdx = visibleMenuItems.findIndex(i => i === item);
-                return renderPillItem(item, globalIdx);
-              })}
             </Box>
           )}
 
           {isSearching && filteredItems.length === 0 && (
             <Box sx={{ px: 2, py: 4, textAlign: 'center' }}>
-              <Typography variant="body2" sx={{ color: '#aaa' }}>
+              <Typography variant="body2" sx={{ color: SIDEBAR.textMuted }}>
                 No results for &quot;{searchQuery}&quot;
               </Typography>
             </Box>
           )}
         </List>
-      </Box>
-
-      {/* User Profile */}
-      <Box sx={{ p: isCollapsed ? 0.5 : 1.5, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
-        {isCollapsed ? (
-          <Tooltip title={`${user?.email} — Logout`} placement="right" arrow>
-            <IconButton onClick={handleLogout} sx={{ width: '100%', borderRadius: 2, py: 1, color: '#888' }}>
-              <LogoutIcon />
-            </IconButton>
-          </Tooltip>
-        ) : (
-          <Box sx={{
-            p: 1.5,
-            borderRadius: '16px',
-            border: '1px solid rgba(0,0,0,0.08)',
-            bgcolor: '#f8f8f8',
-            display: 'flex',
-            alignItems: 'center',
-          }}>
-            <Avatar sx={{
-              background: 'linear-gradient(135deg, #7858d4, #22c4d4)',
-              mr: 1.5,
-              width: 34,
-              height: 34,
-              fontSize: '0.85rem',
-              fontWeight: 700,
-            }}>
-              {user?.email?.charAt(0).toUpperCase()}
-            </Avatar>
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography variant="body2" sx={{ fontWeight: 600, color: '#222', fontSize: '0.8rem' }} noWrap>
-                {user?.email}
-              </Typography>
-              <Typography variant="caption" sx={{ color: '#888', textTransform: 'uppercase', fontSize: '0.65rem' }}>
-                {user?.role?.displayName || user?.role?.name || user?.role}
-              </Typography>
-            </Box>
-            <Tooltip title="Logout">
-              <IconButton onClick={handleLogout} size="small" sx={{ color: '#bbb', '&:hover': { color: '#e04858' } }}>
-                <LogoutIcon sx={{ fontSize: 18 }} />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        )}
       </Box>
     </Box>
   );
@@ -1066,20 +999,15 @@ export default function Sidebar({
       sx={{
         width: drawerWidth,
         flexShrink: 0,
-        transition: theme.transitions.create('width', {
-          easing: theme.transitions.easing.sharp,
-          duration: theme.transitions.duration.enteringScreen,
-        }),
+        transition: drawerTransition,
         '& .MuiDrawer-paper': {
           width: drawerWidth,
           boxSizing: 'border-box',
-          borderRight: '1px solid rgba(0,0,0,0.1)',
-          bgcolor: SIDEBAR_BG,
+          borderRight: `1px solid ${SIDEBAR.border}`,
+          background: SIDEBAR.background,
           overflowX: 'hidden',
-          transition: theme.transitions.create('width', {
-            easing: theme.transitions.easing.sharp,
-            duration: theme.transitions.duration.enteringScreen,
-          }),
+          boxShadow: SIDEBAR.drawerShadow,
+          transition: drawerTransition,
         },
       }}
     >

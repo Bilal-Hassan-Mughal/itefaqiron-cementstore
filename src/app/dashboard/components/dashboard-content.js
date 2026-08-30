@@ -30,6 +30,7 @@ import {
   PieChart,
   BarChart3
 } from 'lucide-react';
+import { SHORTCUT_PALETTE, KPI_PALETTE, QUICK_ENTRY_TONES, CHART_COLORS, REPORT } from '@/lib/brand-theme';
 
 const fmtAmt = (val) => {
   const n = parseFloat(val || 0);
@@ -52,6 +53,9 @@ const fmtK = v => {
   if (abs >= 1000) return `${(v / 1000).toFixed(0)}K`;
   return v.toFixed(0);
 };
+
+const CARD = 'relative bg-white rounded-[1.25rem] border border-slate-200/60 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_28px_rgba(15,23,42,0.08)]';
+const CARD_HOVER = 'transition-all duration-300 ease-out hover:shadow-[0_4px_8px_rgba(15,23,42,0.05),0_16px_40px_rgba(15,23,42,0.11)] hover:-translate-y-1';
 
 export default function DashboardContent({ activeTab }) {
   const router = useRouter();
@@ -287,7 +291,7 @@ export default function DashboardContent({ activeTab }) {
       change: `${analyticsData.totalSales.changeType === 'positive' ? '+' : ''}${analyticsData.totalSales.change}%`,
       changeType: analyticsData.totalSales.changeType,
       icon: DollarSign,
-      color: 'from-green-500 to-emerald-500'
+      theme: 'green',
     },
     {
       title: 'Total Orders',
@@ -295,7 +299,7 @@ export default function DashboardContent({ activeTab }) {
       change: `${analyticsData.totalOrders.changeType === 'positive' ? '+' : ''}${analyticsData.totalOrders.change}%`,
       changeType: analyticsData.totalOrders.changeType,
       icon: ShoppingCart,
-      color: 'from-blue-500 to-cyan-500'
+      theme: 'blue',
     },
     {
       title: 'Active Customers',
@@ -303,7 +307,7 @@ export default function DashboardContent({ activeTab }) {
       change: `${analyticsData.activeCustomers.changeType === 'positive' ? '+' : ''}${analyticsData.activeCustomers.change}%`,
       changeType: analyticsData.activeCustomers.changeType,
       icon: Users,
-      color: 'from-purple-500 to-pink-500'
+      theme: 'periwinkle',
     },
     {
       title: 'Total Products',
@@ -311,7 +315,7 @@ export default function DashboardContent({ activeTab }) {
       change: `${analyticsData.totalProducts.changeType === 'positive' ? '+' : ''}${analyticsData.totalProducts.change}%`,
       changeType: analyticsData.totalProducts.changeType,
       icon: Package,
-      color: 'from-orange-500 to-red-500'
+      theme: 'cyan',
     }
   ] : [
     {
@@ -320,7 +324,7 @@ export default function DashboardContent({ activeTab }) {
       change: '0.0%',
       changeType: 'positive',
       icon: DollarSign,
-      color: 'from-green-500 to-emerald-500'
+      theme: 'green',
     },
     {
       title: 'Total Orders',
@@ -328,7 +332,7 @@ export default function DashboardContent({ activeTab }) {
       change: '0.0%',
       changeType: 'positive',
       icon: ShoppingCart,
-      color: 'from-blue-500 to-cyan-500'
+      theme: 'blue',
     },
     {
       title: 'Active Customers',
@@ -336,7 +340,7 @@ export default function DashboardContent({ activeTab }) {
       change: '0.0%',
       changeType: 'positive',
       icon: Users,
-      color: 'from-purple-500 to-pink-500'
+      theme: 'periwinkle',
     },
     {
       title: 'Total Products',
@@ -344,28 +348,35 @@ export default function DashboardContent({ activeTab }) {
       change: '0.0%',
       changeType: 'positive',
       icon: Package,
-      color: 'from-orange-500 to-red-500'
+      theme: 'cyan',
     }
   ];
 
   const quickActions = [
-    { title: 'New Sale', icon: ShoppingCart, color: 'from-blue-500 to-cyan-500', path: '/dashboard/sales?view=create' },
-    { title: 'New Purchase', icon: ShoppingBag, color: 'from-indigo-500 to-blue-500', path: '/dashboard/purchases' },
-    { title: 'Orders List', icon: ListOrdered, color: 'from-blue-600 to-indigo-600', path: '/dashboard/orders' },
-    { title: 'Add Product', icon: Package, color: 'from-green-500 to-emerald-500', path: '/dashboard/products' },
-    { title: 'Add Customer', icon: Users, color: 'from-purple-500 to-pink-500', path: '/dashboard/customers' },
-    { title: 'Hold Bills', icon: ClipboardList, color: 'from-yellow-500 to-orange-500', path: '/dashboard/hold-bills' },
-    { title: 'Stock Transfer', icon: ArrowLeftRight, color: 'from-teal-500 to-cyan-500', path: '/dashboard/stock-transfer' },
-    { title: 'Store Stock', icon: Warehouse, color: 'from-violet-500 to-purple-500', path: '/dashboard/store-stock' },
-    { title: 'Expenses', icon: DollarSign, color: 'from-rose-500 to-red-500', path: '/dashboard/expenses' },
-    { title: 'Ledger', icon: FileText, color: 'from-slate-500 to-gray-600', path: '/dashboard/finance' },
-    { title: 'View Reports', icon: TrendingUp, color: 'from-orange-500 to-red-500', path: '/dashboard/reports' },
-    { title: 'Sale Return', icon: RotateCcw, color: 'from-orange-600 to-red-600', path: '/dashboard/sales?view=create&type=return' },
-    { title: 'Purchase Return', icon: TrendingDown, color: 'from-red-600 to-rose-600', path: '/dashboard/purchases?view=create&type=return' },
-    { title: 'Quotations List', icon: ScrollText, color: 'from-teal-500 to-emerald-500', path: '/dashboard/quotations' },
-    { title: 'Sales List', icon: Receipt, color: 'from-cyan-500 to-blue-500', path: '/dashboard/sales' },
-    { title: 'Journal Entries', icon: BookOpen, color: 'from-indigo-500 to-purple-500', path: '/dashboard/journal' },
-    { title: 'Day End / Closing', icon: Clock, color: 'from-amber-500 to-orange-500', path: '/dashboard/day-end' }
+    { title: 'New Sale', icon: ShoppingCart, palette: 'green', path: '/dashboard/sales?view=create' },
+    { title: 'New Purchase', icon: ShoppingBag, palette: 'blue', path: '/dashboard/purchases' },
+    { title: 'Orders List', icon: ListOrdered, palette: 'yellow', path: '/dashboard/orders' },
+    { title: 'Add Product', icon: Package, palette: 'cyan', path: '/dashboard/products' },
+    { title: 'Add Customer', icon: Users, palette: 'periwinkle', path: '/dashboard/customers' },
+    { title: 'Hold Bills', icon: ClipboardList, palette: 'orange', path: '/dashboard/hold-bills' },
+    { title: 'Stock Transfer', icon: ArrowLeftRight, palette: 'cyan', path: '/dashboard/stock-transfer' },
+    { title: 'Store Stock', icon: Warehouse, palette: 'slate', path: '/dashboard/store-stock' },
+    { title: 'Expenses', icon: DollarSign, palette: 'pink', path: '/dashboard/expenses' },
+    { title: 'Ledger', icon: FileText, palette: 'periwinkle', path: '/dashboard/finance' },
+    { title: 'View Reports', icon: TrendingUp, palette: 'pink', path: '/dashboard/reports' },
+    { title: 'Sale Return', icon: RotateCcw, palette: 'green', path: '/dashboard/sales?view=create&type=return' },
+    { title: 'Purchase Return', icon: TrendingDown, palette: 'blue', path: '/dashboard/purchases?view=create&type=return' },
+    { title: 'Quotations', icon: ScrollText, palette: 'blue', path: '/dashboard/quotations' },
+    { title: 'Sales List', icon: Receipt, palette: 'green', path: '/dashboard/sales' },
+    { title: 'Journal', icon: BookOpen, palette: 'periwinkle', path: '/dashboard/journal' },
+    { title: 'Day End', icon: Clock, palette: 'cyan', path: '/dashboard/day-end' },
+  ];
+
+  const quickEntryActions = [
+    { title: 'New Purchase Bill', subtitle: 'Record supplier purchase', icon: ShoppingBag, tone: 'blue', path: '/dashboard/purchases' },
+    { title: 'Direct Sale Invoice', subtitle: 'Create customer sale', icon: ShoppingCart, tone: 'green', path: '/dashboard/sales?view=create' },
+    { title: 'Day End / Closing', subtitle: 'Close business day', icon: Clock, tone: 'neutral', path: '/dashboard/day-end' },
+    { title: 'Inventory Check', subtitle: 'View store stock levels', icon: Warehouse, tone: 'neutral', path: '/dashboard/store-stock' },
   ];
 
   const handleQuickActionClick = (path) => {
@@ -404,12 +415,12 @@ export default function DashboardContent({ activeTab }) {
             <stop offset="100%" stopColor={colorGradientStop} stopOpacity="0.4" />
           </linearGradient>
         </defs>
-        <line x1={pL} y1={pT} x2={pL} y2={pT + cH} stroke="#e2e8f0" strokeWidth="1" />
+        <line x1={pL} y1={pT} x2={pL} y2={pT + cH} stroke="#e8ecf3" strokeWidth="1" />
         {[0, 0.25, 0.5, 0.75, 1].map(f => {
           const y = pT + cH * (1 - f);
           return (
             <g key={f}>
-              <line x1={pL} y1={y} x2={W - pR} y2={y} stroke={f === 0 ? '#e2e8f0' : '#f8fafc'} strokeWidth="1" strokeDasharray={f === 0 ? '' : '3 3'} />
+              <line x1={pL} y1={y} x2={W - pR} y2={y} stroke={f === 0 ? '#e8ecf3' : '#f4f6f9'} strokeWidth="1" strokeDasharray={f === 0 ? '' : '3 3'} />
               <text x={pL - 6} y={y + 4} fontSize="9" fill="#94a3b8" textAnchor="end">{fmtK(maxV * f)}</text>
             </g>
           );
@@ -429,7 +440,7 @@ export default function DashboardContent({ activeTab }) {
                 y={pT + cH - bH}
                 width={barW}
                 height={bH}
-                rx="4"
+                rx="6"
                 fill={`url(#${barId})`}
                 className="transition-all duration-200 group-hover:opacity-80"
               >
@@ -460,383 +471,440 @@ export default function DashboardContent({ activeTab }) {
     const totalProfitVal = monthlyProfitList.reduce((s, i) => s + i.profit, 0);
 
     return (
-      <div className="space-y-6 max-w-7xl mx-auto">
-        {/* KPI Cards - Analytics Widgets at Top */}
-        {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="bg-white rounded-2xl shadow-lg border border-gray-100/50 p-6 animate-pulse">
-                <div className="h-20 bg-gray-200 rounded"></div>
-              </div>
-            ))}
+      <div className="space-y-6 max-w-[1400px] mx-auto">
+        {/* Hero Header */}
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[#e6fff4] text-[#00a868] border border-[#b8f5dc] mb-2">
+              Live Overview
+            </span>
+            <h1 className="text-2xl md:text-[1.65rem] font-bold text-slate-900 tracking-tight">
+              Operations Dashboard
+            </h1>
+            <p className="text-sm text-slate-500 mt-1">
+              Real-time branch performance, modules & quick entry
+            </p>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {kpiData.map((kpi, index) => (
-              <div key={index} className="bg-white rounded-2xl shadow-lg border border-gray-100/50 p-6 hover:shadow-xl transition-all duration-300">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600 mb-1">{kpi.title}</p>
-                    <p className="text-3xl font-bold text-gray-900">{kpi.value}</p>
-                    <div className="flex items-center mt-2">
-                      <span className={`text-sm font-medium ${kpi.changeType === 'positive' ? 'text-green-600' : 'text-red-600'
-                        }`}>
-                        {kpi.change}
-                      </span>
-                      <span className="text-sm text-gray-500 ml-1">from last month</span>
-                    </div>
-                  </div>
-                  <div className={`w-16 h-16 bg-gradient-to-r ${kpi.color} rounded-2xl flex items-center justify-center shadow-lg`}>
-                    <kpi.icon className="w-8 h-8 text-white" />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Quick Actions */}
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-100/50">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900">Quick Actions</h3>
-          </div>
-          <div className="p-6">
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-              {quickActions.map((action, index) => (
-                <button
-                  key={index}
-                  type="button"
-                  onClick={() => handleQuickActionClick(action.path)}
-                  className="group p-4 rounded-xl border border-gray-200 hover:border-gray-300 transition-all duration-200 hover:shadow-md cursor-pointer"
-                >
-                  <div className={`w-12 h-12 bg-gradient-to-r ${action.color} rounded-xl flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform duration-200`}>
-                    <action.icon className="w-6 h-6 text-white" />
-                  </div>
-                  <p className="text-sm font-medium text-gray-900 text-center">{action.title}</p>
-                </button>
-              ))}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-slate-200/80 shadow-[0_2px_8px_rgba(15,23,42,0.06),inset_0_1px_0_rgba(255,255,255,0.9)]">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00D284] opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00D284]" />
+              </span>
+              <span className="text-xs font-semibold text-slate-700">Connected</span>
+            </div>
+            <div className="px-3 py-2 rounded-xl bg-white border border-slate-200/80 shadow-[0_2px_8px_rgba(15,23,42,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] text-xs font-semibold text-slate-600">
+              {new Date().toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Karachi' })}
             </div>
           </div>
         </div>
 
-        {/* Dedicated Monthly Performance & Analytics Graphs with Date Filter */}
-        <div className="space-y-6">
-          {/* Filter Bar Header */}
-          <div className="bg-white rounded-2xl shadow-lg border border-gray-100/50 p-6 flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                <BarChart3 className="w-6 h-6 text-blue-600" />
-                Monthly Analytics & Financial Performance
-              </h3>
-              <p className="text-xs text-gray-500 mt-1">
-                Visualizing Monthly Credit, Monthly Debit, Monthly Profit, and Monthly Sales with custom date range filters
-              </p>
+        {/* KPI Cards */}
+        {loading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className={`${CARD} p-5 animate-pulse`}>
+                <div className="h-20 bg-slate-100 rounded-xl" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
+            {kpiData.map((kpi, index) => {
+              const p = KPI_PALETTE[kpi.theme] || KPI_PALETTE.blue;
+              return (
+                <div key={index} className={`${CARD} ${CARD_HOVER} p-5`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">{kpi.title}</p>
+                      <p className="text-[1.65rem] font-extrabold text-slate-900 tracking-tight leading-none">{kpi.value}</p>
+                      <div className="flex items-center mt-2.5 gap-1">
+                        <span className={`text-xs font-bold ${kpi.changeType === 'positive' ? 'text-[#00a868]' : 'text-[#FF0854]'}`}>
+                          {kpi.change}
+                        </span>
+                        <span className="text-xs text-slate-400">from last month</span>
+                      </div>
+                    </div>
+                    <div className={`w-12 h-12 rounded-xl ${p.iconBg} flex items-center justify-center flex-shrink-0`}>
+                      <kpi.icon className={`w-5 h-5 ${p.icon}`} strokeWidth={2.25} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Modules + Quick Entry */}
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-5">
+          {/* Business Modules */}
+          <div className={`${CARD} overflow-hidden`}>
+            <div className="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50/80 to-white">
+              <h3 className="text-base font-extrabold text-slate-900 tracking-tight">Business Modules</h3>
+              <p className="text-xs text-slate-500 mt-0.5 font-medium">Department shortcuts & daily operations</p>
+            </div>
+            <div className="p-4 md:p-5 bg-[#f9fafb]">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5 md:gap-3">
+                {quickActions.map((action, index) => {
+                  const p = SHORTCUT_PALETTE[action.palette] || SHORTCUT_PALETTE.blue;
+                  return (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => handleQuickActionClick(action.path)}
+                      className="group flex flex-col items-center justify-center gap-2 py-4 px-2 min-h-[96px] rounded-xl bg-white border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 active:scale-[0.98] transition-all duration-200 cursor-pointer"
+                    >
+                      <div className={`w-10 h-10 rounded-xl ${p.iconBg} flex items-center justify-center transition-transform duration-200 group-hover:scale-105`}>
+                        <action.icon className={`w-[18px] h-[18px] ${p.icon}`} strokeWidth={2} />
+                      </div>
+                      <p className="text-[11px] md:text-xs font-semibold text-gray-700 text-center leading-snug px-0.5">
+                        {action.title}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Entry Panel */}
+          <div className={`${CARD} overflow-hidden`}>
+            <div className="px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50/80 to-white">
+              <h3 className="text-base font-extrabold text-slate-900 tracking-tight">Quick Entry</h3>
+              <p className="text-xs text-slate-500 mt-0.5 font-medium">High-priority actions</p>
+            </div>
+            <div className="p-4 space-y-3 bg-gradient-to-b from-white to-slate-50/50">
+              {quickEntryActions.map((action, index) => {
+                const isPrimary = action.tone === 'blue' || action.tone === 'green';
+                const toneStyle = QUICK_ENTRY_TONES[action.tone] || QUICK_ENTRY_TONES.neutral;
+                return (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => handleQuickActionClick(action.path)}
+                    className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-left transition-all duration-200 ${toneStyle.className}`}
+                  >
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${isPrimary ? 'bg-white/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]' : 'bg-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]'}`}>
+                      <action.icon className={`w-4 h-4 ${isPrimary ? 'text-white' : 'text-slate-600'}`} strokeWidth={2.25} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-sm font-bold leading-tight ${isPrimary ? 'text-white' : 'text-slate-900'}`}>{action.title}</p>
+                      <p className={`text-[11px] mt-0.5 truncate ${isPrimary ? 'text-white/85' : 'text-slate-500'}`}>{action.subtitle}</p>
+                    </div>
+                    {!isPrimary && (
+                      <svg className="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Reports & Analytics — Plusadmin-style polish */}
+        <div className={REPORT.section}>
+          {/* Filter Bar */}
+          <div className={REPORT.filterBar}>
+            <div className={REPORT.filterHeader}>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                  <BarChart3 className="w-5 h-5 text-white" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base md:text-lg font-bold text-white tracking-tight">
+                    Monthly Analytics & Financial Performance
+                  </h3>
+                  <p className="text-[11px] text-white/75 mt-0.5 hidden sm:block">
+                    Credit, debit, profit & sales with date filters
+                  </p>
+                </div>
+              </div>
+              {monthlyAnalyticsLoading && (
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin flex-shrink-0" />
+              )}
             </div>
 
-            {/* Date Controls & Quick Presets */}
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
-                <Calendar className="w-4 h-4 text-gray-400" />
-                <span className="text-xs font-semibold text-gray-600">From</span>
+            <div className={REPORT.filterBody}>
+              <div className={REPORT.datePill}>
+                <Calendar className="w-4 h-4 text-[#1A55E3]" />
+                <span className="text-xs font-semibold text-slate-500">From</span>
                 <input
                   type="date"
                   value={monthlyAnalyticsFilters.fromDate}
                   onChange={e => setMonthlyAnalyticsFilters(f => ({ ...f, fromDate: e.target.value }))}
-                  className="text-xs font-medium text-gray-800 bg-transparent focus:outline-none"
+                  className="text-xs font-medium text-slate-800 bg-transparent focus:outline-none"
                 />
               </div>
 
-              <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
-                <Calendar className="w-4 h-4 text-gray-400" />
-                <span className="text-xs font-semibold text-gray-600">To</span>
+              <div className={REPORT.datePill}>
+                <Calendar className="w-4 h-4 text-[#1A55E3]" />
+                <span className="text-xs font-semibold text-slate-500">To</span>
                 <input
                   type="date"
                   value={monthlyAnalyticsFilters.toDate}
                   onChange={e => setMonthlyAnalyticsFilters(f => ({ ...f, toDate: e.target.value }))}
-                  className="text-xs font-medium text-gray-800 bg-transparent focus:outline-none"
+                  className="text-xs font-medium text-slate-800 bg-transparent focus:outline-none"
                 />
               </div>
 
-              {/* Quick Preset Buttons */}
-              <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl border border-gray-200">
-                <button
-                  onClick={() => applyDatePreset(30)}
-                  className="px-2.5 py-1 text-xs font-medium rounded-lg text-gray-700 hover:bg-white hover:shadow-sm transition-all"
-                >
-                  30D
-                </button>
-                <button
-                  onClick={() => applyDatePreset(90)}
-                  className="px-2.5 py-1 text-xs font-medium rounded-lg text-gray-700 hover:bg-white hover:shadow-sm transition-all"
-                >
-                  3M
-                </button>
-                <button
-                  onClick={() => applyDatePreset(180)}
-                  className="px-2.5 py-1 text-xs font-medium rounded-lg text-gray-700 hover:bg-white hover:shadow-sm transition-all"
-                >
-                  6M
-                </button>
-                <button
-                  onClick={() => applyDatePreset('year')}
-                  className="px-2.5 py-1 text-xs font-medium rounded-lg text-gray-700 hover:bg-white hover:shadow-sm transition-all"
-                >
-                  Year
-                </button>
+              <div className={REPORT.presetWrap}>
+                {[
+                  { label: '30D', days: 30 },
+                  { label: '3M', days: 90 },
+                  { label: '6M', days: 180 },
+                  { label: 'Year', days: 'year' },
+                ].map(({ label, days }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => applyDatePreset(days)}
+                    className={REPORT.presetBtn}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
 
               {(monthlyAnalyticsFilters.fromDate || monthlyAnalyticsFilters.toDate) && (
                 <button
+                  type="button"
                   onClick={() => setMonthlyAnalyticsFilters({ fromDate: '', toDate: '' })}
-                  className="text-xs text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 px-3 py-2 rounded-xl font-medium transition-colors"
+                  className="text-xs text-[#FF0854] hover:text-[#cc0644] bg-[#ffe8f0] hover:bg-[#ffd6e5] px-3 py-2 rounded-xl font-semibold transition-colors"
                 >
                   Clear Filter
                 </button>
-              )}
-
-              {monthlyAnalyticsLoading && (
-                <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
               )}
             </div>
           </div>
 
           {/* 4 Monthly Graphs Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* 1. Monthly Credit Graph */}
-            <div className="bg-white rounded-2xl shadow-lg border border-gray-100/50 p-6 flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
-                <div>
-                  <h4 className="text-base font-bold text-gray-900 flex items-center gap-2">
-                    <Banknote className="w-5 h-5 text-emerald-600" />
-                    Monthly Credit Graph
-                  </h4>
-                  <p className="text-xs text-gray-400 mt-0.5">Credit amount / receivings by period</p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {/* 1. Monthly Credit */}
+            <div className={REPORT.card}>
+              <div className={`${REPORT.cardInner} flex items-start justify-between gap-4 border-b border-[#eef1f6]`}>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Monthly Credit</p>
+                  <p className="text-2xl font-extrabold text-slate-900 tracking-tight mt-1">PKR {fmtAmt(totalCreditVal)}</p>
+                  <p className="text-xs text-slate-500 mt-1">Credit / receivings by period</p>
                 </div>
-                <div className="bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-100 text-right">
-                  <p className="text-[10px] text-emerald-600 uppercase font-bold tracking-wider">Total Credit</p>
-                  <p className="text-sm font-black text-emerald-700 font-mono">PKR {fmtAmt(totalCreditVal)}</p>
+                <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: CHART_COLORS.credit.tint }}>
+                  <Banknote className="w-5 h-5" style={{ color: CHART_COLORS.credit.primary }} />
                 </div>
               </div>
-
-              <div className="pt-2">
+              <div className={`${REPORT.chartArea} mx-4 mb-4`}>
                 {renderSingleBarChart({
                   data: monthlyCreditList,
                   getValue: d => d.amount,
-                  colorPrimary: '#059669',
-                  colorGradientStop: '#6ee7b7',
+                  colorPrimary: CHART_COLORS.credit.primary,
+                  colorGradientStop: CHART_COLORS.credit.gradient,
                   barId: 'gMonthlyCredit'
                 })}
               </div>
             </div>
 
-            {/* 2. Monthly Debit Graph */}
-            <div className="bg-white rounded-2xl shadow-lg border border-gray-100/50 p-6 flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
-                <div>
-                  <h4 className="text-base font-bold text-gray-900 flex items-center gap-2">
-                    <CreditCard className="w-5 h-5 text-amber-600" />
-                    Monthly Debit Graph
-                  </h4>
-                  <p className="text-xs text-gray-400 mt-0.5">Debit amount / payments by period</p>
+            {/* 2. Monthly Debit */}
+            <div className={REPORT.card}>
+              <div className={`${REPORT.cardInner} flex items-start justify-between gap-4 border-b border-[#eef1f6]`}>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Monthly Debit</p>
+                  <p className="text-2xl font-extrabold text-slate-900 tracking-tight mt-1">PKR {fmtAmt(totalDebitVal)}</p>
+                  <p className="text-xs text-slate-500 mt-1">Debit / payments by period</p>
                 </div>
-                <div className="bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-100 text-right">
-                  <p className="text-[10px] text-amber-600 uppercase font-bold tracking-wider">Total Debit</p>
-                  <p className="text-sm font-black text-amber-700 font-mono">PKR {fmtAmt(totalDebitVal)}</p>
+                <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: CHART_COLORS.debit.tint }}>
+                  <CreditCard className="w-5 h-5" style={{ color: CHART_COLORS.debit.primary }} />
                 </div>
               </div>
-
-              <div className="pt-2">
+              <div className={`${REPORT.chartArea} mx-4 mb-4`}>
                 {renderSingleBarChart({
                   data: monthlyDebitList,
                   getValue: d => d.amount,
-                  colorPrimary: '#d97706',
-                  colorGradientStop: '#fcd34d',
+                  colorPrimary: CHART_COLORS.debit.primary,
+                  colorGradientStop: CHART_COLORS.debit.gradient,
                   barId: 'gMonthlyDebit'
                 })}
               </div>
             </div>
 
-            {/* 3. Monthly Profit Graph */}
-            <div className="bg-white rounded-2xl shadow-lg border border-gray-100/50 p-6 flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
-                <div>
-                  <h4 className="text-base font-bold text-gray-900 flex items-center gap-2">
-                    <TrendingUp className="w-5 h-5 text-blue-600" />
-                    Monthly Profit Graph
-                  </h4>
-                  <p className="text-xs text-gray-400 mt-0.5">Net profit performance (Revenue - Cost - Expense)</p>
+            {/* 3. Monthly Profit */}
+            <div className={REPORT.card}>
+              <div className={`${REPORT.cardInner} flex items-start justify-between gap-4 border-b border-[#eef1f6]`}>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Monthly Profit</p>
+                  <p className="text-2xl font-extrabold text-slate-900 tracking-tight mt-1">PKR {fmtAmt(totalProfitVal)}</p>
+                  <p className="text-xs text-slate-500 mt-1">Net profit performance</p>
                 </div>
-                <div className="bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100 text-right">
-                  <p className="text-[10px] text-blue-600 uppercase font-bold tracking-wider">Net Profit</p>
-                  <p className="text-sm font-black text-blue-700 font-mono">PKR {fmtAmt(totalProfitVal)}</p>
+                <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: CHART_COLORS.profit.tint }}>
+                  <TrendingUp className="w-5 h-5" style={{ color: CHART_COLORS.profit.primary }} />
                 </div>
               </div>
-
-              <div className="pt-2">
+              <div className={`${REPORT.chartArea} mx-4 mb-4`}>
                 {renderSingleBarChart({
                   data: monthlyProfitList,
                   getValue: d => d.profit,
-                  colorPrimary: '#2563eb',
-                  colorGradientStop: '#93c5fd',
+                  colorPrimary: CHART_COLORS.profit.primary,
+                  colorGradientStop: CHART_COLORS.profit.gradient,
                   barId: 'gMonthlyProfit'
                 })}
               </div>
             </div>
 
-            {/* 4. Monthly Sale Graph */}
-            <div className="bg-white rounded-2xl shadow-lg border border-gray-100/50 p-6 flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
-                <div>
-                  <h4 className="text-base font-bold text-gray-900 flex items-center gap-2">
-                    <ShoppingCart className="w-5 h-5 text-purple-600" />
-                    Monthly Sale Graph
-                  </h4>
-                  <p className="text-xs text-gray-400 mt-0.5">Total sales volume by period</p>
+            {/* 4. Monthly Sales */}
+            <div className={REPORT.card}>
+              <div className={`${REPORT.cardInner} flex items-start justify-between gap-4 border-b border-[#eef1f6]`}>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Monthly Sales</p>
+                  <p className="text-2xl font-extrabold text-slate-900 tracking-tight mt-1">PKR {fmtAmt(totalSalesVal)}</p>
+                  <p className="text-xs text-slate-500 mt-1">Total sales volume by period</p>
                 </div>
-                <div className="bg-purple-50 px-3 py-1.5 rounded-xl border border-purple-100 text-right">
-                  <p className="text-[10px] text-purple-600 uppercase font-bold tracking-wider">Total Sales</p>
-                  <p className="text-sm font-black text-purple-700 font-mono">PKR {fmtAmt(totalSalesVal)}</p>
+                <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: CHART_COLORS.sales.tint }}>
+                  <ShoppingCart className="w-5 h-5" style={{ color: CHART_COLORS.sales.primary }} />
                 </div>
               </div>
-
-              <div className="pt-2">
+              <div className={`${REPORT.chartArea} mx-4 mb-4`}>
                 {renderSingleBarChart({
                   data: monthlySalesList,
                   getValue: d => d.amount,
-                  colorPrimary: '#9333ea',
-                  colorGradientStop: '#e9d5ff',
+                  colorPrimary: CHART_COLORS.sales.primary,
+                  colorGradientStop: CHART_COLORS.sales.gradient,
                   barId: 'gMonthlySale'
                 })}
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Existing Charts Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Sales Overview — Clustered Column: Bills vs Orders */}
-          <div className="bg-white rounded-2xl shadow-lg border border-gray-100/50 overflow-hidden">
-            <div className="px-6 pt-5 pb-3 flex items-center justify-between">
+        {/* Weekly Overview Charts */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {/* Sales Overview — Bills vs Orders */}
+          <div className={REPORT.card}>
+            <div className={`${REPORT.cardInner} pb-3 flex items-center justify-between border-b border-[#eef1f6]`}>
               <div>
-                <h3 className="text-base font-semibold text-gray-900">Sales Overview</h3>
-                <p className="text-xs text-gray-400 mt-0.5">Bills vs Orders — Last 7 days</p>
+                <h3 className="text-base font-bold text-slate-900">Sales Overview</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Bills vs Orders — Last 7 days</p>
               </div>
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm inline-block" style={{background:'#3b82f6'}}/><span className="text-xs text-gray-500">Bills</span></div>
-                <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm inline-block" style={{background:'#f97316'}}/><span className="text-xs text-gray-500">Orders</span></div>
+                <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: CHART_COLORS.bills.primary }} /><span className="text-xs text-slate-500 font-medium">Bills</span></div>
+                <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: CHART_COLORS.orders.primary }} /><span className="text-xs text-slate-500 font-medium">Orders</span></div>
               </div>
             </div>
-            <div className="px-1 pb-3">
+            <div className={`${REPORT.chartArea} mx-4 mb-4`}>
               {chartsData?.labels ? (() => {
                 const pL=52,pR=12,pT=20,pB=36,W=600,H=210,cW=W-pL-pR,cH=H-pT-pB;
                 const n=chartsData.labels.length,grpW=cW/n,barW=Math.min(grpW*0.36,32);
                 const s1=chartsData.billAmounts,s2=chartsData.orderAmounts;
                 const maxV=Math.max(...s1,...s2,1);
+                const c1=CHART_COLORS.bills.primary,c1g=CHART_COLORS.bills.gradient;
+                const c2=CHART_COLORS.orders.primary,c2g=CHART_COLORS.orders.gradient;
                 return (
                   <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="230">
                     <defs>
-                      <linearGradient id="cc1B" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#3b82f6"/><stop offset="100%" stopColor="#93c5fd" stopOpacity="0.5"/></linearGradient>
-                      <linearGradient id="cc1O" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f97316"/><stop offset="100%" stopColor="#fdba74" stopOpacity="0.5"/></linearGradient>
+                      <linearGradient id="cc1B" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={c1}/><stop offset="100%" stopColor={c1g} stopOpacity="0.45"/></linearGradient>
+                      <linearGradient id="cc1O" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={c2}/><stop offset="100%" stopColor={c2g} stopOpacity="0.45"/></linearGradient>
                     </defs>
-                    <line x1={pL} y1={pT} x2={pL} y2={pT+cH} stroke="#e2e8f0" strokeWidth="1"/>
-                    {[0,0.25,0.5,0.75,1].map(f=>{const y=pT+cH*(1-f);return(<g key={f}><line x1={pL} y1={y} x2={W-pR} y2={y} stroke={f===0?'#e2e8f0':'#f8fafc'} strokeWidth="1" strokeDasharray={f===0?'':'3 3'}/><text x={pL-4} y={y+4} fontSize="9" fill="#cbd5e1" textAnchor="end">{fmtK(maxV*f)}</text></g>);})}
+                    <line x1={pL} y1={pT} x2={pL} y2={pT+cH} stroke="#e8ecf3" strokeWidth="1"/>
+                    {[0,0.25,0.5,0.75,1].map(f=>{const y=pT+cH*(1-f);return(<g key={f}><line x1={pL} y1={y} x2={W-pR} y2={y} stroke={f===0?'#e8ecf3':'#f4f6f9'} strokeWidth="1" strokeDasharray={f===0?'':'3 3'}/><text x={pL-4} y={y+4} fontSize="9" fill="#94a3b8" textAnchor="end">{fmtK(maxV*f)}</text></g>);})}
                     {chartsData.labels.map((lbl,i)=>{
                       const cx=pL+grpW*i+grpW/2,bx=cx-barW-1,ox=cx+1;
                       const h1=Math.max((s1[i]/maxV)*cH,s1[i]>0?2:0),h2=Math.max((s2[i]/maxV)*cH,s2[i]>0?2:0);
                       return(<g key={i}>
-                        <rect x={bx} y={pT+cH-h1} width={barW} height={h1} rx="3" fill="url(#cc1B)"><title>Bills {lbl}: PKR {s1[i].toLocaleString()}</title></rect>
-                        <rect x={ox} y={pT+cH-h2} width={barW} height={h2} rx="3" fill="url(#cc1O)"><title>Orders {lbl}: PKR {s2[i].toLocaleString()}</title></rect>
-                        <text x={cx} y={H-7} fontSize="9" fill="#94a3b8" textAnchor="middle">{lbl}</text>
+                        <rect x={bx} y={pT+cH-h1} width={barW} height={h1} rx="5" fill="url(#cc1B)"><title>Bills {lbl}: PKR {s1[i].toLocaleString()}</title></rect>
+                        <rect x={ox} y={pT+cH-h2} width={barW} height={h2} rx="5" fill="url(#cc1O)"><title>Orders {lbl}: PKR {s2[i].toLocaleString()}</title></rect>
+                        <text x={cx} y={H-7} fontSize="9" fill="#64748b" textAnchor="middle">{lbl}</text>
                       </g>);
                     })}
                   </svg>
                 );
-              })() : <div className="h-56 flex items-center justify-center"><TrendingUp className="w-12 h-12 text-gray-200"/></div>}
+              })() : <div className="h-56 flex items-center justify-center"><TrendingUp className="w-12 h-12 text-slate-200"/></div>}
             </div>
           </div>
 
-          {/* Orders Overview — Clustered Column: Total vs Orders */}
-          <div className="bg-white rounded-2xl shadow-lg border border-gray-100/50 overflow-hidden">
-            <div className="px-6 pt-5 pb-3 flex items-center justify-between">
+          {/* Transactions Overview */}
+          <div className={REPORT.card}>
+            <div className={`${REPORT.cardInner} pb-3 flex items-center justify-between border-b border-[#eef1f6]`}>
               <div>
-                <h3 className="text-base font-semibold text-gray-900">Transactions Overview</h3>
-                <p className="text-xs text-gray-400 mt-0.5">All transactions vs Orders — Last 7 days</p>
+                <h3 className="text-base font-bold text-slate-900">Transactions Overview</h3>
+                <p className="text-xs text-slate-500 mt-0.5">All transactions vs Orders — Last 7 days</p>
               </div>
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm inline-block" style={{background:'#3b82f6'}}/><span className="text-xs text-gray-500">Total</span></div>
-                <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm inline-block" style={{background:'#f97316'}}/><span className="text-xs text-gray-500">Orders</span></div>
+                <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: CHART_COLORS.sales.primary }} /><span className="text-xs text-slate-500 font-medium">Total</span></div>
+                <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: CHART_COLORS.profit.primary }} /><span className="text-xs text-slate-500 font-medium">Orders</span></div>
               </div>
             </div>
-            <div className="px-1 pb-3">
+            <div className={`${REPORT.chartArea} mx-4 mb-4`}>
               {chartsData?.labels ? (() => {
                 const pL=52,pR=12,pT=20,pB=36,W=600,H=210,cW=W-pL-pR,cH=H-pT-pB;
                 const n=chartsData.labels.length,grpW=cW/n,barW=Math.min(grpW*0.36,32);
                 const s1=chartsData.totalCounts,s2=chartsData.orderCounts;
                 const maxV=Math.max(...s1,...s2,1);
+                const c1=CHART_COLORS.sales.primary,c1g=CHART_COLORS.sales.gradient;
+                const c2=CHART_COLORS.profit.primary,c2g=CHART_COLORS.profit.gradient;
                 return (
                   <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="230">
                     <defs>
-                      <linearGradient id="cc2B" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#3b82f6"/><stop offset="100%" stopColor="#93c5fd" stopOpacity="0.5"/></linearGradient>
-                      <linearGradient id="cc2O" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f97316"/><stop offset="100%" stopColor="#fdba74" stopOpacity="0.5"/></linearGradient>
+                      <linearGradient id="cc2B" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={c1}/><stop offset="100%" stopColor={c1g} stopOpacity="0.45"/></linearGradient>
+                      <linearGradient id="cc2O" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={c2}/><stop offset="100%" stopColor={c2g} stopOpacity="0.45"/></linearGradient>
                     </defs>
-                    <line x1={pL} y1={pT} x2={pL} y2={pT+cH} stroke="#e2e8f0" strokeWidth="1"/>
-                    {[0,0.25,0.5,0.75,1].map(f=>{const y=pT+cH*(1-f);return(<g key={f}><line x1={pL} y1={y} x2={W-pR} y2={y} stroke={f===0?'#e2e8f0':'#f8fafc'} strokeWidth="1" strokeDasharray={f===0?'':'3 3'}/><text x={pL-4} y={y+4} fontSize="9" fill="#cbd5e1" textAnchor="end">{maxV*f>0?Math.round(maxV*f):''}</text></g>);})}
+                    <line x1={pL} y1={pT} x2={pL} y2={pT+cH} stroke="#e8ecf3" strokeWidth="1"/>
+                    {[0,0.25,0.5,0.75,1].map(f=>{const y=pT+cH*(1-f);return(<g key={f}><line x1={pL} y1={y} x2={W-pR} y2={y} stroke={f===0?'#e8ecf3':'#f4f6f9'} strokeWidth="1" strokeDasharray={f===0?'':'3 3'}/><text x={pL-4} y={y+4} fontSize="9" fill="#94a3b8" textAnchor="end">{maxV*f>0?Math.round(maxV*f):''}</text></g>);})}
                     {chartsData.labels.map((lbl,i)=>{
                       const cx=pL+grpW*i+grpW/2,bx=cx-barW-1,ox=cx+1;
                       const h1=Math.max((s1[i]/maxV)*cH,s1[i]>0?2:0),h2=Math.max((s2[i]/maxV)*cH,s2[i]>0?2:0);
                       return(<g key={i}>
-                        <rect x={bx} y={pT+cH-h1} width={barW} height={h1} rx="3" fill="url(#cc2B)"><title>Total {lbl}: {s1[i]}</title></rect>
-                        {s1[i]>0&&<text x={bx+barW/2} y={pT+cH-h1-3} fontSize="8" fill="#2563eb" textAnchor="middle" fontWeight="600">{s1[i]}</text>}
-                        <rect x={ox} y={pT+cH-h2} width={barW} height={h2} rx="3" fill="url(#cc2O)"><title>Orders {lbl}: {s2[i]}</title></rect>
-                        {s2[i]>0&&<text x={ox+barW/2} y={pT+cH-h2-3} fontSize="8" fill="#ea580c" textAnchor="middle" fontWeight="600">{s2[i]}</text>}
-                        <text x={cx} y={H-7} fontSize="9" fill="#94a3b8" textAnchor="middle">{lbl}</text>
+                        <rect x={bx} y={pT+cH-h1} width={barW} height={h1} rx="5" fill="url(#cc2B)"><title>Total {lbl}: {s1[i]}</title></rect>
+                        {s1[i]>0&&<text x={bx+barW/2} y={pT+cH-h1-3} fontSize="8" fill={c1} textAnchor="middle" fontWeight="600">{s1[i]}</text>}
+                        <rect x={ox} y={pT+cH-h2} width={barW} height={h2} rx="5" fill="url(#cc2O)"><title>Orders {lbl}: {s2[i]}</title></rect>
+                        {s2[i]>0&&<text x={ox+barW/2} y={pT+cH-h2-3} fontSize="8" fill={c2} textAnchor="middle" fontWeight="600">{s2[i]}</text>}
+                        <text x={cx} y={H-7} fontSize="9" fill="#64748b" textAnchor="middle">{lbl}</text>
                       </g>);
                     })}
                   </svg>
                 );
-              })() : <div className="h-56 flex items-center justify-center"><ShoppingCart className="w-12 h-12 text-gray-200"/></div>}
+              })() : <div className="h-56 flex items-center justify-center"><ShoppingCart className="w-12 h-12 text-slate-200"/></div>}
             </div>
           </div>
         </div>
 
-        {/* Customer & Supplier Balance Charts — full width, stacked */}
-        <div className="space-y-4">
-          {/* Shared date-range filter bar */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100/50 px-5 py-3 flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 text-gray-500">
-              <Calendar className="w-4 h-4" />
-              <span className="text-sm font-medium">Customer/Supplier Date Range</span>
+        {/* Customer & Supplier Balance Charts */}
+        <div className="space-y-5">
+          <div className={`${REPORT.filterBar} ${REPORT.filterBody}`}>
+            <div className="flex items-center gap-2 text-slate-600">
+              <Calendar className="w-4 h-4 text-[#1A55E3]" />
+              <span className="text-sm font-semibold">Customer / Supplier Date Range</span>
             </div>
             <input
               type="date"
               value={balanceFilters.fromDate}
               onChange={e => setBalanceFilters(f => ({ ...f, fromDate: e.target.value }))}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              className={REPORT.input}
             />
-            <span className="text-gray-400 text-sm">to</span>
+            <span className="text-slate-400 text-sm font-medium">to</span>
             <input
               type="date"
               value={balanceFilters.toDate}
               onChange={e => setBalanceFilters(f => ({ ...f, toDate: e.target.value }))}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              className={REPORT.input}
             />
             {(balanceFilters.fromDate || balanceFilters.toDate) && (
               <button
+                type="button"
                 onClick={() => setBalanceFilters({ fromDate: '', toDate: '' })}
-                className="text-xs text-gray-400 hover:text-red-500 transition-colors px-2 py-1 rounded-lg hover:bg-red-50"
+                className="text-xs text-[#FF0854] hover:text-[#cc0644] bg-[#ffe8f0] px-3 py-2 rounded-xl font-semibold transition-colors"
               >
                 Clear
               </button>
             )}
             {balanceLoading && (
-              <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+              <div className="w-4 h-4 border-2 border-[#1A55E3] border-t-transparent rounded-full animate-spin" />
             )}
           </div>
 
           {/* Customer Balance Chart */}
           {(() => {
             const rows = balanceData.customers;
-            const color = '#3b82f6', gradId = 'balCustG', light = '#eff6ff';
+            const color = CHART_COLORS.customer.primary;
+            const gradId = 'balCustG';
+            const light = CHART_COLORS.customer.tint;
             const n = Math.min(rows.length, 15);
             const pL = 52, pR = 16, pT = 20, pB = 90, W = 1200, H = 260;
             const cW = W - pL - pR, cH = H - pT - pB;
@@ -849,20 +917,20 @@ export default function DashboardContent({ activeTab }) {
               !c.cus_cat_title.toLowerCase().includes('bank')
             );
             return (
-              <div className="bg-white rounded-2xl shadow-lg border border-gray-100/50 overflow-hidden">
-                <div className="px-6 pt-5 pb-4 flex flex-wrap items-center gap-4">
+              <div className={REPORT.card}>
+                <div className={`${REPORT.cardInner} pb-4 flex flex-wrap items-center gap-4 border-b border-[#eef1f6]`}>
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-base font-semibold text-gray-900">Top Customers by Balance</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">
+                    <h3 className="text-base font-bold text-slate-900">Top Customers by Balance</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
                       {balanceFilters.fromDate || balanceFilters.toDate ? 'Net activity in selected period' : 'Outstanding balance'}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Filter className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <Filter className="w-4 h-4 text-[#5E6EED] flex-shrink-0" />
                     <select
                       value={cusCatFilter}
                       onChange={e => setCusCatFilter(e.target.value)}
-                      className="text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 min-w-[200px]"
+                      className={`${REPORT.input} min-w-[200px] py-2`}
                     >
                       <option value="">All Customer Categories</option>
                       {custCats.map(c => (
@@ -870,16 +938,16 @@ export default function DashboardContent({ activeTab }) {
                       ))}
                     </select>
                     {cusCatFilter && (
-                      <button onClick={() => setCusCatFilter('')} className="text-gray-400 hover:text-red-500 text-lg leading-none">×</button>
+                      <button type="button" onClick={() => setCusCatFilter('')} className="text-slate-400 hover:text-[#FF0854] text-lg leading-none">×</button>
                     )}
                   </div>
-                  <span className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0" style={{ background: light, color }}>Top {n}</span>
+                  <span className="text-xs font-bold px-3 py-1.5 rounded-full flex-shrink-0" style={{ background: light, color }}>Top {n}</span>
                 </div>
-                <div className="px-1 pb-3">
+                <div className={`${REPORT.chartArea} mx-4 mb-4`}>
                   {n === 0 ? (
-                    <div className="h-64 flex items-center justify-center text-gray-400 text-sm">
+                    <div className="h-64 flex items-center justify-center text-slate-400 text-sm">
                       {balanceLoading
-                        ? <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                        ? <div className="w-8 h-8 border-2 border-[#5E6EED] border-t-transparent rounded-full animate-spin" />
                         : 'No data available'}
                     </div>
                   ) : (
@@ -887,16 +955,16 @@ export default function DashboardContent({ activeTab }) {
                       <defs>
                         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor={color} />
-                          <stop offset="100%" stopColor={color} stopOpacity="0.3" />
+                          <stop offset="100%" stopColor={CHART_COLORS.customer.gradient} stopOpacity="0.35" />
                         </linearGradient>
                       </defs>
-                      <line x1={pL} y1={pT} x2={pL} y2={pT + cH} stroke="#e2e8f0" strokeWidth="1" />
+                      <line x1={pL} y1={pT} x2={pL} y2={pT + cH} stroke="#e8ecf3" strokeWidth="1" />
                       {[0, 0.25, 0.5, 0.75, 1].map(f => {
                         const y = pT + cH * (1 - f);
                         return (
                           <g key={f}>
-                            <line x1={pL} y1={y} x2={W - pR} y2={y} stroke={f === 0 ? '#e2e8f0' : '#f8fafc'} strokeWidth="1" strokeDasharray={f === 0 ? '' : '4 4'} />
-                            <text x={pL - 6} y={y + 4} fontSize="11" fill="#cbd5e1" textAnchor="end">{fmtK(maxV * f)}</text>
+                            <line x1={pL} y1={y} x2={W - pR} y2={y} stroke={f === 0 ? '#e8ecf3' : '#f4f6f9'} strokeWidth="1" strokeDasharray={f === 0 ? '' : '4 4'} />
+                            <text x={pL - 6} y={y + 4} fontSize="11" fill="#94a3b8" textAnchor="end">{fmtK(maxV * f)}</text>
                           </g>
                         );
                       })}
@@ -907,7 +975,7 @@ export default function DashboardContent({ activeTab }) {
                         const shortName = r.name.length > 14 ? r.name.slice(0, 13) + '…' : r.name;
                         return (
                           <g key={i}>
-                            <rect x={bx} y={pT + cH - bH} width={barW} height={bH} rx="4" fill={`url(#${gradId})`}>
+                            <rect x={bx} y={pT + cH - bH} width={barW} height={bH} rx="5" fill={`url(#${gradId})`}>
                               <title>{r.name}: PKR {r.balance.toLocaleString()}</title>
                             </rect>
                             <text x={bx + barW / 2} y={pT + cH - bH - 5} fontSize="10" fill={color} textAnchor="middle" fontWeight="700">{fmtK(r.balance)}</text>
@@ -925,7 +993,9 @@ export default function DashboardContent({ activeTab }) {
           {/* Supplier Balance Chart */}
           {(() => {
             const rows = balanceData.suppliers;
-            const color = '#f97316', gradId = 'balSuppG', light = '#fff7ed';
+            const color = CHART_COLORS.supplier.primary;
+            const gradId = 'balSuppG';
+            const light = CHART_COLORS.supplier.tint;
             const n = Math.min(rows.length, 15);
             const pL = 52, pR = 16, pT = 20, pB = 90, W = 1200, H = 260;
             const cW = W - pL - pR, cH = H - pT - pB;
@@ -934,20 +1004,20 @@ export default function DashboardContent({ activeTab }) {
             const maxV = n > 0 ? Math.max(...rows.slice(0, n).map(r => r.balance), 1) : 1;
             const supCats = allCategories.filter(c => c.cus_cat_title.toLowerCase().includes('supplier'));
             return (
-              <div className="bg-white rounded-2xl shadow-lg border border-gray-100/50 overflow-hidden">
-                <div className="px-6 pt-5 pb-4 flex flex-wrap items-center gap-4">
+              <div className={REPORT.card}>
+                <div className={`${REPORT.cardInner} pb-4 flex flex-wrap items-center gap-4 border-b border-[#eef1f6]`}>
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-base font-semibold text-gray-900">Top Suppliers by Balance</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">
+                    <h3 className="text-base font-bold text-slate-900">Top Suppliers by Balance</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
                       {balanceFilters.fromDate || balanceFilters.toDate ? 'Net activity in selected period' : 'Outstanding balance'}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Filter className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <Filter className="w-4 h-4 text-[#1A55E3] flex-shrink-0" />
                     <select
                       value={supCatFilter}
                       onChange={e => setSupCatFilter(e.target.value)}
-                      className="text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500/20 min-w-[200px]"
+                      className={`${REPORT.input} min-w-[200px] py-2`}
                     >
                       <option value="">All Supplier Categories</option>
                       {supCats.map(c => (
@@ -955,16 +1025,16 @@ export default function DashboardContent({ activeTab }) {
                       ))}
                     </select>
                     {supCatFilter && (
-                      <button onClick={() => setSupCatFilter('')} className="text-gray-400 hover:text-red-500 text-lg leading-none">×</button>
+                      <button type="button" onClick={() => setSupCatFilter('')} className="text-slate-400 hover:text-[#FF0854] text-lg leading-none">×</button>
                     )}
                   </div>
-                  <span className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0" style={{ background: light, color }}>Top {n}</span>
+                  <span className="text-xs font-bold px-3 py-1.5 rounded-full flex-shrink-0" style={{ background: light, color }}>Top {n}</span>
                 </div>
-                <div className="px-1 pb-3">
+                <div className={`${REPORT.chartArea} mx-4 mb-4`}>
                   {n === 0 ? (
-                    <div className="h-64 flex items-center justify-center text-gray-400 text-sm">
+                    <div className="h-64 flex items-center justify-center text-slate-400 text-sm">
                       {balanceLoading
-                        ? <div className="w-8 h-8 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
+                        ? <div className="w-8 h-8 border-2 border-[#1A55E3] border-t-transparent rounded-full animate-spin" />
                         : 'No data available'}
                     </div>
                   ) : (
@@ -972,16 +1042,16 @@ export default function DashboardContent({ activeTab }) {
                       <defs>
                         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor={color} />
-                          <stop offset="100%" stopColor={color} stopOpacity="0.3" />
+                          <stop offset="100%" stopColor={CHART_COLORS.supplier.gradient} stopOpacity="0.35" />
                         </linearGradient>
                       </defs>
-                      <line x1={pL} y1={pT} x2={pL} y2={pT + cH} stroke="#e2e8f0" strokeWidth="1" />
+                      <line x1={pL} y1={pT} x2={pL} y2={pT + cH} stroke="#e8ecf3" strokeWidth="1" />
                       {[0, 0.25, 0.5, 0.75, 1].map(f => {
                         const y = pT + cH * (1 - f);
                         return (
                           <g key={f}>
-                            <line x1={pL} y1={y} x2={W - pR} y2={y} stroke={f === 0 ? '#e2e8f0' : '#f8fafc'} strokeWidth="1" strokeDasharray={f === 0 ? '' : '4 4'} />
-                            <text x={pL - 6} y={y + 4} fontSize="11" fill="#cbd5e1" textAnchor="end">{fmtK(maxV * f)}</text>
+                            <line x1={pL} y1={y} x2={W - pR} y2={y} stroke={f === 0 ? '#e8ecf3' : '#f4f6f9'} strokeWidth="1" strokeDasharray={f === 0 ? '' : '4 4'} />
+                            <text x={pL - 6} y={y + 4} fontSize="11" fill="#94a3b8" textAnchor="end">{fmtK(maxV * f)}</text>
                           </g>
                         );
                       })}
@@ -992,7 +1062,7 @@ export default function DashboardContent({ activeTab }) {
                         const shortName = r.name.length > 14 ? r.name.slice(0, 13) + '…' : r.name;
                         return (
                           <g key={i}>
-                            <rect x={bx} y={pT + cH - bH} width={barW} height={bH} rx="4" fill={`url(#${gradId})`}>
+                            <rect x={bx} y={pT + cH - bH} width={barW} height={bH} rx="5" fill={`url(#${gradId})`}>
                               <title>{r.name}: PKR {r.balance.toLocaleString()}</title>
                             </rect>
                             <text x={bx + barW / 2} y={pT + cH - bH - 5} fontSize="10" fill={color} textAnchor="middle" fontWeight="700">{fmtK(r.balance)}</text>
@@ -1009,39 +1079,41 @@ export default function DashboardContent({ activeTab }) {
         </div>
 
         {/* Recent Activity */}
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-100/50">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900">Recent Activity</h3>
+        <div className={REPORT.card}>
+          <div className="px-5 py-4 border-b border-[#eef1f6] bg-gradient-to-r from-[#fafbfd] to-white">
+            <h3 className="text-base font-bold text-slate-900">Recent Activity</h3>
+            <p className="text-xs text-slate-500 mt-0.5">Latest sales & purchases</p>
           </div>
-          <div className="p-6">
-            <div className="space-y-4">
+          <div className="p-4 md:p-5">
+            <div className="space-y-1.5">
               {recentActivityData && recentActivityData.length > 0 ? (
                 recentActivityData.map((activity) => (
-                  <div key={activity.id} className="flex items-center space-x-4 p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200">
-                    <div className={`w-3 h-3 rounded-full ${
-                      activity.status === 'success' ? 'bg-green-500' :
-                      activity.status === 'warning' ? 'bg-yellow-500' :
-                      'bg-blue-500'
-                    }`}></div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-gray-900">{activity.action}</p>
-                      <p className="text-xs text-gray-500">{activity.time}</p>
+                  <div key={activity.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-[#f4f6f9] transition-colors duration-200 border border-transparent hover:border-[#e8ecf3]">
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                      activity.status === 'success' ? 'bg-[#00D284]' :
+                      activity.status === 'warning' ? 'bg-[#0DCAF0]' :
+                      'bg-[#1A55E3]'
+                    }`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-slate-900">{activity.action}</p>
+                      <p className="text-xs text-slate-500">{activity.time}</p>
                     </div>
                     {(activity.amount || activity.customer) && (
-                      <div className="text-right">
-                        {activity.amount && <p className="text-sm font-medium text-gray-900">PKR {activity.amount}</p>}
-                        {activity.customer && <p className="text-xs text-gray-500">{activity.customer}</p>}
+                      <div className="text-right flex-shrink-0">
+                        {activity.amount && <p className="text-sm font-semibold text-slate-900">PKR {activity.amount}</p>}
+                        {activity.customer && <p className="text-xs text-slate-500">{activity.customer}</p>}
                       </div>
                     )}
                   </div>
                 ))
               ) : (
-                <div className="text-center py-8">
-                  <p className="text-gray-500">No recent activities</p>
+                <div className="text-center py-10">
+                  <p className="text-sm text-slate-500">No recent activities</p>
                 </div>
               )}
             </div>
           </div>
+        </div>
         </div>
       </div>
     );

@@ -22,6 +22,7 @@
     "db:local": "node scripts/prepare-local-db.js",
     "db:local:sync": "node scripts/prepare-local-db.js --sync",
     "db:seed": "node prisma/seed-admin.js && node prisma/seed-master-data.js",
+    "db:seed:main": "node scripts/setup-branches.js && node prisma/seed-main-branch-sample.js",
     "db:seed:hq": "node prisma/seed-admin.js",
     "db:branches": "node scripts/setup-branches.js",
     "db:branch:migrate": "node scripts/pre-branch-push.js && npx prisma db push && node scripts/setup-branches.js",

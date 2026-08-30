@@ -21,7 +21,9 @@ import {
   Eye,
   CreditCard,
   Banknote,
-  Printer as Print
+  Printer as Print,
+  Minimize2,
+  LayoutGrid
 } from 'lucide-react';
 import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
@@ -76,6 +78,93 @@ const fmtAmt = (val) => {
   if (n % 1 === 0) return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
+
+const LEDGER_FILTER_OUTLINED_SX = {
+  borderRadius: '12px',
+  bgcolor: '#ffffff',
+  fontSize: '0.875rem',
+  transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+  '& fieldset': { borderColor: '#e2e8f0' },
+  '&:hover fieldset': { borderColor: '#93c5fd' },
+  '&.Mui-focused fieldset': {
+    borderColor: '#1A55E3',
+    borderWidth: '1.5px',
+    boxShadow: '0 0 0 3px rgba(26, 85, 227, 0.08)',
+  },
+};
+
+const LEDGER_FILTER_FIELD_SX = {
+  '& .MuiOutlinedInput-root': LEDGER_FILTER_OUTLINED_SX,
+  '& .MuiInputLabel-root': {
+    fontSize: '0.8125rem',
+    fontWeight: 600,
+    color: '#64748b',
+    '&.Mui-focused': { color: '#1A55E3' },
+  },
+};
+
+const LEDGER_FILTER_GRID = {
+  display: 'grid',
+  gridTemplateColumns: {
+    xs: '1fr',
+    sm: 'repeat(2, 1fr)',
+    md: 'repeat(3, 1fr)',
+    lg: 'repeat(4, 1fr)',
+  },
+  gap: { xs: 2, md: 2.25 },
+  width: '100%',
+};
+
+const LEDGER_TABS_STORAGE_PREFIX = 'finance_open_ledger_tabs';
+
+function getLedgerTabsStorageKey() {
+  if (typeof window === 'undefined') return `${LEDGER_TABS_STORAGE_PREFIX}_default`;
+  try {
+    const userStr = localStorage.getItem('user');
+    const user = userStr ? JSON.parse(userStr) : null;
+    const branchId = user?.branch_id ?? localStorage.getItem('active_branch_id') ?? 'default';
+    return `${LEDGER_TABS_STORAGE_PREFIX}_${branchId}`;
+  } catch {
+    return `${LEDGER_TABS_STORAGE_PREFIX}_default`;
+  }
+}
+
+function loadPersistedLedgerTabs() {
+  if (typeof window === 'undefined') return { openLedgers: [], activeLedgerId: null };
+  try {
+    const raw = localStorage.getItem(getLedgerTabsStorageKey());
+    if (!raw) return { openLedgers: [], activeLedgerId: null };
+    const parsed = JSON.parse(raw);
+    const openLedgers = Array.isArray(parsed?.openLedgers)
+      ? parsed.openLedgers
+          .filter((t) => t && Number(t.id) > 0)
+          .map((t) => ({
+            id: Number(t.id),
+            name: String(t.name || `Account #${t.id}`),
+            minimized: Boolean(t.minimized),
+          }))
+      : [];
+    const activeLedgerId =
+      parsed?.activeLedgerId != null && parsed.activeLedgerId !== ''
+        ? Number(parsed.activeLedgerId)
+        : null;
+    return { openLedgers, activeLedgerId };
+  } catch {
+    return { openLedgers: [], activeLedgerId: null };
+  }
+}
+
+function savePersistedLedgerTabs(openLedgers, activeLedgerId) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(
+      getLedgerTabsStorageKey(),
+      JSON.stringify({ openLedgers, activeLedgerId })
+    );
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
 
 const getLocalDateString = (dateInput) => {
   if (!dateInput) return '';
@@ -391,6 +480,11 @@ export default function FinancePage() {
   const [accountSearchTerm, setAccountSearchTerm] = useState('');
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
 
+  // Multi-ledger tabs: open several account ledgers, minimize/restore like windows
+  const [openLedgers, setOpenLedgers] = useState([]); // { id, name, minimized }
+  const [activeLedgerId, setActiveLedgerId] = useState(null);
+  const [ledgerTabsHydrated, setLedgerTabsHydrated] = useState(false);
+
   // Form data
   const [formData, setFormData] = useState({
     cus_id: '',
@@ -551,7 +645,7 @@ export default function FinancePage() {
       const res = await fetch(`/api/ledger?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
-        setLedgerEntries(data);
+        setLedgerEntries(Array.isArray(data) ? data : []);
       }
     } catch (error) {
       console.error('Error fetching ledger entries:', error);
@@ -560,15 +654,72 @@ export default function FinancePage() {
     }
   };
 
-  // Fetch data on mount
+  // Fetch data on mount — restore persisted ledger tabs first
   useEffect(() => {
     setMounted(true);
+
+    const { openLedgers: savedTabs, activeLedgerId: savedActiveId } = loadPersistedLedgerTabs();
+    if (savedTabs.length > 0) {
+      setOpenLedgers(savedTabs);
+      const activeTab = savedTabs.find((t) => t.id === Number(savedActiveId));
+      const firstVisible = savedTabs.find((t) => !t.minimized);
+
+      if (activeTab && !activeTab.minimized) {
+        setActiveLedgerId(activeTab.id);
+        setSelectedCustomer(String(activeTab.id));
+        setAccountSearchTerm(activeTab.name);
+      } else if (firstVisible) {
+        setActiveLedgerId(firstVisible.id);
+        setSelectedCustomer(String(firstVisible.id));
+        setAccountSearchTerm(firstVisible.name);
+      } else {
+        setActiveLedgerId(savedActiveId);
+      }
+    }
+
+    setLedgerTabsHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!ledgerTabsHydrated) return;
     const init = async () => {
       await fetchStaticData();
       await fetchLedgerData();
       setInitialLoading(false);
     };
     init();
+  }, [ledgerTabsHydrated]);
+
+  // Persist open ledger tabs (survives page navigation & browser restart)
+  useEffect(() => {
+    if (!ledgerTabsHydrated) return;
+    savePersistedLedgerTabs(openLedgers, activeLedgerId);
+  }, [openLedgers, activeLedgerId, ledgerTabsHydrated]);
+
+  // Reload tabs when HQ user switches branch
+  useEffect(() => {
+    const onBranchChanged = () => {
+      const { openLedgers: savedTabs, activeLedgerId: savedActiveId } = loadPersistedLedgerTabs();
+      setOpenLedgers(savedTabs);
+      const activeTab = savedTabs.find((t) => t.id === Number(savedActiveId));
+      const firstVisible = savedTabs.find((t) => !t.minimized);
+      if (activeTab && !activeTab.minimized) {
+        setActiveLedgerId(activeTab.id);
+        setSelectedCustomer(String(activeTab.id));
+        setAccountSearchTerm(activeTab.name);
+      } else if (firstVisible) {
+        setActiveLedgerId(firstVisible.id);
+        setSelectedCustomer(String(firstVisible.id));
+        setAccountSearchTerm(firstVisible.name);
+      } else {
+        setActiveLedgerId(null);
+        setSelectedCustomer('');
+        setAccountSearchTerm('');
+      }
+      fetchLedgerData();
+    };
+    window.addEventListener('branch-changed', onBranchChanged);
+    return () => window.removeEventListener('branch-changed', onBranchChanged);
   }, []);
 
   // Reactive effect when filters change
@@ -1945,10 +2096,102 @@ export default function FinancePage() {
     }
   };
 
+  const activateLedger = (cusId, cusName) => {
+    const id = Number(cusId);
+    if (!id) return;
+    const name = cusName || customers.find((c) => Number(c.cus_id) === id)?.cus_name || `Account #${id}`;
+    setActiveLedgerId(id);
+    setSelectedCustomer(String(id));
+    setAccountSearchTerm(name);
+    setOpenLedgers((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, minimized: false, name } : l))
+    );
+  };
+
+  const openCustomerLedger = (cusId, cusName) => {
+    const id = Number(cusId);
+    if (!id) return;
+    const name = cusName || customers.find((c) => Number(c.cus_id) === id)?.cus_name || `Account #${id}`;
+    setOpenLedgers((prev) => {
+      const exists = prev.find((l) => l.id === id);
+      if (exists) {
+        return prev.map((l) => (l.id === id ? { ...l, minimized: false, name } : l));
+      }
+      return [...prev, { id, name, minimized: false }];
+    });
+    setActiveLedgerId(id);
+    setSelectedCustomer(String(id));
+    setAccountSearchTerm(name);
+  };
+
+  const minimizeLedger = (cusId) => {
+    const id = Number(cusId);
+    setOpenLedgers((prev) => {
+      const updated = prev.map((l) => (l.id === id ? { ...l, minimized: true } : l));
+      if (Number(activeLedgerId) === id) {
+        const next = updated.find((l) => !l.minimized);
+        if (next) {
+          setActiveLedgerId(next.id);
+          setSelectedCustomer(String(next.id));
+          setAccountSearchTerm(next.name);
+        } else {
+          setActiveLedgerId(null);
+          setSelectedCustomer('');
+          setAccountSearchTerm('');
+        }
+      }
+      return updated;
+    });
+  };
+
+  const toggleLedgerMinimize = (cusId) => {
+    const id = Number(cusId);
+    const tab = openLedgers.find((l) => l.id === id);
+    if (!tab) return;
+    if (tab.minimized) {
+      restoreLedger(id);
+    } else {
+      minimizeLedger(id);
+    }
+  };
+
+  const closeLedgerTab = (cusId) => {
+    const id = Number(cusId);
+    setOpenLedgers((prev) => {
+      const updated = prev.filter((l) => l.id !== id);
+      if (Number(activeLedgerId) === id) {
+        const next = updated.find((l) => !l.minimized);
+        if (next) {
+          setActiveLedgerId(next.id);
+          setSelectedCustomer(String(next.id));
+          setAccountSearchTerm(next.name);
+        } else {
+          setActiveLedgerId(null);
+          setSelectedCustomer('');
+          setAccountSearchTerm('');
+        }
+      }
+      return updated;
+    });
+  };
+
+  const restoreLedger = (cusId) => {
+    activateLedger(cusId);
+  };
+
+  const showAllAccountsView = () => {
+    setActiveLedgerId(null);
+    setSelectedCustomer('');
+    setAccountSearchTerm('');
+  };
+
+  const activeLedgerTab = openLedgers.find((l) => l.id === Number(activeLedgerId));
+  const openLedgerTabs = openLedgers.filter((l) => !l.minimized);
+  const minimizedLedgerTabs = openLedgers.filter((l) => l.minimized);
+
   const clearFilters = () => {
     setSearchTerm('');
     setFilterAmount('');
-    setSelectedCustomer('');
     setSelectedCategory('');
     setSelectedSubCategory('');
     setSortBy('created_at');
@@ -1956,6 +2199,17 @@ export default function FinancePage() {
     setStartDate('');
     setEndDate('');
     setSelectedLedgerType('');
+    // Open ledger tabs stay until you click X — not cleared here
+    if (!activeLedgerId) {
+      setSelectedCustomer('');
+      setAccountSearchTerm('');
+    } else {
+      const tab = openLedgers.find((l) => l.id === Number(activeLedgerId));
+      if (tab && !tab.minimized) {
+        setSelectedCustomer(String(activeLedgerId));
+        setAccountSearchTerm(tab.name);
+      }
+    }
   };
 
   // Print Ledger between two dates (Always Ascending Chronological Order)
@@ -2166,7 +2420,7 @@ export default function FinancePage() {
 
   return (
     <DashboardLayout>
-      <Container maxWidth={false} sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', p: 3 }}>
+      <Container maxWidth={false} sx={{ display: 'flex', flexDirection: 'column', p: 3, pb: 4 }}>
         {/* Header Section */}
         <Box sx={{ flexShrink: 0, mb: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -2322,328 +2576,286 @@ export default function FinancePage() {
         {/* Filters Section */}
         <Box sx={{ flexShrink: 0, mb: 3, width: '100%' }}>
           <Card sx={{
-            borderRadius: 2,
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
+            borderRadius: '16px',
+            boxShadow: '0 2px 20px rgba(26, 85, 227, 0.06)',
             width: '100%',
-            border: '1px solid #e2e8f0',
-            bgcolor: '#f8fafc'
+            border: '1px solid #e8ecf3',
+            bgcolor: '#ffffff',
+            overflow: 'hidden',
           }}>
-            <CardContent sx={{ p: 3 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-                <Typography variant="h6" sx={{ fontWeight: 700, color: '#334155' }}>
-                  Filters
-                </Typography>
-                <Button
-                  onClick={clearFilters}
-                  size="small"
-                  sx={{
-                    color: '#64748b',
-                    textTransform: 'none',
-                    fontWeight: 600,
-                    '&:hover': { color: '#ef4444' }
+            <Box sx={{
+              px: { xs: 2, md: 3 },
+              py: 2,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 2,
+              borderBottom: '1px solid #eef1f6',
+              background: 'linear-gradient(90deg, #f8faff 0%, #ffffff 100%)',
+            }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
+                <Box sx={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: '12px',
+                  bgcolor: '#e8effd',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  <Filter size={18} color="#1A55E3" />
+                </Box>
+                <Box>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#1e293b', lineHeight: 1.3 }}>
+                    Filters
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 500 }}>
+                    Refine ledger by account, type, date & amount
+                  </Typography>
+                </Box>
+              </Box>
+              <Button
+                onClick={clearFilters}
+                size="small"
+                variant="outlined"
+                sx={{
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  fontSize: '0.8125rem',
+                  color: '#64748b',
+                  borderColor: '#e2e8f0',
+                  borderRadius: '10px',
+                  px: 2,
+                  whiteSpace: 'nowrap',
+                  '&:hover': {
+                    color: '#FF0854',
+                    borderColor: '#ffc2d4',
+                    bgcolor: '#fff5f8',
+                  },
+                }}
+              >
+                Clear All Filters
+              </Button>
+            </Box>
+
+            <CardContent sx={{ p: { xs: 2, md: 3 }, '&:last-child': { pb: { xs: 2, md: 3 } } }}>
+              <Typography sx={{
+                fontSize: '0.6875rem',
+                fontWeight: 700,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                color: '#94a3b8',
+                mb: 1.5,
+              }}>
+                Account & type
+              </Typography>
+              <Box sx={{ ...LEDGER_FILTER_GRID, mb: 3 }}>
+                <FormControl fullWidth sx={LEDGER_FILTER_FIELD_SX}>
+                  <InputLabel>Category</InputLabel>
+                  <Select
+                    value={selectedCategory}
+                    onChange={(e) => {
+                      setSelectedCategory(e.target.value);
+                      setSelectedSubCategory('');
+                      if (!activeLedgerId) setSelectedCustomer('');
+                    }}
+                    label="Category"
+                    sx={{ borderRadius: '12px', bgcolor: '#fff' }}
+                  >
+                    <MenuItem value="">All Categories</MenuItem>
+                    {customerCategories.map((cat) => (
+                      <MenuItem key={cat.cus_cat_id} value={cat.cus_cat_id.toString()}>
+                        {cat.cus_cat_title}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                <FormControl fullWidth sx={LEDGER_FILTER_FIELD_SX}>
+                  <InputLabel>Customer Type</InputLabel>
+                  <Select
+                    value={selectedSubCategory}
+                    onChange={(e) => {
+                      setSelectedSubCategory(e.target.value);
+                      if (!activeLedgerId) setSelectedCustomer('');
+                    }}
+                    label="Customer Type"
+                    sx={{ borderRadius: '12px', bgcolor: '#fff' }}
+                  >
+                    <MenuItem value="">All Customer Types</MenuItem>
+                    {availableSubCategories.map((type) => (
+                      <MenuItem key={type.cus_type_id} value={type.cus_type_id.toString()}>
+                        {type.cus_type_title}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                <Autocomplete
+                  fullWidth
+                  autoSelect
+                  autoHighlight
+                  openOnFocus
+                  selectOnFocus
+                  options={filteredAccounts}
+                  getOptionLabel={(option) => option.cus_name}
+                  value={selectedCustomer ? customers.find(c => Number(c.cus_id) === Number(selectedCustomer)) : null}
+                  onChange={(event, newValue) => {
+                    if (newValue) {
+                      openCustomerLedger(newValue.cus_id, newValue.cus_name);
+                    } else {
+                      showAllAccountsView();
+                    }
                   }}
-                >
-                  Clear All Filters
-                </Button>
+                  inputValue={accountSearchTerm}
+                  onInputChange={(event, newInputValue) => {
+                    setAccountSearchTerm(newInputValue);
+                  }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Account"
+                      placeholder="Search accounts..."
+                      onFocus={(e) => e.target.select()}
+                      InputProps={{
+                        ...params.InputProps,
+                        startAdornment: (
+                          <Fragment>
+                            <InputAdornment position="start">
+                              <Search size={17} color="#1A55E3" />
+                            </InputAdornment>
+                            {params.InputProps.startAdornment}
+                          </Fragment>
+                        ),
+                      }}
+                      sx={LEDGER_FILTER_FIELD_SX}
+                    />
+                  )}
+                  renderOption={(props, option) => {
+                    const { key, ...optionProps } = props;
+                    const balance = parseFloat(option.cus_balance || 0);
+                    return (
+                      <Box component="li" key={key} {...optionProps}>
+                        <Box sx={{ width: '100%', py: 0.5 }}>
+                          <Typography variant="body2" sx={{ fontWeight: 700, color: '#1e293b' }}>
+                            {option.cus_name}
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.25 }}>
+                            {option.cus_phone_no}
+                            {option.cus_email && ` • ${option.cus_email}`}
+                            {option.customer_type?.cus_type_title && ` • ${option.customer_type.cus_type_title}`}
+                          </Typography>
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              fontWeight: 700,
+                              px: 1,
+                              py: 0.25,
+                              mt: 0.5,
+                              borderRadius: 1,
+                              bgcolor: balance > 0 ? '#fef3c7' : balance < 0 ? '#dcfce7' : '#f1f5f9',
+                              color: balance > 0 ? '#b45309' : balance < 0 ? '#15803d' : '#475569',
+                              display: 'inline-block',
+                            }}
+                          >
+                            Bal: PKR {fmtAmt(balance)}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    );
+                  }}
+                  noOptionsText="No accounts found"
+                  clearOnEscape
+                />
+
+                <FormControl fullWidth sx={LEDGER_FILTER_FIELD_SX}>
+                  <InputLabel>Ledger Type</InputLabel>
+                  <Select
+                    value={selectedLedgerType}
+                    onChange={(e) => setSelectedLedgerType(e.target.value)}
+                    label="Ledger Type"
+                    sx={{ borderRadius: '12px', bgcolor: '#fff' }}
+                  >
+                    <MenuItem value="">All Types</MenuItem>
+                    <MenuItem value="Sale">Sale</MenuItem>
+                    <MenuItem value="Purchase">Purchase</MenuItem>
+                    <MenuItem value="Payment">Payment</MenuItem>
+                    <MenuItem value="Receiving">Receiving</MenuItem>
+                    <MenuItem value="Expense">Expense</MenuItem>
+                    <MenuItem value="Order">Order</MenuItem>
+                    <MenuItem value="Sale Return">Sale Return</MenuItem>
+                    <MenuItem value="Purchase Return">Purchase Return</MenuItem>
+                    <MenuItem value="Journal">Journal</MenuItem>
+                    <MenuItem value="Adjustment">Adjustment</MenuItem>
+                  </Select>
+                </FormControl>
               </Box>
 
-              {/* Reordered Filters: Category → Sub-Category → Account → From Date → To Date → Search */}
-              <Box sx={{
-                display: 'grid',
-                gridTemplateColumns: {
-                  xs: '1fr',
-                  sm: '1fr 1fr',
-                  md: 'repeat(3, 1fr)',
-                  lg: 'repeat(7, 1fr)'
-                },
-                gap: 3,
-                width: '100%'
+              <Divider sx={{ borderColor: '#eef1f6', mb: 2.5 }} />
+
+              <Typography sx={{
+                fontSize: '0.6875rem',
+                fontWeight: 700,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                color: '#94a3b8',
+                mb: 1.5,
               }}>
-                {/* Category Filter - FIRST */}
-                <Box>
-                  <FormControl fullWidth>
-                    <InputLabel>Category</InputLabel>
-                    <Select
-                      fullWidth
-                      value={selectedCategory}
-                      onChange={(e) => {
-                        setSelectedCategory(e.target.value);
-                        setSelectedSubCategory(''); // Reset sub-category when category changes
-                        setSelectedCustomer(''); // Reset account when category changes
-                      }}
-                      label="Category"
-                      startAdornment={
-                        <InputAdornment position="start" sx={{ mr: 1, ml: -0.5 }}>
-                          <Filter size={18} color="#94a3b8" />
-                        </InputAdornment>
-                      }
-                      sx={{
-                        borderRadius: 1.5,
-                        bgcolor: 'white',
-                      }}
-                    >
-                      <MenuItem value="">All Categories</MenuItem>
-                      {customerCategories.map((cat) => (
-                        <MenuItem key={cat.cus_cat_id} value={cat.cus_cat_id.toString()}>
-                          {cat.cus_cat_title}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Box>
+                Date & search
+              </Typography>
+              <Box sx={LEDGER_FILTER_GRID}>
+                <TextField
+                  fullWidth
+                  label="From Date"
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  sx={LEDGER_FILTER_FIELD_SX}
+                />
 
-                {/* Customer Type Filter - SECOND */}
-                <Box>
-                  <FormControl fullWidth>
-                    <InputLabel>Customer Type</InputLabel>
-                    <Select
-                      fullWidth
-                      value={selectedSubCategory}
-                      onChange={(e) => {
-                        setSelectedSubCategory(e.target.value);
-                        setSelectedCustomer(''); // Reset account when sub-category changes
-                      }}
-                      label="Customer Type"
-                      sx={{
-                        borderRadius: 1.5,
-                        bgcolor: 'white',
-                      }}
-                    >
-                      <MenuItem value="">All Customer Types</MenuItem>
-                      {availableSubCategories.map((type) => (
-                        <MenuItem key={type.cus_type_id} value={type.cus_type_id.toString()}>
-                          {type.cus_type_title}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Box>
+                <TextField
+                  fullWidth
+                  label="To Date"
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  sx={LEDGER_FILTER_FIELD_SX}
+                />
 
-                {/* Account Filter - THIRD */}
-                <Box>
-                  <Autocomplete
-                    fullWidth
-                    autoSelect={true}
-                    autoHighlight={true}
-                    openOnFocus={true}
-                    selectOnFocus={true}
-                    options={filteredAccounts}
-                    getOptionLabel={(option) => option.cus_name}
-                    value={selectedCustomer ? customers.find(c => Number(c.cus_id) === Number(selectedCustomer)) : null}
-                    onChange={(event, newValue) => {
-                      if (newValue) {
-                        setSelectedCustomer(newValue.cus_id);
-                        setAccountSearchTerm(newValue.cus_name);
-                      } else {
-                        setSelectedCustomer('');
-                        setAccountSearchTerm('');
-                      }
-                    }}
-                    inputValue={accountSearchTerm}
-                    onInputChange={(event, newInputValue) => {
-                      setAccountSearchTerm(newInputValue);
-                    }}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Account"
-                        placeholder="Search accounts..."
-                        onFocus={(e) => e.target.select()}
-                        InputProps={{
-                          ...params.InputProps,
-                          startAdornment: (
-                            <Fragment>
-                              <InputAdornment position="start">
-                                <Search size={18} color="#94a3b8" />
-                              </InputAdornment>
-                              {params.InputProps.startAdornment}
-                            </Fragment>
-                          ),
-                        }}
-                        sx={{
-                          '& .MuiOutlinedInput-root': {
-                            borderRadius: 1.5,
-                            bgcolor: 'white',
-                          }
-                        }}
-                      />
-                    )}
-                    renderOption={(props, option) => {
-                      const { key, ...optionProps } = props;
-                      const balance = parseFloat(option.cus_balance || 0);
-                      return (
-                        <Box component="li" key={key} {...optionProps}>
-                          <Box sx={{ width: '100%', py: 0.5 }}>
-                            <Typography variant="body2" sx={{ fontWeight: 700, color: '#1e293b' }}>
-                              {option.cus_name}
-                            </Typography>
-                            <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.25 }}>
-                              {option.cus_phone_no}
-                              {option.cus_email && ` • ${option.cus_email}`}
-                              {option.customer_type?.cus_type_title && ` • ${option.customer_type.cus_type_title}`}
-                            </Typography>
-                            <Typography
-                              variant="caption"
-                              sx={{
-                                fontWeight: 700,
-                                px: 1,
-                                py: 0.25,
-                                mt: 0.5,
-                                borderRadius: 1,
-                                bgcolor: balance > 0 ? '#fef3c7' : balance < 0 ? '#dcfce7' : '#f1f5f9',
-                                color: balance > 0 ? '#b45309' : balance < 0 ? '#15803d' : '#475569',
-                                display: 'inline-block'
-                              }}
-                            >
-                              Bal: PKR {fmtAmt(balance)}
-                            </Typography>
-                          </Box>
-                        </Box>
-                      );
-                    }}
-                    noOptionsText="No accounts found"
-                    clearOnEscape
-                  />
-                </Box>
+                <TextField
+                  fullWidth
+                  label="Search by Amount"
+                  placeholder="Debit, credit, or balance..."
+                  value={filterAmount}
+                  onChange={(e) => setFilterAmount(e.target.value)}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <DollarSign size={17} color="#1A55E3" />
+                      </InputAdornment>
+                    ),
+                  }}
+                  sx={LEDGER_FILTER_FIELD_SX}
+                />
 
-                {/* Ledger Type Filter - FOURTH */}
-                <Box>
-                  <FormControl fullWidth>
-                    <InputLabel>Ledger Type</InputLabel>
-                    <Select
-                      fullWidth
-                      value={selectedLedgerType}
-                      onChange={(e) => setSelectedLedgerType(e.target.value)}
-                      label="Ledger Type"
-                      sx={{
-                        borderRadius: 1.5,
-                        bgcolor: 'white',
-                      }}
-                    >
-                      <MenuItem value="">All Types</MenuItem>
-                      <MenuItem value="Sale">Sale</MenuItem>
-                      <MenuItem value="Purchase">Purchase</MenuItem>
-                      <MenuItem value="Payment">Payment</MenuItem>
-                      <MenuItem value="Receiving">Receiving</MenuItem>
-                      <MenuItem value="Expense">Expense</MenuItem>
-                      <MenuItem value="Order">Order</MenuItem>
-                      <MenuItem value="Sale Return">Sale Return</MenuItem>
-                      <MenuItem value="Purchase Return">Purchase Return</MenuItem>
-                      <MenuItem value="Journal">Journal</MenuItem>
-                      <MenuItem value="Adjustment">Adjustment</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Box>
-
-                {/* From Date Filter - FIFTH */}
-                <Box>
-                  <TextField
-                    fullWidth
-                    label="From Date"
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    InputLabelProps={{ shrink: true }}
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        borderRadius: 1.5,
-                        bgcolor: 'white',
-                      }
-                    }}
-                  />
-                </Box>
-
-                {/* To Date Filter - FIFTH */}
-                <Box>
-                  <TextField
-                    fullWidth
-                    label="To Date"
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    InputLabelProps={{ shrink: true }}
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        borderRadius: 1.5,
-                        bgcolor: 'white',
-                      }
-                    }}
-                  />
-                </Box>
-
-                {/* Ledger Type Filter */}
-                <Box>
-                  <FormControl fullWidth>
-                    <InputLabel>Ledger Type</InputLabel>
-                    <Select
-                      value={selectedLedgerType}
-                      onChange={(e) => setSelectedLedgerType(e.target.value)}
-                      label="Ledger Type"
-                      sx={{
-                        borderRadius: 1.5,
-                        bgcolor: 'white',
-                      }}
-                    >
-                      <MenuItem value="">All Types</MenuItem>
-                      <MenuItem value="Sale">Sale</MenuItem>
-                      <MenuItem value="Purchase">Purchase</MenuItem>
-                      <MenuItem value="Payment">Payment</MenuItem>
-                      <MenuItem value="Receiving">Receiving</MenuItem>
-                      <MenuItem value="Expense">Expense</MenuItem>
-                      <MenuItem value="Order">Order</MenuItem>
-                      <MenuItem value="Sale Return">Sale Return</MenuItem>
-                      <MenuItem value="Purchase Return">Purchase Return</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Box>
-
-                {/* Search by Amount */}
-                <Box>
-                  <TextField
-                    fullWidth
-                    label="Search by Amount"
-                    placeholder="Debit, credit, or balance..."
-                    value={filterAmount}
-                    onChange={(e) => setFilterAmount(e.target.value)}
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <DollarSign size={18} color="#94a3b8" />
-                        </InputAdornment>
-                      ),
-                    }}
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        borderRadius: 1.5,
-                        bgcolor: 'white',
-                      }
-                    }}
-                  />
-                </Box>
-
-                {/* Search - SEVENTH */}
-                <Box>
-                  <TextField
-                    fullWidth
-                    label="Search"
-                    placeholder="Search by name, phone, ref, amount..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <Search size={18} color="#94a3b8" />
-                        </InputAdornment>
-                      ),
-                    }}
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        borderRadius: 1.5,
-                        bgcolor: 'white',
-                      }
-                    }}
-                  />
-                </Box>
+                <TextField
+                  fullWidth
+                  label="Search"
+                  placeholder="Name, phone, ref, amount..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <Search size={17} color="#1A55E3" />
+                      </InputAdornment>
+                    ),
+                  }}
+                  sx={LEDGER_FILTER_FIELD_SX}
+                />
               </Box>
             </CardContent>
           </Card>
@@ -2743,9 +2955,156 @@ export default function FinancePage() {
           </Card>
         </Box>
 
+        {/* Open Ledger Tabs — multiple accounts, minimize / restore */}
+        {openLedgers.length > 0 && (
+          <Box sx={{ flexShrink: 0, mb: 2, width: '100%' }}>
+            <Card sx={{ borderRadius: 2, border: '1px solid #e2e8f0', boxShadow: 'none', overflow: 'hidden' }}>
+              <Box sx={{ px: 2, py: 1.25, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <LayoutGrid size={16} color="#64748b" />
+                <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                  Open Ledgers
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#94a3b8', ml: 0.5 }}>
+                  — tabs stay open until you click ✕ (saved automatically)
+                </Typography>
+              </Box>
+              <Box sx={{ p: 1.5, display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+                <Box
+                  onClick={showAllAccountsView}
+                  sx={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 0.75,
+                    px: 1.75,
+                    py: 0.75,
+                    borderRadius: '10px',
+                    cursor: 'pointer',
+                    fontWeight: 700,
+                    fontSize: '0.8125rem',
+                    bgcolor: !activeLedgerId ? '#1A55E3' : '#fff',
+                    color: !activeLedgerId ? '#fff' : '#475569',
+                    border: !activeLedgerId ? '2px solid #1A55E3' : '1px solid #e2e8f0',
+                    transition: 'all 0.15s ease',
+                    '&:hover': { bgcolor: !activeLedgerId ? '#1545c4' : '#f1f5f9' },
+                  }}
+                >
+                  All Accounts
+                </Box>
+                {openLedgerTabs.map((tab) => {
+                  const isActive = Number(activeLedgerId) === tab.id;
+                  const balance = parseFloat(customers.find((c) => Number(c.cus_id) === tab.id)?.cus_balance || 0);
+                  return (
+                    <Box
+                      key={tab.id}
+                      sx={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        borderRadius: '10px',
+                        overflow: 'hidden',
+                        bgcolor: isActive ? '#1A55E3' : '#fff',
+                        color: isActive ? '#fff' : '#334155',
+                        border: isActive ? '2px solid #1A55E3' : '1px solid #e2e8f0',
+                        boxShadow: isActive ? '0 2px 8px rgba(26,85,227,0.25)' : 'none',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <Box
+                        onClick={() => activateLedger(tab.id, tab.name)}
+                        sx={{
+                          px: 1.75,
+                          py: 0.75,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          minWidth: 0,
+                          '&:hover': { opacity: 0.92 },
+                        }}
+                      >
+                        <Typography noWrap sx={{ fontWeight: 700, fontSize: '0.8125rem', maxWidth: 180, lineHeight: 1.2 }}>
+                          {tab.name}
+                        </Typography>
+                        <Typography sx={{ fontSize: '0.6875rem', opacity: 0.85, fontWeight: 600 }}>
+                          Bal: PKR {fmtAmt(balance)}
+                        </Typography>
+                      </Box>
+                      <Tooltip title={tab.minimized ? 'Restore' : 'Minimize'}>
+                        <IconButton
+                          size="small"
+                          onClick={(e) => { e.stopPropagation(); toggleLedgerMinimize(tab.id); }}
+                          sx={{ color: isActive ? 'rgba(255,255,255,0.85)' : '#64748b', borderRadius: 0, '&:hover': { bgcolor: isActive ? 'rgba(255,255,255,0.15)' : '#f1f5f9' } }}
+                        >
+                          <Minimize2 size={14} />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Close">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => { e.stopPropagation(); closeLedgerTab(tab.id); }}
+                          sx={{ color: isActive ? 'rgba(255,255,255,0.85)' : '#64748b', borderRadius: 0, mr: 0.25, '&:hover': { bgcolor: isActive ? 'rgba(255,255,255,0.15)' : '#fee2e2', color: '#dc2626' } }}
+                        >
+                          <X size={14} />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                  );
+                })}
+              </Box>
+              {minimizedLedgerTabs.length > 0 && (
+                <Box sx={{ px: 1.5, pb: 1.5, pt: 0, display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+                  <Typography variant="caption" sx={{ fontWeight: 700, color: '#94a3b8', mr: 0.5 }}>
+                    Minimized:
+                  </Typography>
+                  {minimizedLedgerTabs.map((tab) => (
+                    <Box
+                      key={tab.id}
+                      sx={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 0.25,
+                        borderRadius: '8px',
+                        bgcolor: '#f1f5f9',
+                        border: '1px dashed #cbd5e1',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <Box
+                        onClick={() => restoreLedger(tab.id)}
+                        sx={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 0.75,
+                          px: 1.5,
+                          py: 0.5,
+                          cursor: 'pointer',
+                          fontSize: '0.8125rem',
+                          fontWeight: 600,
+                          color: '#475569',
+                          '&:hover': { bgcolor: '#e2e8f0', color: '#1A55E3' },
+                        }}
+                      >
+                        <Minimize2 size={13} />
+                        {tab.name}
+                      </Box>
+                      <Tooltip title="Close">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => { e.stopPropagation(); closeLedgerTab(tab.id); }}
+                          sx={{ borderRadius: 0, color: '#64748b', '&:hover': { bgcolor: '#fee2e2', color: '#dc2626' } }}
+                        >
+                          <X size={13} />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                  ))}
+                </Box>
+              )}
+            </Card>
+          </Box>
+        )}
+
         {/* Professional Ledger Table */}
-        <Box sx={{ flex: 1, minHeight: 0 }}>
-          <Card sx={{ borderRadius: 0, boxShadow: 3, height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+        <Box sx={{ width: '100%' }}>
+          <Card sx={{ borderRadius: 0, boxShadow: 3, display: 'flex', flexDirection: 'column', position: 'relative' }}>
             {loading && <LinearProgress color="primary" sx={{ width: '100%', height: 3, position: 'absolute', top: 0, zIndex: 10 }} />}
             {/* Professional Ledger Header - Dynamic Account Name */}
             <CardHeader
@@ -2900,14 +3259,37 @@ export default function FinancePage() {
               }}
             />
 
-            {finalLedgerEntries.length === 0 ? (
+            {activeLedgerId && activeLedgerTab?.minimized ? (
               <Box sx={{
-                flex: 1,
+                minHeight: 200,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 flexDirection: 'column',
-                gap: 2
+                gap: 1.5,
+                py: 6,
+                bgcolor: '#f8fafc',
+              }}>
+                <Minimize2 size={40} color="#94a3b8" />
+                <Typography variant="h6" color="text.secondary">
+                  {activeLedgerTab.name} is minimized
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Click the tab below to restore this ledger, or select another open ledger.
+                </Typography>
+                <Button variant="contained" size="small" onClick={() => restoreLedger(activeLedgerTab.id)} sx={{ mt: 1, textTransform: 'none', bgcolor: '#1A55E3' }}>
+                  Restore Ledger
+                </Button>
+              </Box>
+            ) : finalLedgerEntries.length === 0 ? (
+              <Box sx={{
+                minHeight: 280,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexDirection: 'column',
+                gap: 2,
+                py: 6,
               }}>
                 <Receipt size={48} color="#9e9e9e" />
                 <Typography variant="h6" color="text.secondary">
@@ -2920,8 +3302,14 @@ export default function FinancePage() {
                 </Typography>
               </Box>
             ) : (
-              <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                <TableContainer sx={{ flex: 1, opacity: loading ? 0.6 : 1, transition: 'opacity 0.2s' }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                <TableContainer sx={{
+                  minHeight: 320,
+                  maxHeight: { xs: '65vh', md: 'calc(100vh - 460px)' },
+                  overflow: 'auto',
+                  opacity: loading ? 0.6 : 1,
+                  transition: 'opacity 0.2s',
+                }}>
                   <Table stickyHeader>
                     <TableHead>
                       <TableRow sx={{ bgcolor: '#1f2937', borderBottom: 2, borderColor: '#e5e7eb' }}>
@@ -3177,12 +3565,18 @@ export default function FinancePage() {
                               </Typography>
                             </TableCell>
 
-                            {/* Account Title */}
+                            {/* Account Title — double-click to open in a ledger tab */}
                             <TableCell
                               sx={{
                                 borderRight: 1,
                                 borderColor: 'divider',
-                                fontWeight: 600
+                                fontWeight: 600,
+                                cursor: entry.customer?.cus_id ? 'pointer' : 'default',
+                              }}
+                              onDoubleClick={() => {
+                                if (entry.customer?.cus_id) {
+                                  openCustomerLedger(entry.customer.cus_id, entry.customer.cus_name);
+                                }
                               }}
                             >
                               <Typography variant="body2" sx={{ fontWeight: 700, color: '#1f2937' }}>

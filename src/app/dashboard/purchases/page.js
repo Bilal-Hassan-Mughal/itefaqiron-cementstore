@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, Suspense, useRef } from 'react';
+import { useState, useEffect, useCallback, Suspense, useRef, useLayoutEffect } from 'react';
 import { getCreatedByName, formatTimePK, formatDatePK } from '@/lib/date-helper';
 import { useSearchParams } from 'next/navigation';
 import DashboardLayout from '../components/dashboard-layout';
@@ -90,6 +90,20 @@ import {
   FolderOpen as FolderOpenIcon
 } from '@mui/icons-material';
 
+const EMPTY_PRODUCT_FORM_DATA = {
+  qnty: '1',
+  unit_rate: '',
+  crate: '',
+  cost_rate: '',
+};
+
+const normalizeProductFormData = (data) => ({
+  qnty: data?.qnty ?? EMPTY_PRODUCT_FORM_DATA.qnty,
+  unit_rate: data?.unit_rate ?? '',
+  crate: data?.crate ?? '',
+  cost_rate: data?.cost_rate ?? '',
+});
+
 function PurchasesPageContent() {
   // PIN auth
   const { requireAuth, authDialogOpen, handleAuthSuccess, handleAuthCancel } = usePinAuth();
@@ -141,7 +155,7 @@ function PurchasesPageContent() {
     selectedBankAccount: null,
     purchaseType: 'new',
     selectedPurchaseForReturn: null,
-    productFormData: { qnty: '', unit_rate: '', crate: '' },
+    productFormData: { ...EMPTY_PRODUCT_FORM_DATA, qnty: '' },
     selectedProduct: null,
     editingPurchase: null,
     timestamp: new Date().toLocaleTimeString(),
@@ -221,22 +235,31 @@ function PurchasesPageContent() {
   const [editingPurchase, setEditingPurchase] = useState(null);
   const [viewingPurchase, setViewingPurchase] = useState(null);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
-  const [currentView, setCurrentView] = useState('list'); // 'list' or 'create'
 
   const searchParams = useSearchParams();
+  const urlWantsCreateView =
+    searchParams?.get('view') === 'create' || searchParams?.get('type') === 'return';
+  const [currentView, setCurrentView] = useState(urlWantsCreateView ? 'create' : 'list'); // 'list' or 'create'
 
-  // Handle URL query parameter for view
+  useLayoutEffect(() => {
+    if (searchParams?.get('view') === 'create' || searchParams?.get('type') === 'return') {
+      setCurrentView('create');
+    }
+  }, [searchParams]);
+
+  // Open create form when header/sidebar links use ?view=create
   useEffect(() => {
     const viewParam = searchParams?.get('view');
     const typeParam = searchParams?.get('type');
+    const forceCreate = viewParam === 'create' || typeParam === 'return';
 
-    if (viewParam === 'create') {
-      setCurrentView('create');
-    }
+    if (!forceCreate) return;
 
+    setCurrentView('create');
     if (typeParam === 'return') {
       setPurchaseType('return');
-      setCurrentView('create');
+    } else {
+      setPurchaseType('new');
     }
   }, [searchParams]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -342,12 +365,7 @@ function PurchasesPageContent() {
 
   // Selected product for preview
   const [selectedProduct, setSelectedProduct] = useState(null);
-  const [productFormData, setProductFormData] = useState({
-    qnty: '',
-    unit_rate: '',
-    crate: '',
-    cost_rate: ''
-  });
+  const [productFormData, setProductFormData] = useState({ ...EMPTY_PRODUCT_FORM_DATA });
 
   // Customer dropdown filter states
   const [customerSearchTerm, setCustomerSearchTerm] = useState('');
@@ -499,8 +517,12 @@ function PurchasesPageContent() {
   const DRAFT_KEY = 'purchase_form_draft';
   const [hasDraft, setHasDraft] = useState(false);
 
-  // Restore draft on first mount
+  // Restore draft on first mount (skipped when URL opens create form)
   useEffect(() => {
+    if (searchParams?.get('view') === 'create' || searchParams?.get('type') === 'return') {
+      return;
+    }
+
     try {
       const saved = localStorage.getItem(DRAFT_KEY);
       if (saved) {
@@ -517,6 +539,7 @@ function PurchasesPageContent() {
     } catch (e) {
       console.warn('Failed to restore purchase draft:', e);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount unless URL already requests create
   }, []);
 
   // Auto-save draft whenever form state changes
@@ -622,7 +645,7 @@ function PurchasesPageContent() {
       selectedBankAccount: null,
       purchaseType: 'new',
       selectedPurchaseForReturn: null,
-      productFormData: { qnty: '1', unit_rate: '', crate: '' },
+      productFormData: { ...EMPTY_PRODUCT_FORM_DATA },
       selectedProduct: null,
       editingPurchase: null,
       timestamp: new Date().getTime().toString(),
@@ -642,7 +665,7 @@ function PurchasesPageContent() {
     setSelectedCargoAccounts(state.selectedCargoAccounts || []);
     setPurchaseType(state.purchaseType);
     setSelectedPurchaseForReturn(state.selectedPurchaseForReturn);
-    setProductFormData(JSON.parse(JSON.stringify(state.productFormData)));
+    setProductFormData(normalizeProductFormData(state.productFormData));
     setSelectedProduct(state.selectedProduct);
     setEditingPurchase(state.editingPurchase);
 
@@ -684,7 +707,7 @@ function PurchasesPageContent() {
     setPurchaseType('new');
     setSelectedPurchaseForReturn(null);
     setEditingPurchase(null);
-    setProductFormData({ qnty: '1', unit_rate: '', crate: '' });
+    setProductFormData({ ...EMPTY_PRODUCT_FORM_DATA });
     setSelectedProduct(null);
     setCustomerSearchTerm('');
     localStorage.removeItem(DRAFT_KEY);
@@ -1124,10 +1147,10 @@ function PurchasesPageContent() {
   const handleProductSelect = (product) => {
     setSelectedProduct(product);
     setProductFormData({
-      qnty: '1',
+      ...EMPTY_PRODUCT_FORM_DATA,
       unit_rate: (product.pro_sale_price || 0).toString(), // maintain sale rate here
       crate: (product.pro_crate || product.pro_cost_price || product.pro_sale_price || 0).toString(), // prioritized cost rate for purchase
-      cost_rate: (product.pro_crate || product.pro_cost_price || product.pro_sale_price || 0).toString()
+      cost_rate: (product.pro_crate || product.pro_cost_price || product.pro_sale_price || 0).toString(),
     });
   };
 
@@ -1220,12 +1243,7 @@ function PurchasesPageContent() {
 
     // Reset selection
     setSelectedProduct(null);
-    setProductFormData({
-      qnty: '1',
-      unit_rate: '',
-      crate: '',
-      cost_rate: ''
-    });
+    setProductFormData({ ...EMPTY_PRODUCT_FORM_DATA });
 
     // Auto-focus on product selection field after adding product
     setTimeout(() => {
@@ -1715,7 +1733,7 @@ function PurchasesPageContent() {
             selectedBankAccount: null,
             purchaseType: 'new',
             selectedPurchaseForReturn: null,
-            productFormData: { qnty: '1', unit_rate: '', crate: '' },
+            productFormData: { ...EMPTY_PRODUCT_FORM_DATA },
             selectedProduct: null,
             editingPurchase: null,
             timestamp: new Date().toLocaleTimeString(),
@@ -2907,7 +2925,8 @@ function PurchasesPageContent() {
   // Render Purchase Create View
   const renderPurchaseCreateView = () => (
     <DashboardLayout>
-      <div className="h-full flex flex-col overflow-hidden">
+      <Container maxWidth={false} disableGutters sx={{ py: 1, px: { xs: 0, sm: 1 } }}>
+        <Stack spacing={2} sx={{ width: '100%', pb: 4 }}>
         {/* Header */}
         <div className="flex-shrink-0 mb-6">
           <div className="flex items-center justify-between">
@@ -2953,8 +2972,6 @@ function PurchasesPageContent() {
           </div>
         </div>
 
-        {/* Main Content */}
-        <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
           {/* Header Section */}
           <Card sx={{ p: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -3066,8 +3083,8 @@ function PurchasesPageContent() {
           )}
 
           {/* Main Form */}
-          <Card key={currentScreenIndex} sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <Box component="form" onSubmit={handleSubmit} sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <Card key={currentScreenIndex} sx={{ display: 'flex', flexDirection: 'column' }}>
+            <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column' }}>
               {/* Purchase Type Selection Section */}
               <Box sx={{ p: 3, borderBottom: 1, borderColor: 'divider', bgcolor: '#f8fafc' }}>
                 <Grid container spacing={3} alignItems="flex-start">
@@ -3661,7 +3678,7 @@ function PurchasesPageContent() {
                       <TextField
                         size="small"
                         type="number"
-                        value={productFormData.qnty}
+                        value={productFormData.qnty ?? ''}
                         onChange={(e) => setProductFormData(prev => ({ ...prev, qnty: e.target.value }))}
                         onFocus={(e) => e.target.select()}
                         onKeyDown={(e) => {
@@ -3703,7 +3720,7 @@ function PurchasesPageContent() {
                       <TextField
                         size="small"
                         type="number"
-                        value={productFormData.crate || productFormData.unit_rate}
+                        value={productFormData.crate || productFormData.unit_rate || ''}
                         onChange={(e) => setProductFormData(prev => ({ ...prev, crate: e.target.value, cost_rate: e.target.value }))}
                         onFocus={(e) => e.target.select()}
                         onKeyDown={(e) => {
@@ -3741,7 +3758,7 @@ function PurchasesPageContent() {
                       <TextField
                         size="small"
                         type="number"
-                        value={productFormData.cost_rate}
+                        value={productFormData.cost_rate ?? ''}
                         onChange={(e) => setProductFormData(prev => ({ ...prev, cost_rate: e.target.value }))}
                         onFocus={(e) => e.target.select()}
                         onBlur={async (e) => {
@@ -3793,7 +3810,7 @@ function PurchasesPageContent() {
                       <TextField
                         size="small"
                         type="number"
-                        value={productFormData.unit_rate}
+                        value={productFormData.unit_rate ?? ''}
                         onChange={(e) => setProductFormData(prev => ({ ...prev, unit_rate: e.target.value }))}
                         onFocus={(e) => e.target.select()}
                         onKeyDown={(e) => {
@@ -3853,7 +3870,7 @@ function PurchasesPageContent() {
 
 
               {/* Product List Table */}
-              <Box sx={{ flex: 1, p: 3, borderBottom: 1, borderColor: 'divider' }}>
+              <Box sx={{ p: 3, borderBottom: 1, borderColor: 'divider' }}>
                 <TableContainer component={Paper} sx={{ maxHeight: 300 }}>
                   <Table stickyHeader>
                     <TableHead>
@@ -4660,9 +4677,9 @@ function PurchasesPageContent() {
               </Box>
             </Box>
           </Card>
-        </Box>
-      </div >
-    </DashboardLayout >
+        </Stack>
+      </Container>
+    </DashboardLayout>
   );
 
   return (

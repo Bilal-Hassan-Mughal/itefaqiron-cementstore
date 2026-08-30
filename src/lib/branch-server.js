@@ -17,6 +17,36 @@ export function parseUserFromRequest(request) {
   }
 }
 
+/** Resolve a valid Users.user_id for updated_by, or null if none exists. */
+export async function resolveUpdatedByUserId(request, bodyUpdatedBy, db = centralPrisma) {
+  const candidates = [];
+
+  if (bodyUpdatedBy != null && bodyUpdatedBy !== '') {
+    const parsed = parseInt(bodyUpdatedBy, 10);
+    if (Number.isFinite(parsed) && parsed > 0) candidates.push(parsed);
+  }
+
+  const user = parseUserFromRequest(request);
+  for (const rawId of [user?.user_id, user?.id]) {
+    if (rawId == null || rawId === '') continue;
+    const parsed = parseInt(rawId, 10);
+    if (Number.isFinite(parsed) && parsed > 0 && !candidates.includes(parsed)) {
+      candidates.push(parsed);
+    }
+  }
+
+  for (const userId of candidates) {
+    try {
+      const exists = await db.users.findUnique({ where: { user_id: userId } });
+      if (exists) return userId;
+    } catch {
+      /* try next candidate */
+    }
+  }
+
+  return null;
+}
+
 export function resolveBranchId(request, fallback = DEFAULT_BRANCH_ID) {
   const user = parseUserFromRequest(request);
   const header = request.headers.get('x-branch-id');

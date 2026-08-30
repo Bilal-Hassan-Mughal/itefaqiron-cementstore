@@ -16,9 +16,11 @@ import {
 import Header from './header';
 import Sidebar from './sidebar';
 import ClientOnly from './client-only';
+import { SIDEBAR_WIDTH } from '@/lib/brand-theme';
 
-const COLLAPSED_WIDTH = 64;
-const EXPANDED_WIDTH = 320;
+const COLLAPSED_WIDTH = SIDEBAR_WIDTH.collapsed;
+const EXPANDED_WIDTH = SIDEBAR_WIDTH.expanded;
+const SIDEBAR_COLLAPSED_KEY = 'pos_sidebar_collapsed';
 
 export default function DashboardLayout({ children }) {
   const [user, setUser] = useState(null);
@@ -95,6 +97,27 @@ export default function DashboardLayout({ children }) {
 
   }, [router]);
 
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+      if (saved === 'true') setCollapsed(true);
+    } catch {
+      /* ignore storage errors */
+    }
+  }, []);
+
+  const toggleSidebarCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
+      } catch {
+        /* ignore storage errors */
+      }
+      return next;
+    });
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('user');
     localStorage.removeItem('isAuthenticated');
@@ -119,6 +142,10 @@ export default function DashboardLayout({ children }) {
   const isMobile = useMediaQuery(theme.breakpoints.down('lg'), { noSsr: true, defaultMatches: false });
 
   const sidebarWidth = (!isMobile && collapsed) ? COLLAPSED_WIDTH : EXPANDED_WIDTH;
+  const sidebarTransition = theme.transitions.create(['width', 'margin'], {
+    easing: theme.transitions.easing.easeInOut,
+    duration: theme.transitions.duration.standard,
+  });
 
   if (!isClient || !user) {
     return (
@@ -148,21 +175,22 @@ export default function DashboardLayout({ children }) {
         <CircularProgress size={80} />
       </Box>
     }>
-      <Box className="dashboard-layout-root" sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
+      <Box className="dashboard-layout-root" sx={{ display: 'flex', height: '100vh', maxHeight: '100vh', overflow: 'hidden', bgcolor: 'background.default' }}>
         {/* Sidebar — hidden when printing */}
         <Box sx={{ '@media print': { display: 'none !important' } }}>
-          <Sidebar
-            sidebarOpen={sidebarOpen}
-            setSidebarOpen={setSidebarOpen}
-            collapsed={collapsed}
-            setCollapsed={setCollapsed}
-            activeTab={activeTab}
-            setActiveTab={setActiveTab}
-            expandedDropdowns={expandedDropdowns}
-            setExpandedDropdowns={setExpandedDropdowns}
-            user={user}
-            handleLogout={handleLogout}
-          />
+          <Suspense fallback={null}>
+            <Sidebar
+              sidebarOpen={sidebarOpen}
+              setSidebarOpen={setSidebarOpen}
+              collapsed={collapsed}
+              onToggleCollapse={toggleSidebarCollapsed}
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              expandedDropdowns={expandedDropdowns}
+              setExpandedDropdowns={setExpandedDropdowns}
+              user={user}
+            />
+          </Suspense>
         </Box>
 
         {/* Main Content */}
@@ -170,16 +198,15 @@ export default function DashboardLayout({ children }) {
           component="main"
           sx={{
             flexGrow: 1,
+            minWidth: 0,
+            minHeight: 0,
             width: { lg: `calc(100% - ${sidebarWidth}px)` },
-            transition: theme.transitions.create(['width', 'margin'], {
-              easing: theme.transitions.easing.sharp,
-              duration: theme.transitions.duration.enteringScreen,
-            }),
+            transition: sidebarTransition,
             bgcolor: 'background.default',
-            minHeight: '100vh',
             display: 'flex',
             flexDirection: 'column',
-            '@media print': { width: '100% !important', marginLeft: '0 !important' },
+            overflow: 'hidden',
+            '@media print': { width: '100% !important', marginLeft: '0 !important', height: 'auto', maxHeight: 'none', overflow: 'visible' },
           }}
         >
           {/* HQ viewing branch banner */}
@@ -223,24 +250,31 @@ export default function DashboardLayout({ children }) {
 
           {/* Header — hidden when printing */}
           <Box sx={{ '@media print': { display: 'none !important' } }}>
-            <Header
-              sidebarOpen={sidebarOpen}
-              setSidebarOpen={setSidebarOpen}
-              activeTab={activeTab}
-              user={user}
-              branchLabel={branchLabel}
-            />
+            <Suspense fallback={null}>
+              <Header
+                sidebarOpen={sidebarOpen}
+                setSidebarOpen={setSidebarOpen}
+                activeTab={activeTab}
+                user={user}
+                branchLabel={branchLabel}
+                onLogout={handleLogout}
+              />
+            </Suspense>
           </Box>
 
           {/* Main Content Area */}
           <Box
-            component="main"
+            className="dashboard-main-scroll"
             sx={{
-              flexGrow: 1,
-              overflow: 'auto',
-              bgcolor: 'background.default',
-              p: 1,
-              '@media print': { padding: 0, overflow: 'visible' },
+              flex: '1 1 0',
+              height: 0,
+              minHeight: 0,
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              WebkitOverflowScrolling: 'touch',
+              bgcolor: '#f4f6f9',
+              p: { xs: 1.5, md: 2.5 },
+              '@media print': { padding: 0, overflow: 'visible', height: 'auto' },
             }}
           >
             {children}

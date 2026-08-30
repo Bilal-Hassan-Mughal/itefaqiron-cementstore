@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback, Suspense, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, Suspense, useRef, useLayoutEffect } from 'react';
 import { getCreatedByName } from '@/lib/date-helper';
+import { BRAND } from '@/lib/brand-theme';
 import { useSearchParams } from 'next/navigation';
 import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
@@ -96,9 +97,133 @@ const toReadOnlyNumberInput = (val) => {
   return n;
 };
 
+const ORDER_FILTER_GRID = {
+  display: 'grid',
+  gridTemplateColumns: {
+    xs: '1fr',
+    sm: 'repeat(2, 1fr)',
+    md: 'repeat(4, 1fr)',
+  },
+  gap: { xs: 2, md: 2.5 },
+  width: '100%',
+};
+
+const ORDER_FILTER_FIELD_SX = {
+  '& .MuiOutlinedInput-root': {
+    borderRadius: '8px',
+    bgcolor: '#fff',
+    fontSize: '0.8125rem',
+    '& fieldset': { borderColor: '#cbd5e1' },
+    '&:hover fieldset': { borderColor: '#94a3b8' },
+    '&.Mui-focused fieldset': {
+      borderColor: BRAND.primary.blue,
+      borderWidth: '1.5px',
+    },
+  },
+  '& .MuiInputLabel-root': { fontSize: '0.8125rem', fontWeight: 500 },
+};
+
+const ORDER_STATS_GRID = {
+  display: 'grid',
+  gridTemplateColumns: {
+    xs: 'repeat(2, 1fr)',
+    sm: 'repeat(3, 1fr)',
+    lg: 'repeat(6, 1fr)',
+  },
+  gap: 1.5,
+  width: '100%',
+};
+
+const ORDER_VIEW_TOGGLE_SX = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  p: '3px',
+  gap: 0.5,
+  bgcolor: '#f1f5f9',
+  borderRadius: '10px',
+  border: '1px solid #e2e8f0',
+};
+
+const ORDER_VIEW_TOGGLE_BTN_SX = (active) => ({
+  px: 2.25,
+  py: 0.85,
+  minWidth: 92,
+  borderRadius: '8px',
+  textTransform: 'none',
+  fontWeight: 700,
+  fontSize: '0.8125rem',
+  lineHeight: 1.2,
+  boxShadow: 'none',
+  transition: 'all 0.2s ease',
+  ...(active
+    ? {
+        bgcolor: '#fff',
+        color: BRAND.primary.blue,
+        boxShadow: '0 1px 4px rgba(15, 23, 42, 0.1)',
+        '&:hover': { bgcolor: '#fff', boxShadow: '0 2px 6px rgba(15, 23, 42, 0.12)' },
+      }
+    : {
+        bgcolor: 'transparent',
+        color: '#64748b',
+        '&:hover': { bgcolor: 'rgba(255,255,255,0.6)', color: '#475569' },
+      }),
+});
+
+const ORDER_PAGE_CARD_SX = {
+  borderRadius: '12px',
+  border: '1px solid #dce3ed',
+  boxShadow: '0 1px 4px rgba(15, 23, 42, 0.06)',
+  bgcolor: '#ffffff',
+  overflow: 'hidden',
+};
+
+const ORDER_EXCEL_TABLE_SX = {
+  minWidth: 1200,
+  borderCollapse: 'collapse',
+  '& .MuiTableCell-root': {
+    border: '1px solid #cbd5e1',
+    py: 0.75,
+    px: 1.25,
+    fontSize: '0.8125rem',
+    lineHeight: 1.35,
+  },
+};
+
+const ORDER_EXCEL_HEAD_SX = {
+  bgcolor: '#e2e8f0',
+  color: '#334155',
+  fontWeight: 700,
+  fontSize: '0.72rem',
+  textTransform: 'uppercase',
+  letterSpacing: '0.05em',
+  whiteSpace: 'nowrap',
+  position: 'sticky',
+  top: 0,
+  zIndex: 2,
+  borderBottom: '2px solid #94a3b8 !important',
+};
+
+const ORDER_NUM_CELL_SX = {
+  textAlign: 'right',
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontVariantNumeric: 'tabular-nums',
+};
+
 function OrdersPageContent() {
   const searchParams = useSearchParams();
   const { requireAuth, authDialogOpen, handleAuthSuccess, handleAuthCancel } = usePinAuth();
+  const [currentUser, setCurrentUser] = useState(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const u = JSON.parse(localStorage.getItem('user') || '{}');
+        setCurrentUser(u);
+      } catch {
+        /* ignore parse errors */
+      }
+    }
+  }, []);
 
   const initialType = searchParams ? (searchParams.get('type') || 'ORDER') : 'ORDER';
   const initialView = searchParams ? (searchParams.get('view') || 'list') : 'list';
@@ -118,6 +243,7 @@ function OrdersPageContent() {
   const [products, setProducts] = useState([]);
   const [stores, setStores] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [savingBill, setSavingBill] = useState(false);
 
   // Filter state
   const [searchTerm, setSearchTerm] = useState('');
@@ -136,28 +262,99 @@ function OrdersPageContent() {
   const [viewBillDialog, setViewBillDialog] = useState(false);
   const [selectedBill, setSelectedBill] = useState(null);
   const [currentView, setCurrentView] = useState(initialView);
+  const lastCreateUrlRef = useRef('');
 
-  // WhatsApp state
-  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+  useLayoutEffect(() => {
+    if (searchParams?.get('view') === 'create') {
+      setCurrentView('create');
+    }
+  }, [searchParams]);
 
   // Handle URL query parameter for view and type
   useEffect(() => {
     const viewParam = searchParams?.get('view');
+    const typeParam = searchParams?.get('type');
+
     if (viewParam === 'create') {
       setCurrentView('create');
+      setBillType(typeParam || 'ORDER');
+      if (stores.length > 0) {
+        setFormSelectedStore(stores[0]);
+      }
+
+      const createKey = searchParams.toString();
+      if (lastCreateUrlRef.current !== createKey) {
+        lastCreateUrlRef.current = createKey;
+        setEditSaleId(null);
+        setFormSelectedCustomer(null);
+        setSelectedCustomerType(null);
+        setProductTableData([]);
+        setPaymentData({
+          cash: '',
+          bank: '',
+          bankAccountId: '',
+          totalCashReceived: 0,
+          discount: '',
+          labour: '',
+          deliveryCharges: '',
+          notes: ''
+        });
+        setProductFormData({
+          quantity: '',
+          rate: '',
+          amount: 0,
+          stock: 0
+        });
+        setFormSelectedProduct(null);
+        setTransportOptions([]);
+        setNewTransport({ amount: 0, accountId: '' });
+        setScreenStack([{
+          formSelectedCustomer: null,
+          formSelectedStore: stores.length > 0 ? stores[0] : null,
+          productTableData: [],
+          paymentData: {
+            cash: '',
+            bank: '',
+            bankAccountId: '',
+            totalCashReceived: 0,
+            discount: '',
+            labour: '',
+            deliveryCharges: '',
+            notes: ''
+          },
+          billType: typeParam || 'ORDER',
+          formSelectedProduct: null,
+          productFormData: {
+            quantity: '',
+            rate: '',
+            amount: 0,
+            stock: 0
+          },
+          newTransport: { amount: 0, accountId: '' },
+          transportAccounts: [],
+          transportOptions: [],
+          timestamp: new Date().toLocaleTimeString(),
+          customerName: 'New Order'
+        }]);
+        setCurrentScreenIndex(0);
+      }
+    } else {
+      lastCreateUrlRef.current = '';
     }
 
-    const typeParam = searchParams?.get('type');
     if (typeParam) {
       setBillType(typeParam);
       setFilterBillType(typeParam);
       setShowTrashOrders(typeParam === 'ORDER_TRASH');
-    } else {
+    } else if (viewParam !== 'create') {
       setBillType('ORDER');
       setFilterBillType('ORDER');
       setShowTrashOrders(false);
     }
-  }, [searchParams]);
+  }, [searchParams, stores]);
+
+  // WhatsApp state
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
 
   useEffect(() => {
     // Primary list mode toggle: active orders vs trashed orders.
@@ -1058,8 +1255,8 @@ function OrdersPageContent() {
         updated_by: 1 // Default user ID, should be from auth context
       };
 
-      // Show loading
-      setLoading(true);
+      // Show saving indicator without unmounting the create view / receipt dialog
+      setSavingBill(true);
 
       console.log('🔍 Frontend - Sale data being sent:', saleData);
       console.log('🔍 Frontend - Sale data JSON:', JSON.stringify(saleData, null, 2));
@@ -1078,44 +1275,60 @@ function OrdersPageContent() {
         const successMessage = editSaleId ? 'Order updated successfully!' : 'Order saved successfully!';
         showSnackbar(successMessage, 'success');
 
+        const updatingSaleId = editSaleId;
         // Clear edit mode
         setEditSaleId(null);
 
-        // Store bill data for printing
-        const billDataForPrint = {
-          sale_id: result.sale_id,
-          bill_number: result.bill_number ?? null,
-          cus_id: formSelectedCustomer.cus_id,
-          total_amount: grandTotal,
-          discount: parseFloat(paymentData.discount) || 0,
-          payment: totalCashReceived,
-          payment_type: splitPayments.length > 0 ? splitPayments[0].payment_type : 'CASH',
-          cash_payment: cashAmount, // Add cash payment details
-          bank_payment: bankAmount, // Add bank payment details
-          bank_title: selectedBankAccount?.cus_name || null, // Add bank title
-          shipping_amount: totalShippingAmount,
-          bill_type: billType || 'BILL',
-          reference: paymentData.notes || null,
-          created_at: new Date().toISOString(),
-          previous_balance: formSelectedCustomer?.cus_balance ?? null,
-          customer: formSelectedCustomer,
-          sale_details: productTableData.map((product, index) => ({
-            sale_detail_id: index + 1,
-            pro_id: product.pro_id,
-            qnty: product.quantity,
-            unit: 'PCS',
-            unit_rate: product.rate,
-            total_amount: product.amount,
-            product: {
-              pro_title: product.pro_title || 'N/A'
-            }
-          })),
-          labour: parseFloat(paymentData.labour) || 0,
-          notes: paymentData.notes || ''
-        };
-        setCurrentBillData(billDataForPrint);
+        const savedSaleId = result.sale_id ?? result.id ?? updatingSaleId;
+        let billForPrint = null;
 
-        // Open receipt dialog
+        if (savedSaleId) {
+          try {
+            const detailRes = await fetch(`/api/sales?id=${savedSaleId}`);
+            if (detailRes.ok) {
+              billForPrint = await detailRes.json();
+            }
+          } catch (fetchErr) {
+            console.warn('Could not fetch saved order for invoice preview:', fetchErr);
+          }
+        }
+
+        if (!billForPrint) {
+          billForPrint = {
+            sale_id: savedSaleId,
+            bill_number: result.bill_number ?? null,
+            cus_id: formSelectedCustomer.cus_id,
+            total_amount: grandTotal,
+            discount: parseFloat(paymentData.discount) || 0,
+            payment: totalCashReceived,
+            payment_type: splitPayments.length > 0 ? splitPayments[0].payment_type : 'CASH',
+            cash_payment: cashAmount,
+            bank_payment: bankAmount,
+            bank_title: selectedBankAccount?.cus_name || null,
+            shipping_amount: totalShippingAmount,
+            bill_type: billType || 'ORDER',
+            reference: paymentData.notes || null,
+            created_at: result.created_at || new Date().toISOString(),
+            previous_balance: formSelectedCustomer?.cus_balance ?? null,
+            customer: formSelectedCustomer,
+            sale_details: productTableData.map((product, index) => ({
+              sale_detail_id: index + 1,
+              pro_id: product.pro_id,
+              qnty: product.quantity,
+              unit: 'PCS',
+              unit_rate: product.rate,
+              total_amount: product.amount,
+              product: {
+                pro_title: product.pro_title || 'N/A'
+              }
+            })),
+            labour: parseFloat(paymentData.labour) || 0,
+            labour_charges: parseFloat(paymentData.labour) || 0,
+            notes: paymentData.notes || ''
+          };
+        }
+
+        setCurrentBillData(billForPrint);
         setReceiptDialogOpen(true);
 
         // Reset form
@@ -1134,8 +1347,8 @@ function OrdersPageContent() {
           notes: ''
         });
 
-        // Refresh sales data
-        fetchData();
+        // Refresh list in background without hiding the invoice dialog
+        refreshSalesQuietly();
       } else {
         const errorData = await response.json();
         console.error('❌ API Error Response:', errorData);
@@ -1147,7 +1360,7 @@ function OrdersPageContent() {
       console.error('❌ Error details:', error.message);
       showSnackbar(`Failed to save bill: ${error.message}`, 'error');
     } finally {
-      setLoading(false);
+      setSavingBill(false);
     }
   };
 
@@ -1595,6 +1808,20 @@ function OrdersPageContent() {
     }
   };
 
+  const refreshSalesQuietly = async () => {
+    try {
+      const salesRes = await fetch('/api/sales');
+      if (salesRes.ok) {
+        const salesData = await salesRes.json();
+        if (Array.isArray(salesData)) {
+          setSales(salesData);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to refresh sales list:', error);
+    }
+  };
+
   // Handle viewing a bill
   const handleViewBill = async (sale) => {
     console.log('📋 Viewing bill:', sale);
@@ -1762,7 +1989,12 @@ function OrdersPageContent() {
       const body = {
         ...returnFormData,
         total_amount: calculatedTotalAmount.toString(),
-        updated_by: 1 // TODO: Get from auth context
+        updated_by: (() => {
+          const raw = currentUser?.user_id ?? currentUser?.id;
+          if (raw == null || raw === '') return null;
+          const parsed = parseInt(raw, 10);
+          return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+        })()
       };
 
       const response = await fetch('/api/sale-returns', {
@@ -2730,16 +2962,19 @@ function OrdersPageContent() {
                           (o.cus_phone_no2 || '').toLowerCase().includes(q)
                         );
                       }}
-                      renderOption={(props, option) => (
-                        <li {...props} key={option.cus_id}>
-                          <Box>
-                            <Typography variant="body2" sx={{ fontWeight: 'medium' }}>{option.cus_name}</Typography>
-                            {option.cus_phone_no && (
-                              <Typography variant="caption" color="text.secondary">{option.cus_phone_no}{option.cus_phone_no2 ? ` / ${option.cus_phone_no2}` : ''}</Typography>
-                            )}
-                          </Box>
-                        </li>
-                      )}
+                      renderOption={(props, option) => {
+                        const { key, ...optionProps } = props;
+                        return (
+                          <li key={key} {...optionProps}>
+                            <Box>
+                              <Typography variant="body2" sx={{ fontWeight: 'medium' }}>{option.cus_name}</Typography>
+                              {option.cus_phone_no && (
+                                <Typography variant="caption" color="text.secondary">{option.cus_phone_no}{option.cus_phone_no2 ? ` / ${option.cus_phone_no2}` : ''}</Typography>
+                              )}
+                            </Box>
+                          </li>
+                        );
+                      }}
                       value={formSelectedCustomer}
                       onChange={(event, newValue) => {
                         setFormSelectedCustomer(newValue);
@@ -2839,34 +3074,41 @@ function OrdersPageContent() {
                       options={products || []}
                       getOptionLabel={(option) => option.pro_title || ''}
                       ListboxProps={{ sx: { maxHeight: 130 } }}
-                      renderOption={(props, option) => (
-                        <li {...props} key={option.pro_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Typography sx={{ fontWeight: 500 }}>{option.pro_title}</Typography>
-                            {option.pro_code && (
-                              <Typography variant="caption" sx={{ color: 'text.secondary', ml: 0.5 }}>#{option.pro_code}</Typography>
-                            )}
-                          </Box>
+                      renderOption={(props, option) => {
+                        const { key, ...optionProps } = props;
+                        return (
+                          <li
+                            key={key}
+                            {...optionProps}
+                            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}
+                          >
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Typography sx={{ fontWeight: 500 }}>{option.pro_title}</Typography>
+                              {option.pro_code && (
+                                <Typography variant="caption" sx={{ color: 'text.secondary', ml: 0.5 }}>#{option.pro_code}</Typography>
+                              )}
+                            </Box>
 
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            {visibleCrates.includes(option.pro_id) && (
-                              <Typography variant="body2" sx={{ color: 'text.secondary', mr: 1 }}>
-                                {option.pro_crate ? 'PKR ' + fmtAmt(option.pro_crate) : 'N/A'}
-                              </Typography>
-                            )}
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              {visibleCrates.includes(option.pro_id) && (
+                                <Typography variant="body2" sx={{ color: 'text.secondary', mr: 1 }}>
+                                  {option.pro_crate ? 'PKR ' + fmtAmt(option.pro_crate) : 'N/A'}
+                                </Typography>
+                              )}
 
-                            <IconButton
-                              size="small"
-                              tabIndex={-1}
-                              onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
-                              onClick={(e) => { e.stopPropagation(); e.preventDefault(); toggleVisibleCrate(option.pro_id); }}
-                              aria-label={visibleCrates.includes(option.pro_id) ? 'Hide purchase rate' : 'Show purchase rate'}
-                            >
-                              <VisibilityIcon fontSize="small" />
-                            </IconButton>
-                          </Box>
-                        </li>
-                      )}
+                              <IconButton
+                                size="small"
+                                tabIndex={-1}
+                                onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
+                                onClick={(e) => { e.stopPropagation(); e.preventDefault(); toggleVisibleCrate(option.pro_id); }}
+                                aria-label={visibleCrates.includes(option.pro_id) ? 'Hide purchase rate' : 'Show purchase rate'}
+                              >
+                                <VisibilityIcon fontSize="small" />
+                              </IconButton>
+                            </Box>
+                          </li>
+                        );
+                      }}
                       value={formSelectedProduct}
                       onChange={(event, newValue) => {
                         console.log('🔍 Product selected:', newValue);
@@ -3675,9 +3917,9 @@ function OrdersPageContent() {
                     '&:hover': { bgcolor: '#218838' }
                   }}
                   onClick={handleSaveBill}
-                  disabled={loading}
+                  disabled={savingBill}
                 >
-                  {loading ? (
+                  {savingBill ? (
                     <>
                       <CircularProgress size={16} sx={{ mr: 1, color: 'white' }} />
                       Saving...
@@ -3929,8 +4171,8 @@ function OrdersPageContent() {
             }
           }}
         >
-          <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+          <DialogTitle component="div" sx={{ bgcolor: 'primary.main', color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6" component="span" sx={{ fontWeight: 'bold' }}>
               Receipt - {getBillDisplayNo(currentBillData)}
             </Typography>
             <IconButton
@@ -4286,229 +4528,179 @@ function OrdersPageContent() {
       <Container
         maxWidth={false}
         sx={{
-          py: 4,
+          py: { xs: 2, md: 2.5 },
           maxWidth: {
-            xs: '100%',           // Mobile: full width
-            sm: '100%',           // Small screens: full width  
-            md: '100%',           // Medium screens: full width
-            lg: '1200px',         // Large screens: reasonable max width
-            xl: '1400px'          // Extra large screens: slightly larger max width
+            xs: '100%',
+            sm: '100%',
+            md: '100%',
+            lg: '1200px',
+            xl: '1400px'
           },
-          mx: 'auto',             // Center the content
-          px: { xs: 2, sm: 3, md: 4 } // Responsive horizontal padding
+          mx: 'auto',
+          px: { xs: 2, sm: 3, md: 4 }
         }}>
-        <Stack spacing={4}>
+        <Stack spacing={3}>
           {/* Header - New Order Button on the left */}
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', py: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', py: 1.5 }}>
             <Button
               variant="contained"
-              startIcon={<AddIcon />}
+              startIcon={<AddIcon sx={{ fontSize: 26 }} />}
               onClick={handleNewOrder}
               size="large"
               sx={{
-                background: 'linear-gradient(45deg, #FFC107 30%, #FF8F00 90%)',
-                boxShadow: '0 4px 20px rgba(255, 193, 7, 0.3)',
-                px: 6,
-                py: 2,
-                fontSize: '1.2rem',
-                fontWeight: 'bold',
+                background: 'linear-gradient(135deg, #FFC107 0%, #FF8F00 100%)',
+                boxShadow: '0 4px 16px rgba(255, 143, 0, 0.32)',
+                px: 5,
+                py: 1.75,
+                fontSize: '1.125rem',
+                fontWeight: 700,
                 minWidth: '320px',
                 height: '70px',
-                borderRadius: 3,
-                position: 'relative',
-                '@keyframes float': {
-                  '0%, 100%': { transform: 'translateY(0px)' },
-                  '50%': { transform: 'translateY(-8px)' }
-                },
-                '@keyframes glow': {
-                  '0%, 100%': { boxShadow: '0 4px 20px rgba(255, 193, 7, 0.3)' },
-                  '50%': { boxShadow: '0 4px 35px rgba(255, 193, 7, 0.7)' }
-                },
-                '@keyframes shimmer': {
-                  '0%': { backgroundPosition: '-200% 0' },
-                  '100%': { backgroundPosition: '200% 0' }
-                },
-                '@keyframes pulse': {
-                  '0%, 100%': { transform: 'scale(1)' },
-                  '50%': { transform: 'scale(1.02)' }
-                },
-                '@keyframes plusGlow': {
-                  '0%, 100%': {
-                    textShadow: '0 0 5px rgba(255, 255, 255, 0.3)',
-                    filter: 'drop-shadow(0 0 3px rgba(255, 255, 255, 0.2))'
-                  },
-                  '50%': {
-                    textShadow: '0 0 15px rgba(255, 255, 255, 0.8), 0 0 25px rgba(255, 255, 255, 0.4)',
-                    filter: 'drop-shadow(0 0 8px rgba(255, 255, 255, 0.6))'
-                  }
-                },
-                '@keyframes yellowTransition': {
-                  '0%': { background: 'linear-gradient(45deg, #FFC107 30%, #FF8F00 90%)' },
-                  '25%': { background: 'linear-gradient(45deg, #FFD54F 30%, #FFB74D 90%)' },
-                  '50%': { background: 'linear-gradient(45deg, #FFEB3B 30%, #FFC107 90%)' },
-                  '75%': { background: 'linear-gradient(45deg, #FFF176 30%, #FFD54F 90%)' },
-                  '100%': { background: 'linear-gradient(45deg, #FFC107 30%, #FF8F00 90%)' }
-                },
-                animation: 'float 3s ease-in-out infinite, glow 2s ease-in-out infinite alternate, pulse 4s ease-in-out infinite, yellowTransition 5s ease-in-out infinite',
-                backgroundSize: '200% 100%',
-                '& .MuiButton-startIcon': {
-                  animation: 'plusGlow 2s ease-in-out infinite alternate'
-                },
+                borderRadius: 2.5,
+                textTransform: 'none',
+                letterSpacing: '0.02em',
+                color: '#fff',
+                transition: 'transform 0.2s ease, box-shadow 0.2s ease',
                 '&:hover': {
-                  background: 'linear-gradient(45deg, #FF8F00 30%, #E65100 90%)',
-                  transform: 'scale(1.08) translateY(-4px)',
-                  boxShadow: '0 10px 40px rgba(255, 193, 7, 0.6)',
-                  animation: 'shimmer 1.5s ease-in-out infinite, float 1s ease-in-out infinite, yellowTransition 2s ease-in-out infinite',
-                  '& .MuiButton-startIcon': {
-                    animation: 'plusGlow 1s ease-in-out infinite alternate, float 0.5s ease-in-out infinite'
-                  }
+                  background: 'linear-gradient(135deg, #FFB300 0%, #E65100 100%)',
+                  boxShadow: '0 6px 22px rgba(255, 143, 0, 0.42)',
+                  transform: 'translateY(-1px)',
                 },
                 '&:active': {
-                  transform: 'scale(0.95) translateY(0px)',
-                  transition: 'all 0.1s ease-in-out'
+                  transform: 'translateY(0)',
                 },
-                transition: 'all 0.3s ease-in-out'
               }}
             >
-              <span style={{
-                textShadow: '0 0 8px rgba(255, 255, 255, 0.5), 0 0 16px rgba(255, 255, 255, 0.3)',
-                filter: 'drop-shadow(0 0 4px rgba(255, 255, 255, 0.4))',
-                transition: 'all 0.3s ease-in-out'
-              }}>
-                ➕
-              </span>
               New Order
             </Button>
           </Box>
 
-          {/* Stats Cards Grid */}
-          <Box sx={{ flexShrink: 0, mb: 3, width: '100%' }}>
-            <Grid container spacing={2}>
-              {[
-                { title: 'Total Orders', val: statsTotalOrders, color: '#2563eb', bg: '#eff6ff', icon: <ShoppingCartIcon />, isCount: true },
-                { title: "Order's Amount", val: statsTotalAmount, color: '#16a34a', bg: '#f0fdf4', icon: <AttachMoneyIcon /> },
-                { title: 'Total Discount', val: statsTotalDiscount, color: '#dc2626', bg: '#fef2f2', icon: <TrendingDownIcon /> },
-                { title: 'Total Shipping', val: statsTotalShipping, color: '#06b6d4', bg: '#ecfeff', icon: <ShippingIcon /> },
-                { title: 'Received Amount', val: statsTotalPayment, color: '#16a34a', bg: '#f0fdf4', icon: <CreditCardIcon /> },
-                { title: 'Total Remaining', val: statsTotalBalance, color: '#7c3aed', bg: '#f5f3ff', icon: <WalletIcon /> }
-              ].map((stat, i) => (
-                <Grid item xs={12} sm={6} md={4} lg={2} key={i}>
-                  <Card sx={{
-                    borderRadius: 2.5,
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
-                    border: '1px solid #e5e7eb',
-                    bgcolor: stat.bg,
-                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                    '&:hover': {
-                      transform: 'translateY(-3px)',
-                      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-                      bgcolor: 'white'
-                    }
+          {/* Main orders panel — stats, filters & excel grid */}
+          <Card sx={ORDER_PAGE_CARD_SX}>
+            {/* Stats strip */}
+            <Box sx={{ px: { xs: 1.5, md: 2 }, py: 1.75, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+              <Box sx={ORDER_STATS_GRID}>
+                {[
+                  { title: 'Total Orders', val: statsTotalOrders, color: BRAND.primary.blue, bg: BRAND.tint.blue, icon: <ShoppingCartIcon fontSize="small" />, isCount: true },
+                  { title: "Order's Amount", val: statsTotalAmount, color: BRAND.text.green, bg: BRAND.tint.green, icon: <AttachMoneyIcon fontSize="small" /> },
+                  { title: 'Total Discount', val: statsTotalDiscount, color: BRAND.text.pink, bg: BRAND.tint.pink, icon: <TrendingDownIcon fontSize="small" /> },
+                  { title: 'Total Shipping', val: statsTotalShipping, color: BRAND.text.cyan, bg: BRAND.tint.cyan, icon: <ShippingIcon fontSize="small" /> },
+                  { title: 'Received Amount', val: statsTotalPayment, color: BRAND.text.periwinkle, bg: BRAND.tint.periwinkle, icon: <CreditCardIcon fontSize="small" /> },
+                  { title: 'Total Remaining', val: statsTotalBalance, color: '#b45309', bg: '#fffbeb', icon: <WalletIcon fontSize="small" /> }
+                ].map((stat, i) => (
+                  <Box key={i} sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1.25,
+                    p: 1.5,
+                    width: '100%',
+                    minHeight: 72,
+                    borderRadius: 1.5,
+                    border: '1px solid #e2e8f0',
+                    bgcolor: '#fff',
                   }}>
-                    <CardContent sx={{ p: 2, '&:last-child': { pb: 2 }, display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                      <Avatar sx={{
-                        bgcolor: 'white',
-                        color: stat.color,
-                        width: 42,
-                        height: 42,
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-                        border: `1px solid ${stat.color}15`
-                      }}>
-                        {stat.icon}
-                      </Avatar>
-                      <Box sx={{ minWidth: 0, flex: 1 }}>
-                        <Typography variant="caption" sx={{
-                          display: 'block',
-                          color: '#6b7280',
-                          fontWeight: 700,
-                          textTransform: 'uppercase',
-                          letterSpacing: 0.5,
-                          fontSize: '0.65rem',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis'
-                        }}>
-                          {stat.title}
-                        </Typography>
-                        <Typography variant="h6" sx={{ fontWeight: 800, color: stat.color, fontSize: '1.1rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {!stat.isCount && <span style={{ fontSize: '0.7rem', marginRight: 2, opacity: 0.6 }}>PKR</span>}
-                          {stat.isCount ? stat.val : fmtAmt(stat.val)}
-                        </Typography>
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
-          </Box>
-
-          {/* Sales Filter */}
-          {/* Filters & Sorting Section */}
-          <Box sx={{ flexShrink: 0, mb: 3, width: '100%' }}>
-            <Card sx={{
-              borderRadius: 2,
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
-              width: '100%',
-              border: '1px solid #e2e8f0',
-              bgcolor: '#f8fafc'
-            }}>
-              <CardContent sx={{ p: 3 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-                  <Typography variant="h6" sx={{ fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <FilterIcon sx={{ color: '#64748b' }} />
-                    Filters & Sorting
-                  </Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={showTrashOrders}
-                          onChange={(e) => setShowTrashOrders(e.target.checked)}
-                          color="warning"
-                        />
-                      }
-                      label={showTrashOrders ? 'Showing Trash Orders' : 'Showing Active Orders'}
-                      sx={{
-                        mr: 1,
-                        '& .MuiFormControlLabel-label': {
-                          fontSize: '0.875rem',
-                          fontWeight: 600,
-                          color: showTrashOrders ? '#b45309' : '#334155',
-                        },
-                      }}
-                    />
-                    <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 500 }}>
-                      Showing <strong>{filteredSales.length}</strong> of <strong>{modeSales.length}</strong> orders
-                    </Typography>
-                    <Button
-                      onClick={clearFilters}
-                      size="small"
-                      startIcon={<ClearIcon />}
-                      sx={{
-                        color: '#64748b',
-                        textTransform: 'none',
-                        fontWeight: 600,
-                        '&:hover': { color: '#ef4444', bgcolor: '#fee2e2' }
-                      }}
-                    >
-                      Clear All Filters
-                    </Button>
+                    <Box sx={{
+                      width: 38,
+                      height: 38,
+                      borderRadius: 1.25,
+                      bgcolor: stat.bg,
+                      color: stat.color,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}>
+                      {stat.icon}
+                    </Box>
+                    <Box sx={{ minWidth: 0, flex: 1 }}>
+                      <Typography noWrap sx={{ fontSize: '0.625rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1.2 }}>
+                        {stat.title}
+                      </Typography>
+                      <Typography noWrap sx={{ fontWeight: 800, color: stat.color, fontSize: '0.9375rem', lineHeight: 1.3, mt: 0.25 }}>
+                        {!stat.isCount && <Box component="span" sx={{ fontSize: '0.625rem', mr: 0.35, opacity: 0.85, fontWeight: 700 }}>PKR</Box>}
+                        {stat.isCount ? stat.val : fmtAmt(stat.val)}
+                      </Typography>
+                    </Box>
                   </Box>
+                ))}
+              </Box>
+            </Box>
+
+            {/* Filters toolbar */}
+            <Box sx={{
+              px: { xs: 1.5, md: 2 },
+              py: 1.5,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 1.5,
+              borderBottom: '1px solid #e2e8f0',
+              bgcolor: '#fff',
+            }}>
+              <Typography sx={{ fontWeight: 700, color: '#1e293b', fontSize: '0.9375rem', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <FilterIcon sx={{ color: BRAND.primary.blue, fontSize: 20 }} />
+                Filters & Sorting
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.25 }}>
+                <Box sx={ORDER_VIEW_TOGGLE_SX}>
+                  <Button
+                    size="small"
+                    disableElevation
+                    onClick={() => setShowTrashOrders(false)}
+                    sx={ORDER_VIEW_TOGGLE_BTN_SX(!showTrashOrders)}
+                  >
+                    Active Orders
+                  </Button>
+                  <Button
+                    size="small"
+                    disableElevation
+                    onClick={() => setShowTrashOrders(true)}
+                    sx={ORDER_VIEW_TOGGLE_BTN_SX(showTrashOrders)}
+                  >
+                    Trash
+                  </Button>
                 </Box>
-                <Box sx={{
-                  display: 'grid',
-                  gridTemplateColumns: {
-                    xs: '1fr',
-                    sm: 'repeat(2, 1fr)',
-                    md: 'repeat(4, 1fr)'
-                  },
-                  gap: 3,
-                  width: '100%'
-                }}>
-                  {/* Search */}
-                  <Box>
+                <Chip
+                  size="small"
+                  label={`${filteredSales.length} / ${modeSales.length}`}
+                  sx={{
+                    bgcolor: BRAND.tint.blue,
+                    color: BRAND.primary.blue,
+                    fontWeight: 700,
+                    height: 32,
+                    px: 0.5,
+                    fontSize: '0.8125rem',
+                    borderRadius: '8px',
+                  }}
+                />
+                <Button
+                  onClick={clearFilters}
+                  size="small"
+                  variant="outlined"
+                  startIcon={<ClearIcon sx={{ fontSize: 18 }} />}
+                  sx={{
+                    textTransform: 'none',
+                    fontWeight: 600,
+                    color: '#64748b',
+                    borderColor: '#cbd5e1',
+                    borderRadius: '8px',
+                    height: 32,
+                    px: 1.5,
+                    '&:hover': { borderColor: '#94a3b8', bgcolor: '#f8fafc' },
+                  }}
+                >
+                  Clear All
+                </Button>
+              </Box>
+            </Box>
+
+            <Box sx={{ px: { xs: 1.5, md: 2 }, py: 2, borderBottom: '1px solid #e2e8f0', bgcolor: '#fafbfc' }}>
+              <Box sx={{ ...ORDER_FILTER_GRID, gap: { xs: 1.5, md: 2 } }}>
+                  <Box sx={{ gridColumn: { xs: '1', md: 'span 2' } }}>
                     <TextField
                       fullWidth
+                      size="small"
                       label="Search Orders"
                       placeholder="ID, Customer, Phone, Address, City, Order Name..."
                       value={searchTerm}
@@ -4517,20 +4709,19 @@ function OrdersPageContent() {
                       InputProps={{
                         startAdornment: (
                           <InputAdornment position="start">
-                            <SearchIcon size={18} sx={{ color: '#94a3b8' }} />
+                            <SearchIcon sx={{ color: '#94a3b8', fontSize: 20 }} />
                           </InputAdornment>
                         ),
                       }}
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}
+                      sx={ORDER_FILTER_FIELD_SX}
                     />
                   </Box>
 
-                  {/* Customer Filter */}
                   <Box>
                     <Autocomplete
                       fullWidth
+                      size="small"
                       options={customers.filter(customer => {
-                        // Filter for customers with category "Customer"
                         const isCustomer = customer.customer_category &&
                           customer.customer_category.cus_cat_title &&
                           customer.customer_category.cus_cat_title.toLowerCase().includes('customer');
@@ -4551,14 +4742,14 @@ function OrdersPageContent() {
                           label="Customer"
                           placeholder="All Customers"
                           onFocus={(e) => e.target.select()}
-                          sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}
+                          sx={ORDER_FILTER_FIELD_SX}
                         />
                       )}
                     />
                   </Box>
-                  {/* Bill Type Filter */}
+
                   <Box>
-                    <FormControl fullWidth sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}>
+                    <FormControl fullWidth size="small" sx={ORDER_FILTER_FIELD_SX}>
                       <InputLabel>Bill Type</InputLabel>
                       <Select
                         value={filterBillType}
@@ -4575,10 +4766,10 @@ function OrdersPageContent() {
                     </FormControl>
                   </Box>
 
-                  {/* Store Filter */}
                   <Box>
                     <Autocomplete
                       fullWidth
+                      size="small"
                       options={stores}
                       getOptionLabel={(option) => option.store_name || ''}
                       value={stores.find(s => s.storeid.toString() === filterStore) || null}
@@ -4593,66 +4784,66 @@ function OrdersPageContent() {
                           label="Store"
                           placeholder="All Stores"
                           onFocus={(e) => e.target.select()}
-                          sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}
+                          sx={ORDER_FILTER_FIELD_SX}
                         />
                       )}
                     />
                   </Box>
-                  {/* Date From */}
+
                   <Box>
                     <TextField
                       fullWidth
+                      size="small"
                       label="From Date"
                       type="date"
                       value={dateFrom}
                       onChange={(e) => setDateFrom(e.target.value)}
                       InputLabelProps={{ shrink: true }}
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}
+                      sx={ORDER_FILTER_FIELD_SX}
                     />
                   </Box>
 
-                  {/* Date To */}
                   <Box>
                     <TextField
                       fullWidth
+                      size="small"
                       label="To Date"
                       type="date"
                       value={dateTo}
                       onChange={(e) => setDateTo(e.target.value)}
                       InputLabelProps={{ shrink: true }}
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}
+                      sx={ORDER_FILTER_FIELD_SX}
                     />
                   </Box>
 
-                  {/* Min Amount */}
                   <Box>
                     <TextField
                       fullWidth
+                      size="small"
                       label="Min Amount"
                       type="number"
                       placeholder="e.g. 1000"
                       value={filterMinAmount}
                       onChange={(e) => setFilterMinAmount(e.target.value)}
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}
+                      sx={ORDER_FILTER_FIELD_SX}
                     />
                   </Box>
 
-                  {/* Max Amount */}
                   <Box>
                     <TextField
                       fullWidth
+                      size="small"
                       label="Max Amount"
                       type="number"
                       placeholder="e.g. 50000"
                       value={filterMaxAmount}
                       onChange={(e) => setFilterMaxAmount(e.target.value)}
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}
+                      sx={ORDER_FILTER_FIELD_SX}
                     />
                   </Box>
 
-                  {/* Payment Type */}
                   <Box>
-                    <FormControl fullWidth sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}>
+                    <FormControl fullWidth size="small" sx={ORDER_FILTER_FIELD_SX}>
                       <InputLabel>Payment Type</InputLabel>
                       <Select
                         value={filterPaymentType}
@@ -4666,9 +4857,8 @@ function OrdersPageContent() {
                     </FormControl>
                   </Box>
 
-                  {/* Balance Status */}
                   <Box>
-                    <FormControl fullWidth sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}>
+                    <FormControl fullWidth size="small" sx={ORDER_FILTER_FIELD_SX}>
                       <InputLabel>Balance Status</InputLabel>
                       <Select
                         value={filterBalanceStatus}
@@ -4683,168 +4873,152 @@ function OrdersPageContent() {
                     </FormControl>
                   </Box>
 
-                  {/* Sort */}
-                  <Autocomplete
-                    fullWidth
-                    options={[
-                      { value: 'created_at-desc', label: 'Newest First' },
-                      { value: 'created_at-asc', label: 'Oldest First' },
-                      { value: 'customer-asc', label: 'Customer A-Z' },
-                      { value: 'customer-desc', label: 'Customer Z-A' },
-                      { value: 'total_amount-desc', label: 'Amount High-Low' },
-                      { value: 'total_amount-asc', label: 'Amount Low-High' }
-                    ]}
-                    getOptionLabel={(option) => option.label}
-                    value={{ value: `${sortBy}-${sortOrder}`, label: getSortLabel(`${sortBy}-${sortOrder}`) }}
-                    onChange={(event, newValue) => {
-                      if (newValue) {
-                        const [field, order] = newValue.value.split('-');
-                        setSortBy(field);
-                        setSortOrder(order);
-                      }
-                    }}
-                    autoSelect={true}
-                    autoHighlight={true}
-                    openOnFocus={true}
-                    selectOnFocus={true}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Sort By"
-                        placeholder="Select..."
-                        onFocus={(e) => e.target.select()}
-                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}
-                      />
-                    )}
-                  />
-                </Box>
-              </CardContent>
-            </Card>
-          </Box>
+                  <Box>
+                    <Autocomplete
+                      fullWidth
+                      size="small"
+                      options={[
+                        { value: 'created_at-desc', label: 'Newest First' },
+                        { value: 'created_at-asc', label: 'Oldest First' },
+                        { value: 'customer-asc', label: 'Customer A-Z' },
+                        { value: 'customer-desc', label: 'Customer Z-A' },
+                        { value: 'total_amount-desc', label: 'Amount High-Low' },
+                        { value: 'total_amount-asc', label: 'Amount Low-High' }
+                      ]}
+                      getOptionLabel={(option) => option.label}
+                      value={{ value: `${sortBy}-${sortOrder}`, label: getSortLabel(`${sortBy}-${sortOrder}`) }}
+                      onChange={(event, newValue) => {
+                        if (newValue) {
+                          const [field, order] = newValue.value.split('-');
+                          setSortBy(field);
+                          setSortOrder(order);
+                        }
+                      }}
+                      autoSelect={true}
+                      autoHighlight={true}
+                      openOnFocus={true}
+                      selectOnFocus={true}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Sort By"
+                          placeholder="Select..."
+                          onFocus={(e) => e.target.select()}
+                          sx={ORDER_FILTER_FIELD_SX}
+                        />
+                      )}
+                    />
+                  </Box>
+              </Box>
+            </Box>
 
-          {/* Sales Table */}
-          <Card>
-            <Box sx={{ p: 3, borderBottom: 1, borderColor: 'divider', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Typography variant="h6" sx={{ fontWeight: 'semibold' }}>
+            {/* Order list — excel-style grid */}
+            <Box sx={{
+              px: { xs: 1.5, md: 2 },
+              py: 1.25,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderBottom: '1px solid #cbd5e1',
+              bgcolor: '#f1f5f9',
+            }}>
+              <Typography sx={{ fontWeight: 700, color: '#1e293b', fontSize: '0.875rem' }}>
                 {showTrashOrders ? 'Trash Order List' : 'Order List'}
               </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Showing {filteredSales.length} of {modeSales.length} orders
-                {modeSales.length > 0 && ` (Debug: Orders loaded successfully)`}
+              <Typography sx={{ fontSize: '0.8125rem', color: '#64748b', fontWeight: 600 }}>
+                {filteredSales.length} of {modeSales.length} rows
               </Typography>
             </Box>
-            <TableContainer sx={{ overflowX: 'auto', maxWidth: '100%' }}>
-              <Table sx={{ minWidth: 800 }}>
+
+            <TableContainer sx={{ overflowX: 'auto', maxWidth: '100%', bgcolor: '#fff' }}>
+              <Table sx={ORDER_EXCEL_TABLE_SX}>
                 <TableHead>
                   <TableRow>
-                    <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Order ID</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Order No</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Order Name</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Customer</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Total Amount</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Discount</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Shipping</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Payment</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Balance</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Bill Type</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Date</TableCell>
-                    <TableCell align="center" sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Actions</TableCell>
+                    {[
+                      { label: 'Order ID', align: 'left' },
+                      { label: 'Order No', align: 'left' },
+                      { label: 'Order Name', align: 'left' },
+                      { label: 'Customer', align: 'left' },
+                      { label: 'Total Amount', align: 'right' },
+                      { label: 'Discount', align: 'right' },
+                      { label: 'Shipping', align: 'right' },
+                      { label: 'Payment', align: 'right' },
+                      { label: 'Balance', align: 'right' },
+                      { label: 'Bill Type', align: 'center' },
+                      { label: 'Date', align: 'center' },
+                      { label: 'Actions', align: 'center' },
+                    ].map((col) => (
+                      <TableCell key={col.label} align={col.align} sx={ORDER_EXCEL_HEAD_SX}>
+                        {col.label}
+                      </TableCell>
+                    ))}
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {filteredSales.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={12} align="center">
-                        <Box sx={{ py: 8, textAlign: 'center' }}>
-                          <ShoppingCartIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
-                          <Typography variant="h6" color="text.secondary" gutterBottom>
-                            {modeSales.length === 0
-                              ? (showTrashOrders ? 'No trashed orders found' : 'No active orders found')
-                              : 'No orders match your filters'}
-                          </Typography>
-                          <Typography variant="body2" color="text.disabled">
-                            {modeSales.length === 0
-                              ? (showTrashOrders ? 'Move any order to trash to see it here.' : 'Create your first order to get started.')
-                              : 'Try adjusting your filter criteria.'}
-                          </Typography>
-                        </Box>
+                      <TableCell colSpan={12} align="center" sx={{ py: 6, border: '1px solid #cbd5e1' }}>
+                        <ShoppingCartIcon sx={{ fontSize: 48, color: '#cbd5e1', mb: 1 }} />
+                        <Typography sx={{ fontWeight: 600, color: '#64748b', fontSize: '0.875rem' }}>
+                          {modeSales.length === 0
+                            ? (showTrashOrders ? 'No trashed orders found' : 'No active orders found')
+                            : 'No orders match your filters'}
+                        </Typography>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredSales.map((sale) => {
+                    filteredSales.map((sale, rowIndex) => {
                       const balance = parseFloat(sale.total_amount || 0) - parseFloat(sale.payment || 0);
                       return (
-                        <TableRow key={sale.sale_id} sx={{ '&:hover': { bgcolor: '#f8f9fa' } }}>
-                          <TableCell sx={{ fontWeight: 'medium' }}>#{sale.sale_id}</TableCell>
-                          <TableCell sx={{ fontWeight: 'medium' }}>{getBillDisplayNo(sale)}</TableCell>
-                          <TableCell>{sale.reference || '—'}</TableCell>
-                          <TableCell>{sale.customer?.cus_name || 'N/A'}</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }}>{fmtAmt(sale.total_amount)}</TableCell>
-                          <TableCell>{fmtAmt(sale.discount)}</TableCell>
-                          <TableCell>{fmtAmt(sale.shipping_amount)}</TableCell>
-                          <TableCell sx={{ fontWeight: 'medium' }}>{fmtAmt(sale.payment)}</TableCell>
+                        <TableRow
+                          key={sale.sale_id}
+                          sx={{
+                            bgcolor: rowIndex % 2 === 0 ? '#ffffff' : '#f8fafc',
+                            '&:hover': { bgcolor: '#eff6ff' },
+                          }}
+                        >
+                          <TableCell sx={{ fontWeight: 600, color: '#475569' }}>#{sale.sale_id}</TableCell>
+                          <TableCell sx={{ fontWeight: 700, color: BRAND.primary.blue }}>{getBillDisplayNo(sale)}</TableCell>
+                          <TableCell sx={{ color: '#64748b' }}>{sale.reference || '—'}</TableCell>
+                          <TableCell sx={{ fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>{sale.customer?.cus_name || 'N/A'}</TableCell>
+                          <TableCell sx={{ ...ORDER_NUM_CELL_SX, fontWeight: 700 }}>{fmtAmt(sale.total_amount)}</TableCell>
+                          <TableCell sx={ORDER_NUM_CELL_SX}>{fmtAmt(sale.discount)}</TableCell>
+                          <TableCell sx={ORDER_NUM_CELL_SX}>{fmtAmt(sale.shipping_amount)}</TableCell>
+                          <TableCell sx={{ ...ORDER_NUM_CELL_SX, fontWeight: 600, color: BRAND.text.green }}>{fmtAmt(sale.payment)}</TableCell>
                           <TableCell sx={{
-                            fontWeight: 'bold',
-                            color: balance > 0 ? 'error.main' : balance < 0 ? 'success.main' : 'text.secondary'
+                            ...ORDER_NUM_CELL_SX,
+                            fontWeight: 700,
+                            color: balance > 0 ? BRAND.primary.pink : balance < 0 ? BRAND.text.green : '#64748b',
                           }}>
                             {fmtAmt(balance)}
                           </TableCell>
-                          <TableCell>
-                            <Chip
-                              label={sale.bill_type || 'N/A'}
-                              size="small"
-                              color={sale.bill_type === 'ORDER_TRASH' ? 'warning' : 'secondary'}
-                              variant="outlined"
-                            />
-                          </TableCell>
-                          <TableCell>{new Date(sale.created_at).toLocaleDateString('en-GB')}</TableCell>
-                          <TableCell align="center">
-                            <Stack direction="row" spacing={1} justifyContent="center">
+                          <TableCell align="center">{sale.bill_type || '—'}</TableCell>
+                          <TableCell align="center" sx={{ color: '#64748b' }}>{new Date(sale.created_at).toLocaleDateString('en-GB')}</TableCell>
+                          <TableCell align="center" sx={{ p: 0.5 }}>
+                            <Stack direction="row" spacing={0} justifyContent="center" flexWrap="nowrap">
                               <Tooltip title="View Details">
-                                <IconButton
-                                  size="small"
-                                  color="primary"
-                                  onClick={() => handleViewBill(sale)}
-                                >
-                                  <VisibilityIcon fontSize="small" />
+                                <IconButton size="small" onClick={() => handleViewBill(sale)} sx={{ p: 0.5, color: BRAND.primary.blue }}>
+                                  <VisibilityIcon sx={{ fontSize: 17 }} />
                                 </IconButton>
                               </Tooltip>
                               <Tooltip title="Print Bill">
-                                <IconButton
-                                  size="small"
-                                  color="secondary"
-                                  onClick={() => handleQuickPrint(sale)}
-                                >
-                                  <PrintIcon fontSize="small" />
+                                <IconButton size="small" onClick={() => handleQuickPrint(sale)} sx={{ p: 0.5, color: '#64748b' }}>
+                                  <PrintIcon sx={{ fontSize: 17 }} />
                                 </IconButton>
                               </Tooltip>
                               <Tooltip title="Edit / Convert to Sale">
-                                <IconButton
-                                  size="small"
-                                  color="info"
-                                  onClick={() => handleEdit(sale)}
-                                  disabled={sale.bill_type === 'ORDER_TRASH'}
-                                >
-                                  <EditIcon fontSize="small" />
+                                <IconButton size="small" onClick={() => handleEdit(sale)} disabled={sale.bill_type === 'ORDER_TRASH'} sx={{ p: 0.5, color: BRAND.text.cyan }}>
+                                  <EditIcon sx={{ fontSize: 17 }} />
                                 </IconButton>
                               </Tooltip>
                               <Tooltip title="Return Sale">
-                                <IconButton
-                                  size="small"
-                                  color="error"
-                                  onClick={() => handleOpenReturnDialog(sale)}
-                                  disabled={sale.bill_type === 'ORDER_TRASH'}
-                                >
-                                  <TrendingDownIcon fontSize="small" />
+                                <IconButton size="small" onClick={() => handleOpenReturnDialog(sale)} disabled={sale.bill_type === 'ORDER_TRASH'} sx={{ p: 0.5, color: BRAND.primary.pink }}>
+                                  <TrendingDownIcon sx={{ fontSize: 17 }} />
                                 </IconButton>
                               </Tooltip>
                               <Tooltip title={sale.bill_type === 'ORDER_TRASH' ? 'Restore Order' : 'Move to Trash'}>
-                                <IconButton
-                                  size="small"
-                                  color={sale.bill_type === 'ORDER_TRASH' ? 'success' : 'warning'}
-                                  onClick={() => handleDelete(sale)}
-                                >
-                                  <DeleteIcon fontSize="small" />
+                                <IconButton size="small" onClick={() => handleDelete(sale)} sx={{ p: 0.5, color: sale.bill_type === 'ORDER_TRASH' ? BRAND.text.green : '#d97706' }}>
+                                  <DeleteIcon sx={{ fontSize: 17 }} />
                                 </IconButton>
                               </Tooltip>
                             </Stack>
@@ -4897,7 +5071,7 @@ function OrdersPageContent() {
           }
         }}
       >
-        <DialogTitle sx={{
+        <DialogTitle component="div" sx={{
           background: 'linear-gradient(45deg, #2196f3 30%, #9c27b0 90%)',
           color: 'white',
           display: 'flex',
@@ -5434,7 +5608,7 @@ function OrdersPageContent() {
           }
         }}
       >
-        <DialogTitle sx={{
+        <DialogTitle component="div" sx={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -5445,7 +5619,7 @@ function OrdersPageContent() {
         }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <ReceiptIcon />
-            <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+            <Typography variant="h6" component="span" sx={{ fontWeight: 'bold' }}>
               Bill Details - {getBillDisplayNo(selectedBill)}
             </Typography>
           </Box>
@@ -5845,7 +6019,7 @@ function OrdersPageContent() {
         maxWidth="md"
         fullWidth
       >
-        <DialogTitle sx={{
+        <DialogTitle component="div" sx={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -5856,7 +6030,7 @@ function OrdersPageContent() {
         }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <TrendingDownIcon />
-            <Typography variant="h6">Process Sale Return</Typography>
+            <Typography variant="h6" component="span">Process Sale Return</Typography>
           </Box>
           <IconButton
             onClick={handleCloseReturnDialog}
@@ -6067,7 +6241,7 @@ function OrdersPageContent() {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle sx={{
+        <DialogTitle component="div" sx={{
           background: 'linear-gradient(45deg, #4caf50 30%, #2e7d32 90%)',
           color: 'white',
           display: 'flex',
@@ -6146,7 +6320,7 @@ function OrdersPageContent() {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle sx={{
+        <DialogTitle component="div" sx={{
           background: 'linear-gradient(45deg, #2196f3 30%, #9c27b0 90%)',
           color: 'white',
           display: 'flex',
@@ -6225,7 +6399,7 @@ function OrdersPageContent() {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle sx={{
+        <DialogTitle component="div" sx={{
           background: 'linear-gradient(45deg, #ff9800 30%, #f57c00 90%)',
           color: 'white',
           display: 'flex',

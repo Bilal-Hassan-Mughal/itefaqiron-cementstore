@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { updateStoreStock } from '@/lib/storeStock';
 import { createLedgerEntry } from '@/lib/ledger-helper';
 import { getNextId } from '@/lib/id-helper';
-import { initBranchScope } from '@/lib/branch-server';
+import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -393,6 +393,8 @@ export async function POST(request) {
       grandTotal
     });
 
+    const validatedUpdatedBy = await resolveUpdatedByUserId(request, updated_by, prisma);
+
     // Use transaction to ensure data consistency
     const result = await prisma.$transaction(async (tx) => {
       // Get the original sale to get store_id and verify bill_type
@@ -442,6 +444,7 @@ export async function POST(request) {
       // Create sale return
       const saleReturn = await tx.saleReturn.create({
         data: {
+          branch_id: __branchScope.branchId || 1,
           sale_id: sale_id || null,
           cus_id,
           total_amount: computedTotal,
@@ -456,7 +459,7 @@ export async function POST(request) {
           reason: reason || null,
           reference: reference || null,
           manual_sale_inv: manual_sale_inv || null,
-          updated_by
+          updated_by: validatedUpdatedBy
         }
       });
 
@@ -486,7 +489,7 @@ export async function POST(request) {
             net_total: parseFloat(detail.total_amount) - parseFloat(detail.discount || 0),
             cus_id,
             store_id: targetStoreId && !isNaN(targetStoreId) ? targetStoreId : null,
-            updated_by
+            updated_by: validatedUpdatedBy
           }
         });
       });
@@ -502,7 +505,7 @@ export async function POST(request) {
           const rawStoreId = detail.store_id || detail.storeid || sale?.store_id;
           const targetStoreId = rawStoreId ? parseInt(rawStoreId) : null;
           if (targetStoreId && !isNaN(targetStoreId)) {
-            await updateStoreStock(targetStoreId, detail.pro_id, parseInt(detail.qnty), 'increment', updated_by, tx);
+            await updateStoreStock(targetStoreId, detail.pro_id, parseInt(detail.qnty), 'increment', validatedUpdatedBy, tx);
           }
         });
 
@@ -527,7 +530,7 @@ export async function POST(request) {
             ledger_type: 'Sale Return',
             details: `Sale Return - Product: ${computedTotal}, Delivery: -${shippingAmount}, Labour: -${labourChargesAmount}, Discount: -${discountAmount}, Net: ${grandTotal}`,
             payments: 0,
-            updated_by
+            updated_by: validatedUpdatedBy
           }
         });
 
@@ -569,7 +572,7 @@ export async function POST(request) {
                 ledger_type: 'Sale Return',
                 details: `Refund Paid Out (CASH) - Sale Return #${saleReturn.return_id} - Amount: ${cashRefund}`,
                 payments: cashRefund,
-                updated_by
+                updated_by: validatedUpdatedBy
               }
             });
 
@@ -599,7 +602,7 @@ export async function POST(request) {
                 ledger_type: 'Sale Return',
                 details: `Customer Balance Update - CASH Refund Received: ${cashRefund} for Sale Return #${saleReturn.return_id}`,
                 payments: 0,
-                updated_by
+                updated_by: validatedUpdatedBy
               }
             });
             console.log('✅ CUSTOMER: Balance updated after CASH refund:', { customerAfterCash, cashRefund });
@@ -647,7 +650,7 @@ export async function POST(request) {
                 ledger_type: 'Sale Return',
                 details: `Refund Paid Out (BANK) - Sale Return #${saleReturn.return_id} - Amount: ${bankRefund}`,
                 payments: bankRefund,
-                updated_by
+                updated_by: validatedUpdatedBy
               }
             });
 
@@ -677,7 +680,7 @@ export async function POST(request) {
                 ledger_type: 'Sale Return',
                 details: `Customer Balance Update - BANK Refund Received: ${bankRefund} for Sale Return #${saleReturn.return_id}`,
                 payments: 0,
-                updated_by
+                updated_by: validatedUpdatedBy
               }
             });
             console.log('✅ CUSTOMER: Balance updated after BANK refund:', { customerAfterBank, bankRefund });
@@ -739,7 +742,7 @@ export async function POST(request) {
                 ledger_type: 'Sale Return',
                 details: `Transport Fare Deduction - Sale Return #${saleReturn.return_id} - Original Bill #${sale_id}`,
                 payments: 0,
-                updated_by
+                updated_by: validatedUpdatedBy
               }
             });
           }

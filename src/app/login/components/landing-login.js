@@ -9,20 +9,20 @@ import { useAuthLogin, useSessionGuard } from './use-login';
 const BRAND = {
   branch: {
     badge: 'Branch Portal',
-    badgeColor: '#38bdf8',
+    badgeColor: '#0DCAF0',
     title: 'Sign in to your branch POS — sales, stock, and accounts for your location.',
     subtitle: 'Select your branch, then use credentials from your manager.',
-    accent: '#0284c7',
-    accentDark: '#0369a1',
+    accent: '#1A55E3',
+    accentDark: '#1347c4',
     submitLabel: 'Sign in to Branch',
   },
   hq: {
     badge: 'Head Office Portal',
-    badgeColor: '#a78bfa',
+    badgeColor: '#5E6EED',
     title: 'Manage all branches from one place — create locations and assign admins.',
     subtitle: 'Use your HQ administrator credentials only.',
-    accent: '#4f46e5',
-    accentDark: '#6d28d9',
+    accent: '#5E6EED',
+    accentDark: '#4a57d4',
     submitLabel: 'Sign in to Head Office',
   },
 };
