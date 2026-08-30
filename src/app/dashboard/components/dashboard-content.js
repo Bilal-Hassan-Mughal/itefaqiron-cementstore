@@ -472,33 +472,6 @@ export default function DashboardContent({ activeTab }) {
 
     return (
       <div className="space-y-6 max-w-[1400px] mx-auto">
-        {/* Hero Header */}
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[#e6fff4] text-[#00a868] border border-[#b8f5dc] mb-2">
-              Live Overview
-            </span>
-            <h1 className="text-2xl md:text-[1.65rem] font-bold text-slate-900 tracking-tight">
-              Operations Dashboard
-            </h1>
-            <p className="text-sm text-slate-500 mt-1">
-              Real-time branch performance, modules & quick entry
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-slate-200/80 shadow-[0_2px_8px_rgba(15,23,42,0.06),inset_0_1px_0_rgba(255,255,255,0.9)]">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00D284] opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00D284]" />
-              </span>
-              <span className="text-xs font-semibold text-slate-700">Connected</span>
-            </div>
-            <div className="px-3 py-2 rounded-xl bg-white border border-slate-200/80 shadow-[0_2px_8px_rgba(15,23,42,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] text-xs font-semibold text-slate-600">
-              {new Date().toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Karachi' })}
-            </div>
-          </div>
-        </div>
-
         {/* KPI Cards */}
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">

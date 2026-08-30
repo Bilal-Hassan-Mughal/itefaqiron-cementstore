@@ -3,6 +3,24 @@
 import { Menu, Mail, Bell, Home, Plus, LogOut } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
+import { getStaffRoleName } from '@/lib/staff-access';
+import { formatRoleLabel } from '@/lib/branch-login-credentials';
+
+function getUserDisplayName(user) {
+  const name = (user?.full_name || '').trim();
+  if (name) return name;
+  const email = (user?.email || '').trim();
+  if (email) return email.split('@')[0];
+  return 'User';
+}
+
+function getUserRoleLabel(user) {
+  const role = getStaffRoleName(user) || user?.role;
+  if (!role) return 'Staff';
+  return formatRoleLabel(role)
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, branchLabel, onLogout }) {
   const router = useRouter();
@@ -44,6 +62,9 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
         : String(activeTab || 'dashboard').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
   const branchCode = branchLabel || 'MAIN';
+  const userDisplayName = getUserDisplayName(user);
+  const userRoleLabel = getUserRoleLabel(user);
+  const userInitial = userDisplayName.charAt(0).toUpperCase();
 
   return (
     <header className="sticky top-0 z-30">
@@ -141,23 +162,23 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
             <button
               type="button"
               onClick={() => router.push('/dashboard/products')}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#00D284] text-white text-sm font-semibold hover:bg-[#00b872] transition-colors shadow-sm"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-[#00D284] border border-[#00c978]/30 shadow-[0_1px_2px_rgba(0,168,104,0.2)] hover:bg-[#00c978] hover:shadow-[0_4px_12px_rgba(0,210,132,0.28)] active:bg-[#00b872] transition-all duration-200"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-4 h-4" strokeWidth={2.25} />
               <span className="hidden sm:inline">Add Product</span>
             </button>
-            <div className="hidden lg:flex items-center gap-2 pl-3 ml-1 border-l border-slate-200">
-              <div className="text-right">
-                <p className="text-sm font-semibold text-slate-900 truncate max-w-[120px]">
-                  {user?.full_name || user?.email || 'User'}
+            <div className="hidden md:flex items-center gap-2.5 pl-3 ml-1 border-l border-slate-200">
+              <div className="text-right min-w-0">
+                <p className="text-sm font-semibold text-slate-900 truncate max-w-[140px]" title={userDisplayName}>
+                  {userDisplayName}
                 </p>
-                <p className="text-[10px] text-slate-500 uppercase tracking-wide font-medium truncate max-w-[120px]">
-                  {branchLabel || user?.role?.displayName || user?.role?.name || user?.role || 'Admin'}
+                <p className="text-[10px] text-[#1A55E3] uppercase tracking-wide font-bold truncate max-w-[140px]" title={userRoleLabel}>
+                  {userRoleLabel}
                 </p>
               </div>
-              <div className="w-9 h-9 bg-gradient-to-br from-[#1A55E3] to-[#5E6EED] rounded-full flex items-center justify-center shadow-sm">
+              <div className="w-9 h-9 bg-gradient-to-br from-[#1A55E3] to-[#5E6EED] rounded-full flex items-center justify-center shadow-sm shrink-0">
                 <span className="text-white text-xs font-bold">
-                  {(user?.full_name || user?.email || 'U').charAt(0).toUpperCase()}
+                  {userInitial}
                 </span>
               </div>
             </div>
