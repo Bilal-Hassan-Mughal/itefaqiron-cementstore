@@ -121,9 +121,7 @@ export default function LandingLogin() {
 
       {/* Form panel */}
       <div className="landing-form-panel">
-        <div className="landing-form-bg" aria-hidden="true" />
         <div className="landing-form-center">
-          <div className="form-card">
           <div className="form-wrap">
             <div className="tab-switch" role="tablist">
             <button
@@ -202,7 +200,6 @@ export default function LandingLogin() {
                 onSubmit={hqAuth.handleSubmit}
               />
             )}
-          </div>
           </div>
           </div>
 
@@ -408,77 +405,35 @@ export default function LandingLogin() {
         .landing-form-panel {
           flex: 1 1 48%;
           position: relative;
-          background: #f1f5f9;
+          background: #ffffff;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          padding: 32px 24px 28px;
-          overflow: hidden;
-        }
-
-        .landing-form-bg {
-          position: absolute;
-          inset: 0;
-          background:
-            radial-gradient(circle at 20% 20%, rgba(26, 85, 227, 0.06) 0%, transparent 45%),
-            radial-gradient(circle at 80% 80%, rgba(0, 210, 132, 0.05) 0%, transparent 40%),
-            linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
-          pointer-events: none;
-        }
-
-        .landing-form-bg::after {
-          content: '';
-          position: absolute;
-          inset: 0;
-          background-image: radial-gradient(rgba(26, 85, 227, 0.08) 1px, transparent 1px);
-          background-size: 24px 24px;
-          opacity: 0.5;
-        }
-
-        .form-card {
-          position: relative;
-          z-index: 1;
-          width: 100%;
-          padding: 28px 26px 24px;
-          border-radius: 24px;
-          background: rgba(255, 255, 255, 0.92);
-          border: 1px solid rgba(255, 255, 255, 0.9);
-          box-shadow:
-            0 4px 6px rgba(15, 23, 42, 0.02),
-            0 20px 50px rgba(15, 23, 42, 0.08);
-          backdrop-filter: blur(12px);
+          padding: 48px 40px 36px;
         }
 
         .landing-form-center {
           width: 100%;
-          max-width: 420px;
+          max-width: 400px;
           display: flex;
           flex-direction: column;
-          gap: 22px;
-          position: relative;
-          z-index: 1;
+          gap: 28px;
         }
 
         .form-wrap {
           width: 100%;
-          animation: formSlideIn 0.6s ease-out 0.15s both;
-        }
-
-        @keyframes formSlideIn {
-          from { opacity: 0; transform: translateX(24px); }
-          to { opacity: 1; transform: translateX(0); }
         }
 
         .tab-switch {
           position: relative;
           display: grid;
           grid-template-columns: 1fr 1fr;
-          background: #eef2f7;
-          border-radius: 16px;
-          padding: 5px;
-          margin-bottom: 26px;
-          border: 1px solid #e2e8f0;
+          background: #f1f5f9;
+          border-radius: 14px;
+          padding: 4px;
+          margin-bottom: 28px;
+          border: 1px solid #e8ecf3;
         }
 
         .tab-btn {
@@ -550,12 +505,11 @@ export default function LandingLogin() {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 10px;
-          padding: 14px 18px 16px;
-          border-radius: 14px;
-          border: 1px solid #e8ecf3;
-          background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-          box-shadow: 0 4px 18px rgba(15, 23, 42, 0.05);
+          gap: 8px;
+          padding: 0;
+          border: none;
+          background: transparent;
+          box-shadow: none;
         }
 
         .landing-footer-copy {
@@ -612,11 +566,7 @@ export default function LandingLogin() {
           }
           .landing-form-panel {
             flex: 1;
-            padding: 24px 16px 32px;
-          }
-          .form-card {
-            padding: 22px 18px 20px;
-            border-radius: 20px;
+            padding: 32px 24px;
           }
         }
 
