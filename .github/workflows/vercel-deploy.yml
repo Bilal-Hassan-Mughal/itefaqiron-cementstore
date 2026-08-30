@@ -1,0 +1,26 @@
+# Triggers Vercel via Deploy Hook — bypasses "Git author must have access" check.
+# Setup: Vercel → Project → Settings → Git → Deploy Hooks → create hook for `main`
+# Then GitHub → Repo → Settings → Secrets → Actions → add VERCEL_DEPLOY_HOOK (hook URL)
+
+name: Deploy to Vercel
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Vercel deployment
+        env:
+          DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$DEPLOY_HOOK" ]; then
+            echo "::warning::VERCEL_DEPLOY_HOOK secret is not set. Skipping deploy hook."
+            echo "Add the hook URL from Vercel → Project Settings → Git → Deploy Hooks"
+            exit 0
+          fi
+          curl -fsS -X POST "$DEPLOY_HOOK"
+          echo "Vercel deploy hook triggered successfully."

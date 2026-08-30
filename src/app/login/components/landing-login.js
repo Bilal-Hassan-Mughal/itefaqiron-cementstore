@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Building2, MapPin, Phone, Store } from 'lucide-react';
 import { LoginFormFields } from './login-shell';
 import { useAuthLogin, useSessionGuard } from './use-login';
+import { COMPANY, POWERED_BY } from '@/lib/brand-theme';
 
 const BRAND = {
   branch: {
@@ -93,9 +94,10 @@ export default function LandingLogin() {
           </div>
 
           <h1 className="brand-title">
-            Itefaq Iron &amp;<br />Cement Store
+            {COMPANY.nameShort} &amp;<br />Cement Store
           </h1>
-          <p className="brand-title-ur">اتفاق آئرن اینڈ سیمنٹ سٹور</p>
+          <p className="brand-title-ur">{COMPANY.nameUr}</p>
+          <p className="brand-tagline">{COMPANY.tagline}</p>
           <div className="brand-divider" />
 
           <span className="brand-badge" key={`badge-${tab}`}>
@@ -109,16 +111,17 @@ export default function LandingLogin() {
           <p className="brand-sub">{brand.subtitle}</p>
 
           <div className="brand-contact">
-            <span><MapPin size={14} /> Gujrat Sargodha Road, Pahrian Wali</span>
-            <span><Phone size={14} /> 0346-7560306 · 0300-7560306</span>
+            <span><MapPin size={14} /> {COMPANY.address}</span>
+            <span><Phone size={14} /> {COMPANY.phones.join(' · ')}</span>
           </div>
         </div>
       </div>
 
       {/* Form panel */}
       <div className="landing-form-panel">
-        <div className="form-wrap">
-          <div className="tab-switch" role="tablist">
+        <div className="landing-form-center">
+          <div className="form-wrap">
+            <div className="tab-switch" role="tablist">
             <button
               type="button"
               role="tab"
@@ -151,14 +154,14 @@ export default function LandingLogin() {
                   : '0 4px 14px rgba(79, 70, 229, 0.35)',
               }}
             />
-          </div>
+            </div>
 
-          <div className="form-header">
-            <h2>{isBranch ? 'Branch Sign In' : 'HQ Sign In'}</h2>
-            <p>{isBranch ? 'Your store POS system' : 'Administrator access'}</p>
-          </div>
+            <div className="form-header">
+              <h2>{isBranch ? 'Branch Sign In' : 'HQ Sign In'}</h2>
+              <p>{isBranch ? 'Your store POS system' : 'Administrator access'}</p>
+            </div>
 
-          <div className="form-body" key={animKey}>
+            <div className="form-body" key={animKey}>
             {isBranch ? (
               <LoginFormFields
                 email={branchAuth.email}
@@ -196,9 +199,21 @@ export default function LandingLogin() {
               />
             )}
           </div>
-        </div>
+          </div>
 
-        <p className="form-footer">© {new Date().getFullYear()} Itefaq Iron & Cement Store</p>
+          <footer className="landing-form-footer">
+            <div className="landing-footer-card">
+              <p className="landing-footer-copy">
+                © {new Date().getFullYear()} {COMPANY.name}
+              </p>
+              <div className="landing-footer-rule" aria-hidden="true" />
+              <div className="landing-footer-powered">
+                <span className="landing-footer-powered-label">{POWERED_BY.label}</span>
+                <span className="landing-footer-powered-name">{POWERED_BY.name}</span>
+              </div>
+            </div>
+          </footer>
+        </div>
       </div>
 
       <style jsx global>{`
@@ -300,8 +315,17 @@ export default function LandingLogin() {
           color: rgba(255, 255, 255, 0.88);
           font-size: 1.15rem;
           font-weight: 600;
-          margin: 0 0 20px;
+          margin: 0 0 10px;
           direction: rtl;
+        }
+
+        .brand-tagline {
+          color: rgba(255, 255, 255, 0.72);
+          font-size: 0.875rem;
+          font-weight: 500;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          margin: 0 0 20px;
         }
 
         .brand-divider {
@@ -370,12 +394,19 @@ export default function LandingLogin() {
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          padding: 32px 24px;
+          padding: 32px 24px 28px;
+        }
+
+        .landing-form-center {
+          width: 100%;
+          max-width: 400px;
+          display: flex;
+          flex-direction: column;
+          gap: 26px;
         }
 
         .form-wrap {
           width: 100%;
-          max-width: 400px;
           animation: formSlideIn 0.6s ease-out 0.15s both;
         }
 
@@ -453,11 +484,65 @@ export default function LandingLogin() {
           to { opacity: 1; transform: translateY(0); }
         }
 
-        .form-footer {
-          margin-top: 32px;
+        .landing-form-footer {
+          width: 100%;
+          margin: 0;
+          padding: 0;
+        }
+
+        .landing-footer-card {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 10px;
+          padding: 14px 18px 16px;
+          border-radius: 14px;
+          border: 1px solid #e8ecf3;
+          background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+          box-shadow: 0 4px 18px rgba(15, 23, 42, 0.05);
+        }
+
+        .landing-footer-copy {
+          margin: 0;
           color: #94a3b8;
-          font-size: 0.75rem;
-          text-align: center;
+          font-size: 0.6875rem;
+          font-weight: 500;
+          letter-spacing: 0.02em;
+        }
+
+        .landing-footer-rule {
+          width: 100%;
+          height: 1px;
+          background: linear-gradient(
+            90deg,
+            transparent 0%,
+            #e2e8f0 20%,
+            #e2e8f0 80%,
+            transparent 100%
+          );
+        }
+
+        .landing-footer-powered {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+
+        .landing-footer-powered-label {
+          font-size: 0.625rem;
+          font-weight: 700;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: #94a3b8;
+        }
+
+        .landing-footer-powered-name {
+          font-size: 0.8125rem;
+          font-weight: 800;
+          letter-spacing: 0.05em;
+          color: #1A55E3;
         }
 
         @media (max-width: 900px) {

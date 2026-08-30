@@ -54,7 +54,7 @@ import {
 import { isAdminRole as isAdminRoleName, getStaffRoleName, getRoleDefaultModules, SALESMAN_ALLOWED_MENU_IDS } from '@/lib/staff-access';
 import { isHqUser } from '@/lib/branch-roles';
 import { exitHqPosMode } from '@/lib/branch-client';
-import { NAV_FN, SIDEBAR, SIDEBAR_WIDTH, SIDEBAR_SECTION_LABELS } from '@/lib/brand-theme';
+import { NAV_FN, SIDEBAR, SIDEBAR_WIDTH, SIDEBAR_SECTION_LABELS, COMPANY, POWERED_BY } from '@/lib/brand-theme';
 
 const COLLAPSED_WIDTH = SIDEBAR_WIDTH.collapsed;
 const EXPANDED_WIDTH = SIDEBAR_WIDTH.expanded;
@@ -813,10 +813,10 @@ export default function Sidebar({
             {!isCollapsed ? (
               <Box className="sidebar-brand" sx={{ flex: 1, minWidth: 0, pt: 0, pb: 0 }}>
                 <Typography component="span" className="sidebar-brand-title" sx={{ display: 'block' }}>
-                  Ittefaq Iron
+                  {COMPANY.nameShort}
                 </Typography>
                 <Typography component="span" className="sidebar-brand-sub">
-                  & Cement Store
+                  {COMPANY.nameSub}
                 </Typography>
                 <Box className="sidebar-brand-glow" />
               </Box>
@@ -878,10 +878,10 @@ export default function Sidebar({
           <Box sx={{ px: 1.5, pb: 1.25, pt: 0.25 }}>
             <Box className="sidebar-brand">
               <Typography component="span" className="sidebar-brand-title" sx={{ display: 'block' }}>
-                Ittefaq Iron
+                {COMPANY.nameShort}
               </Typography>
               <Typography component="span" className="sidebar-brand-sub">
-                & Cement Store
+                {COMPANY.nameSub}
               </Typography>
               <Box className="sidebar-brand-glow" />
             </Box>
@@ -987,6 +987,74 @@ export default function Sidebar({
             </Box>
           )}
         </List>
+      </Box>
+
+      {/* Powered By — fixed footer */}
+      <Box
+        className="sidebar-powered-by"
+        sx={{
+          flexShrink: 0,
+          borderTop: `1px solid ${SIDEBAR.border}`,
+          bgcolor: SIDEBAR.bgElevated,
+          px: isCollapsed ? 0.5 : 1.25,
+          py: isCollapsed ? 1 : 1.15,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: isCollapsed ? 'center' : 'flex-start',
+        }}
+      >
+        {!isCollapsed ? (
+          <Box sx={{ width: '100%' }}>
+            <Typography
+              component="span"
+              sx={{
+                display: 'block',
+                fontSize: '0.5625rem',
+                fontWeight: 700,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                color: SIDEBAR.textMuted,
+                lineHeight: 1.2,
+                mb: 0.25,
+              }}
+            >
+              {POWERED_BY.label}
+            </Typography>
+            <Typography
+              component="span"
+              className="sidebar-powered-name"
+              sx={{
+                display: 'block',
+                fontSize: '0.75rem',
+                fontWeight: 800,
+                letterSpacing: '0.05em',
+                lineHeight: 1.25,
+              }}
+            >
+              {POWERED_BY.name}
+            </Typography>
+          </Box>
+        ) : (
+          <Tooltip title={`${POWERED_BY.label} ${POWERED_BY.name}`} placement="right" arrow>
+            <Box
+              className="sidebar-powered-collapsed"
+              sx={{
+                width: 36,
+                height: 36,
+                borderRadius: 1.5,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.65rem',
+                fontWeight: 800,
+                letterSpacing: '0.02em',
+                cursor: 'default',
+              }}
+            >
+              {POWERED_BY.nameShort}
+            </Box>
+          </Tooltip>
+        )}
       </Box>
     </Box>
   );

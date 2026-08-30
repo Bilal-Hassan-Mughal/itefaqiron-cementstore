@@ -4,6 +4,22 @@
  * Supporting: #00D284 (green/sales), #0DCAF0 (cyan), #5E6EED (periwinkle)
  */
 
+export const COMPANY = {
+  name: 'Itefaq Iron & Cement Store',
+  nameShort: 'Itefaq Iron',
+  nameSub: '& Cement Store',
+  nameUr: 'اتفاق آئرن اینڈ سیمنٹ سٹور',
+  tagline: 'Iron, Cement & Building Materials',
+  address: 'Gujrat Sargodha Road, Pahrian Wali',
+  phones: ['0346-7560306', '0300-7560306'],
+};
+
+export const POWERED_BY = {
+  label: 'Powered By',
+  name: 'AL-JANNAT SYSTEMS',
+  nameShort: 'AJ',
+};
+
 export const BRAND = {
   primary: {
     blue: '#1A55E3',
