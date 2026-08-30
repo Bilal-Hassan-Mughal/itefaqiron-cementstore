@@ -1,0 +1,325 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  --font-poppins: 'Poppins', sans-serif;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-poppins);
+  --font-mono: var(--font-poppins);
+}
+
+/* Force white background for all pages */
+body,
+html {
+  background-color: #ffffff !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #ffffff;
+    --foreground: #171717;
+  }
+
+  body,
+  html {
+    background-color: #ffffff !important;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-poppins), 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+}
+
+/* Apply Poppins font to all elements */
+* {
+  font-family: var(--font-poppins), 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif !important;
+}
+
+/* Custom animations for login page */
+@keyframes shake {
+
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  10%,
+  30%,
+  50%,
+  70%,
+  90% {
+    transform: translateX(-2px);
+  }
+
+  20%,
+  40%,
+  60%,
+  80% {
+    transform: translateX(2px);
+  }
+}
+
+@keyframes float {
+
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes glow {
+
+  0%,
+  100% {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+  }
+
+  50% {
+    box-shadow: 0 0 30px rgba(59, 130, 246, 0.6);
+  }
+}
+
+@keyframes gradient-shift {
+
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.animate-shake {
+  animation: shake 0.5s ease-in-out;
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-glow {
+  animation: glow 2s ease-in-out infinite;
+}
+
+.animate-gradient {
+  background-size: 200% 200%;
+  animation: gradient-shift 3s ease infinite;
+}
+
+/* Prevent scrolling on login page */
+.login-page {
+  overflow: hidden;
+  height: 100vh;
+}
+
+/* Dashboard animations */
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-30px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-glow {
+
+  0%,
+  100% {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+  }
+
+  50% {
+    box-shadow: 0 0 30px rgba(59, 130, 246, 0.6);
+  }
+}
+
+.animate-slide-in-up {
+  animation: slideInUp 0.6s ease-out;
+}
+
+.animate-slide-in-left {
+  animation: slideInLeft 0.6s ease-out;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.8s ease-out;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Staggered animation delays */
+.delay-100 {
+  animation-delay: 0.1s;
+}
+
+.delay-200 {
+  animation-delay: 0.2s;
+}
+
+.delay-300 {
+  animation-delay: 0.3s;
+}
+
+.delay-400 {
+  animation-delay: 0.4s;
+}
+
+/* Remove spinner arrows from input type number */
+/* Chrome, Safari, Edge, Opera */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
+/* Firefox */
+input[type=number] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* Make all input fields and dropdowns text color bold and black (including disabled ones) */
+.MuiInputBase-input,
+.MuiInputBase-input.Mui-disabled,
+.MuiSelect-select,
+.MuiSelect-select.Mui-disabled,
+input,
+input:disabled,
+select,
+select:disabled,
+textarea,
+textarea:disabled {
+  color: #000000 !important;
+  -webkit-text-fill-color: #000000 !important; /* Force black text in webkit browsers for disabled inputs */
+  opacity: 1 !important; /* Override browser transparency for disabled fields */
+  font-weight: bold !important;
+}
+
+/* Ensure placeholder texts are readable but not full black */
+.MuiInputBase-input::placeholder {
+  color: #666666 !important;
+  -webkit-text-fill-color: #666666 !important;
+  font-weight: normal !important;
+}
+
+/* Force numeric placeholders (like 0) to be black and bold */
+input[type="number"]::placeholder,
+.MuiInputBase-input[type="number"]::placeholder {
+  color: #000000 !important;
+  -webkit-text-fill-color: #000000 !important;
+  font-weight: bold !important;
+  opacity: 1 !important;
+}
+
+/* Keep the transaction type selection input in the header banner white */
+.MuiInputBase-input[placeholder="Select Transaction Type"] {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-weight: bold !important;
+}
+
+/* Hide native select element in MUI Select components to avoid text overlap */
+.MuiSelect-nativeInput {
+  opacity: 0 !important;
+}
+
+/* Ledger Table Hover Highlights */
+.ledger-row-hover {
+  transition: background-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out !important;
+}
+.ledger-row-hover:hover {
+  background-color: #e0f2fe !important; /* Soft sky blue highlight */
+  box-shadow: inset 4px 0 0 #0284c7 !important; /* Accent bar on left */
+}
+
+.ledger-row-hover-credit {
+  transition: background-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out !important;
+}
+.ledger-row-hover-credit:hover {
+  background-color: #dcfce7 !important; /* Soft green highlight */
+  box-shadow: inset 4px 0 0 #16a34a !important; /* Green accent bar on left */
+}
+
+.ledger-row-hover-debit {
+  transition: background-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out !important;
+}
+.ledger-row-hover-debit:hover {
+  background-color: #fee2e2 !important; /* Soft red highlight */
+  box-shadow: inset 4px 0 0 #dc2626 !important; /* Red accent bar on left */
+}
+
+@media print {
+  .ledger-row-hover:hover,
+  .ledger-row-hover-credit:hover,
+  .ledger-row-hover-debit:hover {
+    box-shadow: none !important;
+  }
+  
+  /* Force all printed bill text to be bold and solid black for thermal printers */
+  body, html, table, td, th, div, span, p, label, b, strong, tr {
+    font-weight: 700 !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+/* Force thermal receipt preview text to be bold and solid black */
+.thermal-receipt,
+.thermal-receipt *,
+#receipt-whatsapp-capture,
+#receipt-whatsapp-capture *,
+#receipt-preview,
+#receipt-preview *,
+#payment-receipt-preview,
+#payment-receipt-preview *:not(.remaining-balance-bar):not(.remaining-balance-bar *) {
+  font-weight: 700;
+  color: #000000;
+}
+
+#payment-receipt-preview .remaining-balance-bar,
+#payment-receipt-preview .remaining-balance-bar * {
+  color: #ffffff !important;
+}

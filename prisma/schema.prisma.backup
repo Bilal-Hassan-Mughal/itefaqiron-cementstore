@@ -1,0 +1,512 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  SALESMAN
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+
+enum TransactionType {
+  CASH
+  CHEQUE
+  BANK_TRANSFER
+}
+
+enum PaymentType {
+  CASH
+  CHEQUE
+  BANK_TRANSFER
+}
+
+enum BillType {
+  QUOTATION
+  ORDER
+  BILL
+}
+
+// Models
+model Users {
+  user_id      String     @id @default(cuid())
+  role         UserRole
+  full_name    String
+  email        String     @unique
+  password     String
+  is_verified  Boolean    @default(false)
+  status       UserStatus @default(ACTIVE)
+  last_logged_in DateTime?
+  created_at   DateTime   @default(now())
+  updated_at   DateTime   @updatedAt
+
+  // Relations
+  products     Product[]
+  ledger       Ledger[]
+  expenses     Expense[]
+  sales        Sale[]
+  sale_details SaleDetail[]
+  purchases    Purchase[]
+  purchase_details PurchaseDetail[]
+  cargo        Cargo[]
+  categories   Categories[]
+  sub_categories SubCategory[]
+  customers    Customer[]
+  customer_categories CustomerCategory[]
+  customer_types CustomerType[]
+  cities       City[]
+  vehicles     Vehicle[]
+  loaders      Loader[]
+  sale_returns SaleReturn[]
+  sale_return_details SaleReturnDetail[]
+
+  @@map("users")
+}
+
+model CustomerCategory {
+  cus_cat_id   String   @id @default(cuid())
+  cus_cat_title String
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+  updated_by   String?
+
+  // Relations
+  customers    Customer[]
+  updated_by_user Users? @relation(fields: [updated_by], references: [user_id])
+
+  @@map("customer_categories")
+}
+
+model CustomerType {
+  cus_type_id   String   @id @default(cuid())
+  cus_type_title String
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  updated_by    String?
+
+  // Relations
+  customers     Customer[]
+  updated_by_user Users? @relation(fields: [updated_by], references: [user_id])
+
+  @@map("customer_types")
+}
+
+model City {
+  city_id    String   @id @default(cuid())
+  city_name  String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  updated_by String?
+
+  // Relations
+  customers  Customer[]
+  updated_by_user Users? @relation(fields: [updated_by], references: [user_id])
+
+  @@map("cities")
+}
+
+model Customer {
+  cus_id           String         @id @default(cuid())
+  cus_category     String
+  cus_type         String
+  cus_name         String
+  cus_phone_no     String
+  cus_phone_no2    String?
+  cus_address      String
+  cus_reference    String?
+  cus_account_info String?
+  other            String?
+  cus_balance      Decimal        @default(0)
+  CNIC             String?
+  NTN_NO           String?
+  name_urdu        String?
+  city_id          String?
+  created_at       DateTime       @default(now())
+  updated_at       DateTime       @updatedAt
+  updated_by       String?
+
+  // Relations
+  customer_category CustomerCategory @relation(fields: [cus_category], references: [cus_cat_id])
+  customer_type     CustomerType?    @relation(fields: [cus_type], references: [cus_type_id])
+  city              City?            @relation(fields: [city_id], references: [city_id])
+  ledger           Ledger[]
+  sales            Sale[]            @relation("SaleCustomer")
+  sales_debit      Sale[]            @relation("SaleDebitAccount")
+  sales_credit     Sale[]            @relation("SaleCreditAccount")
+  sale_details     SaleDetail[]
+  split_payments_debit  SplitPayment[] @relation("SplitPaymentDebitAccount")
+  split_payments_credit SplitPayment[] @relation("SplitPaymentCreditAccount")
+  purchases        Purchase[]       @relation("PurchaseCustomer")
+  purchases_debit  Purchase[]       @relation("PurchaseDebitAccount")
+  purchases_credit Purchase[]       @relation("PurchaseCreditAccount")
+  purchase_details PurchaseDetail[]
+  sale_returns     SaleReturn[]
+  sale_returns_debit SaleReturn[]   @relation("SaleReturnDebitAccount")
+  sale_returns_credit SaleReturn[]  @relation("SaleReturnCreditAccount")
+  sale_return_details SaleReturnDetail[]
+  updated_by_user  Users? @relation(fields: [updated_by], references: [user_id])
+
+  @@map("customers")
+}
+
+model Categories {
+  cat_id     String   @id @default(cuid())
+  cat_name   String
+  cat_code   String   @unique
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  updated_by String?
+
+  // Relations
+  sub_categories SubCategory[]
+  products       Product[]
+  updated_by_user Users? @relation(fields: [updated_by], references: [user_id])
+
+  @@map("categories")
+}
+
+model SubCategory {
+  sub_cat_id   String    @id @default(cuid())
+  cat_id       String
+  sub_cat_name String
+  sub_cat_code String    @unique
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+  updated_by   String?
+
+  // Relations
+  category     Categories @relation(fields: [cat_id], references: [cat_id], onDelete: Cascade)
+  products     Product[]
+  updated_by_user Users? @relation(fields: [updated_by], references: [user_id])
+
+  @@map("sub_categories")
+}
+
+model Product {
+  pro_id           String    @id @default(cuid())
+  cat_id           String
+  sub_cat_id       String
+  pro_title        String
+  pro_description  String
+  pro_cost_price   Decimal
+  pro_sale_price   Decimal
+  pro_baser_price  Decimal
+  pro_stock_qnty   Int       @default(0)
+  pro_unit         String
+  pro_packing      String?
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+  updated_by       String?
+
+  // Relations
+  category         Categories  @relation(fields: [cat_id], references: [cat_id])
+  sub_category     SubCategory @relation(fields: [sub_cat_id], references: [sub_cat_id])
+  updated_by_user  Users?       @relation(fields: [updated_by], references: [user_id])
+  sale_details     SaleDetail[]
+  purchase_details PurchaseDetail[]
+  sale_return_details SaleReturnDetail[]
+
+  @@map("products")
+}
+
+model Ledger {
+  l_id             String          @id @default(cuid())
+  cus_id           String
+  opening_balance  Decimal         @default(0)
+  debit_amount     Decimal         @default(0)
+  credit_amount    Decimal         @default(0)
+  closing_balance  Decimal         @default(0)
+  bill_no          String?
+  trnx_type        TransactionType
+  details          String?
+  payments         Decimal         @default(0)
+  updated_by       String?
+  created_at       DateTime        @default(now())
+  updated_at       DateTime        @updatedAt
+
+  // Relations
+  customer         Customer @relation(fields: [cus_id], references: [cus_id])
+  updated_by_user  Users?    @relation(fields: [updated_by], references: [user_id])
+
+  @@map("ledger")
+}
+
+model ExpenseTitle {
+  id         String     @id @default(cuid())
+  title      String     @unique
+  created_at DateTime   @default(now())
+  updated_at DateTime   @updatedAt
+
+  // Relations
+  expenses   Expense[]
+
+  @@map("expense_titles")
+}
+
+model Expense {
+  exp_id     String    @id @default(cuid())
+  exp_title  String
+  exp_type   String
+  exp_detail String?
+  exp_amount Decimal
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+  updated_by String?
+
+  // Relations
+  expense_title ExpenseTitle @relation(fields: [exp_type], references: [id])
+  updated_by_user Users?      @relation(fields: [updated_by], references: [user_id])
+
+  @@map("expenses")
+}
+
+model Sale {
+  sale_id           String      @id @default(cuid())
+  total_amount      Decimal
+  discount          Decimal     @default(0)
+  cus_id            String
+  payment           Decimal
+  payment_type      PaymentType
+  debit_account_id  String?
+  credit_account_id String?
+  loader_id         String?
+  shipping_amount   Decimal     @default(0)
+  bill_type         BillType
+  reference         String?
+  updated_by        String?
+  created_at        DateTime    @default(now())
+  updated_at        DateTime    @updatedAt
+
+  // Relations
+  customer          Customer    @relation(fields: [cus_id], references: [cus_id], name: "SaleCustomer")
+  debit_account     Customer?   @relation(fields: [debit_account_id], references: [cus_id], name: "SaleDebitAccount")
+  credit_account    Customer?   @relation(fields: [credit_account_id], references: [cus_id], name: "SaleCreditAccount")
+  loader            Loader?     @relation(fields: [loader_id], references: [loader_id])
+  updated_by_user   Users?      @relation(fields: [updated_by], references: [user_id])
+  sale_details      SaleDetail[]
+  split_payments    SplitPayment[]
+  sale_returns      SaleReturn[]
+
+  @@map("sales")
+}
+
+model SaleDetail {
+  sale_detail_id String    @id @default(cuid())
+  sale_id        String
+  pro_id         String
+  vehicle_no     String?
+  qnty           Int
+  unit           String
+  unit_rate      Decimal
+  total_amount   Decimal
+  discount       Decimal   @default(0)
+  net_total      Decimal
+  cus_id         String
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+  updated_by     String?
+
+  // Relations
+  sale           Sale      @relation(fields: [sale_id], references: [sale_id], onDelete: Cascade)
+  product        Product   @relation(fields: [pro_id], references: [pro_id])
+  customer       Customer  @relation(fields: [cus_id], references: [cus_id])
+  updated_by_user Users?    @relation(fields: [updated_by], references: [user_id])
+
+  @@map("sale_details")
+}
+
+model SplitPayment {
+  split_payment_id  String      @id @default(cuid())
+  sale_id           String
+  amount            Decimal
+  payment_type      PaymentType
+  debit_account_id  String?
+  credit_account_id String?
+  reference         String?
+  created_at        DateTime     @default(now())
+  updated_at        DateTime     @updatedAt
+
+  // Relations
+  sale              Sale         @relation(fields: [sale_id], references: [sale_id], onDelete: Cascade)
+  debit_account     Customer?    @relation(fields: [debit_account_id], references: [cus_id], name: "SplitPaymentDebitAccount")
+  credit_account    Customer?    @relation(fields: [credit_account_id], references: [cus_id], name: "SplitPaymentCreditAccount")
+
+  @@map("split_payments")
+}
+
+model Purchase {
+  pur_id          String      @id @default(cuid())
+  cus_id          String
+  debit_account_id String?
+  credit_account_id String?
+  total_amount    Decimal
+  unloading_amount Decimal     @default(0)
+  fare_amount     Decimal      @default(0)
+  discount        Decimal      @default(0)
+  net_total       Decimal
+  payment         Decimal
+  payment_type    PaymentType
+  vehicle_no      String?
+  created_at      DateTime     @default(now())
+  updated_at      DateTime     @updatedAt
+  updated_by      String?
+
+  // Relations
+  customer        Customer     @relation(fields: [cus_id], references: [cus_id], name: "PurchaseCustomer")
+  debit_account   Customer?    @relation(fields: [debit_account_id], references: [cus_id], name: "PurchaseDebitAccount")
+  credit_account  Customer?    @relation(fields: [credit_account_id], references: [cus_id], name: "PurchaseCreditAccount")
+  updated_by_user Users?       @relation(fields: [updated_by], references: [user_id])
+  purchase_details PurchaseDetail[]
+
+  @@map("purchases")
+}
+
+model PurchaseDetail {
+  pur_detail_id String    @id @default(cuid())
+  pur_id        String
+  vehicle_no    String?
+  cus_id        String
+  pro_id        String
+  qnty          Int
+  unit          String
+  unit_rate     Decimal
+  total_amount  Decimal
+  discount      Decimal   @default(0)
+  net_total     Decimal
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  updated_by    String?
+
+  // Relations
+  purchase      Purchase  @relation(fields: [pur_id], references: [pur_id], onDelete: Cascade)
+  customer      Customer  @relation(fields: [cus_id], references: [cus_id])
+  product       Product   @relation(fields: [pro_id], references: [pro_id])
+  updated_by_user Users?   @relation(fields: [updated_by], references: [user_id])
+
+  @@map("purchase_details")
+}
+
+model Vehicle {
+  v_id          String   @id @default(cuid())
+  v_vehicle_no  String   @unique
+  v_driver_no   String?
+  v_driver_name String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  updated_by    String?
+
+  // Relations
+  updated_by_user Users? @relation(fields: [updated_by], references: [user_id])
+
+  @@map("vehicles")
+}
+
+model Loader {
+  loader_id      String   @id @default(cuid())
+  loader_name    String
+  loader_number  String   @unique
+  loader_phone   String?
+  loader_balance Decimal  @default(0)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  updated_by     String?
+
+  // Relations
+  sales          Sale[]
+  sale_returns   SaleReturn[]
+  updated_by_user Users? @relation(fields: [updated_by], references: [user_id])
+
+  @@map("loaders")
+}
+
+model Cargo {
+  cargo_id           String   @id @default(cuid())
+  vehicle_no         String
+  total_cargo_fare   Decimal  @default(0)
+  exp1               Decimal? @default(0)
+  exp2               Decimal? @default(0)
+  exp3               Decimal? @default(0)
+  exp4               Decimal? @default(0)
+  exp5               Decimal? @default(0)
+  exp6               Decimal? @default(0)
+  others             Decimal? @default(0)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+  updated_by         String?
+
+  // Relations
+  updated_by_user    Users?    @relation(fields: [updated_by], references: [user_id])
+
+  @@map("cargo")
+}
+
+model SaleReturn {
+  return_id         String      @id @default(cuid())
+  sale_id           String
+  cus_id            String
+  total_amount      Decimal
+  discount          Decimal     @default(0)
+  payment           Decimal
+  payment_type      PaymentType
+  debit_account_id  String?
+  credit_account_id String?
+  loader_id         String?
+  shipping_amount   Decimal     @default(0)
+  reason            String?
+  reference         String?
+  updated_by        String?
+  created_at        DateTime    @default(now())
+  updated_at        DateTime    @updatedAt
+
+  // Relations
+  sale              Sale        @relation(fields: [sale_id], references: [sale_id])
+  customer          Customer    @relation(fields: [cus_id], references: [cus_id])
+  debit_account     Customer?   @relation(fields: [debit_account_id], references: [cus_id], name: "SaleReturnDebitAccount")
+  credit_account    Customer?   @relation(fields: [credit_account_id], references: [cus_id], name: "SaleReturnCreditAccount")
+  loader            Loader?     @relation(fields: [loader_id], references: [loader_id])
+  updated_by_user   Users?      @relation(fields: [updated_by], references: [user_id])
+  return_details    SaleReturnDetail[]
+
+  @@map("sale_returns")
+}
+
+model SaleReturnDetail {
+  return_detail_id  String      @id @default(cuid())
+  return_id         String
+  pro_id            String
+  qnty              Int
+  unit              String
+  unit_rate         Decimal
+  total_amount      Decimal
+  discount          Decimal     @default(0)
+  net_total         Decimal
+  cus_id            String
+  created_at        DateTime    @default(now())
+  updated_at        DateTime    @updatedAt
+  updated_by        String?
+
+  // Relations
+  sale_return       SaleReturn  @relation(fields: [return_id], references: [return_id], onDelete: Cascade)
+  product           Product     @relation(fields: [pro_id], references: [pro_id])
+  customer          Customer    @relation(fields: [cus_id], references: [cus_id])
+  updated_by_user   Users?      @relation(fields: [updated_by], references: [user_id])
+
+  @@map("sale_return_details")
+}

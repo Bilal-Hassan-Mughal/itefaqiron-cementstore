@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//d/d/new_ittefaq_iron/itefaq builders/itefaq builders/src/app/**)",
+      "Bash(powershell -Command \"Get-PnpDevice -Class Biometric | Format-List Status, FriendlyName, InstanceId\")"
+    ]
+  }
+}

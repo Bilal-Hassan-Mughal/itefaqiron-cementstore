@@ -1,0 +1,1341 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Branch {
+  branch_id           Int                @id @default(autoincrement())
+  branch_code         String             @unique @db.VarChar(20)
+  branch_name         String
+  address             String?
+  phone               String?
+  status              BranchStatus       @default(ACTIVE)
+  /** Physical table prefix for dedicated tables (e.g. lhr → lhr_sales). Null = legacy shared tables. */
+  table_prefix        String?            @unique @db.VarChar(20)
+  /** SHARED = main DB + branch_id; DEDICATED = own DB; PREFIXED = own table set in same DB */
+  isolation_mode      BranchIsolation    @default(SHARED)
+  db_host             String?            @db.VarChar(255)
+  db_port             Int                @default(3306)
+  db_name             String?            @db.VarChar(128)
+  db_user             String?            @db.VarChar(128)
+  db_password         String?            @db.Text
+  tables_provisioned  Boolean            @default(false)
+  provision_status    ProvisionStatus    @default(PENDING)
+  provision_message   String?            @db.Text
+  created_at          DateTime           @default(now())
+  updated_at          DateTime           @updatedAt
+  users               Users[]
+  customer_categories CustomerCategory[]
+  customer_types      CustomerType[]
+  cities              City[]
+  customers           Customer[]
+  categories          Categories[]
+  sub_categories      SubCategory[]
+  products            Product[]
+  ledger              Ledger[]
+  expense_titles      ExpenseTitle[]
+  expenses            Expense[]
+  sales               Sale[]
+  purchases           Purchase[]
+  sale_returns        SaleReturn[]
+  purchase_returns    PurchaseReturn[]
+  hold_bills          HoldBill[]
+  day_ends            DayEnd[]
+  journals            Journal[]
+  payments            Payment[]
+  stores              Store[]
+  stock_transfers     StockTransfer[]
+  draft_sales         DraftSale[]
+  vehicles            Vehicle[]
+  loaders             Loader[]
+  cargo               Cargo[]
+  packages            Package[]
+  subscriptions       Subscription[]
+  employees           Employee[]
+  hr_settings         HrSettings[]
+
+  @@map("branches")
+}
+
+model Users {
+  user_id             Int                @id @default(autoincrement())
+  role                UserRole
+  branch_id           Int?
+  full_name           String
+  email               String             @unique
+  password            String
+  is_verified         Boolean            @default(false)
+  status              UserStatus         @default(ACTIVE)
+  last_logged_in       DateTime?
+  pin_code             String?
+  fingerprint_template String?            @db.LongText
+  fingerprint_enrolled Boolean            @default(false)
+  allowed_modules      String?            @db.Text
+  fingerprints        Fingerprint[]
+  created_at           DateTime           @default(now())
+  updated_at           DateTime           @updatedAt
+  cargo               Cargo[]
+  categories          Categories[]
+  cities              City[]
+  customer_categories CustomerCategory[]
+  customer_types      CustomerType[]
+  customers           Customer[]
+  day_ends            DayEnd[]
+  draft_sales         DraftSale[]
+  expenses            Expense[]
+  hold_bill_details   HoldBillDetail[]
+  hold_bills          HoldBill[]
+  journals_created    Journal[]          @relation("JournalCreatedBy")
+  journals_posted     Journal[]          @relation("JournalPostedBy")
+  ledger              Ledger[]
+  loaders             Loader[]
+  packages            Package[]
+  products            Product[]
+  purchase_details    PurchaseDetail[]
+  purchases           Purchase[]
+  sale_details        SaleDetail[]
+  sale_return_details SaleReturnDetail[]
+  sale_returns        SaleReturn[]
+  sales               Sale[]
+  stock_transfers     StockTransfer[]
+  store_stocks        StoreStock[]
+  sub_categories      SubCategory[]
+  subscriptions       Subscription[]
+  vehicles            Vehicle[]
+  payments            Payment[]
+  stock_adjustments   StockAdjustment[]
+  branch              Branch?            @relation(fields: [branch_id], references: [branch_id])
+
+  @@index([branch_id], map: "users_branch_id_fkey")
+  @@map("users")
+}
+
+// SourceAFIS templates + raw PNG captures for per-user step-up auth.
+// (`Users.fingerprint_template` / `fingerprint_enrolled` are kept for legacy UI flags.)
+model Fingerprint {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  finger     String   @db.VarChar(40)
+  format     String   @db.VarChar(40)
+  template   String   @db.LongText
+  descriptor String?  @db.LongText
+  created_at DateTime @default(now())
+  user       Users    @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@map("fingerprints")
+}
+
+model CustomerCategory {
+  cus_cat_id      Int        @id
+  branch_id       Int        @default(1)
+  cus_cat_title   String
+  created_at      DateTime   @default(now())
+  updated_at      DateTime   @updatedAt
+  updated_by      Int?
+  updated_by_user Users?     @relation(fields: [updated_by], references: [user_id])
+  branch          Branch     @relation(fields: [branch_id], references: [branch_id])
+  customers       Customer[]
+
+  @@index([branch_id], map: "customer_categories_branch_id_fkey")
+  @@index([updated_by], map: "customer_categories_updated_by_fkey")
+  @@map("customer_categories")
+}
+
+model CustomerType {
+  cus_type_id     Int        @id
+  branch_id       Int        @default(1)
+  cus_type_title  String
+  created_at      DateTime   @default(now())
+  updated_at      DateTime   @updatedAt
+  updated_by      Int?
+  updated_by_user Users?     @relation(fields: [updated_by], references: [user_id])
+  branch          Branch     @relation(fields: [branch_id], references: [branch_id])
+  customers       Customer[]
+
+  @@index([branch_id], map: "customer_types_branch_id_fkey")
+  @@index([updated_by], map: "customer_types_updated_by_fkey")
+  @@map("customer_types")
+}
+
+model City {
+  city_id         Int        @id
+  branch_id       Int        @default(1)
+  city_name       String
+  created_at      DateTime   @default(now())
+  updated_at      DateTime   @updatedAt
+  updated_by      Int?
+  updated_by_user Users?     @relation(fields: [updated_by], references: [user_id])
+  branch          Branch     @relation(fields: [branch_id], references: [branch_id])
+  customers       Customer[]
+
+  @@index([branch_id], map: "cities_branch_id_fkey")
+  @@index([updated_by], map: "cities_updated_by_fkey")
+  @@map("cities")
+}
+
+model Customer {
+  cus_id                Int                @id
+  branch_id             Int                @default(1)
+  cus_category          Int
+  cus_type              Int
+  cus_name              String
+  cus_phone_no          String
+  cus_phone_no2         String?
+  cus_address           String
+  cus_reference         String?
+  cus_account_info      String?
+  other                 String?
+  cus_balance           Float              @default(0)
+  CNIC                  String?
+  NTN_NO                String?
+  name_urdu             String?
+  city_id               Int?
+  created_at            DateTime           @default(now())
+  updated_at            DateTime           @updatedAt
+  updated_by            Int?
+  branch                Branch             @relation(fields: [branch_id], references: [branch_id])
+  city                  City?              @relation(fields: [city_id], references: [city_id])
+  customer_category     CustomerCategory   @relation(fields: [cus_category], references: [cus_cat_id])
+  customer_type         CustomerType       @relation(fields: [cus_type], references: [cus_type_id])
+  updated_by_user       Users?             @relation(fields: [updated_by], references: [user_id])
+  hold_bill_details     HoldBillDetail[]
+  hold_bills_credit     HoldBill[]         @relation("HoldBillCreditAccount")
+  hold_bills            HoldBill[]
+  hold_bills_debit      HoldBill[]         @relation("HoldBillDebitAccount")
+  journal_details       JournalDetail[]
+  ledger                Ledger[]
+  purchase_details      PurchaseDetail[]
+  purchases_credit      Purchase[]         @relation("PurchaseCreditAccount")
+  purchases             Purchase[]         @relation("PurchaseCustomer")
+  purchases_debit       Purchase[]         @relation("PurchaseDebitAccount")
+  purchases_cargo       Purchase[]         @relation("PurchaseCargoAccount")
+  sale_details          SaleDetail[]
+  sale_return_details   SaleReturnDetail[]
+  sale_returns_credit   SaleReturn[]       @relation("SaleReturnCreditAccount")
+  sale_returns          SaleReturn[]
+  sale_returns_debit    SaleReturn[]       @relation("SaleReturnDebitAccount")
+  sales_credit          Sale[]             @relation("SaleCreditAccount")
+  sales                 Sale[]             @relation("SaleCustomer")
+  sales_debit           Sale[]             @relation("SaleDebitAccount")
+  split_payments_credit SplitPayment[]     @relation("SplitPaymentCreditAccount")
+  split_payments_debit  SplitPayment[]     @relation("SplitPaymentDebitAccount")
+  subscriptions         Subscription[]
+  draft_sales           DraftSale[]
+  expenses_paid         Expense[]          @relation("ExpensePaidFrom")
+  expenses_bank_paid    Expense[]          @relation("ExpenseBankPaidFrom")
+  payments_account      Payment[]          @relation("PaymentAccount")
+  payments_cash         Payment[]          @relation("PaymentCashAccount")
+  payments_bank         Payment[]          @relation("PaymentBankAccount")
+  payment_details       PaymentDetail[]
+
+  @@index([branch_id], map: "customers_branch_id_fkey")
+  @@index([city_id], map: "customers_city_id_fkey")
+  @@index([cus_category], map: "customers_cus_category_fkey")
+  @@index([cus_type], map: "customers_cus_type_fkey")
+  @@index([updated_by], map: "customers_updated_by_fkey")
+  @@map("customers")
+}
+
+model Categories {
+  cat_id          Int           @id
+  branch_id       Int           @default(1)
+  cat_name        String
+  cat_code        String        @unique
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+  updated_by      Int?
+  branch          Branch        @relation(fields: [branch_id], references: [branch_id])
+  updated_by_user Users?        @relation(fields: [updated_by], references: [user_id])
+  products        Product[]
+  sub_categories  SubCategory[]
+
+  @@index([branch_id], map: "categories_branch_id_fkey")
+  @@index([updated_by], map: "categories_updated_by_fkey")
+  @@map("categories")
+}
+
+model SubCategory {
+  sub_cat_id      Int        @id
+  branch_id       Int        @default(1)
+  cat_id          Int
+  sub_cat_name    String
+  sub_cat_code    String     @unique
+  created_at      DateTime   @default(now())
+  updated_at      DateTime   @updatedAt
+  updated_by      Int?
+  branch          Branch     @relation(fields: [branch_id], references: [branch_id])
+  products        Product[]
+  category        Categories @relation(fields: [cat_id], references: [cat_id], onDelete: Cascade)
+  updated_by_user Users?     @relation(fields: [updated_by], references: [user_id])
+
+  @@index([branch_id], map: "sub_categories_branch_id_fkey")
+  @@index([cat_id], map: "sub_categories_cat_id_fkey")
+  @@index([updated_by], map: "sub_categories_updated_by_fkey")
+  @@map("sub_categories")
+}
+
+model Product {
+  pro_id                  Int                    @id
+  branch_id               Int                    @default(1)
+  cat_id                  Int
+  sub_cat_id              Int
+  pro_title               String
+  pro_description         String
+  pro_cost_price                Decimal   @db.Decimal(18, 2)
+  pro_sale_price                Decimal   @db.Decimal(18, 2)
+  pro_baser_price               Decimal   @db.Decimal(18, 2)
+  pro_crate                     Decimal?  @default(0.00) @db.Decimal(10, 2)
+  pro_stock_qnty                Decimal   @default(0.00) @db.Decimal(18, 2)
+  low_stock_quantity      Int?                   @default(10) @map("pro_low_stock")
+  pro_unit                String
+  pro_packing             String?
+  created_at              DateTime               @default(now())
+  updated_at              DateTime               @updatedAt
+  updated_by              Int?
+  branch                  Branch                 @relation(fields: [branch_id], references: [branch_id])
+  hold_bill_details       HoldBillDetail[]
+  category                Categories             @relation(fields: [cat_id], references: [cat_id])
+  sub_category            SubCategory            @relation(fields: [sub_cat_id], references: [sub_cat_id])
+  updated_by_user         Users?                 @relation(fields: [updated_by], references: [user_id])
+  purchase_details        PurchaseDetail[]
+  purchase_return_details PurchaseReturnDetail[]
+  sale_details            SaleDetail[]
+  sale_return_details     SaleReturnDetail[]
+  stock_transfer_details  StockTransferDetail[]
+  store_stocks            StoreStock[]
+  stock_adjustments       StockAdjustment[]
+
+  @@index([branch_id], map: "products_branch_id_fkey")
+  @@index([cat_id], map: "products_cat_id_fkey")
+  @@index([sub_cat_id], map: "products_sub_cat_id_fkey")
+  @@index([updated_by], map: "products_updated_by_fkey")
+  @@map("products")
+}
+
+model Ledger {
+  l_id            Int             @id
+  branch_id       Int             @default(1)
+  cus_id          Int
+  opening_balance Float           @default(0)
+  debit_amount    Float           @default(0)
+  credit_amount   Float           @default(0)
+  closing_balance Float           @default(0)
+  bill_no         String?
+  trnx_type       TransactionType
+  details         String?
+  payments        Float           @default(0)
+  cash_payment    Float           @default(0)
+  bank_payment    Float           @default(0)
+  updated_by      Int?
+  ledger_type     String?
+  created_at      DateTime        @default(now())
+  updated_at      DateTime        @updatedAt
+  branch          Branch          @relation(fields: [branch_id], references: [branch_id])
+  customer        Customer        @relation(fields: [cus_id], references: [cus_id])
+  updated_by_user Users?          @relation(fields: [updated_by], references: [user_id])
+
+  @@index([branch_id], map: "ledger_branch_id_fkey")
+  @@index([cus_id], map: "ledger_cus_id_fkey")
+  @@index([updated_by], map: "ledger_updated_by_fkey")
+  @@index([created_at])
+  @@map("ledger")
+}
+
+model ExpenseTitle {
+  id         Int       @id
+  branch_id  Int       @default(1)
+  title      String
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+  branch     Branch    @relation(fields: [branch_id], references: [branch_id])
+  expenses   Expense[]
+
+  @@index([branch_id], map: "expense_titles_branch_id_fkey")
+  @@map("expense_titles")
+}
+
+model Expense {
+  exp_id                Int          @id
+  branch_id             Int          @default(1)
+  exp_title             String
+  exp_type              Int
+  exp_detail            String?
+  exp_amount                    Decimal   @db.Decimal(18, 2)
+  is_paid               Boolean      @default(false)
+  paid_from_account_id  Int?
+  cash_amount                   Decimal   @default(0.00) @db.Decimal(10, 2)
+  bank_account_id       Int?
+  bank_amount                   Decimal   @default(0.00) @db.Decimal(10, 2)
+  payment_date          DateTime?
+  payment_reference     String?
+  created_at            DateTime     @default(now())
+  updated_at            DateTime     @updatedAt
+  updated_by            Int?
+  branch                Branch       @relation(fields: [branch_id], references: [branch_id])
+  expense_title         ExpenseTitle @relation(fields: [exp_type], references: [id])
+  paid_from_account     Customer?    @relation("ExpensePaidFrom", fields: [paid_from_account_id], references: [cus_id])
+  bank_account          Customer?    @relation("ExpenseBankPaidFrom", fields: [bank_account_id], references: [cus_id])
+  updated_by_user       Users?       @relation(fields: [updated_by], references: [user_id])
+
+  @@index([branch_id], map: "expenses_branch_id_fkey")
+  @@index([exp_type], map: "expenses_exp_type_fkey")
+  @@index([updated_by], map: "expenses_updated_by_fkey")
+  @@index([paid_from_account_id], map: "expenses_paid_from_account_id_fkey")
+  @@index([bank_account_id], map: "expenses_bank_account_id_fkey")
+  @@map("expenses")
+}
+
+model Sale {
+  sale_id           Int            @id @default(autoincrement())
+  branch_id         Int            @default(1)
+  total_amount                  Decimal   @db.Decimal(18, 2)
+  discount                      Decimal   @default(0.00) @db.Decimal(18, 2)
+  cus_id            Int
+  store_id          Int?
+  payment                       Decimal   @db.Decimal(18, 2)
+  payment_type      PaymentType
+  cash_payment      Float          @default(0)
+  bank_payment      Float          @default(0)
+  bank_title        String?
+  advance_payment   Float          @default(0)
+  previous_balance  Float          @default(0)
+  debit_account_id  Int?
+  credit_account_id Int?
+  loader_id         Int?
+  shipping_amount   Float          @default(0)
+  labour_charges    Float          @default(0)
+  bill_type         BillType
+  bill_number       Int?
+  reference         String?
+  updated_by        Int?
+  created_at        DateTime       @default(now())
+  updated_at        DateTime       @updatedAt
+  sale_details      SaleDetail[]
+  sale_returns      SaleReturn[]
+  branch            Branch         @relation(fields: [branch_id], references: [branch_id])
+  credit_account    Customer?      @relation("SaleCreditAccount", fields: [credit_account_id], references: [cus_id])
+  customer          Customer       @relation("SaleCustomer", fields: [cus_id], references: [cus_id])
+  debit_account     Customer?      @relation("SaleDebitAccount", fields: [debit_account_id], references: [cus_id])
+  loader            Loader?        @relation(fields: [loader_id], references: [loader_id])
+  store             Store?         @relation(fields: [store_id], references: [storeid])
+  updated_by_user   Users?         @relation(fields: [updated_by], references: [user_id])
+  split_payments    SplitPayment[]
+
+  @@index([branch_id], map: "sales_branch_id_fkey")
+  @@index([credit_account_id], map: "sales_credit_account_id_fkey")
+  @@index([cus_id], map: "sales_cus_id_fkey")
+  @@index([debit_account_id], map: "sales_debit_account_id_fkey")
+  @@index([loader_id], map: "sales_loader_id_fkey")
+  @@index([store_id], map: "sales_store_id_fkey")
+  @@index([updated_by], map: "sales_updated_by_fkey")
+  @@map("sales")
+}
+
+model SaleDetail {
+  sale_detail_id  Int      @id @default(autoincrement())
+  sale_id         Int
+  store_id        Int?
+  pro_id          Int
+  vehicle_no      String?
+  qnty                          Decimal   @db.Decimal(18, 2)
+  unit            String
+  unit_rate                     Decimal   @db.Decimal(18, 2)
+  total_amount                  Decimal   @db.Decimal(18, 2)
+  discount                      Decimal   @default(0.00) @db.Decimal(18, 2)
+  net_total                     Decimal   @db.Decimal(18, 2)
+  cus_id          Int
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  updated_by      Int?
+  customer        Customer @relation(fields: [cus_id], references: [cus_id])
+  product         Product  @relation(fields: [pro_id], references: [pro_id])
+  sale            Sale     @relation(fields: [sale_id], references: [sale_id], onDelete: Cascade)
+  store           Store?   @relation(fields: [store_id], references: [storeid])
+  updated_by_user Users?   @relation(fields: [updated_by], references: [user_id])
+
+  @@index([cus_id], map: "sale_details_cus_id_fkey")
+  @@index([pro_id], map: "sale_details_pro_id_fkey")
+  @@index([sale_id], map: "sale_details_sale_id_fkey")
+  @@index([store_id], map: "sale_details_store_id_fkey")
+  @@index([updated_by], map: "sale_details_updated_by_fkey")
+  @@map("sale_details")
+}
+
+model SplitPayment {
+  split_payment_id  Int         @id @default(autoincrement())
+  sale_id           Int
+  amount                        Decimal   @db.Decimal(18, 2)
+  payment_type      PaymentType
+  debit_account_id  Int?
+  credit_account_id Int?
+  reference         String?
+  created_at        DateTime    @default(now())
+  updated_at        DateTime    @updatedAt
+  credit_account    Customer?   @relation("SplitPaymentCreditAccount", fields: [credit_account_id], references: [cus_id])
+  debit_account     Customer?   @relation("SplitPaymentDebitAccount", fields: [debit_account_id], references: [cus_id])
+  sale              Sale        @relation(fields: [sale_id], references: [sale_id], onDelete: Cascade)
+
+  @@index([credit_account_id], map: "split_payments_credit_account_id_fkey")
+  @@index([debit_account_id], map: "split_payments_debit_account_id_fkey")
+  @@index([sale_id], map: "split_payments_sale_id_fkey")
+  @@map("split_payments")
+}
+
+model Purchase {
+  pur_id            Int              @id @default(autoincrement())
+  branch_id         Int              @default(1)
+  cus_id            Int
+  debit_account_id  Int?
+  credit_account_id Int?
+  cargo_account_id  Int?
+  total_amount                  Decimal   @db.Decimal(18, 2)
+  unloading_amount              Decimal   @default(0.00) @db.Decimal(18, 2)
+  fare_amount                   Decimal   @default(0.00) @db.Decimal(18, 2)
+  transport_amount              Decimal?  @default(0.00) @db.Decimal(10, 2)
+  labour_amount                 Decimal?  @default(0.00) @db.Decimal(10, 2)
+  out_labour_amount             Decimal?  @default(0.00) @db.Decimal(10, 2)
+  out_delivery_amount           Decimal?  @default(0.00) @db.Decimal(10, 2)
+  include_cargo_in_costprice Boolean @default(false)
+  incity_own_labour             Decimal?  @default(0.00) @db.Decimal(10, 2)
+  incity_own_delivery           Decimal?  @default(0.00) @db.Decimal(10, 2)
+  incity_charges_total          Decimal?  @default(0.00) @db.Decimal(10, 2)
+  discount                      Decimal   @default(0.00) @db.Decimal(18, 2)
+  net_total                     Decimal   @db.Decimal(18, 2)
+  payment                       Decimal   @db.Decimal(18, 2)
+  payment_type      PaymentType
+  vehicle_no        String?
+  invoice_number    String?          @db.VarChar(255)
+  created_at        DateTime         @default(now())
+  updated_at        DateTime         @updatedAt
+  updated_by        Int?
+  store_id          Int?
+  bank_payment                  Decimal?  @default(0.00) @db.Decimal(10, 2)
+  bank_title        String?          @db.VarChar(255)
+  cash_payment                  Decimal?  @default(0.00) @db.Decimal(10, 2)
+  purchase_details  PurchaseDetail[]
+  purchase_returns  PurchaseReturn[]
+  branch            Branch           @relation(fields: [branch_id], references: [branch_id])
+  credit_account    Customer?        @relation("PurchaseCreditAccount", fields: [credit_account_id], references: [cus_id])
+  cargo_account     Customer?        @relation("PurchaseCargoAccount", fields: [cargo_account_id], references: [cus_id])
+  cargo_account_ids String?          @db.LongText
+  customer          Customer         @relation("PurchaseCustomer", fields: [cus_id], references: [cus_id])
+  debit_account     Customer?        @relation("PurchaseDebitAccount", fields: [debit_account_id], references: [cus_id])
+  store             Store?           @relation(fields: [store_id], references: [storeid])
+  updated_by_user   Users?           @relation(fields: [updated_by], references: [user_id])
+
+  @@index([branch_id], map: "purchases_branch_id_fkey")
+  @@index([credit_account_id], map: "purchases_credit_account_id_fkey")
+  @@index([cargo_account_id], map: "purchases_cargo_account_id_fkey")
+  @@index([cus_id], map: "purchases_cus_id_fkey")
+  @@index([debit_account_id], map: "purchases_debit_account_id_fkey")
+  @@index([store_id], map: "purchases_store_id_fkey")
+  @@index([updated_by], map: "purchases_updated_by_fkey")
+  @@map("purchases")
+}
+
+model PurchaseDetail {
+  pur_detail_id   Int      @id @default(autoincrement())
+  pur_id          Int
+  vehicle_no      String?
+  cus_id          Int
+  pro_id          Int
+  qnty                          Decimal   @db.Decimal(18, 2)
+  unit            String
+  unit_rate                     Decimal   @db.Decimal(18, 2)
+  prate                         Decimal?  @default(0.00) @db.Decimal(10, 2)
+  crate                         Decimal?  @default(0.00) @db.Decimal(10, 2)
+  total_amount                  Decimal   @db.Decimal(18, 2)
+  discount                      Decimal   @default(0.00) @db.Decimal(18, 2)
+  net_total                     Decimal   @db.Decimal(18, 2)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  updated_by      Int?
+  customer        Customer @relation(fields: [cus_id], references: [cus_id])
+  product         Product  @relation(fields: [pro_id], references: [pro_id])
+  purchase        Purchase @relation(fields: [pur_id], references: [pur_id], onDelete: Cascade)
+  updated_by_user Users?   @relation(fields: [updated_by], references: [user_id])
+
+  @@index([cus_id], map: "purchase_details_cus_id_fkey")
+  @@index([pro_id], map: "purchase_details_pro_id_fkey")
+  @@index([pur_id], map: "purchase_details_pur_id_fkey")
+  @@index([updated_by], map: "purchase_details_updated_by_fkey")
+  @@map("purchase_details")
+}
+
+model PurchaseReturn {
+  id                  Int                    @id @default(autoincrement())
+  branch_id           Int                    @default(1)
+  purchase_id         Int
+  return_date         DateTime
+  return_reason       String
+  total_return_amount           Decimal   @default(0.00) @db.Decimal(10, 2)
+  notes               String?
+  status              String                 @default("COMPLETED")
+  created_at          DateTime               @default(now())
+  updated_at          DateTime               @updatedAt
+  return_details      PurchaseReturnDetail[]
+  branch              Branch                 @relation(fields: [branch_id], references: [branch_id])
+  purchase            Purchase               @relation(fields: [purchase_id], references: [pur_id], onDelete: Cascade)
+
+  @@index([branch_id], map: "purchase_returns_branch_id_fkey")
+  @@index([purchase_id], map: "purchase_returns_purchase_id_fkey")
+  @@map("purchase_returns")
+}
+
+model PurchaseReturnDetail {
+  id              Int            @id @default(autoincrement())
+  return_id       Int
+  pro_id          Int
+  return_quantity               Decimal   @db.Decimal(18, 2)
+  unit_rate                     Decimal   @db.Decimal(10, 2)
+  return_amount                 Decimal   @db.Decimal(10, 2)
+  created_at      DateTime       @default(now())
+  updated_at      DateTime       @updatedAt
+  product         Product        @relation(fields: [pro_id], references: [pro_id])
+  purchase_return PurchaseReturn @relation(fields: [return_id], references: [id], onDelete: Cascade)
+
+  @@index([return_id], map: "purchase_return_details_return_id_fkey")
+  @@index([pro_id], map: "purchase_return_details_pro_id_fkey")
+  @@map("purchase_return_details")
+}
+
+model Vehicle {
+  v_id            Int      @id @default(autoincrement())
+  branch_id       Int      @default(1)
+  v_vehicle_no    String
+  v_driver_no     String?
+  v_driver_name   String?
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  updated_by      Int?
+  branch          Branch   @relation(fields: [branch_id], references: [branch_id])
+  updated_by_user Users?   @relation(fields: [updated_by], references: [user_id])
+
+  @@index([branch_id], map: "vehicles_branch_id_fkey")
+  @@index([updated_by], map: "vehicles_updated_by_fkey")
+  @@map("vehicles")
+}
+
+model Loader {
+  loader_id       Int          @id @default(autoincrement())
+  branch_id       Int          @default(1)
+  loader_name     String
+  loader_number   String
+  loader_phone    String?
+  loader_balance                Decimal   @default(0.00) @db.Decimal(18, 2)
+  created_at      DateTime     @default(now())
+  updated_at      DateTime     @updatedAt
+  updated_by      Int?
+  branch          Branch       @relation(fields: [branch_id], references: [branch_id])
+  hold_bills      HoldBill[]
+  updated_by_user Users?       @relation(fields: [updated_by], references: [user_id])
+  sale_returns    SaleReturn[]
+  sales           Sale[]
+
+  @@index([branch_id], map: "loaders_branch_id_fkey")
+  @@index([updated_by], map: "loaders_updated_by_fkey")
+  @@map("loaders")
+}
+
+model Cargo {
+  cargo_id         Int      @id @default(autoincrement())
+  branch_id        Int      @default(1)
+  vehicle_no       String
+  total_cargo_fare              Decimal   @default(0.00) @db.Decimal(18, 2)
+  exp1                          Decimal?  @default(0.00) @db.Decimal(18, 2)
+  exp2                          Decimal?  @default(0.00) @db.Decimal(18, 2)
+  exp3                          Decimal?  @default(0.00) @db.Decimal(18, 2)
+  exp4                          Decimal?  @default(0.00) @db.Decimal(18, 2)
+  exp5                          Decimal?  @default(0.00) @db.Decimal(18, 2)
+  exp6                          Decimal?  @default(0.00) @db.Decimal(18, 2)
+  others                        Decimal?  @default(0.00) @db.Decimal(18, 2)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+  updated_by       Int?
+  branch           Branch   @relation(fields: [branch_id], references: [branch_id])
+  updated_by_user  Users?   @relation(fields: [updated_by], references: [user_id])
+
+  @@index([branch_id], map: "cargo_branch_id_fkey")
+  @@index([updated_by], map: "cargo_updated_by_fkey")
+  @@map("cargo")
+}
+
+model SaleReturn {
+  return_id         Int                @id @default(autoincrement())
+  branch_id         Int                @default(1)
+  sale_id           Int?
+  cus_id            Int
+  total_amount                  Decimal   @db.Decimal(18, 2)
+  discount                      Decimal   @default(0.00) @db.Decimal(18, 2)
+  payment                       Decimal   @db.Decimal(18, 2)
+  payment_type      PaymentType
+  debit_account_id  Int?
+  credit_account_id Int?
+  loader_id         Int?
+  labour_charges                Decimal   @default(0.00) @db.Decimal(18, 2)
+  shipping_amount               Decimal   @default(0.00) @db.Decimal(18, 2)
+  reason            String?
+  reference         String?
+  manual_sale_inv   String?
+  updated_by        Int?
+  created_at        DateTime           @default(now())
+  updated_at        DateTime           @updatedAt
+  return_details    SaleReturnDetail[]
+  branch            Branch             @relation(fields: [branch_id], references: [branch_id])
+  credit_account    Customer?          @relation("SaleReturnCreditAccount", fields: [credit_account_id], references: [cus_id])
+  customer          Customer           @relation(fields: [cus_id], references: [cus_id])
+  debit_account     Customer?          @relation("SaleReturnDebitAccount", fields: [debit_account_id], references: [cus_id])
+  loader            Loader?            @relation(fields: [loader_id], references: [loader_id])
+  sale              Sale?              @relation(fields: [sale_id], references: [sale_id])
+  updated_by_user   Users?             @relation(fields: [updated_by], references: [user_id])
+
+  @@index([branch_id], map: "sale_returns_branch_id_fkey")
+  @@index([credit_account_id], map: "sale_returns_credit_account_id_fkey")
+  @@index([cus_id], map: "sale_returns_cus_id_fkey")
+  @@index([debit_account_id], map: "sale_returns_debit_account_id_fkey")
+  @@index([loader_id], map: "sale_returns_loader_id_fkey")
+  @@index([sale_id], map: "sale_returns_sale_id_fkey")
+  @@index([updated_by], map: "sale_returns_updated_by_fkey")
+  @@map("sale_returns")
+}
+
+model SaleReturnDetail {
+  return_detail_id Int        @id @default(autoincrement())
+  return_id        Int
+  pro_id           Int
+  qnty                          Decimal   @db.Decimal(18, 2)
+  unit             String
+  unit_rate                     Decimal   @db.Decimal(18, 2)
+  total_amount                  Decimal   @db.Decimal(18, 2)
+  discount                      Decimal   @default(0.00) @db.Decimal(18, 2)
+  net_total                     Decimal   @db.Decimal(18, 2)
+  cus_id           Int
+  store_id         Int?
+  created_at       DateTime   @default(now())
+  updated_at       DateTime   @updatedAt
+  updated_by       Int?
+  customer         Customer   @relation(fields: [cus_id], references: [cus_id])
+  product          Product    @relation(fields: [pro_id], references: [pro_id])
+  sale_return      SaleReturn @relation(fields: [return_id], references: [return_id], onDelete: Cascade)
+  store            Store?     @relation(fields: [store_id], references: [storeid])
+  updated_by_user  Users?     @relation(fields: [updated_by], references: [user_id])
+
+  @@index([cus_id], map: "sale_return_details_cus_id_fkey")
+  @@index([pro_id], map: "sale_return_details_pro_id_fkey")
+  @@index([return_id], map: "sale_return_details_return_id_fkey")
+  @@index([updated_by], map: "sale_return_details_updated_by_fkey")
+  @@map("sale_return_details")
+}
+
+model HoldBill {
+  hold_bill_id      Int              @id @default(autoincrement())
+  branch_id         Int              @default(1)
+  cus_id            Int
+  total_amount                  Decimal   @db.Decimal(18, 2)
+  discount                      Decimal   @default(0.00) @db.Decimal(18, 2)
+  payment                       Decimal   @default(0.00) @db.Decimal(18, 2)
+  payment_type      PaymentType
+  debit_account_id  Int?
+  credit_account_id Int?
+  loader_id         Int?
+  shipping_amount               Decimal   @default(0.00) @db.Decimal(18, 2)
+  bill_type         BillType
+  status            HoldBillStatus   @default(DRAFT)
+  reference         String?
+  notes             String?
+  updated_by        Int?
+  created_at        DateTime         @default(now())
+  updated_at        DateTime         @updatedAt
+  hold_bill_details HoldBillDetail[]
+  branch            Branch           @relation(fields: [branch_id], references: [branch_id])
+  credit_account    Customer?        @relation("HoldBillCreditAccount", fields: [credit_account_id], references: [cus_id])
+  customer          Customer         @relation(fields: [cus_id], references: [cus_id])
+  debit_account     Customer?        @relation("HoldBillDebitAccount", fields: [debit_account_id], references: [cus_id])
+  loader            Loader?          @relation(fields: [loader_id], references: [loader_id])
+  updated_by_user   Users?           @relation(fields: [updated_by], references: [user_id])
+
+  @@index([branch_id], map: "hold_bills_branch_id_fkey")
+  @@index([credit_account_id], map: "hold_bills_credit_account_id_fkey")
+  @@index([cus_id], map: "hold_bills_cus_id_fkey")
+  @@index([debit_account_id], map: "hold_bills_debit_account_id_fkey")
+  @@index([loader_id], map: "hold_bills_loader_id_fkey")
+  @@index([updated_by], map: "hold_bills_updated_by_fkey")
+  @@map("hold_bills")
+}
+
+model HoldBillDetail {
+  hold_bill_detail_id Int      @id @default(autoincrement())
+  hold_bill_id        Int
+  pro_id              Int
+  vehicle_no          String?
+  qnty                          Decimal   @db.Decimal(18, 2)
+  unit                String
+  unit_rate                     Decimal   @db.Decimal(18, 2)
+  total_amount                  Decimal   @db.Decimal(18, 2)
+  discount                      Decimal   @default(0.00) @db.Decimal(18, 2)
+  net_total                     Decimal   @db.Decimal(18, 2)
+  cus_id              Int
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+  updated_by          Int?
+  customer            Customer @relation(fields: [cus_id], references: [cus_id])
+  hold_bill           HoldBill @relation(fields: [hold_bill_id], references: [hold_bill_id], onDelete: Cascade)
+  product             Product  @relation(fields: [pro_id], references: [pro_id])
+  updated_by_user     Users?   @relation(fields: [updated_by], references: [user_id])
+
+  @@index([cus_id], map: "hold_bill_details_cus_id_fkey")
+  @@index([hold_bill_id], map: "hold_bill_details_hold_bill_id_fkey")
+  @@index([pro_id], map: "hold_bill_details_pro_id_fkey")
+  @@index([updated_by], map: "hold_bill_details_updated_by_fkey")
+  @@map("hold_bill_details")
+}
+
+model DayEnd {
+  day_end_id      Int            @id @default(autoincrement())
+  branch_id       Int            @default(1)
+  business_date   DateTime       @db.Date
+  opening_cash                  Decimal   @default(0.00) @db.Decimal(18, 2)
+  closing_cash                  Decimal?  @db.Decimal(18, 2)
+  total_sales                   Decimal   @default(0.00) @db.Decimal(18, 2)
+  total_purchases               Decimal   @default(0.00) @db.Decimal(18, 2)
+  total_expenses                Decimal   @default(0.00) @db.Decimal(18, 2)
+  total_receipts                Decimal   @default(0.00) @db.Decimal(18, 2)
+  total_payments                Decimal   @default(0.00) @db.Decimal(18, 2)
+  cash_in_hand                  Decimal?  @db.Decimal(18, 2)
+  bank_balance                  Decimal?  @db.Decimal(18, 2)
+  status          DayEndStatus   @default(OPEN)
+  notes           String?
+  closed_by       Int?
+  closed_at       DateTime?
+  created_at      DateTime       @default(now())
+  updated_at      DateTime       @updatedAt
+  day_end_details DayEndDetail[]
+  branch          Branch         @relation(fields: [branch_id], references: [branch_id])
+  closed_by_user  Users?         @relation(fields: [closed_by], references: [user_id])
+
+  @@unique([branch_id, business_date])
+  @@index([branch_id], map: "day_ends_branch_id_fkey")
+  @@index([closed_by], map: "day_ends_closed_by_fkey")
+  @@map("day_ends")
+}
+
+model DayEndDetail {
+  day_end_detail_id Int         @id @default(autoincrement())
+  day_end_id        Int
+  transaction_type  String
+  transaction_id    Int
+  amount                        Decimal   @db.Decimal(18, 2)
+  payment_type      PaymentType
+  description       String?
+  created_at        DateTime    @default(now())
+  day_end           DayEnd      @relation(fields: [day_end_id], references: [day_end_id], onDelete: Cascade)
+
+  @@index([day_end_id], map: "day_end_details_day_end_id_fkey")
+  @@map("day_end_details")
+}
+
+model Journal {
+  journal_id      Int             @id @default(autoincrement())
+  branch_id       Int             @default(1)
+  journal_date    DateTime        @db.Date
+  journal_type    JournalType
+  reference       String?
+  description     String?
+  total_amount                  Decimal   @db.Decimal(18, 2)
+  status          JournalStatus   @default(DRAFT)
+  posted_by       Int?
+  posted_at       DateTime?
+  created_by      Int
+  created_at      DateTime        @default(now())
+  updated_at      DateTime        @updatedAt
+  journal_details JournalDetail[]
+  branch          Branch          @relation(fields: [branch_id], references: [branch_id])
+  created_by_user Users           @relation("JournalCreatedBy", fields: [created_by], references: [user_id])
+  posted_by_user  Users?          @relation("JournalPostedBy", fields: [posted_by], references: [user_id])
+
+  @@index([branch_id], map: "journals_branch_id_fkey")
+  @@index([created_by], map: "journals_created_by_fkey")
+  @@index([posted_by], map: "journals_posted_by_fkey")
+  @@map("journals")
+}
+
+model JournalDetail {
+  journal_detail_id Int      @id @default(autoincrement())
+  journal_id        Int
+  account_id        Int
+  debit_amount                  Decimal   @default(0.00) @db.Decimal(18, 2)
+  credit_amount                 Decimal   @default(0.00) @db.Decimal(18, 2)
+  description       String?
+  created_at        DateTime @default(now())
+  account           Customer @relation(fields: [account_id], references: [cus_id])
+  journal           Journal  @relation(fields: [journal_id], references: [journal_id], onDelete: Cascade)
+
+  @@index([account_id], map: "journal_details_account_id_fkey")
+  @@index([journal_id], map: "journal_details_journal_id_fkey")
+  @@map("journal_details")
+}
+
+model Store {
+  storeid              Int             @id @default(autoincrement())
+  branch_id            Int             @default(1)
+  store_name           String
+  store_address        String?
+  created_at           DateTime        @default(now())
+  updated_at           DateTime        @updatedAt
+  branch               Branch          @relation(fields: [branch_id], references: [branch_id])
+  purchases            Purchase[]
+  sale_details         SaleDetail[]
+  sales                Sale[]
+  stock_transfers_from StockTransfer[] @relation("StockTransferFrom")
+  stock_transfers_to   StockTransfer[] @relation("StockTransferTo")
+  store_stocks         StoreStock[]
+  sale_return_details  SaleReturnDetail[]
+  stock_adjustments    StockAdjustment[]
+
+  @@index([branch_id], map: "stores_branch_id_fkey")
+  @@map("stores")
+}
+
+model StoreStock {
+  store_stock_id  Int      @id @default(autoincrement())
+  store_id        Int
+  pro_id          Int
+  stock_quantity                Decimal   @default(0.00) @db.Decimal(18, 2)
+  min_stock                     Decimal   @default(0.00) @db.Decimal(18, 2)
+  max_stock                     Decimal   @default(0.00) @db.Decimal(18, 2)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  updated_by      Int?
+  product         Product  @relation(fields: [pro_id], references: [pro_id])
+  store           Store    @relation(fields: [store_id], references: [storeid])
+  updated_by_user Users?   @relation(fields: [updated_by], references: [user_id])
+
+  @@unique([store_id, pro_id])
+  @@index([pro_id], map: "store_stocks_pro_id_fkey")
+  @@index([updated_by], map: "store_stocks_updated_by_fkey")
+  @@map("store_stocks")
+}
+
+model StockAdjustment {
+  adjustment_id   Int      @id @default(autoincrement())
+  store_id        Int
+  pro_id          Int
+  quantity        Decimal  @db.Decimal(18, 2)
+  pre_quantity    Decimal  @db.Decimal(18, 2)
+  post_quantity   Decimal  @db.Decimal(18, 2)
+  created_at      DateTime @default(now())
+  updated_by      Int?
+  reference       String?
+  product         Product  @relation(fields: [pro_id], references: [pro_id])
+  store           Store    @relation(fields: [store_id], references: [storeid])
+  updated_by_user Users?   @relation(fields: [updated_by], references: [user_id])
+
+  @@index([pro_id], map: "stock_adjustments_pro_id_fkey")
+  @@index([store_id], map: "stock_adjustments_store_id_fkey")
+  @@index([updated_by], map: "stock_adjustments_updated_by_fkey")
+  @@map("stock_adjustments")
+}
+
+model Package {
+  package_id          Int            @id @default(autoincrement())
+  branch_id           Int            @default(1)
+  package_name        String
+  package_description String?
+  price                         Decimal   @db.Decimal(18, 2)
+  duration_days       Int
+  features            String?
+  is_active           Boolean        @default(true)
+  created_at          DateTime       @default(now())
+  updated_at          DateTime       @updatedAt
+  updated_by          Int?
+  branch              Branch         @relation(fields: [branch_id], references: [branch_id])
+  updated_by_user     Users?         @relation(fields: [updated_by], references: [user_id])
+  subscriptions       Subscription[]
+
+  @@index([branch_id], map: "packages_branch_id_fkey")
+  @@index([updated_by], map: "packages_updated_by_fkey")
+  @@map("packages")
+}
+
+model Subscription {
+  subscription_id Int                       @id @default(autoincrement())
+  branch_id       Int                       @default(1)
+  cus_id          Int
+  package_id      Int
+  amount                        Decimal   @db.Decimal(18, 2)
+  status          SubscriptionStatus        @default(ACTIVE)
+  start_date      DateTime
+  end_date        DateTime
+  payment_method  SubscriptionPaymentMethod @default(BALANCE)
+  reference       String?
+  created_at      DateTime                  @default(now())
+  updated_at      DateTime                  @updatedAt
+  updated_by      Int?
+  branch          Branch                    @relation(fields: [branch_id], references: [branch_id])
+  customer        Customer                  @relation(fields: [cus_id], references: [cus_id])
+  package         Package                   @relation(fields: [package_id], references: [package_id])
+  updated_by_user Users?                    @relation(fields: [updated_by], references: [user_id])
+
+  @@index([branch_id], map: "subscriptions_branch_id_fkey")
+  @@index([cus_id], map: "subscriptions_cus_id_fkey")
+  @@index([package_id], map: "subscriptions_package_id_fkey")
+  @@index([updated_by], map: "subscriptions_updated_by_fkey")
+  @@map("subscriptions")
+}
+
+model StockTransfer {
+  transfer_id      Int                   @id @default(autoincrement())
+  branch_id        Int                   @default(1)
+  transfer_no      String?
+  transfer_date    DateTime              @db.Date
+  from_store_id    Int
+  to_store_id      Int
+  notes            String?
+  created_at       DateTime              @default(now())
+  updated_at       DateTime              @updatedAt
+  updated_by       Int?
+  transfer_details StockTransferDetail[]
+  branch           Branch                @relation(fields: [branch_id], references: [branch_id])
+  from_store       Store                 @relation("StockTransferFrom", fields: [from_store_id], references: [storeid])
+  to_store         Store                 @relation("StockTransferTo", fields: [to_store_id], references: [storeid])
+  updated_by_user  Users?                @relation(fields: [updated_by], references: [user_id])
+
+  @@index([branch_id], map: "stock_transfers_branch_id_fkey")
+  @@index([from_store_id], map: "stock_transfers_from_store_id_fkey")
+  @@index([to_store_id], map: "stock_transfers_to_store_id_fkey")
+  @@index([updated_by], map: "stock_transfers_updated_by_fkey")
+  @@map("stock_transfers")
+}
+
+model StockTransferDetail {
+  transfer_detail_id Int           @id @default(autoincrement())
+  transfer_id        Int
+  pro_id             Int
+  quantity           Int
+  packing            Int?          @default(0)
+  created_at         DateTime      @default(now())
+  product            Product       @relation(fields: [pro_id], references: [pro_id])
+  transfer           StockTransfer @relation(fields: [transfer_id], references: [transfer_id], onDelete: Cascade)
+
+  @@index([transfer_id], map: "stock_transfer_details_transfer_id_fkey")
+  @@index([pro_id], map: "stock_transfer_details_pro_id_fkey")
+  @@map("stock_transfer_details")
+}
+
+model DraftSale {
+  draft_id         Int       @id @default(autoincrement())
+  branch_id        Int       @default(1)
+  draft_code       String
+  store_id         Int?
+  cus_id           Int?
+  form_state_json  String    @db.LongText // Stores entire form state as JSON
+  is_active        Boolean   @default(true)
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+  updated_by       Int?
+  branch           Branch    @relation(fields: [branch_id], references: [branch_id])
+  customer         Customer? @relation(fields: [cus_id], references: [cus_id])
+  updated_by_user  Users?    @relation(fields: [updated_by], references: [user_id])
+
+  @@unique([branch_id, draft_code])
+  @@index([branch_id], map: "draft_sales_branch_id_fkey")
+  @@index([store_id], map: "draft_sales_store_id_idx")
+  @@index([cus_id], map: "draft_sales_cus_id_fkey")
+  @@index([updated_by], map: "draft_sales_updated_by_fkey")
+  @@index([is_active], map: "draft_sales_is_active_idx")
+  @@index([created_at], map: "draft_sales_created_at_idx")
+  @@map("draft_sales")
+}
+
+model Employee {
+  emp_id        Int               @id @default(autoincrement())
+  branch_id     Int               @default(1)
+  emp_name      String
+  emp_phone     String?
+  emp_cnic      String?           @unique
+  emp_address   String?
+  designation   String?
+  department    String?
+  join_date     DateTime          @db.Date
+  basic_salary  Decimal           @default(0.00) @db.Decimal(10, 2)
+  status        EmpStatus         @default(ACTIVE)
+  created_at    DateTime          @default(now())
+  updated_at    DateTime          @updatedAt
+  branch        Branch            @relation(fields: [branch_id], references: [branch_id])
+  attendance    Attendance[]
+  payrolls      Payroll[]
+  advances      EmployeeAdvance[]
+
+  @@index([branch_id], map: "employees_branch_id_fkey")
+  @@map("employees")
+}
+
+model Attendance {
+  att_id     Int              @id @default(autoincrement())
+  emp_id     Int
+  att_date   DateTime         @db.Date
+  in_time    String?
+  out_time   String?
+  status     AttendanceStatus @default(PRESENT)
+  notes      String?
+  created_at DateTime         @default(now())
+  updated_at DateTime         @updatedAt
+  employee   Employee         @relation(fields: [emp_id], references: [emp_id], onDelete: Cascade)
+
+  @@unique([emp_id, att_date])
+  @@index([emp_id])
+  @@index([att_date])
+  @@map("attendance")
+}
+
+model Payroll {
+  payroll_id        Int               @id @default(autoincrement())
+  emp_id            Int
+  month             Int
+  year              Int
+  basic_salary      Decimal           @db.Decimal(10, 2)
+  total_days        Int               @default(30)
+  days_present      Int               @default(0)
+  leaves_taken      Int               @default(0)
+  allowed_leaves    Int               @default(0)
+  excess_leaves     Int               @default(0)
+  deduction_per_day Decimal           @default(0.00) @db.Decimal(10, 2)
+  total_deduction   Decimal           @default(0.00) @db.Decimal(10, 2)
+  advance_deduction Decimal           @default(0.00) @db.Decimal(10, 2)
+  bonus             Decimal           @default(0.00) @db.Decimal(10, 2)
+  other_deduction   Decimal           @default(0.00) @db.Decimal(10, 2)
+  net_salary        Decimal           @default(0.00) @db.Decimal(10, 2)
+  status            PayrollStatus     @default(PENDING)
+  payment_date      DateTime?
+  notes             String?
+  created_at        DateTime          @default(now())
+  updated_at        DateTime          @updatedAt
+  employee          Employee          @relation(fields: [emp_id], references: [emp_id], onDelete: Cascade)
+  advances          EmployeeAdvance[]
+
+  @@unique([emp_id, month, year])
+  @@index([emp_id])
+  @@map("payrolls")
+}
+
+enum AdvanceStatus {
+  PENDING
+  DEDUCTED
+  CANCELLED
+}
+
+model EmployeeAdvance {
+  advance_id   Int           @id @default(autoincrement())
+  emp_id       Int
+  amount       Decimal       @db.Decimal(10, 2)
+  advance_date DateTime      @db.Date
+  payment_mode PaymentType   @default(CASH)
+  account_id   Int?
+  reason       String?
+  status       AdvanceStatus @default(PENDING)
+  payroll_id   Int?
+  created_at   DateTime      @default(now())
+  updated_at   DateTime      @updatedAt
+  employee     Employee      @relation(fields: [emp_id], references: [emp_id], onDelete: Cascade)
+  payroll      Payroll?      @relation(fields: [payroll_id], references: [payroll_id], onDelete: SetNull)
+
+  @@index([emp_id])
+  @@index([payroll_id])
+  @@map("employee_advances")
+}
+
+model HrSettings {
+  id                      Int      @id @default(autoincrement())
+  branch_id               Int      @default(1)
+  allowed_leaves_per_month Int     @default(2)
+  allowed_leaves_per_year  Int     @default(24)
+  updated_at              DateTime @updatedAt
+  branch                  Branch   @relation(fields: [branch_id], references: [branch_id])
+
+  @@index([branch_id], map: "hr_settings_branch_id_fkey")
+  @@map("hr_settings")
+}
+
+enum EmpStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  HALF_DAY
+  LEAVE
+  HOLIDAY
+}
+
+enum PayrollStatus {
+  PENDING
+  PAID
+  CANCELLED
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  HQ_SUPER_ADMIN
+  BRANCH_SUPER_ADMIN
+  ADMIN
+  SALESMAN
+}
+
+enum BranchStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum BranchIsolation {
+  SHARED
+  DEDICATED
+  PREFIXED
+}
+
+enum ProvisionStatus {
+  PENDING
+  ACTIVE
+  FAILED
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum TransactionType {
+  CASH
+  CHEQUE
+  BANK_TRANSFER
+  PURCHASE
+  CASH_PAYMENT
+  BANK_PAYMENT
+  SALE
+  SALE_RETURN
+  PURCHASE_RETURN
+  REBATE
+  CREDIT
+  DEBIT
+}
+
+enum PaymentType {
+  CASH
+  CHEQUE
+  BANK_TRANSFER
+}
+
+enum BillType {
+  QUOTATION
+  ORDER
+  ORDER_TRASH
+  BILL
+  DISPATCHED
+}
+
+enum HoldBillStatus {
+  DRAFT
+  PENDING
+  CONVERTED
+  CANCELLED
+}
+
+enum DayEndStatus {
+  OPEN
+  CLOSED
+}
+
+enum JournalType {
+  PAYMENT
+  RECEIPT
+  TRANSFER
+  ADJUSTMENT
+}
+
+enum JournalStatus {
+  DRAFT
+  POSTED
+  CANCELLED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum SubscriptionPaymentMethod {
+  BALANCE
+  CASH
+  BANK_TRANSFER
+}
+
+enum PaymentTransactionType {
+  RECEIVE
+  PAY
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+model Payment {
+  payment_id          Int                     @id @default(autoincrement())
+  branch_id           Int                     @default(1)
+  payment_date        DateTime                @db.Date
+  payment_type        PaymentTransactionType
+  account_id          Int
+  total_amount                  Decimal   @db.Decimal(18, 2)
+  discount_amount               Decimal   @default(0.00) @db.Decimal(18, 2)
+  net_amount                    Decimal   @db.Decimal(18, 2)
+  cash_account_id     Int?
+  cash_amount                   Decimal   @default(0.00) @db.Decimal(18, 2)
+  bank_account_id     Int?
+  bank_amount                   Decimal   @default(0.00) @db.Decimal(18, 2)
+  description         String?
+  status              PaymentStatus   @default(COMPLETED)
+  created_by          Int
+  created_at          DateTime        @default(now())
+  updated_at          DateTime        @updatedAt
+  
+  // Relations
+  branch              Branch          @relation(fields: [branch_id], references: [branch_id])
+  account             Customer        @relation("PaymentAccount", fields: [account_id], references: [cus_id])
+  cash_account        Customer?       @relation("PaymentCashAccount", fields: [cash_account_id], references: [cus_id])
+  bank_account        Customer?       @relation("PaymentBankAccount", fields: [bank_account_id], references: [cus_id])
+  created_by_user     Users           @relation(fields: [created_by], references: [user_id])
+
+  payment_details      PaymentDetail[]
+
+  @@index([branch_id], map: "payments_branch_id_fkey")
+  @@index([account_id], map: "payment_account_id_fkey")
+  @@index([cash_account_id], map: "payment_cash_account_id_fkey")
+  @@index([bank_account_id], map: "payment_bank_account_id_fkey")
+  @@index([created_by], map: "payment_created_by_fkey")
+  @@map("payments")
+}
+
+model PaymentDetail {
+  payment_detail_id   Int      @id @default(autoincrement())
+  payment_id          Int
+  account_id          Int
+  amount                        Decimal   @db.Decimal(18, 2)
+  description         String?
+  created_at          DateTime @default(now())
+  
+  // Relations
+  payment             Payment  @relation(fields: [payment_id], references: [payment_id], onDelete: Cascade)
+  account             Customer @relation(fields: [account_id], references: [cus_id])
+
+  @@index([payment_id], map: "payment_detail_payment_id_fkey")
+  @@index([account_id], map: "payment_detail_account_id_fkey")
+  @@map("payment_details")
+}
