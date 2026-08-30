@@ -82,15 +82,17 @@ export default function LandingLogin() {
 
   return (
     <div className="landing-root">
-      {/* Brand panel */}
+      {/* Brand panel — real construction photo */}
       <div className="landing-brand">
-        <div className="orb orb-1" />
-        <div className="orb orb-2" />
-        <div className="orb orb-3" />
+        <div className="brand-scene" aria-hidden="true">
+          <div className="brand-photo-bg" />
+          <div className="brand-photo-overlay" />
+          <div className="brand-vignette" />
+        </div>
 
         <div className="brand-content">
           <div className="brand-logo">
-            <Store size={48} color="white" strokeWidth={1.5} />
+            <Store size={44} color="white" strokeWidth={1.75} />
           </div>
 
           <h1 className="brand-title">
@@ -119,7 +121,9 @@ export default function LandingLogin() {
 
       {/* Form panel */}
       <div className="landing-form-panel">
+        <div className="landing-form-bg" aria-hidden="true" />
         <div className="landing-form-center">
+          <div className="form-card">
           <div className="form-wrap">
             <div className="tab-switch" role="tablist">
             <button
@@ -200,6 +204,7 @@ export default function LandingLogin() {
             )}
           </div>
           </div>
+          </div>
 
           <footer className="landing-form-footer">
             <div className="landing-footer-card">
@@ -232,42 +237,63 @@ export default function LandingLogin() {
           align-items: center;
           justify-content: center;
           padding: 48px 32px;
-          background: linear-gradient(145deg, #1a237e 0%, #283593 28%, #1565c0 62%, #0288d1 100%);
+          background: #0f172a;
+          perspective: 1100px;
         }
 
-        .orb {
+        .brand-scene {
           position: absolute;
-          border-radius: 50%;
+          inset: -6%;
+          transform-style: preserve-3d;
+          animation: sceneTilt 22s ease-in-out infinite alternate;
+          will-change: transform;
+        }
+
+        @keyframes sceneTilt {
+          0% {
+            transform: rotateX(1.8deg) rotateY(-2.2deg);
+          }
+          100% {
+            transform: rotateX(-1.2deg) rotateY(2.2deg);
+          }
+        }
+
+        .brand-photo-bg {
+          position: absolute;
+          inset: 0;
+          background: url('/landing-brand-bg.jpg') center center / cover no-repeat;
+          animation: imageDrift 28s ease-in-out infinite alternate;
+          will-change: transform;
+        }
+
+        @keyframes imageDrift {
+          0% {
+            transform: scale(1.06) translate(0.5%, 0.3%);
+          }
+          100% {
+            transform: scale(1.13) translate(-1.8%, -1.2%);
+          }
+        }
+
+        .brand-photo-overlay {
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(
+            160deg,
+            rgba(15, 23, 42, 0.78) 0%,
+            rgba(26, 85, 227, 0.45) 45%,
+            rgba(15, 23, 42, 0.82) 100%
+          );
           pointer-events: none;
         }
-        .orb-1 {
-          width: 420px;
-          height: 420px;
-          top: -120px;
-          right: -100px;
-          background: rgba(255, 255, 255, 0.06);
-          animation: floatOrb 14s ease-in-out infinite;
-        }
-        .orb-2 {
-          width: 320px;
-          height: 320px;
-          bottom: -80px;
-          left: -60px;
-          background: rgba(255, 255, 255, 0.05);
-          animation: floatOrb 18s ease-in-out infinite reverse;
-        }
-        .orb-3 {
-          width: 180px;
-          height: 180px;
-          top: 40%;
-          left: 15%;
-          background: rgba(56, 189, 248, 0.08);
-          animation: floatOrb 11s ease-in-out infinite 2s;
-        }
 
-        @keyframes floatOrb {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          50% { transform: translate(12px, -18px) scale(1.04); }
+        .brand-vignette {
+          position: absolute;
+          inset: 0;
+          background:
+            radial-gradient(ellipse 85% 75% at 50% 45%, transparent 30%, rgba(0, 0, 0, 0.5) 100%),
+            linear-gradient(180deg, rgba(0, 0, 0, 0.2) 0%, transparent 35%, rgba(0, 0, 0, 0.3) 100%);
+          pointer-events: none;
         }
 
         .brand-content {
@@ -275,32 +301,18 @@ export default function LandingLogin() {
           z-index: 1;
           text-align: center;
           max-width: 400px;
-          animation: brandFadeIn 0.8s ease-out;
-        }
-
-        @keyframes brandFadeIn {
-          from { opacity: 0; transform: translateY(16px); }
-          to { opacity: 1; transform: translateY(0); }
         }
 
         .brand-logo {
           width: 88px;
           height: 88px;
-          margin: 0 auto 24px;
+          margin: 0 auto 22px;
           border-radius: 22px;
-          background: rgba(255, 255, 255, 0.14);
-          backdrop-filter: blur(12px);
+          background: rgba(255, 255, 255, 0.1);
           border: 1px solid rgba(255, 255, 255, 0.22);
           display: flex;
           align-items: center;
           justify-content: center;
-          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
-          animation: logoPulse 4s ease-in-out infinite;
-        }
-
-        @keyframes logoPulse {
-          0%, 100% { box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18); }
-          50% { box-shadow: 0 12px 40px rgba(255, 255, 255, 0.12); }
         }
 
         .brand-title {
@@ -309,23 +321,26 @@ export default function LandingLogin() {
           font-weight: 800;
           line-height: 1.2;
           margin: 0 0 8px;
+          text-shadow: 0 2px 16px rgba(0, 0, 0, 0.5);
         }
 
         .brand-title-ur {
-          color: rgba(255, 255, 255, 0.88);
+          color: rgba(255, 255, 255, 0.92);
           font-size: 1.15rem;
           font-weight: 600;
           margin: 0 0 10px;
           direction: rtl;
+          text-shadow: 0 1px 12px rgba(0, 0, 0, 0.45);
         }
 
         .brand-tagline {
-          color: rgba(255, 255, 255, 0.72);
+          color: rgba(255, 255, 255, 0.8);
           font-size: 0.875rem;
           font-weight: 500;
           letter-spacing: 0.04em;
           text-transform: uppercase;
           margin: 0 0 20px;
+          text-shadow: 0 1px 10px rgba(0, 0, 0, 0.4);
         }
 
         .brand-divider {
@@ -340,15 +355,16 @@ export default function LandingLogin() {
           display: inline-flex;
           align-items: center;
           gap: 8px;
-          padding: 8px 18px;
+          padding: 9px 20px;
           border-radius: 999px;
-          background: rgba(255, 255, 255, 0.12);
-          border: 1px solid rgba(255, 255, 255, 0.2);
+          background: rgba(255, 255, 255, 0.14);
+          border: 1px solid rgba(255, 255, 255, 0.28);
           color: white;
           font-size: 0.875rem;
-          font-weight: 600;
+          font-weight: 700;
           margin-bottom: 18px;
-          animation: tabContentIn 0.4s ease;
+          backdrop-filter: blur(10px);
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
         }
 
         .badge-dot {
@@ -359,17 +375,18 @@ export default function LandingLogin() {
         }
 
         .brand-desc {
-          color: rgba(255, 255, 255, 0.78);
+          color: rgba(255, 255, 255, 0.85);
           font-size: 0.92rem;
           line-height: 1.55;
           margin: 0 0 8px;
-          animation: tabContentIn 0.4s ease;
+          text-shadow: 0 1px 10px rgba(0, 0, 0, 0.45);
         }
 
         .brand-sub {
-          color: rgba(255, 255, 255, 0.55);
+          color: rgba(255, 255, 255, 0.65);
           font-size: 0.82rem;
           margin: 0 0 28px;
+          text-shadow: 0 1px 8px rgba(0, 0, 0, 0.4);
         }
 
         .brand-contact {
@@ -383,26 +400,64 @@ export default function LandingLogin() {
           display: inline-flex;
           align-items: center;
           gap: 6px;
-          color: rgba(255, 255, 255, 0.62);
+          color: rgba(255, 255, 255, 0.82);
           font-size: 0.82rem;
+          text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
         }
 
         .landing-form-panel {
           flex: 1 1 48%;
-          background: #f8fafc;
+          position: relative;
+          background: #f1f5f9;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
           padding: 32px 24px 28px;
+          overflow: hidden;
+        }
+
+        .landing-form-bg {
+          position: absolute;
+          inset: 0;
+          background:
+            radial-gradient(circle at 20% 20%, rgba(26, 85, 227, 0.06) 0%, transparent 45%),
+            radial-gradient(circle at 80% 80%, rgba(0, 210, 132, 0.05) 0%, transparent 40%),
+            linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+          pointer-events: none;
+        }
+
+        .landing-form-bg::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background-image: radial-gradient(rgba(26, 85, 227, 0.08) 1px, transparent 1px);
+          background-size: 24px 24px;
+          opacity: 0.5;
+        }
+
+        .form-card {
+          position: relative;
+          z-index: 1;
+          width: 100%;
+          padding: 28px 26px 24px;
+          border-radius: 24px;
+          background: rgba(255, 255, 255, 0.92);
+          border: 1px solid rgba(255, 255, 255, 0.9);
+          box-shadow:
+            0 4px 6px rgba(15, 23, 42, 0.02),
+            0 20px 50px rgba(15, 23, 42, 0.08);
+          backdrop-filter: blur(12px);
         }
 
         .landing-form-center {
           width: 100%;
-          max-width: 400px;
+          max-width: 420px;
           display: flex;
           flex-direction: column;
-          gap: 26px;
+          gap: 22px;
+          position: relative;
+          z-index: 1;
         }
 
         .form-wrap {
@@ -419,10 +474,11 @@ export default function LandingLogin() {
           position: relative;
           display: grid;
           grid-template-columns: 1fr 1fr;
-          background: #e2e8f0;
-          border-radius: 14px;
-          padding: 4px;
-          margin-bottom: 28px;
+          background: #eef2f7;
+          border-radius: 16px;
+          padding: 5px;
+          margin-bottom: 26px;
+          border: 1px solid #e2e8f0;
         }
 
         .tab-btn {
@@ -551,15 +607,27 @@ export default function LandingLogin() {
           }
           .landing-brand {
             flex: none;
-            min-height: 42vh;
-            padding: 36px 24px;
-          }
-          .brand-contact {
-            display: none;
+            min-height: 48vh;
+            padding: 36px 20px;
           }
           .landing-form-panel {
             flex: 1;
-            padding: 28px 20px 40px;
+            padding: 24px 16px 32px;
+          }
+          .form-card {
+            padding: 22px 18px 20px;
+            border-radius: 20px;
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .brand-scene,
+          .brand-photo-bg {
+            animation: none !important;
+          }
+          .brand-scene {
+            inset: 0;
+            transform: none;
           }
         }
       `}</style>
