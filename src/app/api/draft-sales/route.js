@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { initBranchScope } from '@/lib/branch-server';
+import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 
 // Get next draft code
 async function getNextDraftCode() {
@@ -99,6 +99,7 @@ export async function POST(request) {
 
     // Convert form_state to JSON string
     const formStateJson = typeof form_state === 'string' ? form_state : JSON.stringify(form_state);
+    const validatedUpdatedBy = await resolveUpdatedByUserId(request, updated_by, prisma);
 
     if (draft_id) {
       // Update existing draft
@@ -108,7 +109,7 @@ export async function POST(request) {
           store_id: store_id || null,
           cus_id: cus_id || null,
           form_state_json: formStateJson,
-          updated_by: updated_by || null
+          updated_by: validatedUpdatedBy
         },
         include: {
           customer: {
@@ -134,7 +135,7 @@ export async function POST(request) {
           cus_id: cus_id || null,
           form_state_json: formStateJson,
           is_active: true,
-          updated_by: updated_by || null
+          updated_by: validatedUpdatedBy
         },
         include: {
           customer: {

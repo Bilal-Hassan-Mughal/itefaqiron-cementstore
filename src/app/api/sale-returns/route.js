@@ -7,6 +7,41 @@ import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 
 export const dynamic = 'force-dynamic';
 
+/** Resolves the correct opening balance for any customer/account at a target created_at timestamp. */
+async function resolveOpeningBalance(tx, cus_id, target_created_at) {
+  const priorEntry = await tx.ledger.findFirst({
+    where: { cus_id, created_at: { lt: target_created_at } },
+    orderBy: [
+      { created_at: 'desc' },
+      { l_id: 'desc' },
+    ],
+    select: { closing_balance: true },
+  });
+
+  if (priorEntry) {
+    return parseFloat(priorEntry.closing_balance || 0);
+  }
+
+  const nextEntry = await tx.ledger.findFirst({
+    where: { cus_id, created_at: { gte: target_created_at } },
+    orderBy: [
+      { created_at: 'asc' },
+      { l_id: 'asc' },
+    ],
+    select: { opening_balance: true },
+  });
+
+  if (nextEntry) {
+    return parseFloat(nextEntry.opening_balance || 0);
+  }
+
+  const customer = await tx.customer.findUnique({
+    where: { cus_id },
+    select: { cus_balance: true },
+  });
+  return parseFloat(customer?.cus_balance || 0);
+}
+
 
 // Chronologically recalculates all ledger entry opening/closing balances for a customer and updates their customer table balance.
 async function recalculateLedgerBalances(tx, cus_id) {

@@ -10,7 +10,6 @@ import {
   X,
   DollarSign,
   Search,
-  Filter,
   Hash,
   Calendar,
   TrendingUp,
@@ -22,12 +21,15 @@ import {
   CreditCard,
   Banknote,
   Printer as Print,
+  Download,
   Minimize2,
-  LayoutGrid
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
+import { BRAND, COMPANY } from '@/lib/brand-theme';
 
 // Material-UI imports
 import {
@@ -114,6 +116,371 @@ const LEDGER_FILTER_GRID = {
   gap: { xs: 2, md: 2.25 },
   width: '100%',
 };
+
+const LEDGER_FILTER_COMPACT_GRID = {
+  display: 'grid',
+  gridTemplateColumns: {
+    xs: '1fr',
+    sm: 'repeat(2, 1fr)',
+    md: '1fr 1fr 1.4fr 1.6fr auto',
+  },
+  gap: 1.5,
+  alignItems: 'center',
+  width: '100%',
+};
+
+/** PDF palette — matches on-screen ledger Excel-style colours */
+const LEDGER_PDF = {
+  blue: [26, 85, 227],
+  blueDark: [19, 71, 196],
+  blueTint: [232, 239, 253],
+  debitHead: [0, 97, 0],
+  creditHead: [156, 0, 6],
+  debitRow: [226, 239, 218],
+  creditRow: [252, 228, 214],
+  debitText: [0, 97, 0],
+  creditText: [156, 0, 6],
+  summaryRow: [217, 225, 242],
+  summaryDebit: [198, 239, 206],
+  summaryCredit: [244, 204, 204],
+  summaryBalance: [189, 215, 238],
+  border: [197, 197, 197],
+  white: [255, 255, 255],
+  slate: [71, 85, 105],
+  dark: [30, 41, 59],
+};
+
+/** Render ledger PDF header as image so Urdu renders correctly */
+async function captureLedgerPdfHeader({ contentW, custName, typeLabel, today, entryCount, compact = false }) {
+  const el = document.createElement('div');
+  el.style.cssText = [
+    'position:fixed', 'left:-10000px', 'top:0',
+    `width:${Math.round(contentW)}px`,
+    'background:linear-gradient(180deg,#e8effd 0%,#ffffff 100%)',
+    'border:1px solid #c5d4f5', 'border-radius:8px',
+    compact ? 'padding:14px 18px 12px' : 'padding:22px 28px 20px',
+    'text-align:center',
+    "font-family:'Segoe UI',system-ui,sans-serif", 'box-sizing:border-box',
+  ].join(';');
+
+  el.innerHTML = `
+    <div style="font-size:${compact ? '15px' : '19px'};font-weight:700;color:#1A55E3;line-height:1.3">${COMPANY.name}</div>
+    <div style="font-size:${compact ? '13px' : '15px'};font-weight:600;color:#475569;margin-top:4px;line-height:1.5;font-family:'Segoe UI','Noto Nastaliq Urdu','Jameel Noori Nastaleeq',serif">${COMPANY.nameUr}</div>
+    <div style="width:56px;height:2px;background:linear-gradient(90deg,#1A55E3,#5E6EED);margin:10px auto 0;border-radius:99px"></div>
+    <div style="font-size:${compact ? '15px' : '18px'};font-weight:800;color:#1e293b;margin-top:10px;line-height:1.25">${custName}</div>
+    ${typeLabel ? `<div style="font-size:10px;color:#64748b;margin-top:3px">${typeLabel}</div>` : ''}
+    <div style="font-size:9px;color:#94a3b8;margin-top:8px;line-height:1.4">${today} · ${entryCount} entries · ${COMPANY.address} · Ph: ${COMPANY.phones.join(', ')}</div>
+  `;
+
+  document.body.appendChild(el);
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const html2canvas = (await import('html2canvas')).default;
+  const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', logging: false, useCORS: true });
+  document.body.removeChild(el);
+  const imgH = (canvas.height / canvas.width) * contentW;
+  return { imgData: canvas.toDataURL('image/png'), imgH };
+}
+
+function drawLedgerPdfStatBoxes(doc, { marginX, statY, contentW, opening, totalDebit, totalCredit, closing, fmtAmt, compact = false }) {
+  const gap = compact ? 6 : 8;
+  const boxW = (contentW - gap * 3) / 4;
+  const boxH = compact ? 34 : 40;
+  const stats = [
+    { label: 'Opening Balance', value: fmtAmt(opening), bg: LEDGER_PDF.blueTint, accent: LEDGER_PDF.blueDark },
+    { label: 'Total Debit', value: fmtAmt(totalDebit), bg: LEDGER_PDF.debitRow, accent: LEDGER_PDF.debitText },
+    { label: 'Total Credit', value: fmtAmt(totalCredit), bg: LEDGER_PDF.creditRow, accent: LEDGER_PDF.creditText },
+    { label: 'Closing Balance', value: fmtAmt(closing), bg: LEDGER_PDF.summaryBalance, accent: LEDGER_PDF.blueDark },
+  ];
+
+  stats.forEach((stat, i) => {
+    const x = marginX + i * (boxW + gap);
+    doc.setFillColor(...stat.bg);
+    doc.setDrawColor(...LEDGER_PDF.border);
+    doc.setLineWidth(0.35);
+    doc.roundedRect(x, statY, boxW, boxH, 4, 4, 'FD');
+    doc.setFontSize(compact ? 6.5 : 7);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...LEDGER_PDF.slate);
+    doc.text(stat.label.toUpperCase(), x + boxW / 2, statY + (compact ? 11 : 13), { align: 'center' });
+    doc.setFontSize(compact ? 9 : 10.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...stat.accent);
+    doc.text(`PKR ${stat.value}`, x + boxW / 2, statY + (compact ? 26 : 30), { align: 'center' });
+  });
+  doc.setFont('helvetica', 'normal');
+  return statY + boxH;
+}
+
+function drawLedgerPdfPageFooter(doc, { marginX, pageW, pageH, pageNum, pageCount }) {
+  doc.setDrawColor(...LEDGER_PDF.border);
+  doc.setLineWidth(0.5);
+  doc.line(marginX, pageH - 24, pageW - marginX, pageH - 24);
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...LEDGER_PDF.slate);
+  doc.text(`${COMPANY.name}  ·  Account Ledger Report`, marginX, pageH - 12);
+  doc.text(`Page ${pageNum} of ${pageCount}`, pageW - marginX, pageH - 12, { align: 'right' });
+}
+
+const getLedgerRowStyle = (isDebit, isCredit) => {
+  if (isDebit) {
+    return {
+      bg: '#e2efda',
+      hover: '#d4e6cc',
+      text: '#1e293b',
+      sub: '#475569',
+      amount: '#006100',
+      border: '#c5c5c5',
+      chipBg: '#c6efce',
+      chipText: '#006100',
+    };
+  }
+  if (isCredit) {
+    return {
+      bg: '#fce4d6',
+      hover: '#f8d4c4',
+      text: '#1e293b',
+      sub: '#475569',
+      amount: '#9c0006',
+      border: '#c5c5c5',
+      chipBg: '#f4cccc',
+      chipText: '#9c0006',
+    };
+  }
+  return {
+    bg: '#ffffff',
+    hover: '#f2f2f2',
+    text: '#1e293b',
+    sub: '#64748b',
+    amount: '#333333',
+    border: '#c5c5c5',
+    chipBg: '#f2f2f2',
+    chipText: '#333333',
+  };
+};
+
+const LEDGER_UI = {
+  page: { bgcolor: '#f4f6f9', minHeight: '100%' },
+  sectionCard: {
+    borderRadius: '20px',
+    border: '1px solid #eef1f6',
+    boxShadow: '0 2px 16px rgba(15, 23, 42, 0.04)',
+    bgcolor: '#ffffff',
+    overflow: 'hidden',
+  },
+  statCard: (color) => ({
+    p: 2,
+    borderRadius: '16px',
+    bgcolor: '#fff',
+    border: '1px solid #eef1f6',
+    boxShadow: '0 2px 12px rgba(15, 23, 42, 0.03)',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 1.75,
+    transition: 'box-shadow 0.2s ease, border-color 0.2s ease',
+    '&:hover': {
+      boxShadow: '0 8px 24px rgba(15, 23, 42, 0.06)',
+      borderColor: `${color}33`,
+    },
+  }),
+  tableCard: {
+    borderRadius: '12px',
+    border: '1px solid #b4b4b4',
+    boxShadow: '0 2px 12px rgba(0, 0, 0, 0.06)',
+    display: 'flex',
+    flexDirection: 'column',
+    position: 'relative',
+    overflow: 'hidden',
+    bgcolor: '#fff',
+  },
+  tableHeadRow: {
+    '& .MuiTableCell-head': {
+      bgcolor: '#1A55E3',
+      color: '#ffffff',
+      fontWeight: 700,
+      fontSize: '0.75rem',
+      letterSpacing: '0.02em',
+      textTransform: 'none',
+      border: '1px solid #c5c5c5',
+      borderTop: 'none',
+      py: 1.1,
+      whiteSpace: 'nowrap',
+    },
+  },
+  ledgerHeaderWrap: {
+    m: 0,
+    p: 0,
+    flexShrink: 0,
+    lineHeight: 0,
+    '& table': { lineHeight: 1.4 },
+  },
+  ledgerHeaderTable: {
+    borderCollapse: 'collapse',
+    width: '100%',
+    tableLayout: 'fixed',
+    border: '1px solid #b4b4b4',
+    borderBottom: 'none',
+    bgcolor: '#ffffff',
+    '& .MuiTableCell-root': {
+      border: '1px solid #c5c5c5',
+      py: 1.1,
+      px: 1.1,
+      fontSize: '0.75rem',
+      verticalAlign: 'middle',
+      lineHeight: 1.4,
+    },
+  },
+  tableGrid: {
+    borderCollapse: 'collapse',
+    width: '100%',
+    tableLayout: 'fixed',
+    border: '1px solid #b4b4b4',
+    bgcolor: '#ffffff',
+    '& .MuiTableCell-root': {
+      border: '1px solid #c5c5c5',
+      py: 0.85,
+      px: 1.1,
+      fontSize: '0.8125rem',
+      verticalAlign: 'middle',
+      lineHeight: 1.4,
+    },
+  },
+  ledgerTitleBar: {
+    background: '#ffffff',
+    borderBottom: 'none',
+    color: '#0f172a',
+    px: { xs: 2, md: 3 },
+    pt: { xs: 2, md: 2.5 },
+    pb: 0,
+    position: 'relative',
+    '&::before': {
+      content: '""',
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: '3px',
+      background: BRAND.primary.blue,
+    },
+  },
+  ledgerTitleEn: {
+    fontWeight: 600,
+    fontSize: { xs: '0.9375rem', md: '1rem' },
+    color: BRAND.primary.blue,
+    lineHeight: 1.35,
+    textAlign: 'center',
+  },
+  ledgerTitleUr: {
+    fontWeight: 500,
+    fontSize: { xs: '0.8125rem', md: '0.875rem' },
+    color: '#64748b',
+    mt: 0.35,
+    lineHeight: 1.5,
+    textAlign: 'center',
+    fontFamily: '"Segoe UI", "Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", serif',
+  },
+  ledgerTitleMain: {
+    fontWeight: 700,
+    fontSize: { xs: '1.2rem', md: '1.35rem' },
+    color: '#1e293b',
+    mt: 1,
+    mb: 0,
+    lineHeight: 1.25,
+    textAlign: 'center',
+  },
+  ledgerActionBar: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 0.75,
+    justifyContent: 'flex-end',
+    px: { xs: 2, md: 3 },
+    py: 1.25,
+    mt: 1.5,
+    borderTop: '1px solid #eef1f6',
+    bgcolor: '#fafbfd',
+  },
+  summaryRow: {
+    '& .MuiTableCell-root': {
+      py: 1.1,
+      fontWeight: 700,
+      bgcolor: '#d9e1f2',
+      border: '1px solid #c5c5c5',
+      fontSize: '0.8125rem',
+    },
+  },
+  accountTab: (active) => ({
+    display: 'inline-flex',
+    alignItems: 'center',
+    borderRadius: '999px',
+    overflow: 'hidden',
+    bgcolor: active ? BRAND.primary.blue : '#fff',
+    color: active ? '#fff' : '#334155',
+    border: active ? `2px solid ${BRAND.primary.blue}` : '1px solid #cbd5e1',
+    transition: 'all 0.15s ease',
+    flexShrink: 0,
+  }),
+  minimizedTab: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    borderRadius: '999px',
+    bgcolor: '#fffbeb',
+    border: '1px dashed #fbbf24',
+    overflow: 'hidden',
+    flexShrink: 0,
+  },
+  toolbarBtn: {
+    textTransform: 'none',
+    fontWeight: 700,
+    borderRadius: '10px',
+    fontSize: '0.8125rem',
+    px: 1.75,
+    py: 0.65,
+    boxShadow: 'none',
+  },
+};
+
+const LedgerTableColGroup = () => (
+  <colgroup>
+    <col style={{ width: '4%' }} />
+    <col style={{ width: '10%' }} />
+    <col style={{ width: '14%' }} />
+    <col style={{ width: '28%' }} />
+    <col style={{ width: '11%' }} />
+    <col style={{ width: '11%' }} />
+    <col style={{ width: '12%' }} />
+    <col style={{ width: '10%' }} />
+  </colgroup>
+);
+
+const LedgerTableHeaderRow = () => (
+  <TableRow sx={LEDGER_UI.tableHeadRow}>
+    <TableCell sx={{ textAlign: 'center', borderTop: 'none !important' }}>
+      #
+    </TableCell>
+    <TableCell sx={{ borderTop: 'none !important' }}>
+      Date
+    </TableCell>
+    <TableCell sx={{ borderTop: 'none !important' }}>
+      Account
+    </TableCell>
+    <TableCell sx={{ borderTop: 'none !important' }}>
+      Particulars
+    </TableCell>
+    <TableCell sx={{ textAlign: 'right', bgcolor: '#006100 !important', color: '#fff !important', borderTop: 'none !important' }}>
+      Debit (PKR)
+    </TableCell>
+    <TableCell sx={{ textAlign: 'right', bgcolor: '#9c0006 !important', color: '#fff !important', borderTop: 'none !important' }}>
+      Credit (PKR)
+    </TableCell>
+    <TableCell sx={{ textAlign: 'right', bgcolor: '#1347c4 !important', color: '#fff !important', borderTop: 'none !important' }}>
+      Balance (PKR)
+    </TableCell>
+    <TableCell sx={{ textAlign: 'center', borderTop: 'none !important' }}>
+      Type
+    </TableCell>
+  </TableRow>
+);
 
 const LEDGER_TABS_STORAGE_PREFIX = 'finance_open_ledger_tabs';
 
@@ -459,6 +826,7 @@ export default function FinancePage() {
   const [showJournalForm, setShowJournalForm] = useState(false);
   const [editingLedger, setEditingLedger] = useState(null);
   const [showDeleteMenu, setShowDeleteMenu] = useState(false);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [journalStatus, setJournalStatus] = useState({ loading: false, error: null });
 
   // Filter states
@@ -550,7 +918,7 @@ export default function FinancePage() {
   const [selectedLedgerBankAccount, setSelectedLedgerBankAccount] = useState(null);
   const [isSubmittingLedger, setIsSubmittingLedger] = useState(false);
   const [isSendingPaymentWhatsApp, setIsSendingPaymentWhatsApp] = useState(false);
-  const [isSendingLedgerWhatsApp, setIsSendingLedgerWhatsApp] = useState(false);
+  const [isDownloadingLedgerPdf, setIsDownloadingLedgerPdf] = useState(false);
   const [isSendingSaleWhatsApp, setIsSendingSaleWhatsApp] = useState(false);
 
   // Inline Cell Editing States & Handlers
@@ -1815,118 +2183,248 @@ export default function FinancePage() {
     }
   };
 
-  const handleSendLedgerPdfWhatsApp = async () => {
+  const buildLedgerPdfDocument = async () => {
+    const jsPDF = (await import('jspdf')).default;
+    const autoTable = (await import('jspdf-autotable')).default;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const marginX = 40;
+    const marginTop = 36;
+    const marginBottom = 32;
+    const contentW = pageW - marginX * 2;
+
     const customer = selectedCustomer ? customers.find(c => Number(c.cus_id) === Number(selectedCustomer)) : null;
-    const phone = customer?.cus_phone_no;
-    if (!phone) {
-      alert('Please select a customer with a phone number to send the ledger.');
-      return;
-    }
+    const today = new Date().toLocaleDateString('en-GB');
+    const custName = customer?.cus_name || 'All Accounts Ledger';
+    const balance = parseFloat(customer?.cus_balance ?? ledgerViewSummary.lastClosing ?? 0);
+    const showAccountCol = !selectedCustomer;
+
+    const chronologicalEntries = [...finalLedgerEntries].sort(compareChronologically);
+    const pdfOpeningBalance = chronologicalEntries.length > 0 ? parseFloat(chronologicalEntries[0].opening_balance || 0) : 0;
+
+    const totalDebit = chronologicalEntries.reduce((s, e) => s + getLedgerEntryDisplayAmounts(e).debit, 0);
+    const totalCredit = chronologicalEntries.reduce((s, e) => s + getLedgerEntryDisplayAmounts(e).credit, 0);
+
+    const custType = customer?.customer_type?.cus_type_title || '';
+    const custCat = customer?.customer_category?.cus_cat_title || '';
+    const typeLabel = [custType, custCat].filter(Boolean).join(' · ');
+
+    // Top brand accent (page 1)
+    doc.setFillColor(...LEDGER_PDF.blue);
+    doc.rect(0, 0, pageW, 4, 'F');
+
+    const { imgData, imgH } = await captureLedgerPdfHeader({
+      contentW,
+      custName,
+      typeLabel,
+      today,
+      entryCount: chronologicalEntries.length,
+      compact: true,
+    });
+    const headerTop = 10;
+    doc.addImage(imgData, 'PNG', marginX, headerTop, contentW, imgH);
+
+    const statBottom = drawLedgerPdfStatBoxes(doc, {
+      marginX,
+      statY: headerTop + imgH + 10,
+      contentW,
+      opening: pdfOpeningBalance,
+      totalDebit,
+      totalCredit,
+      closing: balance,
+      fmtAmt,
+      compact: true,
+    });
+
+    const tableHead = showAccountCol
+      ? ['#', 'Date', 'Account', 'Particulars', 'Debit', 'Credit', 'Balance']
+      : ['#', 'Date', 'Particulars', 'Debit', 'Credit', 'Balance', 'Type'];
+
+    const rows = chronologicalEntries.map((entry) => {
+      const date = entry.created_at
+        ? new Date(entry.created_at).toLocaleDateString('en-GB')
+        : '—';
+      const account = entry.customer?.cus_name || 'Cash Account';
+      let desc = entry.details
+        ? String(entry.details).replace(/\{.*?\}/g, '').replace(/\|/g, ' ').trim()
+        : 'General transaction';
+      if (entry.bill_no) desc += ` (Bill #${entry.bill_no})`;
+      const displayAmts = getLedgerEntryDisplayAmounts(entry);
+      const debit = displayAmts.debit > 0 ? fmtAmt(displayAmts.debit) : '—';
+      const credit = displayAmts.credit > 0 ? fmtAmt(displayAmts.credit) : '—';
+      const bal = fmtAmt(entry.closing_balance);
+      const ledgerType = entry.ledger_type || '—';
+
+      if (showAccountCol) {
+        return [String(entry.l_id), date, account, desc, debit, credit, bal];
+      }
+      return [String(entry.l_id), date, desc, debit, credit, bal, ledgerType];
+    });
+
+    const footLabelCol = showAccountCol ? 3 : 2;
+    const footDebitCol = showAccountCol ? 4 : 3;
+    const footCreditCol = showAccountCol ? 5 : 4;
+    const footBalanceCol = showAccountCol ? 6 : 5;
+
+    const footRow = new Array(tableHead.length).fill('');
+    footRow[footLabelCol] = 'Period Total';
+    footRow[footDebitCol] = fmtAmt(totalDebit);
+    footRow[footCreditCol] = fmtAmt(totalCredit);
+    footRow[footBalanceCol] = fmtAmt(balance);
+
+    const columnStyles = showAccountCol
+      ? {
+          0: { cellWidth: 20, halign: 'center' },
+          1: { cellWidth: 48 },
+          2: { cellWidth: 62 },
+          3: { cellWidth: 'auto' },
+          4: { cellWidth: 52, halign: 'right' },
+          5: { cellWidth: 52, halign: 'right' },
+          6: { cellWidth: 58, halign: 'right' },
+        }
+      : {
+          0: { cellWidth: 20, halign: 'center' },
+          1: { cellWidth: 48 },
+          2: { cellWidth: 'auto' },
+          3: { cellWidth: 52, halign: 'right' },
+          4: { cellWidth: 52, halign: 'right' },
+          5: { cellWidth: 58, halign: 'right' },
+          6: { cellWidth: 42, halign: 'center' },
+        };
+
+    autoTable(doc, {
+      startY: statBottom + 12,
+      tableWidth: contentW,
+      margin: { left: marginX, right: marginX, top: marginTop, bottom: marginBottom },
+      showHead: 'everyPage',
+      showFoot: 'lastPage',
+      rowPageBreak: 'auto',
+      head: [tableHead],
+      body: rows,
+      foot: [footRow],
+      styles: {
+        fontSize: 7.5,
+        cellPadding: { top: 4, right: 4, bottom: 4, left: 4 },
+        lineColor: LEDGER_PDF.border,
+        lineWidth: 0.35,
+        textColor: LEDGER_PDF.dark,
+        valign: 'middle',
+        overflow: 'linebreak',
+      },
+      headStyles: {
+        fillColor: LEDGER_PDF.blue,
+        textColor: LEDGER_PDF.white,
+        fontStyle: 'bold',
+        fontSize: 7.5,
+        cellPadding: { top: 5, right: 4, bottom: 5, left: 4 },
+      },
+      footStyles: {
+        fillColor: LEDGER_PDF.summaryRow,
+        textColor: LEDGER_PDF.dark,
+        fontStyle: 'bold',
+        fontSize: 8,
+      },
+      columnStyles,
+      didParseCell: (data) => {
+        const col = data.column.index;
+        const debitCol = showAccountCol ? 4 : 3;
+        const creditCol = showAccountCol ? 5 : 4;
+        const balanceCol = showAccountCol ? 6 : 5;
+        const typeCol = showAccountCol ? -1 : 6;
+
+        if (data.section === 'head') {
+          data.cell.styles.textColor = LEDGER_PDF.white;
+          data.cell.styles.fontStyle = 'bold';
+          if (col === debitCol) data.cell.styles.fillColor = LEDGER_PDF.debitHead;
+          else if (col === creditCol) data.cell.styles.fillColor = LEDGER_PDF.creditHead;
+          else if (col === balanceCol) data.cell.styles.fillColor = LEDGER_PDF.blueDark;
+          else data.cell.styles.fillColor = LEDGER_PDF.blue;
+          return;
+        }
+
+        if (data.section === 'body') {
+          const entry = chronologicalEntries[data.row.index];
+          if (!entry) return;
+          const displayAmts = getLedgerEntryDisplayAmounts(entry);
+          const isDebit = displayAmts.debit > 0;
+          const isCredit = displayAmts.credit > 0;
+
+          if (isDebit) data.cell.styles.fillColor = LEDGER_PDF.debitRow;
+          else if (isCredit) data.cell.styles.fillColor = LEDGER_PDF.creditRow;
+          else data.cell.styles.fillColor = LEDGER_PDF.white;
+
+          if (col === debitCol && isDebit) {
+            data.cell.styles.textColor = LEDGER_PDF.debitText;
+            data.cell.styles.fontStyle = 'bold';
+          } else if (col === creditCol && isCredit) {
+            data.cell.styles.textColor = LEDGER_PDF.creditText;
+            data.cell.styles.fontStyle = 'bold';
+          } else if (col === balanceCol) {
+            data.cell.styles.textColor = LEDGER_PDF.blueDark;
+            data.cell.styles.fontStyle = 'bold';
+          }
+          if (col === 0) {
+            data.cell.styles.halign = 'center';
+            data.cell.styles.textColor = LEDGER_PDF.slate;
+            data.cell.styles.fontSize = 7;
+          }
+          if (col === typeCol) {
+            data.cell.styles.fontSize = 7;
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.textColor = isDebit ? LEDGER_PDF.debitText : isCredit ? LEDGER_PDF.creditText : LEDGER_PDF.slate;
+          }
+          return;
+        }
+
+        if (data.section === 'foot') {
+          if (col === footLabelCol) {
+            data.cell.styles.halign = 'left';
+            data.cell.styles.fontStyle = 'bold';
+          }
+          if (col === footDebitCol) {
+            data.cell.styles.fillColor = LEDGER_PDF.summaryDebit;
+            data.cell.styles.textColor = LEDGER_PDF.debitText;
+            data.cell.styles.halign = 'right';
+          }
+          if (col === footCreditCol) {
+            data.cell.styles.fillColor = LEDGER_PDF.summaryCredit;
+            data.cell.styles.textColor = LEDGER_PDF.creditText;
+            data.cell.styles.halign = 'right';
+          }
+          if (col === footBalanceCol) {
+            data.cell.styles.fillColor = LEDGER_PDF.summaryBalance;
+            data.cell.styles.textColor = LEDGER_PDF.blueDark;
+            data.cell.styles.halign = 'right';
+          }
+        }
+      },
+      didDrawPage: () => {
+        const pageCount = doc.internal.getNumberOfPages();
+        const pageNum = doc.internal.getCurrentPageInfo().pageNumber;
+        drawLedgerPdfPageFooter(doc, { marginX, pageW, pageH, pageNum, pageCount });
+      },
+    });
+
+    return { doc, custName };
+  };
+
+  const handleDownloadLedgerPdf = async () => {
     if (finalLedgerEntries.length === 0) {
-      alert('No ledger entries to send.');
+      alert('No ledger entries to download.');
       return;
     }
     try {
-      setIsSendingLedgerWhatsApp(true);
-      const jsPDF = (await import('jspdf')).default;
-      const autoTable = (await import('jspdf-autotable')).default;
-      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
-
-      const today = new Date().toLocaleDateString('en-GB');
-      const custName = customer?.cus_name || 'All Accounts';
-      const balance = parseFloat(customer?.cus_balance ?? ledgerViewSummary.lastClosing ?? 0);
-
-      const chronologicalEntries = [...finalLedgerEntries].sort(compareChronologically);
-      const pdfOpeningBalance = chronologicalEntries.length > 0 ? parseFloat(chronologicalEntries[0].opening_balance || 0) : 0;
-
-      // Header
-      doc.setFontSize(16);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Itefaq Iron & Cement Store', 40, 36);
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      doc.text('Gujrat Sargodha Road, Pahrian Wali | Ph: 0346-7560306, 0300-7560306', 40, 50);
-      doc.setFontSize(13);
-      doc.setFont('helvetica', 'bold');
-      doc.text('GENERAL LEDGER', 40, 68);
-      doc.setFontSize(11);
-      const custType = customer?.customer_type?.cus_type_title || '';
-      const custCat = customer?.customer_category?.cus_cat_title || '';
-      const typeLabel = [custType, custCat].filter(Boolean).join(' - ');
-      doc.text(`Account: ${custName}${typeLabel ? ` (${typeLabel})` : ''}`, 40, 84);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-      doc.text(`Date: ${today}   |   Entries: ${finalLedgerEntries.length}   |   Opening Balance: PKR ${fmtAmt(pdfOpeningBalance)}   |   Balance: PKR ${fmtAmt(balance)}`, 40, 98);
-      doc.line(40, 104, 800, 104);
-
-      const rows = chronologicalEntries.map((entry, i) => {
-        const date = entry.created_at
-          ? new Date(entry.created_at).toLocaleDateString('en-GB') + ' ' + new Date(entry.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
-          : '—';
-        const trnxType = entry.trnx_type || '—';
-        const ledgerType = entry.ledger_type || '—';
-        const account = entry.customer?.cus_name || '—';
-        const desc = entry.details
-          ? String(entry.details).replace(/\{.*?\}/g, '').replace(/\|/g, ' ').trim().slice(0, 60)
-          : '—';
-        const bill = entry.bill_no ? `B-${entry.bill_no}` : '—';
-        const displayAmts = getLedgerEntryDisplayAmounts(entry);
-        const debit = displayAmts.debit > 0 ? fmtAmt(displayAmts.debit) : '';
-        const credit = displayAmts.credit > 0 ? fmtAmt(displayAmts.credit) : '';
-        const bal = fmtAmt(entry.closing_balance);
-        return [entry.l_id, date, trnxType, ledgerType, account, desc, bill, credit, debit, bal];
-      });
-
-      const totalDebit = chronologicalEntries.reduce((s, e) => {
-        const { debit } = getLedgerEntryDisplayAmounts(e);
-        return s + debit;
-      }, 0);
-      const totalCredit = chronologicalEntries.reduce((s, e) => {
-        const { credit } = getLedgerEntryDisplayAmounts(e);
-        return s + credit;
-      }, 0);
-
-      autoTable(doc, {
-        startY: 112,
-        head: [['L_ID', 'Date & Time', 'Trnx Type', 'Ledger Type', 'Account', 'Description', 'Bill No', 'Credit (PKR)', 'Debit (PKR)', 'Balance (PKR)']],
-        body: rows,
-        foot: [['', '', '', '', '', '', 'TOTALS', fmtAmt(totalCredit), fmtAmt(totalDebit), fmtAmt(balance)]],
-        styles: { fontSize: 7, cellPadding: 2.5 },
-        headStyles: { fillColor: [31, 41, 55], textColor: 255, fontStyle: 'bold' },
-        footStyles: { fillColor: [241, 245, 249], textColor: [0, 0, 0], fontStyle: 'bold' },
-        columnStyles: {
-          0: { cellWidth: 24, halign: 'center' },
-          1: { cellWidth: 85 },
-          2: { cellWidth: 45 },
-          3: { cellWidth: 55 },
-          4: { cellWidth: 80 },
-          5: { cellWidth: 'auto' },
-          6: { cellWidth: 40 },
-          7: { cellWidth: 65, halign: 'right' },
-          8: { cellWidth: 65, halign: 'right' },
-          9: { cellWidth: 70, halign: 'right' },
-        },
-        didParseCell: (data) => {
-          if (data.section === 'body') {
-            const rowData = rows[data.row.index];
-            if (rowData && rowData[7] && !rowData[8]) {
-              // credit row (payment/refund received) - green tint
-              data.cell.styles.fillColor = [220, 252, 231];
-            } else if (rowData && rowData[8] && !rowData[7]) {
-              // debit row (sales/orders) - red tint
-              data.cell.styles.fillColor = [254, 226, 226];
-            }
-          }
-        },
-      });
-
-      const { sharePdfViaWhatsAppDesktop, whatsAppSuccessMessage } = await import('@/lib/whatsapp-local');
-      const { opened } = await sharePdfViaWhatsAppDesktop(doc, phone);
-      alert(`✅ ${whatsAppSuccessMessage(opened)}`);
+      setIsDownloadingLedgerPdf(true);
+      const { doc, custName } = await buildLedgerPdfDocument();
+      const fileDate = new Date().toISOString().slice(0, 10);
+      const safeName = String(custName).replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-') || 'Ledger';
+      doc.save(`Ledger-${safeName}-${fileDate}.pdf`);
     } catch (err) {
-      alert(err.message || 'WhatsApp error');
+      alert(err.message || 'PDF download failed');
     } finally {
-      setIsSendingLedgerWhatsApp(false);
+      setIsDownloadingLedgerPdf(false);
     }
   };
 
@@ -2420,363 +2918,221 @@ export default function FinancePage() {
 
   return (
     <DashboardLayout>
-      <Container maxWidth={false} sx={{ display: 'flex', flexDirection: 'column', p: 3, pb: 4 }}>
-        {/* Header Section */}
-        <Box sx={{ flexShrink: 0, mb: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Box>
-              <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold', color: 'text.primary' }}>
-                Finance Management
-              </Typography>
-              <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
-                Manage customer ledger entries, payments, and financial records
-              </Typography>
-            </Box>
-            <Box className="delete-btn-container" sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-              {/* Delete Ledger Dropdown */}
-              <Box sx={{ position: 'relative' }}>
-                <Button
-                  variant="contained"
-                  startIcon={<Trash2 />}
-                  onClick={() => setShowDeleteMenu(!showDeleteMenu)}
-                  sx={{
-                    background: 'linear-gradient(45deg, #f44336, #d32f2f)',
-                    '&:hover': {
-                      background: 'linear-gradient(45deg, #da190b, #ba000d)',
-                    },
-                    px: 3,
-                    py: 1.5,
-                    borderRadius: 0,
-                    textTransform: 'none',
-                    fontSize: '1rem',
-                    fontWeight: 600,
-                    boxShadow: 3,
-                    '&:hover': {
-                      boxShadow: 6,
-                      transform: 'translateY(-2px)',
-                    },
-                    transition: 'all 0.2s ease-in-out',
-                    ml: 1
-                  }}
-                >
-                  Delete Ledger
-                </Button>
+      <Container maxWidth={false} sx={{ display: 'flex', flexDirection: 'column', p: { xs: 2, md: 2.5 }, pb: 4, gap: 2.5, ...LEDGER_UI.page }}>
 
-                {showDeleteMenu && (
-                  <Box sx={{
-                    position: 'absolute',
-                    top: '100%',
-                    right: 0,
-                    mt: 1,
-                    width: '250px',
-                    background: 'white',
-                    border: '1px solid #ddd',
-                    borderRadius: 1,
-                    boxShadow: 3,
-                    zIndex: 1000,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    overflow: 'hidden'
+        {/* Summary KPIs */}
+        <Box sx={{
+          display: 'grid',
+          gridTemplateColumns: {
+            xs: '1fr',
+            sm: 'repeat(2, 1fr)',
+            lg: selectedCustomer ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)',
+          },
+          gap: 2,
+        }}>
+          {(() => {
+            const stats = [];
+            if (selectedCustomer) {
+              stats.push({
+                title: 'Opening Balance',
+                val: accountOpeningBalance,
+                color: BRAND.supporting.periwinkle,
+                icon: <DollarSign size={20} />
+              });
+            }
+            stats.push(
+              { title: 'Total Debit', val: totalDebit, color: BRAND.supporting.green, icon: <TrendingUp size={20} /> },
+              { title: 'Total Credit', val: totalCredit, color: BRAND.primary.pink, icon: <TrendingDown size={20} /> },
+              { title: 'Current Balance', val: currentBalance, color: BRAND.primary.blue, icon: <Receipt size={20} /> }
+            );
+            return stats.map((stat, i) => (
+              <Box key={i} sx={LEDGER_UI.statCard(stat.color)}>
+                <Avatar sx={{
+                  bgcolor: `${stat.color}12`,
+                  color: stat.color,
+                  width: 44,
+                  height: 44,
+                }}>
+                  {stat.icon}
+                </Avatar>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="caption" sx={{
+                    display: 'block',
+                    color: '#94a3b8',
+                    fontWeight: 700,
+                    letterSpacing: '0.05em',
+                    textTransform: 'uppercase',
+                    mb: 0.25,
                   }}>
-                    <Button
-                      fullWidth
-                      onClick={() => {
-                        handleDeleteAllLedger('purchase');
-                        setShowDeleteMenu(false);
-                      }}
-                      sx={{
-                        color: '#f44336',
-                        justifyContent: 'flex-start',
-                        pl: 2,
-                        py: 1.5,
-                        fontSize: '0.9rem',
-                        borderRadius: 0,
-                        textTransform: 'none',
-                        '&:hover': {
-                          background: '#ffebee'
-                        }
-                      }}
+                    {stat.title}
+                  </Typography>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#0f172a', lineHeight: 1.2 }}>
+                    <Typography component="span" sx={{ fontSize: '0.68rem', color: '#94a3b8', fontWeight: 600, mr: 0.5 }}>PKR</Typography>
+                    {fmtAmt(stat.val)}
+                  </Typography>
+                </Box>
+              </Box>
+            ));
+          })()}
+        </Box>
+
+        {/* Smart filter + account tabs toolbar */}
+        <Card sx={LEDGER_UI.sectionCard}>
+          {(openLedgers.length > 0 || minimizedLedgerTabs.length > 0) && (
+            <Box sx={{
+              px: 2,
+              py: 1.25,
+              borderBottom: '1px solid #eef1f6',
+              bgcolor: '#fafbfd',
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 1,
+              alignItems: 'center',
+            }}>
+              <Box
+                onClick={showAllAccountsView}
+                sx={{
+                  ...LEDGER_UI.accountTab(!activeLedgerId),
+                  px: 1.5,
+                  py: 0.6,
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                  fontSize: '0.8125rem',
+                  '&:hover': { opacity: 0.92 },
+                }}
+              >
+                All Accounts
+              </Box>
+              {openLedgerTabs.map((tab) => {
+                const isActive = Number(activeLedgerId) === tab.id;
+                const balance = parseFloat(customers.find((c) => Number(c.cus_id) === tab.id)?.cus_balance || 0);
+                return (
+                  <Box key={tab.id} sx={LEDGER_UI.accountTab(isActive)}>
+                    <Box
+                      onClick={() => activateLedger(tab.id, tab.name)}
+                      sx={{ px: 1.5, py: 0.5, cursor: 'pointer', minWidth: 0 }}
                     >
-                      Delete Purchase Entries
-                    </Button>
-                    <Divider />
-                    <Button
-                      fullWidth
-                      onClick={() => {
-                        handleDeleteAllLedger('order');
-                        setShowDeleteMenu(false);
-                      }}
-                      sx={{
-                        color: '#f44336',
-                        justifyContent: 'flex-start',
-                        pl: 2,
-                        py: 1.5,
-                        fontSize: '0.9rem',
-                        borderRadius: 0,
-                        textTransform: 'none',
-                        '&:hover': {
-                          background: '#ffebee'
-                        }
-                      }}
-                    >
-                      Delete Order Entries
-                    </Button>
-                    <Divider />
-                    <Button
-                      fullWidth
-                      onClick={() => {
-                        handleDeleteAllLedger('sales');
-                        setShowDeleteMenu(false);
-                      }}
-                      sx={{
-                        color: '#f44336',
-                        justifyContent: 'flex-start',
-                        pl: 2,
-                        py: 1.5,
-                        fontSize: '0.9rem',
-                        borderRadius: 0,
-                        textTransform: 'none',
-                        '&:hover': {
-                          background: '#ffebee'
-                        }
-                      }}
-                    >
-                      Delete Sales Entries
-                    </Button>
-                    <Divider />
-                    <Button
-                      fullWidth
-                      onClick={() => {
-                        handleDeleteAllLedger('all');
-                        setShowDeleteMenu(false);
-                      }}
-                      sx={{
-                        color: '#d32f2f',
-                        justifyContent: 'flex-start',
-                        pl: 2,
-                        py: 1.5,
-                        fontSize: '0.9rem',
-                        fontWeight: 'bold',
-                        borderRadius: 0,
-                        textTransform: 'none',
-                        '&:hover': {
-                          background: '#ffcdd2'
-                        }
-                      }}
-                    >
-                      🗑️ Delete ALL Entries
-                    </Button>
+                      <Typography noWrap sx={{ fontWeight: 700, fontSize: '0.8125rem', maxWidth: 160, lineHeight: 1.2 }}>
+                        {tab.name}
+                      </Typography>
+                      <Typography sx={{ fontSize: '0.65rem', opacity: 0.85, fontWeight: 600 }}>
+                        PKR {fmtAmt(balance)}
+                      </Typography>
+                    </Box>
+                    <Tooltip title="Minimize">
+                      <IconButton size="small" onClick={(e) => { e.stopPropagation(); toggleLedgerMinimize(tab.id); }}
+                        sx={{ color: isActive ? 'rgba(255,255,255,0.9)' : '#64748b', borderRadius: 0, p: 0.5, '&:hover': { bgcolor: isActive ? 'rgba(255,255,255,0.15)' : '#f1f5f9' } }}>
+                        <Minimize2 size={13} />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Close">
+                      <IconButton size="small" onClick={(e) => { e.stopPropagation(); closeLedgerTab(tab.id); }}
+                        sx={{ color: isActive ? 'rgba(255,255,255,0.9)' : '#64748b', borderRadius: 0, p: 0.5, mr: 0.25, '&:hover': { bgcolor: isActive ? 'rgba(255,255,255,0.15)' : '#fee2e2', color: '#dc2626' } }}>
+                        <X size={13} />
+                      </IconButton>
+                    </Tooltip>
                   </Box>
+                );
+              })}
+              {minimizedLedgerTabs.map((tab) => (
+                <Box key={`min-${tab.id}`} sx={LEDGER_UI.minimizedTab}>
+                  <Box onClick={() => restoreLedger(tab.id)}
+                    sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, px: 1.25, py: 0.5, cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 600, color: '#92400e', '&:hover': { bgcolor: '#fef3c7' } }}>
+                    <Minimize2 size={12} />
+                    {tab.name}
+                  </Box>
+                  <IconButton size="small" onClick={(e) => { e.stopPropagation(); closeLedgerTab(tab.id); }}
+                    sx={{ borderRadius: 0, p: 0.5, color: '#b45309', '&:hover': { bgcolor: '#fee2e2', color: '#dc2626' } }}>
+                    <X size={12} />
+                  </IconButton>
+                </Box>
+              ))}
+            </Box>
+          )}
+
+          <Box sx={{ px: { xs: 2, md: 2.5 }, py: 1.75, borderBottom: filtersExpanded ? '1px solid #eef1f6' : 'none' }}>
+            <Box sx={LEDGER_FILTER_COMPACT_GRID}>
+              <FormControl fullWidth size="small" sx={LEDGER_FILTER_FIELD_SX}>
+                <InputLabel>Category</InputLabel>
+                <Select value={selectedCategory} label="Category"
+                  onChange={(e) => { setSelectedCategory(e.target.value); setSelectedSubCategory(''); if (!activeLedgerId) setSelectedCustomer(''); }}>
+                  <MenuItem value="">All Categories</MenuItem>
+                  {customerCategories.map((cat) => (
+                    <MenuItem key={cat.cus_cat_id} value={cat.cus_cat_id.toString()}>{cat.cus_cat_title}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl fullWidth size="small" sx={LEDGER_FILTER_FIELD_SX}>
+                <InputLabel>Customer Type</InputLabel>
+                <Select value={selectedSubCategory} label="Customer Type"
+                  onChange={(e) => { setSelectedSubCategory(e.target.value); if (!activeLedgerId) setSelectedCustomer(''); }}>
+                  <MenuItem value="">All Customer Types</MenuItem>
+                  {availableSubCategories.map((type) => (
+                    <MenuItem key={type.cus_type_id} value={type.cus_type_id.toString()}>{type.cus_type_title}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Autocomplete
+                fullWidth
+                autoSelect
+                autoHighlight
+                openOnFocus
+                selectOnFocus
+                size="small"
+                options={filteredAccounts}
+                getOptionLabel={(option) => option.cus_name}
+                value={selectedCustomer ? customers.find(c => Number(c.cus_id) === Number(selectedCustomer)) : null}
+                onChange={(event, newValue) => {
+                  if (newValue) openCustomerLedger(newValue.cus_id, newValue.cus_name);
+                  else showAllAccountsView();
+                }}
+                inputValue={accountSearchTerm}
+                onInputChange={(event, newInputValue) => setAccountSearchTerm(newInputValue)}
+                renderInput={(params) => (
+                  <TextField {...params} label="Account" placeholder="Select account..."
+                    InputProps={{
+                      ...params.InputProps,
+                      startAdornment: (
+                        <Fragment>
+                          <InputAdornment position="start"><Search size={16} color={BRAND.primary.blue} /></InputAdornment>
+                          {params.InputProps.startAdornment}
+                        </Fragment>
+                      ),
+                    }}
+                    sx={LEDGER_FILTER_FIELD_SX}
+                  />
                 )}
+                noOptionsText="No accounts found"
+                clearOnEscape
+              />
+              <TextField fullWidth size="small" label="Search" placeholder="Name, phone, bill..."
+                value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+                InputProps={{ startAdornment: <InputAdornment position="start"><Search size={16} color={BRAND.primary.blue} /></InputAdornment> }}
+                sx={LEDGER_FILTER_FIELD_SX} />
+              <Box sx={{ display: 'flex', gap: 0.75, justifyContent: { xs: 'flex-start', md: 'flex-end' }, gridColumn: { xs: '1 / -1', md: 'auto' } }}>
+                <Button size="small" variant="outlined" onClick={() => setFiltersExpanded(!filtersExpanded)}
+                  endIcon={filtersExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  sx={{ textTransform: 'none', fontWeight: 600, borderRadius: '10px', borderColor: '#cbd5e1', color: '#475569', whiteSpace: 'nowrap' }}>
+                  More
+                </Button>
+                <Button size="small" variant="text" onClick={clearFilters}
+                  sx={{ textTransform: 'none', fontWeight: 600, color: '#64748b', minWidth: 0, px: 1.25 }}>
+                  Clear
+                </Button>
               </Box>
             </Box>
           </Box>
-        </Box>
 
-        {/* Filters Section */}
-        <Box sx={{ flexShrink: 0, mb: 3, width: '100%' }}>
-          <Card sx={{
-            borderRadius: '16px',
-            boxShadow: '0 2px 20px rgba(26, 85, 227, 0.06)',
-            width: '100%',
-            border: '1px solid #e8ecf3',
-            bgcolor: '#ffffff',
-            overflow: 'hidden',
-          }}>
-            <Box sx={{
-              px: { xs: 2, md: 3 },
-              py: 2,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 2,
-              borderBottom: '1px solid #eef1f6',
-              background: 'linear-gradient(90deg, #f8faff 0%, #ffffff 100%)',
-            }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
-                <Box sx={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: '12px',
-                  bgcolor: '#e8effd',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}>
-                  <Filter size={18} color="#1A55E3" />
-                </Box>
-                <Box>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#1e293b', lineHeight: 1.3 }}>
-                    Filters
-                  </Typography>
-                  <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 500 }}>
-                    Refine ledger by account, type, date & amount
-                  </Typography>
-                </Box>
-              </Box>
-              <Button
-                onClick={clearFilters}
-                size="small"
-                variant="outlined"
-                sx={{
-                  textTransform: 'none',
-                  fontWeight: 600,
-                  fontSize: '0.8125rem',
-                  color: '#64748b',
-                  borderColor: '#e2e8f0',
-                  borderRadius: '10px',
-                  px: 2,
-                  whiteSpace: 'nowrap',
-                  '&:hover': {
-                    color: '#FF0854',
-                    borderColor: '#ffc2d4',
-                    bgcolor: '#fff5f8',
-                  },
-                }}
-              >
-                Clear All Filters
-              </Button>
-            </Box>
-
-            <CardContent sx={{ p: { xs: 2, md: 3 }, '&:last-child': { pb: { xs: 2, md: 3 } } }}>
-              <Typography sx={{
-                fontSize: '0.6875rem',
-                fontWeight: 700,
-                letterSpacing: '0.1em',
-                textTransform: 'uppercase',
-                color: '#94a3b8',
-                mb: 1.5,
-              }}>
-                Account & type
-              </Typography>
-              <Box sx={{ ...LEDGER_FILTER_GRID, mb: 3 }}>
-                <FormControl fullWidth sx={LEDGER_FILTER_FIELD_SX}>
-                  <InputLabel>Category</InputLabel>
-                  <Select
-                    value={selectedCategory}
-                    onChange={(e) => {
-                      setSelectedCategory(e.target.value);
-                      setSelectedSubCategory('');
-                      if (!activeLedgerId) setSelectedCustomer('');
-                    }}
-                    label="Category"
-                    sx={{ borderRadius: '12px', bgcolor: '#fff' }}
-                  >
-                    <MenuItem value="">All Categories</MenuItem>
-                    {customerCategories.map((cat) => (
-                      <MenuItem key={cat.cus_cat_id} value={cat.cus_cat_id.toString()}>
-                        {cat.cus_cat_title}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-
-                <FormControl fullWidth sx={LEDGER_FILTER_FIELD_SX}>
-                  <InputLabel>Customer Type</InputLabel>
-                  <Select
-                    value={selectedSubCategory}
-                    onChange={(e) => {
-                      setSelectedSubCategory(e.target.value);
-                      if (!activeLedgerId) setSelectedCustomer('');
-                    }}
-                    label="Customer Type"
-                    sx={{ borderRadius: '12px', bgcolor: '#fff' }}
-                  >
-                    <MenuItem value="">All Customer Types</MenuItem>
-                    {availableSubCategories.map((type) => (
-                      <MenuItem key={type.cus_type_id} value={type.cus_type_id.toString()}>
-                        {type.cus_type_title}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-
-                <Autocomplete
-                  fullWidth
-                  autoSelect
-                  autoHighlight
-                  openOnFocus
-                  selectOnFocus
-                  options={filteredAccounts}
-                  getOptionLabel={(option) => option.cus_name}
-                  value={selectedCustomer ? customers.find(c => Number(c.cus_id) === Number(selectedCustomer)) : null}
-                  onChange={(event, newValue) => {
-                    if (newValue) {
-                      openCustomerLedger(newValue.cus_id, newValue.cus_name);
-                    } else {
-                      showAllAccountsView();
-                    }
-                  }}
-                  inputValue={accountSearchTerm}
-                  onInputChange={(event, newInputValue) => {
-                    setAccountSearchTerm(newInputValue);
-                  }}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="Account"
-                      placeholder="Search accounts..."
-                      onFocus={(e) => e.target.select()}
-                      InputProps={{
-                        ...params.InputProps,
-                        startAdornment: (
-                          <Fragment>
-                            <InputAdornment position="start">
-                              <Search size={17} color="#1A55E3" />
-                            </InputAdornment>
-                            {params.InputProps.startAdornment}
-                          </Fragment>
-                        ),
-                      }}
-                      sx={LEDGER_FILTER_FIELD_SX}
-                    />
-                  )}
-                  renderOption={(props, option) => {
-                    const { key, ...optionProps } = props;
-                    const balance = parseFloat(option.cus_balance || 0);
-                    return (
-                      <Box component="li" key={key} {...optionProps}>
-                        <Box sx={{ width: '100%', py: 0.5 }}>
-                          <Typography variant="body2" sx={{ fontWeight: 700, color: '#1e293b' }}>
-                            {option.cus_name}
-                          </Typography>
-                          <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.25 }}>
-                            {option.cus_phone_no}
-                            {option.cus_email && ` • ${option.cus_email}`}
-                            {option.customer_type?.cus_type_title && ` • ${option.customer_type.cus_type_title}`}
-                          </Typography>
-                          <Typography
-                            variant="caption"
-                            sx={{
-                              fontWeight: 700,
-                              px: 1,
-                              py: 0.25,
-                              mt: 0.5,
-                              borderRadius: 1,
-                              bgcolor: balance > 0 ? '#fef3c7' : balance < 0 ? '#dcfce7' : '#f1f5f9',
-                              color: balance > 0 ? '#b45309' : balance < 0 ? '#15803d' : '#475569',
-                              display: 'inline-block',
-                            }}
-                          >
-                            Bal: PKR {fmtAmt(balance)}
-                          </Typography>
-                        </Box>
-                      </Box>
-                    );
-                  }}
-                  noOptionsText="No accounts found"
-                  clearOnEscape
-                />
-
-                <FormControl fullWidth sx={LEDGER_FILTER_FIELD_SX}>
-                  <InputLabel>Ledger Type</InputLabel>
-                  <Select
-                    value={selectedLedgerType}
-                    onChange={(e) => setSelectedLedgerType(e.target.value)}
-                    label="Ledger Type"
-                    sx={{ borderRadius: '12px', bgcolor: '#fff' }}
-                  >
+          {filtersExpanded && (
+            <Box sx={{ px: { xs: 2, md: 2.5 }, pb: 2, pt: 0.5 }}>
+              <Box sx={{ ...LEDGER_FILTER_GRID, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' } }}>
+                <TextField fullWidth size="small" label="From Date" type="date" value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)} InputLabelProps={{ shrink: true }} sx={LEDGER_FILTER_FIELD_SX} />
+                <TextField fullWidth size="small" label="To Date" type="date" value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)} InputLabelProps={{ shrink: true }} sx={LEDGER_FILTER_FIELD_SX} />
+                <FormControl fullWidth size="small" sx={LEDGER_FILTER_FIELD_SX}>
+                  <InputLabel>Type</InputLabel>
+                  <Select value={selectedLedgerType} onChange={(e) => setSelectedLedgerType(e.target.value)} label="Type">
                     <MenuItem value="">All Types</MenuItem>
                     <MenuItem value="Sale">Sale</MenuItem>
                     <MenuItem value="Purchase">Purchase</MenuItem>
@@ -2790,474 +3146,77 @@ export default function FinancePage() {
                     <MenuItem value="Adjustment">Adjustment</MenuItem>
                   </Select>
                 </FormControl>
+                <TextField fullWidth size="small" label="Search by Amount" placeholder="Debit, credit, balance..."
+                  value={filterAmount} onChange={(e) => setFilterAmount(e.target.value)}
+                  InputProps={{ startAdornment: <InputAdornment position="start"><DollarSign size={16} color={BRAND.primary.blue} /></InputAdornment> }}
+                  sx={LEDGER_FILTER_FIELD_SX} />
               </Box>
-
-              <Divider sx={{ borderColor: '#eef1f6', mb: 2.5 }} />
-
-              <Typography sx={{
-                fontSize: '0.6875rem',
-                fontWeight: 700,
-                letterSpacing: '0.1em',
-                textTransform: 'uppercase',
-                color: '#94a3b8',
-                mb: 1.5,
-              }}>
-                Date & search
-              </Typography>
-              <Box sx={LEDGER_FILTER_GRID}>
-                <TextField
-                  fullWidth
-                  label="From Date"
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  InputLabelProps={{ shrink: true }}
-                  sx={LEDGER_FILTER_FIELD_SX}
-                />
-
-                <TextField
-                  fullWidth
-                  label="To Date"
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  InputLabelProps={{ shrink: true }}
-                  sx={LEDGER_FILTER_FIELD_SX}
-                />
-
-                <TextField
-                  fullWidth
-                  label="Search by Amount"
-                  placeholder="Debit, credit, or balance..."
-                  value={filterAmount}
-                  onChange={(e) => setFilterAmount(e.target.value)}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <DollarSign size={17} color="#1A55E3" />
-                      </InputAdornment>
-                    ),
-                  }}
-                  sx={LEDGER_FILTER_FIELD_SX}
-                />
-
-                <TextField
-                  fullWidth
-                  label="Search"
-                  placeholder="Name, phone, ref, amount..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <Search size={17} color="#1A55E3" />
-                      </InputAdornment>
-                    ),
-                  }}
-                  sx={LEDGER_FILTER_FIELD_SX}
-                />
-              </Box>
-            </CardContent>
-          </Card>
-        </Box>
-        {/* Unified Professional Stats Bar */}
-        <Box sx={{ flexShrink: 0, mb: 3, width: '100%' }}>
-          <Card sx={{
-            borderRadius: 2,
-            boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
-            overflow: 'hidden',
-            bgcolor: 'white',
-            border: '1px solid #e5e7eb'
-          }}>
-            <Box sx={{
-              display: 'flex',
-              flexDirection: { xs: 'column', md: 'row' },
-              alignItems: 'stretch',
-              justifyContent: 'space-between',
-              p: 0
-            }}>
-              {(() => {
-                const stats = [];
-                if (selectedCustomer) {
-                  stats.push({
-                    title: 'Opening Balance',
-                    val: accountOpeningBalance,
-                    color: '#6366f1',
-                    bg: '#eef2ff',
-                    icon: <DollarSign size={24} />
-                  });
-                }
-                stats.push(
-                  { title: 'Total Debit', val: totalDebit, color: '#16a34a', bg: '#f0fdf4', icon: <TrendingUp size={24} /> },
-                  { title: 'Total Credit', val: totalCredit, color: '#dc2626', bg: '#fef2f2', icon: <TrendingDown size={24} /> },
-                  { title: 'Current Balance', val: currentBalance, color: '#d97706', bg: '#fffbeb', icon: <Receipt size={24} /> }
-                );
-                return stats.map((stat, i) => (
-                  <Fragment key={i}>
-                    <Box sx={{
-                      flex: 1,
-                      p: 3,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 2.5,
-                      width: '100%',
-                      bgcolor: stat.bg,
-                      position: 'relative',
-                      borderBottom: i < stats.length - 1 ? { xs: '1px solid #e5e7eb', md: 'none' } : 'none',
-                      '&:hover': {
-                        bgcolor: 'white',
-                        transition: 'background-color 0.3s'
-                      }
-                    }}>
-                      <Avatar sx={{
-                        bgcolor: 'white',
-                        color: stat.color,
-                        width: 52,
-                        height: 52,
-                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                        border: `1.5px solid ${stat.color}20`
-                      }}>
-                        {stat.icon}
-                      </Avatar>
-                      <Box>
-                        <Typography variant="overline" sx={{
-                          display: 'block',
-                          lineHeight: 1,
-                          mb: 0.5,
-                          color: '#6b7280',
-                          fontWeight: 700,
-                          letterSpacing: 1.2
-                        }}>
-                          {stat.title}
-                        </Typography>
-                        <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: 0.5, color: stat.color }}>
-                          <span style={{ fontSize: '0.8rem', marginRight: 4, opacity: 0.6 }}>PKR</span>
-                          {fmtAmt(stat.val)}
-                        </Typography>
-                      </Box>
-                    </Box>
-                    {i < stats.length - 1 && (
-                      <Divider
-                        orientation="vertical"
-                        flexItem
-                        sx={{
-                          display: { xs: 'none', md: 'block' },
-                          bgcolor: '#e5e7eb',
-                          height: 60,
-                          my: 'auto'
-                        }}
-                      />
-                    )}
-                  </Fragment>
-                ));
-              })()}
             </Box>
-          </Card>
-        </Box>
+          )}
+        </Card>
 
-        {/* Open Ledger Tabs — multiple accounts, minimize / restore */}
-        {openLedgers.length > 0 && (
-          <Box sx={{ flexShrink: 0, mb: 2, width: '100%' }}>
-            <Card sx={{ borderRadius: 2, border: '1px solid #e2e8f0', boxShadow: 'none', overflow: 'hidden' }}>
-              <Box sx={{ px: 2, py: 1.25, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 1 }}>
-                <LayoutGrid size={16} color="#64748b" />
-                <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                  Open Ledgers
-                </Typography>
-                <Typography variant="caption" sx={{ color: '#94a3b8', ml: 0.5 }}>
-                  — tabs stay open until you click ✕ (saved automatically)
-                </Typography>
-              </Box>
-              <Box sx={{ p: 1.5, display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
-                <Box
-                  onClick={showAllAccountsView}
-                  sx={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 0.75,
-                    px: 1.75,
-                    py: 0.75,
-                    borderRadius: '10px',
-                    cursor: 'pointer',
-                    fontWeight: 700,
-                    fontSize: '0.8125rem',
-                    bgcolor: !activeLedgerId ? '#1A55E3' : '#fff',
-                    color: !activeLedgerId ? '#fff' : '#475569',
-                    border: !activeLedgerId ? '2px solid #1A55E3' : '1px solid #e2e8f0',
-                    transition: 'all 0.15s ease',
-                    '&:hover': { bgcolor: !activeLedgerId ? '#1545c4' : '#f1f5f9' },
-                  }}
-                >
-                  All Accounts
-                </Box>
-                {openLedgerTabs.map((tab) => {
-                  const isActive = Number(activeLedgerId) === tab.id;
-                  const balance = parseFloat(customers.find((c) => Number(c.cus_id) === tab.id)?.cus_balance || 0);
-                  return (
-                    <Box
-                      key={tab.id}
-                      sx={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        borderRadius: '10px',
-                        overflow: 'hidden',
-                        bgcolor: isActive ? '#1A55E3' : '#fff',
-                        color: isActive ? '#fff' : '#334155',
-                        border: isActive ? '2px solid #1A55E3' : '1px solid #e2e8f0',
-                        boxShadow: isActive ? '0 2px 8px rgba(26,85,227,0.25)' : 'none',
-                        transition: 'all 0.15s ease',
-                      }}
-                    >
-                      <Box
-                        onClick={() => activateLedger(tab.id, tab.name)}
-                        sx={{
-                          px: 1.75,
-                          py: 0.75,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          minWidth: 0,
-                          '&:hover': { opacity: 0.92 },
-                        }}
-                      >
-                        <Typography noWrap sx={{ fontWeight: 700, fontSize: '0.8125rem', maxWidth: 180, lineHeight: 1.2 }}>
-                          {tab.name}
-                        </Typography>
-                        <Typography sx={{ fontSize: '0.6875rem', opacity: 0.85, fontWeight: 600 }}>
-                          Bal: PKR {fmtAmt(balance)}
-                        </Typography>
-                      </Box>
-                      <Tooltip title={tab.minimized ? 'Restore' : 'Minimize'}>
-                        <IconButton
-                          size="small"
-                          onClick={(e) => { e.stopPropagation(); toggleLedgerMinimize(tab.id); }}
-                          sx={{ color: isActive ? 'rgba(255,255,255,0.85)' : '#64748b', borderRadius: 0, '&:hover': { bgcolor: isActive ? 'rgba(255,255,255,0.15)' : '#f1f5f9' } }}
-                        >
-                          <Minimize2 size={14} />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Close">
-                        <IconButton
-                          size="small"
-                          onClick={(e) => { e.stopPropagation(); closeLedgerTab(tab.id); }}
-                          sx={{ color: isActive ? 'rgba(255,255,255,0.85)' : '#64748b', borderRadius: 0, mr: 0.25, '&:hover': { bgcolor: isActive ? 'rgba(255,255,255,0.15)' : '#fee2e2', color: '#dc2626' } }}
-                        >
-                          <X size={14} />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  );
-                })}
-              </Box>
-              {minimizedLedgerTabs.length > 0 && (
-                <Box sx={{ px: 1.5, pb: 1.5, pt: 0, display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
-                  <Typography variant="caption" sx={{ fontWeight: 700, color: '#94a3b8', mr: 0.5 }}>
-                    Minimized:
-                  </Typography>
-                  {minimizedLedgerTabs.map((tab) => (
-                    <Box
-                      key={tab.id}
-                      sx={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 0.25,
-                        borderRadius: '8px',
-                        bgcolor: '#f1f5f9',
-                        border: '1px dashed #cbd5e1',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <Box
-                        onClick={() => restoreLedger(tab.id)}
-                        sx={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 0.75,
-                          px: 1.5,
-                          py: 0.5,
-                          cursor: 'pointer',
-                          fontSize: '0.8125rem',
-                          fontWeight: 600,
-                          color: '#475569',
-                          '&:hover': { bgcolor: '#e2e8f0', color: '#1A55E3' },
-                        }}
-                      >
-                        <Minimize2 size={13} />
-                        {tab.name}
-                      </Box>
-                      <Tooltip title="Close">
-                        <IconButton
-                          size="small"
-                          onClick={(e) => { e.stopPropagation(); closeLedgerTab(tab.id); }}
-                          sx={{ borderRadius: 0, color: '#64748b', '&:hover': { bgcolor: '#fee2e2', color: '#dc2626' } }}
-                        >
-                          <X size={13} />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  ))}
-                </Box>
-              )}
-            </Card>
-          </Box>
-        )}
-
-        {/* Professional Ledger Table */}
+        {/* Ledger Table */}
         <Box sx={{ width: '100%' }}>
-          <Card sx={{ borderRadius: 0, boxShadow: 3, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+          <Card sx={LEDGER_UI.tableCard}>
             {loading && <LinearProgress color="primary" sx={{ width: '100%', height: 3, position: 'absolute', top: 0, zIndex: 10 }} />}
-            {/* Professional Ledger Header - Dynamic Account Name */}
             <CardHeader
               title={
-                <Box sx={{ position: 'relative', textAlign: 'center', py: 2, bgcolor: 'white', color: 'black', mb: 0 }}>
-                  <Typography variant="h4" sx={{ fontWeight: 'bold', mb: 1, color: 'black' }}>
+                <Box sx={LEDGER_UI.ledgerTitleBar}>
+                  <Typography component="p" sx={LEDGER_UI.ledgerTitleEn}>
+                    {COMPANY.name}
+                  </Typography>
+                  <Typography component="p" sx={LEDGER_UI.ledgerTitleUr}>
+                    {COMPANY.nameUr}
+                  </Typography>
+                  <Typography component="h2" sx={LEDGER_UI.ledgerTitleMain}>
                     {selectedCustomer
-                      ? customers.find(c => Number(c.cus_id) === Number(selectedCustomer))?.cus_name || 'ITEFAQ BUILDERS'
-                      : 'ITEFAQ BUILDERS'
-                    }
+                      ? customers.find(c => Number(c.cus_id) === Number(selectedCustomer))?.cus_name
+                      : 'All Accounts Ledger'}
                   </Typography>
-                  <Typography variant="body2" sx={{ opacity: 0.8, color: '#6b7280' }}>
-                    Accounting Period: {new Date().getFullYear()}
-                  </Typography>
-                  {selectedCustomer && (
-                    <Typography variant="subtitle1" sx={{ mt: 1, fontWeight: 700, color: '#6366f1' }}>
-                      Opening Balance: PKR {fmtAmt(accountOpeningBalance)}
-                    </Typography>
-                  )}
-
-                  {/* Left Payment Action Buttons */}
-                  {selectedCustomer && (
-                    <Box sx={{
-                      position: 'absolute',
-                      left: 24,
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      display: 'flex',
-                      gap: 1
-                    }}>
-                      <Button
-                        variant="contained"
-                        size="small"
-                        startIcon={<ArrowUp size={16} />}
-                        onClick={handlePayPayment}
-                        sx={{
-                          background: 'linear-gradient(135deg, #ef4444, #dc2626)',
-                          color: 'white',
-                          fontWeight: 600,
-                          textTransform: 'none',
-                          px: 2,
-                          py: 1,
-                          borderRadius: 1.5,
-                          boxShadow: '0 4px 6px -1px rgba(239, 68, 68, 0.2)',
-                          '&:hover': {
-                            background: 'linear-gradient(135deg, #dc2626, #b91c1c)',
-                            boxShadow: '0 10px 15px -3px rgba(239, 68, 68, 0.3)',
-                            transform: 'translateY(-1px)',
-                          },
-                          transition: 'all 0.2s'
-                        }}
-                      >
-                        Pay Amount
-                      </Button>
-                      <Button
-                        variant="contained"
-                        size="small"
-                        disabled={isSendingLedgerWhatsApp}
-                        startIcon={isSendingLedgerWhatsApp ? <CircularProgress size={14} sx={{ color: 'white' }} /> : null}
-                        onClick={handleSendLedgerPdfWhatsApp}
-                        sx={{
-                          background: 'linear-gradient(135deg, #25D366, #1ebe5d)',
-                          color: 'white',
-                          fontWeight: 600,
-                          textTransform: 'none',
-                          px: 2,
-                          py: 1,
-                          borderRadius: 1.5,
-                          '&:hover': {
-                            background: 'linear-gradient(135deg, #1ebe5d, #17a34a)',
-                            transform: 'translateY(-1px)',
-                          },
-                          transition: 'all 0.2s'
-                        }}
-                      >
-                        {isSendingLedgerWhatsApp ? 'Sending…' : 'Send Ledger'}
-                      </Button>
-                    </Box>
-                  )}
-
-                  {/* Right Payment Action Buttons */}
-                  {selectedCustomer && (
-                    <Box sx={{
-                      position: 'absolute',
-                      right: 24,
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      display: 'flex',
-                      gap: 1
-                    }}>
-                      <Button
-                        variant="contained"
-                        size="small"
-                        startIcon={<ArrowDown size={16} />}
-                        onClick={handleReceivePayment}
-                        sx={{
-                          background: 'linear-gradient(135deg, #10b981, #059669)',
-                          color: 'white',
-                          fontWeight: 600,
-                          textTransform: 'none',
-                          px: 2,
-                          py: 1,
-                          borderRadius: 1.5,
-                          boxShadow: '0 4px 6px -1px rgba(16, 185, 129, 0.2)',
-                          '&:hover': {
-                            background: 'linear-gradient(135deg, #059669, #047857)',
-                            boxShadow: '0 10px 15px -3px rgba(16, 185, 129, 0.3)',
-                            transform: 'translateY(-1px)',
-                          },
-                          transition: 'all 0.2s'
-                        }}
-                      >
-                        Receive Amount
-                      </Button>
-                      <Button
-                        variant="contained"
-                        size="small"
-                        startIcon={<Print size={16} />}
-                        onClick={() => {
-                          setPrintFromDate('');
-                          setPrintToDate('');
-                          setShowPrintLedgerDialog(true);
-                        }}
-                        sx={{
-                          background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
-                          color: 'white',
-                          fontWeight: 600,
-                          textTransform: 'none',
-                          px: 2,
-                          py: 1,
-                          borderRadius: 1.5,
-                          boxShadow: '0 4px 6px -1px rgba(99, 102, 241, 0.2)',
-                          '&:hover': {
-                            background: 'linear-gradient(135deg, #4f46e5, #4338ca)',
-                            boxShadow: '0 10px 15px -3px rgba(99, 102, 241, 0.3)',
-                            transform: 'translateY(-1px)',
-                          },
-                          transition: 'all 0.2s'
-                        }}
-                      >
-                        Print Ledger
-                      </Button>
-                    </Box>
-                  )}
                 </Box>
               }
-              sx={{
-                borderBottom: 2,
-                borderColor: '#e5e7eb',
-                bgcolor: 'white',
-                p: 0
-              }}
+              sx={{ p: 0, m: 0, pb: '0 !important', '& .MuiCardHeader-content': { width: '100%', m: 0 } }}
             />
+
+            {selectedCustomer && (
+              <Box sx={LEDGER_UI.ledgerActionBar}>
+                <Button size="small" variant="contained" startIcon={<ArrowUp size={15} />} onClick={handlePayPayment}
+                  sx={{ ...LEDGER_UI.toolbarBtn, bgcolor: BRAND.primary.pink, color: '#fff', boxShadow: 'none', '&:hover': { bgcolor: '#e0074c' } }}>
+                  Pay Amount
+                </Button>
+                <Button size="small" variant="contained" startIcon={<ArrowDown size={15} />} onClick={handleReceivePayment}
+                  sx={{ ...LEDGER_UI.toolbarBtn, bgcolor: BRAND.supporting.green, color: '#fff', boxShadow: 'none', '&:hover': { bgcolor: '#00b872' } }}>
+                  Receive Amount
+                </Button>
+                <Button size="small" variant="outlined" startIcon={<Print size={15} />}
+                  onClick={() => { setPrintFromDate(''); setPrintToDate(''); setShowPrintLedgerDialog(true); }}
+                  sx={{ ...LEDGER_UI.toolbarBtn, color: '#475569', borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#fff', borderColor: BRAND.primary.blue, color: BRAND.text.blue } }}>
+                  Print
+                </Button>
+                <Button size="small" variant="outlined" disabled={isDownloadingLedgerPdf || finalLedgerEntries.length === 0}
+                  startIcon={isDownloadingLedgerPdf ? <CircularProgress size={14} color="inherit" /> : <Download size={15} />}
+                  onClick={handleDownloadLedgerPdf}
+                  sx={{ ...LEDGER_UI.toolbarBtn, color: BRAND.text.blue, borderColor: BRAND.primary.blue, bgcolor: '#fff', '&:hover': { bgcolor: BRAND.tint.blue, borderColor: BRAND.text.blue } }}>
+                  {isDownloadingLedgerPdf ? 'Downloading…' : 'Download PDF'}
+                </Button>
+              </Box>
+            )}
+
+            {!selectedCustomer && finalLedgerEntries.length > 0 && (
+              <Box sx={LEDGER_UI.ledgerActionBar}>
+                <Button size="small" variant="outlined" startIcon={<Print size={15} />}
+                  onClick={() => { setPrintFromDate(''); setPrintToDate(''); setShowPrintLedgerDialog(true); }}
+                  sx={{ ...LEDGER_UI.toolbarBtn, color: '#475569', borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#fff', borderColor: BRAND.primary.blue, color: BRAND.text.blue } }}>
+                  Print
+                </Button>
+                <Button size="small" variant="outlined" disabled={isDownloadingLedgerPdf}
+                  startIcon={isDownloadingLedgerPdf ? <CircularProgress size={14} color="inherit" /> : <Download size={15} />}
+                  onClick={handleDownloadLedgerPdf}
+                  sx={{ ...LEDGER_UI.toolbarBtn, color: BRAND.text.blue, borderColor: BRAND.primary.blue, bgcolor: '#fff', '&:hover': { bgcolor: BRAND.tint.blue, borderColor: BRAND.text.blue } }}>
+                  {isDownloadingLedgerPdf ? 'Downloading…' : 'Download PDF'}
+                </Button>
+              </Box>
+            )}
 
             {activeLedgerId && activeLedgerTab?.minimized ? (
               <Box sx={{
@@ -3302,131 +3261,27 @@ export default function FinancePage() {
                 </Typography>
               </Box>
             ) : (
-              <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', m: 0, p: 0 }}>
+                <Box sx={LEDGER_UI.ledgerHeaderWrap}>
+                  <Table size="small" sx={LEDGER_UI.ledgerHeaderTable}>
+                    <LedgerTableColGroup />
+                    <TableHead>
+                      <LedgerTableHeaderRow />
+                    </TableHead>
+                  </Table>
+                </Box>
                 <TableContainer sx={{
                   minHeight: 320,
-                  maxHeight: { xs: '65vh', md: 'calc(100vh - 460px)' },
+                  maxHeight: { xs: '65vh', md: 'calc(100vh - 380px)' },
                   overflow: 'auto',
                   opacity: loading ? 0.6 : 1,
                   transition: 'opacity 0.2s',
+                  p: 0,
+                  m: 0,
+                  bgcolor: '#ffffff',
                 }}>
-                  <Table stickyHeader>
-                    <TableHead>
-                      <TableRow sx={{ bgcolor: '#1f2937', borderBottom: 2, borderColor: '#e5e7eb' }}>
-                        <TableCell
-                          sx={{
-                            fontWeight: 800,
-                            fontSize: '0.85rem',
-                            borderRight: 1,
-                            borderColor: '#e5e7eb',
-                            bgcolor: '#1f2937',
-                            color: 'white',
-                            textAlign: 'center',
-                            letterSpacing: 0.5
-                          }}
-                        >
-                          L_ID
-                        </TableCell>
-                        <TableCell
-                          sx={{
-                            fontWeight: 800,
-                            fontSize: '0.85rem',
-                            borderRight: 1,
-                            borderColor: '#e5e7eb',
-                            bgcolor: '#1f2937',
-                            color: 'white',
-                            minWidth: 110,
-                            letterSpacing: 0.5
-                          }}
-                        >
-                          DATE
-                        </TableCell>
-                        <TableCell
-                          sx={{
-                            fontWeight: 800,
-                            fontSize: '0.85rem',
-                            borderRight: 1,
-                            borderColor: '#e5e7eb',
-                            bgcolor: '#1f2937',
-                            color: 'white',
-                            minWidth: 160,
-                            letterSpacing: 0.5
-                          }}
-                        >
-                          ACCOUNT TITLE
-                        </TableCell>
-                        <TableCell
-                          sx={{
-                            fontWeight: 800,
-                            fontSize: '0.85rem',
-                            borderRight: 1,
-                            borderColor: '#e5e7eb',
-                            bgcolor: '#1f2937',
-                            color: 'white',
-                            minWidth: 200,
-                            letterSpacing: 0.5
-                          }}
-                        >
-                          DESCRIPTION
-                        </TableCell>
-
-                        <TableCell
-                          sx={{
-                            fontWeight: 800,
-                            fontSize: '0.85rem',
-                            borderRight: 1,
-                            borderColor: '#e5e7eb',
-                            bgcolor: '#1f2937',
-                            color: 'white',
-                            textAlign: 'right',
-                            minWidth: 110,
-                            letterSpacing: 0.5
-                          }}
-                        >
-                          DEBIT (PKR)
-                        </TableCell>
-                        <TableCell
-                          sx={{
-                            fontWeight: 800,
-                            fontSize: '0.85rem',
-                            borderRight: 1,
-                            borderColor: '#e5e7eb',
-                            bgcolor: '#1f2937',
-                            color: 'white',
-                            textAlign: 'right',
-                            minWidth: 110,
-                            letterSpacing: 0.5
-                          }}
-                        >
-                          CREDIT (PKR)
-                        </TableCell>
-                        <TableCell
-                          sx={{
-                            fontWeight: 800,
-                            fontSize: '0.85rem',
-                            bgcolor: '#1f2937',
-                            color: 'white',
-                            textAlign: 'right',
-                            minWidth: 120,
-                            letterSpacing: 0.5
-                          }}
-                        >
-                          BALANCE (PKR)
-                        </TableCell>
-                        <TableCell
-                          sx={{
-                            fontWeight: 800,
-                            fontSize: '0.85rem',
-                            bgcolor: '#1f2937',
-                            color: 'white',
-                            minWidth: 120,
-                            letterSpacing: 0.5
-                          }}
-                        >
-                          TYPE
-                        </TableCell>
-                      </TableRow>
-                    </TableHead>
+                  <Table size="small" sx={{ ...LEDGER_UI.tableGrid, borderTop: 'none', mt: '-1px' }}>
+                    <LedgerTableColGroup />
                     <TableBody>
                       {finalLedgerEntries.map((entry, index) => {
                         // Determine if this is a debit (green) or credit (red) entry using display amounts helper
@@ -3477,308 +3332,151 @@ export default function FinancePage() {
                           }
                         }
 
-                        // Color coding: Green for Debit entries, Red for Credit entries
-                        let isPositive;
-                        if (isDebit) {
-                          isPositive = true; // Debit entries are GREEN
-                        } else if (isCredit) {
-                          isPositive = false; // Credit entries are RED
-                        } else {
-                          isPositive = true;
-                        }
-
-                        const rowBgColor = isPositive ? '#dcfce7' : '#fee2e2';
-                        const entryTypeColor = isPositive ? '#16a34a' : '#dc2626';
-
-                        // Column text colors (Green for debit, Red for credit)
-                        const debitColor = entryTypeColor;
-                        const creditColor = entryTypeColor;
+                        const rowStyle = getLedgerRowStyle(isDebit, isCredit);
 
                         return (
                           <TableRow
                             key={entry.l_id}
                             sx={{
-                              bgcolor: rowBgColor,
+                              bgcolor: rowStyle.bg,
                               '&:hover': {
-                                bgcolor: '#ffffff !important',
+                                bgcolor: `${rowStyle.hover} !important`,
                                 cursor: 'pointer',
-                                '& .MuiTypography-root, & .MuiTableCell-root': {
-                                  color: '#000000 !important',
-                                  fontWeight: '700 !important',
-                                  fontSize: '1.05em !important'
-                                },
-                                '& .edit-icon': {
-                                  opacity: 1
-                                }
+                                '& .edit-icon': { opacity: 1 },
                               },
-                              borderLeft: `5px solid ${entryTypeColor}`,
-                              transition: 'all 0.15s ease-in-out'
                             }}
                             onDoubleClick={() => handleEdit(entry)}
                           >
-                            {/* Serial Number */}
-                            <TableCell
-                              sx={{
-                                borderRight: 1,
-                                borderColor: 'divider',
-                                textAlign: 'center',
-                                fontWeight: 700
-                              }}
-                            >
+                            <TableCell sx={{ textAlign: 'center', fontWeight: 600, color: '#595959', fontSize: '0.75rem', position: 'relative', bgcolor: rowStyle.bg }}>
                               {entry.l_id}
                               <IconButton
                                 size="small"
                                 className="edit-icon"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleEdit(entry);
-                                }}
+                                onClick={(e) => { e.stopPropagation(); handleEdit(entry); }}
                                 sx={{
-                                  position: 'absolute',
-                                  right: 8,
-                                  top: '50%',
-                                  transform: 'translateY(-50%)',
-                                  opacity: 0,
-                                  transition: 'opacity 0.2s',
-                                  bgcolor: entryTypeColor,
-                                  color: 'white',
-                                  '&:hover': {
-                                    bgcolor: entryTypeColor
-                                  }
+                                  position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)',
+                                  opacity: 0, transition: 'opacity 0.2s',
+                                  bgcolor: rowStyle.amount, color: '#fff',
+                                  width: 22, height: 22,
+                                  '&:hover': { bgcolor: rowStyle.amount },
                                 }}
                               >
-                                <Edit size={12} />
+                                <Edit size={11} />
                               </IconButton>
                             </TableCell>
 
-                            {/* Date */}
-                            <TableCell
-                              sx={{
-                                borderRight: 1,
-                                borderColor: 'divider',
-                                fontFamily: 'monospace',
-                                fontWeight: 600
-                              }}
-                            >
-                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                {getLocalDateString(entry.created_at)}
-                              </Typography>
+                            <TableCell sx={{ fontFamily: 'monospace', color: rowStyle.text, fontWeight: 500, fontSize: '0.8125rem', bgcolor: rowStyle.bg }}>
+                              {getLocalDateString(entry.created_at)}
                             </TableCell>
 
-                            {/* Account Title — double-click to open in a ledger tab */}
                             <TableCell
-                              sx={{
-                                borderRight: 1,
-                                borderColor: 'divider',
-                                fontWeight: 600,
-                                cursor: entry.customer?.cus_id ? 'pointer' : 'default',
-                              }}
+                              sx={{ cursor: entry.customer?.cus_id ? 'pointer' : 'default', bgcolor: rowStyle.bg }}
                               onDoubleClick={() => {
-                                if (entry.customer?.cus_id) {
-                                  openCustomerLedger(entry.customer.cus_id, entry.customer.cus_name);
-                                }
+                                if (entry.customer?.cus_id) openCustomerLedger(entry.customer.cus_id, entry.customer.cus_name);
                               }}
                             >
-                              <Typography variant="body2" sx={{ fontWeight: 700, color: '#1f2937' }}>
+                              <Typography variant="body2" sx={{ fontWeight: 700, color: rowStyle.text }}>
                                 {entry.customer?.cus_name || 'Cash Account'}
                               </Typography>
                               {entry.customer?.customer_type?.cus_type_title && (
-                                <Typography variant="caption" sx={{ color: '#4b5563', display: 'block', mt: 0.5, fontWeight: 600 }}>
+                                <Typography variant="caption" sx={{ color: rowStyle.sub, display: 'block', mt: 0.25, fontWeight: 500 }}>
                                   {entry.customer.customer_type.cus_type_title}
-                                  {entry.customer.customer_category?.cus_cat_title && ` (${entry.customer.customer_category.cus_cat_title})`}
+                                  {entry.customer.customer_category?.cus_cat_title && ` · ${entry.customer.customer_category.cus_cat_title}`}
                                 </Typography>
                               )}
                             </TableCell>
 
-                            {/* Description */}
-                            <TableCell
-                              sx={{
-                                borderRight: 1,
-                                borderColor: 'divider',
-                                maxWidth: 250
-                              }}
-                            >
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <Typography variant="body2" sx={{ lineHeight: 1.4, fontWeight: 500, color: '#374151', flex: 1 }}>
-                                  {entry.details || 'General transaction'}
-                                </Typography>
-
-                                {entry.bill_no && (
-                                  <Tooltip title="View bill / invoice details">
-                                    <IconButton
-                                      size="small"
-                                      onClick={(e) => { e.stopPropagation(); openDocumentFromLedgerEntry(entry); }}
-                                      sx={{ p: 0.5, color: entryTypeColor }}
-                                    >
-                                      <Eye size={14} />
-                                    </IconButton>
-                                  </Tooltip>
-                                )}
-                              </Box>
-
+                            <TableCell sx={{ maxWidth: 300, bgcolor: rowStyle.bg }}>
+                              <Typography variant="body2" sx={{ lineHeight: 1.5, fontWeight: 500, color: rowStyle.text }}>
+                                {entry.details || 'General transaction'}
+                              </Typography>
                               {entry.bill_no && (
-                                <Typography
-                                  variant="caption"
-                                  onClick={(e) => { e.stopPropagation(); openDocumentFromLedgerEntry(entry); }}
-                                  sx={{
-                                    fontWeight: 600,
-                                    display: 'inline-block',
-                                    mt: 0.5,
-                                    color: entryTypeColor,
-                                    cursor: 'pointer',
-                                    '&:hover': { textDecoration: 'underline' }
-                                  }}
-                                >
-                                  Bill: {entry.bill_no}
-                                </Typography>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.35 }}>
+                                  <Typography variant="caption" onClick={(e) => { e.stopPropagation(); openDocumentFromLedgerEntry(entry); }}
+                                    sx={{ fontWeight: 700, color: rowStyle.amount, cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}>
+                                    Bill #{entry.bill_no}
+                                  </Typography>
+                                  <IconButton size="small" onClick={(e) => { e.stopPropagation(); openDocumentFromLedgerEntry(entry); }}
+                                    sx={{ p: 0.25, color: rowStyle.amount }}>
+                                    <Eye size={13} />
+                                  </IconButton>
+                                </Box>
                               )}
                             </TableCell>
 
-                             {/* Debit Amount */}
-                             <TableCell
-                               sx={{
-                                 borderRight: 1,
-                                 borderColor: 'divider',
-                                 textAlign: 'right',
-                                 fontWeight: 700,
-                                 position: 'relative'
-                               }}
-                             >
+                             <TableCell sx={{ textAlign: 'right', bgcolor: rowStyle.bg }}>
                                {displayAmts.debit > 0 ? (
-                                 <Typography
-                                   variant="body2"
-                                   sx={{
-                                     fontWeight: 700,
-                                     color: debitColor,
-                                     fontFamily: 'monospace',
-                                     fontSize: '0.95rem'
-                                   }}
-                                 >
+                                 <Typography variant="body2" sx={{ fontWeight: 700, color: rowStyle.amount, fontFamily: 'monospace', fontSize: '0.875rem' }}>
                                    {fmtAmt(displayAmts.debit)}
                                  </Typography>
                                ) : (
-                                 <Typography variant="body2" sx={{ color: '#d1d5db', fontWeight: 500 }}>
-                                   -
-                                 </Typography>
+                                 <Typography variant="body2" sx={{ color: '#e2e8f0' }}>—</Typography>
                                )}
                              </TableCell>
 
-                             {/* Credit Amount */}
-                             <TableCell
-                               sx={{
-                                 borderRight: 1,
-                                 borderColor: 'divider',
-                                 textAlign: 'right',
-                                 fontWeight: 700,
-                                 position: 'relative'
-                               }}
-                             >
+                             <TableCell sx={{ textAlign: 'right', bgcolor: rowStyle.bg }}>
                                {displayAmts.credit > 0 ? (
-                                 <Typography
-                                   variant="body2"
-                                   sx={{
-                                     fontWeight: 700,
-                                     color: creditColor,
-                                     fontFamily: 'monospace',
-                                     fontSize: '0.95rem'
-                                   }}
-                                 >
+                                 <Typography variant="body2" sx={{ fontWeight: 700, color: rowStyle.amount, fontFamily: 'monospace', fontSize: '0.875rem' }}>
                                    {fmtAmt(displayAmts.credit)}
                                  </Typography>
                                ) : (
-                                 <Typography variant="body2" sx={{ color: '#d1d5db', fontWeight: 500 }}>
-                                   -
-                                 </Typography>
+                                 <Typography variant="body2" sx={{ color: '#e2e8f0' }}>—</Typography>
                                )}
                              </TableCell>
 
-                             {/* Running Balance */}
-                             <TableCell
-                               sx={{
-                                 textAlign: 'right',
-                                 position: 'relative'
-                               }}
-                             >
-                               <Typography
-                                 variant="body2"
-                                 sx={{
-                                   fontWeight: 700,
-                                   fontFamily: 'monospace',
-                                   color: '#1d4ed8',
-                                   bgcolor: '#eff6ff',
-                                   px: 1,
-                                   py: 0.5,
-                                   borderRadius: 1,
-                                   fontSize: '0.95rem',
-                                   display: 'inline-block'
-                                 }}
-                               >
+                             <TableCell sx={{ textAlign: 'right', bgcolor: rowStyle.bg }}>
+                               <Typography variant="body2" sx={{ fontWeight: 700, fontFamily: 'monospace', color: BRAND.text.blue, fontSize: '0.8125rem' }}>
                                  {fmtAmt(entry.closing_balance)}
                                </Typography>
                              </TableCell>
 
-                            {/* Ledger Type */}
-                            <TableCell
-                              sx={{
-                                fontWeight: 700,
-                                color: '#1f2937'
-                              }}
-                            >
-                              <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                                {entry.ledger_type || '-'}
-                              </Typography>
+                            <TableCell sx={{ bgcolor: rowStyle.bg, textAlign: 'center' }}>
+                              <Chip
+                                label={entry.ledger_type || '—'}
+                                size="small"
+                                sx={{
+                                  fontWeight: 600,
+                                  fontSize: '0.65rem',
+                                  height: 22,
+                                  bgcolor: rowStyle.chipBg,
+                                  color: rowStyle.chipText,
+                                  border: `1px solid ${rowStyle.border}`,
+                                }}
+                              />
                             </TableCell>
                           </TableRow>
                         );
                       })}
-                      <TableRow sx={{ bgcolor: '#f9fafb', borderTop: 2, borderColor: '#374151' }}>
-                        <TableCell colSpan={3} sx={{ borderRight: 1, borderColor: '#e5e7eb', bgcolor: '#1f2937' }}>
-                          <Typography variant="h6" sx={{ fontWeight: 700, textAlign: 'center', color: 'white' }}>
-                            TOTAL SUMMARY
+                      <TableRow sx={LEDGER_UI.summaryRow}>
+                        <TableCell colSpan={4} sx={{ textAlign: 'left' }}>
+                          <Typography sx={{ fontWeight: 700, color: '#1e293b', fontSize: '0.8125rem' }}>
+                            Period Total
                           </Typography>
                         </TableCell>
-                         <TableCell sx={{ borderRight: 1, borderColor: '#e5e7eb', textAlign: 'right', bgcolor: '#f0fdf4' }}>
-                           <Typography variant="body2" sx={{ fontWeight: 800, color: '#16a34a', fontFamily: 'monospace', fontSize: '1rem' }}>
-                             {finalLedgerEntries.length > 0
-                               ? fmtAmt(ledgerViewSummary.totalCredit)
-                               : '—'}
+                         <TableCell sx={{ textAlign: 'right', bgcolor: '#c6efce !important' }}>
+                           <Typography variant="body2" sx={{ fontWeight: 700, color: '#006100', fontFamily: 'monospace' }}>
+                             {finalLedgerEntries.length > 0 ? fmtAmt(ledgerViewSummary.totalDebit) : '—'}
                            </Typography>
                          </TableCell>
-                         <TableCell sx={{ borderRight: 1, borderColor: '#e5e7eb', textAlign: 'right', bgcolor: '#fef2f2' }}>
-                           <Typography variant="body2" sx={{ fontWeight: 800, color: '#dc2626', fontFamily: 'monospace', fontSize: '1rem' }}>
-                             {finalLedgerEntries.length > 0
-                               ? fmtAmt(ledgerViewSummary.totalDebit)
-                               : '—'}
+                         <TableCell sx={{ textAlign: 'right', bgcolor: '#f4cccc !important' }}>
+                           <Typography variant="body2" sx={{ fontWeight: 700, color: '#9c0006', fontFamily: 'monospace' }}>
+                             {finalLedgerEntries.length > 0 ? fmtAmt(ledgerViewSummary.totalCredit) : '—'}
                            </Typography>
                          </TableCell>
-                         <TableCell sx={{ textAlign: 'right', bgcolor: '#eff6ff' }}>
-                           <Typography
-                             variant="body2"
-                             sx={{
-                               fontWeight: 800,
-                               fontFamily: 'monospace',
-                               color: '#1d4ed8',
-                               fontSize: '1rem',
-                               bgcolor: '#eff6ff',
-                               px: 1,
-                               py: 0.5,
-                               borderRadius: 1
-                             }}
-                           >
-                             {finalLedgerEntries.length > 0
-                               ? fmtAmt(ledgerViewSummary.lastClosing)
-                               : '—'}
+                         <TableCell sx={{ textAlign: 'right', bgcolor: '#bdd7ee !important' }}>
+                           <Typography variant="body2" sx={{ fontWeight: 700, fontFamily: 'monospace', color: '#1347c4' }}>
+                             {finalLedgerEntries.length > 0 ? fmtAmt(ledgerViewSummary.lastClosing) : '—'}
                            </Typography>
                          </TableCell>
-                         <TableCell sx={{ bgcolor: '#f9fafb' }}></TableCell>
+                         <TableCell sx={{ bgcolor: '#d9e1f2 !important' }} />
                       </TableRow>
                     </TableBody>
                   </Table>
                 </TableContainer>
 
-                <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider', bgcolor: '#f8f9fa' }}>
-                  <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
-                    Showing {finalLedgerEntries.length} of {ledgerEntries.length} entries • Double-click any entry to edit
+                <Box sx={{ px: 2, py: 1.25, borderTop: '1px solid #c5c5c5', bgcolor: '#f2f2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 1 }}>
+                  <Typography variant="caption" sx={{ color: '#595959', fontWeight: 500, textAlign: 'center' }}>
+                    {COMPANY.name} · {COMPANY.address} · Double-click row to edit
                   </Typography>
                 </Box>
               </Box>
@@ -3818,7 +3516,7 @@ export default function FinancePage() {
         }}
       >
         {/* Header */}
-        <DialogTitle sx={{ p: 0 }}>
+        <DialogTitle component="div" sx={{ p: 0 }}>
           <Box sx={{
             background: 'linear-gradient(135deg, #1e40af 0%, #3b82f6 50%, #06b6d4 100%)',
             px: 3, py: 2.5,
@@ -4276,7 +3974,7 @@ export default function FinancePage() {
           sx: { borderRadius: 2 }
         }}
       >
-        <DialogTitle sx={{
+        <DialogTitle component="div" sx={{
           bgcolor: '#2563eb',
           color: 'white',
           fontWeight: 700,
@@ -4533,7 +4231,7 @@ export default function FinancePage() {
         fullWidth
         PaperProps={{ sx: { borderRadius: 2 } }}
       >
-        <DialogTitle sx={{
+        <DialogTitle component="div" sx={{
           bgcolor: '#10b981',
           color: 'white',
           fontWeight: 700,
@@ -4774,7 +4472,7 @@ export default function FinancePage() {
         fullWidth
         PaperProps={{ sx: { borderRadius: 2 } }}
       >
-        <DialogTitle sx={{
+        <DialogTitle component="div" sx={{
           bgcolor: '#ef4444',
           color: 'white',
           fontWeight: 700,
@@ -5015,7 +4713,7 @@ export default function FinancePage() {
         fullWidth
         PaperProps={{ sx: { borderRadius: 2 } }}
       >
-        <DialogTitle sx={{
+        <DialogTitle component="div" sx={{
           bgcolor: paymentReceiptData?.type === 'PAY' ? '#ef4444' : '#16a34a',
           color: 'white', fontWeight: 800, display: 'flex', justifyContent: 'space-between', alignItems: 'center'
         }}>
@@ -5220,7 +4918,7 @@ export default function FinancePage() {
         fullWidth
         PaperProps={{ sx: { borderRadius: 2, boxShadow: 3 } }}
       >
-        <DialogTitle sx={{ bgcolor: viewingPurchase?._isReturnVariant ? '#9333ea' : '#0284c7', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 3 }}>
+        <DialogTitle component="div" sx={{ bgcolor: viewingPurchase?._isReturnVariant ? '#9333ea' : '#0284c7', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Receipt />
             <Typography variant="h6" sx={{ fontWeight: 'bold', color: 'white' }}>
@@ -5583,7 +5281,7 @@ export default function FinancePage() {
         fullWidth
         PaperProps={{ sx: { borderRadius: 2, boxShadow: 3 } }}
       >
-        <DialogTitle sx={{ bgcolor: '#f59e0b', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 3 }}>
+        <DialogTitle component="div" sx={{ bgcolor: '#f59e0b', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Receipt />
             <Typography variant="h6" sx={{ fontWeight: 'bold', color: 'white' }}>
@@ -5887,7 +5585,7 @@ export default function FinancePage() {
         fullWidth
         PaperProps={{ sx: { borderRadius: 2, boxShadow: 3 } }}
       >
-        <DialogTitle sx={{ bgcolor: '#dc2626', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 3 }}>
+        <DialogTitle component="div" sx={{ bgcolor: '#dc2626', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Receipt />
             <Typography variant="h6" sx={{ fontWeight: 'bold', color: 'white' }}>
@@ -6209,7 +5907,7 @@ export default function FinancePage() {
         fullWidth
         PaperProps={{ sx: { borderRadius: 2, boxShadow: 3 } }}
       >
-        <DialogTitle sx={{ bgcolor: 'secondary.main', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 3 }}>
+        <DialogTitle component="div" sx={{ bgcolor: 'secondary.main', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Receipt />
             <Typography variant="h6" sx={{ fontWeight: 'bold', color: 'white' }}>
@@ -6525,7 +6223,7 @@ export default function FinancePage() {
         fullWidth
         PaperProps={{ sx: { borderRadius: 3, overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' } }}
       >
-        <DialogTitle sx={{ p: 0 }}>
+        <DialogTitle component="div" sx={{ p: 0 }}>
           <Box sx={{
             background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 50%, #7c3aed 100%)',
             px: 3, py: 2.5,

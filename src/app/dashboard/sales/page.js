@@ -513,6 +513,7 @@ function SalesPageContent() {
     credit_account_id: '',
     loader_id: '',
     shipping_amount: '',
+    labour_charges: '',
     bill_type: 'BILL',
     reason: '',
     reference: '',
@@ -1547,6 +1548,7 @@ function SalesPageContent() {
           discount: Number(discount.toFixed(0)),
           labour_charges: Number(labourCharges.toFixed(0)),
           shipping_amount: Number(deliveryCharges.toFixed(0)),
+          loader_id: selectedSaleForReturnMain?.loader_id || null,
           payment: Number(totalReturn.toFixed(0)), // The total amount being refunded to customer
           payment_type: bankReturn > 0 ? 'BANK_TRANSFER' : 'CASH', // Use BANK_TRANSFER if there's bank amount
           cash_return: Number(cashReturn.toFixed(0)), // Additional: cash portion
@@ -3132,7 +3134,8 @@ function SalesPageContent() {
         debit_account_id: fullSale.credit_account_id || '',
         credit_account_id: fullSale.debit_account_id || '',
         loader_id: fullSale.loader_id || '',
-        shipping_amount: '0',
+        shipping_amount: parseFloat(fullSale.shipping_amount || 0).toString(),
+        labour_charges: parseFloat(fullSale.labour_charges || fullSale.labour || 0).toString(),
         bill_type: fullSale.bill_type || 'BILL',
         reason: '',
         reference: fullSale.reference || '',
@@ -3177,6 +3180,7 @@ function SalesPageContent() {
       credit_account_id: '',
       loader_id: '',
       shipping_amount: '',
+      labour_charges: '',
       bill_type: 'BILL',
       reason: '',
       reference: '',
@@ -3411,6 +3415,11 @@ function SalesPageContent() {
       console.log('  Products:', fullSale.sale_details);
 
       // Populate the return form data with sale details
+      const labourValue = parseFloat(fullSale.labour_charges || fullSale.labour || 0);
+      const discountValue = parseFloat(fullSale.discount || 0);
+      const deliveryValue = parseFloat(fullSale.shipping_amount || 0);
+      const advanceValue = parseFloat(fullSale.payment || 0);
+
       setReturnFormData({
         sale_id: fullSale.sale_id,
         cus_id: fullSale.cus_id,
@@ -3421,7 +3430,8 @@ function SalesPageContent() {
         debit_account_id: fullSale.credit_account_id || '',
         credit_account_id: fullSale.debit_account_id || '',
         loader_id: fullSale.loader_id || '',
-        shipping_amount: '0',
+        shipping_amount: deliveryValue.toString(),
+        labour_charges: labourValue.toString(),
         bill_type: fullSale.bill_type || 'BILL',
         reason: '',
         reference: fullSale.reference || '',
@@ -3435,32 +3445,37 @@ function SalesPageContent() {
         })) : []
       });
 
-      // Calculate labour value
-      const labourValue = parseFloat(fullSale.labour_charges || fullSale.labour || 0);
-      const discountValue = parseFloat(fullSale.discount || 0);
-      const deliveryValue = 0; // Delivery charges from original sale are NOT returned
-      const advanceValue = parseFloat(fullSale.payment || 0);
-
       console.log('💾 PAYMENT DATA BEING SET:');
       console.log('  Labour:', labourValue);
       console.log('  Discount:', discountValue);
       console.log('  Delivery:', deliveryValue);
       console.log('  Advance:', advanceValue);
 
-      // Also update paymentData for main form display
-      setPaymentData(prev => {
-        const newPaymentData = {
-          ...prev,
-          advancePayment: advanceValue,
-          discount: 0,
-          labour: 0,
-          deliveryCharges: 0,
-          notes: `Return from Sale #${fullSale.sale_id}. Original Amount: ${fullSale.total_amount}`,
-          isLoadedOrder: false
-        };
-        console.log('🔔 Updated paymentData object:', newPaymentData);
-        return newPaymentData;
-      });
+      if (fullSale.transport_details && Array.isArray(fullSale.transport_details)) {
+        const mappedTransport = fullSale.transport_details.map((item, index) => {
+          const account = transportAccounts.find((t) => t.cus_id === item.account_id);
+          return {
+            id: Date.now() + index + 100,
+            name: account ? account.cus_name : (item.account?.cus_name || 'Unknown Account'),
+            amount: parseFloat(item.amount || 0),
+            accountId: item.account_id,
+            accountName: account ? account.cus_name : (item.account?.cus_name || 'Unknown Account'),
+          };
+        });
+        setTransportOptions(mappedTransport);
+      } else {
+        setTransportOptions([]);
+      }
+
+      setPaymentData((prev) => ({
+        ...prev,
+        advancePayment: advanceValue,
+        discount: 0,
+        labour: labourValue > 0 ? labourValue : '',
+        deliveryCharges: deliveryValue > 0 ? deliveryValue : '',
+        notes: `Return from Sale #${fullSale.sale_id}. Original Amount: ${fullSale.total_amount}`,
+        isLoadedOrder: false,
+      }));
 
       // Update product table with sale items
       if (fullSale.sale_details && Array.isArray(fullSale.sale_details)) {

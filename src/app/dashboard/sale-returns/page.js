@@ -397,6 +397,16 @@ export default function SaleReturnsPage() {
   const handleSaleSelect = async (sale) => {
     setSelectedSale(sale);
 
+    let fullSale = sale;
+    try {
+      const response = await fetch(`/api/sales?id=${sale.sale_id}`);
+      if (response.ok) {
+        fullSale = await response.json();
+      }
+    } catch (err) {
+      console.error('Failed to fetch full sale for return:', err);
+    }
+
     let customerType = null;
     let loadedFormCustomers = [];
     
@@ -439,15 +449,16 @@ export default function SaleReturnsPage() {
 
     setFormData(prev => ({
       ...prev,
-      sale_id: sale.sale_id,
-      cus_id: sale.cus_id,
-      loader_id: sale.loader_id || '',
-      shipping_amount: 0, // Should be specified manually if deduction needed
+      sale_id: fullSale.sale_id,
+      cus_id: fullSale.cus_id,
+      loader_id: fullSale.loader_id || '',
+      shipping_amount: parseFloat(fullSale.shipping_amount || 0),
+      labour_charges: parseFloat(fullSale.labour_charges || fullSale.labour || 0),
       payment: 0,
-      manual_sale_inv: sale.sale_id.toString(),
-      return_details: sale.sale_details?.map(detail => ({
+      manual_sale_inv: fullSale.sale_id.toString(),
+      return_details: fullSale.sale_details?.map(detail => ({
         pro_id: detail.pro_id,
-        store_id: detail.store_id || sale.store_id,
+        store_id: detail.store_id || fullSale.store_id,
         max_quantity: detail.qnty || 0,
         unit_rate: detail.unit_rate || 0,
         unit: detail.unit || 'PCS',
@@ -457,16 +468,16 @@ export default function SaleReturnsPage() {
       })) || []
     }));
 
-    if (sale.store_id && stores.length > 0) {
+    if (fullSale.store_id && stores.length > 0) {
       const matchingStore = stores.find(s =>
-        (s.store_id && s.store_id === sale.store_id) ||
-        (s.storeid && s.storeid === sale.store_id)
+        (s.store_id && s.store_id === fullSale.store_id) ||
+        (s.storeid && s.storeid === fullSale.store_id)
       );
       if (matchingStore) {
         setManualStore(matchingStore);
       }
     }
-    showSnackbar(`Sale #${sale.sale_id} loaded successfully`, 'success');
+    showSnackbar(`Sale #${fullSale.sale_id} loaded successfully`, 'success');
   };
 
   // Handle sale search
