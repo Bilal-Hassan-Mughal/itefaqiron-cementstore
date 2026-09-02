@@ -176,6 +176,137 @@ export const CHART_COLORS = {
   orders:  { primary: BRAND.supporting.cyan, gradient: '#8ee9fa' },
 };
 
+/** Head Office portal — executive navy/indigo + gold accent (Branch uses blue/pink) */
+export const HQ_BRAND = {
+  primary: '#4338ca',
+  primaryMid: '#4f46e5',
+  primaryDark: '#3730a3',
+  navy: '#1e1b4b',
+  navyMid: '#312e81',
+  accent: '#6366f1',
+  accentLight: '#818cf8',
+  secondary: '#7c3aed',
+  highlight: '#f59e0b',
+  highlightDark: '#d97706',
+  teal: '#0d9488',
+  tealDark: '#0f766e',
+  badge: '#f59e0b',
+  tint: '#eef2ff',
+  tintSoft: '#e0e7ff',
+  tintGold: '#fffbeb',
+  text: '#4338ca',
+  textDark: '#312e81',
+};
+
+export const HQ_GRADIENTS = {
+  header: 'linear-gradient(90deg, #1e1b4b 0%, #312e81 42%, #4338ca 100%)',
+  headerAccent: 'linear-gradient(90deg, #312e81 0%, #4338ca 35%, #6366f1 68%, #f59e0b 100%)',
+  activeNav: 'linear-gradient(135deg, #4338ca 0%, #6366f1 100%)',
+  btnPrimary: 'linear-gradient(180deg, #4338ca 0%, #3730a3 100%)',
+  btnAccent: 'linear-gradient(180deg, #7c3aed 0%, #6d28d9 100%)',
+  btnTeal: 'linear-gradient(180deg, #0d9488 0%, #0f766e 100%)',
+  welcome: 'linear-gradient(135deg, #eef2ff 0%, #ffffff 55%, #fffbeb 100%)',
+  cardShine: 'linear-gradient(90deg, transparent, rgba(99,102,241,0.06), transparent)',
+};
+
+export const HQ_UI = {
+  pageWrap: 'space-y-6 max-w-[1400px] mx-auto',
+  card: 'relative bg-white rounded-[1.25rem] border border-slate-200/60 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_28px_rgba(15,23,42,0.08)]',
+  cardHover: 'transition-all duration-300 ease-out hover:shadow-[0_4px_8px_rgba(15,23,42,0.05),0_16px_40px_rgba(49,46,129,0.12)] hover:-translate-y-1',
+  sectionHeader: 'px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-[#eef2ff]/90 via-white to-[#fffbeb]/40',
+  moduleGrid: 'p-4 md:p-5 bg-[#f9fafb]',
+};
+
+export const HQ_MUI = {
+  spinner: { color: HQ_BRAND.primary },
+  tabs: {
+    '& .Mui-selected': { color: HQ_BRAND.primary, fontWeight: 700 },
+    '& .MuiTabs-indicator': { bgcolor: HQ_BRAND.primary, height: 3, borderRadius: '3px 3px 0 0' },
+  },
+  btnPrimary: {
+    bgcolor: HQ_BRAND.primary,
+    background: HQ_GRADIENTS.btnPrimary,
+    '&:hover': { bgcolor: HQ_BRAND.primaryDark, filter: 'brightness(1.05)' },
+  },
+  chipPrimary: { bgcolor: HQ_BRAND.tint, color: HQ_BRAND.textDark, fontWeight: 700 },
+};
+
+export const HQ_SIDEBAR = {
+  background: '#f8f9fb',
+  bgElevated: '#ffffff',
+  bgHover: '#f1f3f8',
+  bgActive: HQ_BRAND.primary,
+  bgActiveGradient: HQ_GRADIENTS.activeNav,
+  border: '#e8ecf3',
+  borderStrong: '#dde3ed',
+  text: '#64748b',
+  textMuted: '#94a3b8',
+  textActive: '#1e293b',
+  textOnActive: '#ffffff',
+  accent: HQ_BRAND.primary,
+  accentMuted: HQ_BRAND.accent,
+  accentSoft: HQ_BRAND.tint,
+  accentGlow: `0 2px 12px ${hexToRgba(HQ_BRAND.primary, 0.14)}`,
+  searchBg: '#ffffff',
+  searchBorder: '#e8ecf3',
+  badgeBg: HQ_BRAND.tintGold,
+  badgeText: HQ_BRAND.highlightDark,
+  drawerShadow: '2px 0 28px rgba(30, 27, 75, 0.08)',
+  avatarGradient: `linear-gradient(135deg, ${HQ_BRAND.navyMid} 0%, ${HQ_BRAND.primary} 50%, ${HQ_BRAND.accent} 100%)`,
+  collapseBtn: HQ_BRAND.highlight,
+  collapseBtnHover: HQ_BRAND.highlightDark,
+  sectionLabel: HQ_BRAND.text,
+};
+
+export const HQ_SIDEBAR_SECTION = {
+  label: HQ_BRAND.text,
+  bg: HQ_BRAND.tint,
+  accent: HQ_BRAND.accent,
+};
+
+export const HQ_NAV_FN = {
+  overview:  nav(HQ_BRAND.accent, HQ_BRAND.text, HQ_BRAND.tint, HQ_BRAND.tintSoft),
+  branches:  nav(HQ_BRAND.primary, HQ_BRAND.textDark, HQ_BRAND.tint, '#ddd6fe'),
+  users:     nav('#0891b2', '#0e7490', '#ecfeff', '#cffafe'),
+  monitoring:nav('#059669', '#047857', '#ecfdf5', '#d1fae5'),
+  settings:  nav('#64748b', '#475569', '#f8fafc', '#f1f5f9'),
+};
+
+export const HQ_KPI_PALETTE = {
+  indigo:   { iconBg: 'bg-[#eef2ff]', icon: 'text-[#4338ca]', ring: 'ring-[#4338ca]/10' },
+  violet:   { iconBg: 'bg-[#f5f3ff]', icon: 'text-[#7c3aed]', ring: 'ring-[#7c3aed]/10' },
+  green:    { iconBg: 'bg-[#ecfdf5]', icon: 'text-[#059669]', ring: 'ring-[#059669]/10' },
+  cyan:     { iconBg: 'bg-[#ecfeff]', icon: 'text-[#0891b2]', ring: 'ring-[#0891b2]/10' },
+  gold:     { iconBg: 'bg-[#fffbeb]', icon: 'text-[#d97706]', ring: 'ring-[#f59e0b]/10' },
+};
+
+export const HQ_SHORTCUT_PALETTE = {
+  indigo:   { iconBg: 'bg-[#eef2ff]', icon: 'text-[#4338ca]' },
+  violet:   { iconBg: 'bg-[#f5f3ff]', icon: 'text-[#7c3aed]' },
+  cyan:     { iconBg: 'bg-[#ecfeff]', icon: 'text-[#0891b2]' },
+  green:    { iconBg: 'bg-[#ecfdf5]', icon: 'text-[#059669]' },
+  gold:     { iconBg: 'bg-[#fffbeb]', icon: 'text-[#d97706]' },
+  slate:    { iconBg: 'bg-slate-100', icon: 'text-slate-600' },
+};
+
+export const HQ_QUICK_ENTRY_TONES = {
+  indigo: {
+    className: 'text-white border-0 shadow-[0_4px_0_#3730a3,0_8px_24px_rgba(67,56,202,0.35)] hover:shadow-[0_2px_0_#3730a3,0_12px_32px_rgba(67,56,202,0.4)] hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_4px_0_#3730a3,0_4px_12px_rgba(67,56,202,0.3)] bg-gradient-to-b from-[#4338ca] to-[#3730a3]',
+  },
+  violet: {
+    className: 'text-white border-0 shadow-[0_4px_0_#6d28d9,0_8px_24px_rgba(124,58,237,0.35)] hover:shadow-[0_2px_0_#6d28d9,0_12px_32px_rgba(124,58,237,0.4)] hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_4px_0_#6d28d9,0_4px_12px_rgba(124,58,237,0.3)] bg-gradient-to-b from-[#7c3aed] to-[#6d28d9]',
+  },
+  neutral: {
+    className: 'bg-white border border-slate-200/80 text-slate-800 shadow-[0_2px_8px_rgba(15,23,42,0.06)] hover:shadow-[0_8px_24px_rgba(15,23,42,0.1)] hover:-translate-y-0.5 hover:border-slate-300',
+  },
+};
+
+export const HQ_REPORT = {
+  section: 'rounded-[1.35rem] bg-[#f4f6f9] border border-[#e8ecf3] p-4 md:p-5 space-y-5',
+  card: 'bg-white rounded-2xl border border-[#eef1f6] shadow-[0_2px_20px_rgba(67,56,202,0.05)] overflow-hidden',
+  filterHeader: 'px-5 md:px-6 py-4 bg-gradient-to-r from-[#4338ca] to-[#6366f1] flex flex-wrap items-center justify-between gap-3',
+};
+
 /** Plusadmin-style report cards — smooth, soft shadows */
 export const REPORT = {
   section: 'rounded-[1.35rem] bg-[#f4f6f9] border border-[#e8ecf3] p-4 md:p-5 space-y-5',

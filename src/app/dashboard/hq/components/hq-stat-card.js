@@ -1,23 +1,34 @@
 'use client';
 
 import { Card, CardContent, Box, Typography } from '@mui/material';
+import { HQ_BRAND } from '@/lib/brand-theme';
 
-export default function HqStatCard({ icon: Icon, label, value, color, sub, trend }) {
+export default function HqStatCard({ icon: Icon, label, value, color = HQ_BRAND.primary, sub, trend }) {
   return (
     <Card
       sx={{
-        borderRadius: 3,
+        borderRadius: '1.25rem',
         height: '100%',
-        border: '1px solid #e2e8f0',
+        border: '1px solid rgba(226, 232, 240, 0.9)',
         background: 'white',
-        boxShadow: '0 2px 10px rgba(15,23,42,0.03)',
-        transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+        boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 28px rgba(15,23,42,0.06)',
+        transition: 'all 0.28s cubic-bezier(0.4, 0, 0.2, 1)',
         position: 'relative',
         overflow: 'hidden',
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 3,
+          background: `linear-gradient(90deg, ${color}, ${HQ_BRAND.accent})`,
+          opacity: 0.85,
+        },
         '&:hover': {
-          transform: 'translateY(-3px)',
-          boxShadow: `0 12px 28px ${color}1a`,
-          borderColor: `${color}40`,
+          transform: 'translateY(-4px)',
+          boxShadow: `0 16px 40px ${color}18`,
+          borderColor: `${color}35`,
         },
       }}
     >
@@ -26,9 +37,9 @@ export default function HqStatCard({ icon: Icon, label, value, color, sub, trend
           position: 'absolute',
           top: 0,
           right: 0,
-          width: 80,
-          height: 80,
-          background: `radial-gradient(circle at top right, ${color}12, transparent 70%)`,
+          width: 100,
+          height: 100,
+          background: `radial-gradient(circle at top right, ${color}10, transparent 70%)`,
           pointerEvents: 'none',
         }}
       />
@@ -44,23 +55,28 @@ export default function HqStatCard({ icon: Icon, label, value, color, sub, trend
             alignItems: 'center',
             justifyContent: 'center',
             flexShrink: 0,
-            border: `1px solid ${color}20`,
+            border: `1px solid ${color}22`,
+            boxShadow: `0 4px 10px ${color}12`,
           }}
         >
-          <Icon size={24} />
+          <Icon size={24} strokeWidth={2.25} />
         </Box>
 
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h4" fontWeight={800} sx={{ color: '#0f172a', lineHeight: 1.1, letterSpacing: '-0.02em' }}>
             {value != null ? (typeof value === 'number' ? value.toLocaleString() : value) : 0}
           </Typography>
-          <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', mt: 0.5 }}>
+          <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', mt: 0.5 }}>
             {label}
           </Typography>
-
           {sub && (
             <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 500, display: 'block', mt: 0.25 }}>
               {sub}
+            </Typography>
+          )}
+          {trend && (
+            <Typography variant="caption" sx={{ color: HQ_BRAND.teal, fontWeight: 700, display: 'block', mt: 0.25 }}>
+              {trend}
             </Typography>
           )}
         </Box>

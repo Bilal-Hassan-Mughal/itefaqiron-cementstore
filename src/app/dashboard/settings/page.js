@@ -1,10 +1,25 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { SampleFormat } from '@digitalpersona/devices';
-import FingerprintScanner from '@/components/FingerprintScanner';
 import DashboardLayout from '../components/dashboard-layout';
+import { canStaffAccessPath } from '@/lib/staff-access';
+
+const FingerprintEnrollmentScanner = dynamic(
+  () => import('@/components/FingerprintEnrollmentScanner'),
+  {
+    ssr: false,
+    loading: () => (
+      <Box sx={{ py: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1.5 }}>
+        <CircularProgress size={28} sx={{ color: '#7c3aed' }} />
+        <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
+          Preparing fingerprint scanner…
+        </Typography>
+      </Box>
+    ),
+  }
+);
 
 // Material-UI imports
 import {
@@ -139,8 +154,8 @@ export default function SettingsPage() {
 
     try {
       const user = JSON.parse(userData);
-      if (user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') {
-        router.push('/dashboard');
+      if (!canStaffAccessPath(user, '/dashboard/settings')) {
+        router.replace('/dashboard?access=denied');
         return;
       }
       setCurrentUser(user);
@@ -831,8 +846,8 @@ export default function SettingsPage() {
 
         {/* DIALOG 2: Set PIN Code Modal */}
         <Dialog open={!!pinUserId} onClose={cancelPinSetup} maxWidth="xs" fullWidth PaperProps={{ sx: { borderRadius: 4, p: 1 } }}>
-          <DialogTitle sx={{ textAlign: 'center', pt: 3, pb: 1 }}>
-            <Typography variant="h6" sx={{ fontWeight: 800 }}>
+          <DialogTitle component="div" sx={{ textAlign: 'center', pt: 3, pb: 1 }}>
+            <Typography variant="h6" component="div" sx={{ fontWeight: 800 }}>
               {pinStep === 'enter' ? 'Set 6-Digit PIN' : 'Confirm 6-Digit PIN'}
             </Typography>
             <Typography variant="caption" color="text.secondary">
@@ -973,11 +988,11 @@ export default function SettingsPage() {
 
         {/* DIALOG 3: Fingerprint Enrollment Modal */}
         <Dialog open={!!fpUserId} onClose={cancelFingerprintSetup} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 4, p: 1 } }}>
-          <DialogTitle sx={{ textAlign: 'center', pt: 3, pb: 0 }}>
+          <DialogTitle component="div" sx={{ textAlign: 'center', pt: 3, pb: 0 }}>
             <Avatar sx={{ bgcolor: '#f5f3ff', color: '#7c3aed', width: 56, height: 56, mx: 'auto', mb: 1 }}>
               <FingerprintIcon sx={{ fontSize: 36 }} />
             </Avatar>
-            <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            <Typography variant="h6" component="div" sx={{ fontWeight: 800 }}>
               Enroll Fingerprint Template
             </Typography>
             <Typography variant="caption" color="text.secondary">
@@ -997,9 +1012,7 @@ export default function SettingsPage() {
               />
             </Box>
 
-            <FingerprintScanner
-              format={SampleFormat.PngImage}
-              autoStart
+            <FingerprintEnrollmentScanner
               onSample={(s) => {
                 setFpSamples((prev) => {
                   if (prev.length >= 4) return prev;

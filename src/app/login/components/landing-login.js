@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Building2, MapPin, Phone, Store } from 'lucide-react';
 import { LoginFormFields } from './login-shell';
 import { useAuthLogin, useSessionGuard } from './use-login';
+import { HqAuthModeSwitch, HqFingerprintLogin } from './hq-biometric-login';
 import { COMPANY, POWERED_BY } from '@/lib/brand-theme';
 
 const BRAND = {
@@ -37,6 +38,7 @@ export default function LandingLogin() {
 
   const branchAuth = useAuthLogin('branch');
   const hqAuth = useAuthLogin('hq');
+  const [hqAuthMode, setHqAuthMode] = useState('password');
 
   const [branches, setBranches] = useState([]);
   const [branchesLoading, setBranchesLoading] = useState(true);
@@ -70,6 +72,7 @@ export default function LandingLogin() {
   const switchTab = (next) => {
     if (next === tab) return;
     setTab(next);
+    setHqAuthMode('password');
     setAnimKey((k) => k + 1);
     if (typeof window !== 'undefined') {
       const url = next === 'hq' ? '/?tab=hq' : '/';
@@ -159,8 +162,8 @@ export default function LandingLogin() {
             </div>
 
             <div className="form-header">
-              <h2>{isBranch ? 'Branch Sign In' : 'HQ Sign In'}</h2>
-              <p>{isBranch ? 'Your store POS system' : 'Administrator access'}</p>
+              <h2>{isBranch ? 'Branch Sign In' : hqAuthMode === 'fingerprint' ? 'Biometric Login' : 'HQ Sign In'}</h2>
+              <p>{isBranch ? 'Your store POS system' : hqAuthMode === 'fingerprint' ? 'Scan your enrolled finger' : 'Administrator access'}</p>
             </div>
 
             <div className="form-body" key={animKey}>
@@ -185,20 +188,36 @@ export default function LandingLogin() {
                 onSubmit={branchAuth.handleSubmit}
               />
             ) : (
-              <LoginFormFields
-                email={hqAuth.email}
-                setEmail={hqAuth.setEmail}
-                password={hqAuth.password}
-                setPassword={hqAuth.setPassword}
-                showPassword={hqAuth.showPassword}
-                setShowPassword={hqAuth.setShowPassword}
-                error={hqAuth.error}
-                loading={hqAuth.loading}
-                submitLabel={brand.submitLabel}
-                accent={brand.accent}
-                accentDark={brand.accentDark}
-                onSubmit={hqAuth.handleSubmit}
-              />
+              <>
+                <HqAuthModeSwitch
+                  mode={hqAuthMode}
+                  onChange={(mode) => {
+                    setHqAuthMode(mode);
+                    hqAuth.setError('');
+                  }}
+                  accent={brand.accent}
+                />
+                <div className="hq-form-slot">
+                {hqAuthMode === 'password' ? (
+                  <LoginFormFields
+                    email={hqAuth.email}
+                    setEmail={hqAuth.setEmail}
+                    password={hqAuth.password}
+                    setPassword={hqAuth.setPassword}
+                    showPassword={hqAuth.showPassword}
+                    setShowPassword={hqAuth.setShowPassword}
+                    error={hqAuth.error}
+                    loading={hqAuth.loading}
+                    submitLabel={brand.submitLabel}
+                    accent={brand.accent}
+                    accentDark={brand.accentDark}
+                    onSubmit={hqAuth.handleSubmit}
+                  />
+                ) : (
+                  <HqFingerprintLogin accent={brand.accent} />
+                )}
+                </div>
+              </>
             )}
           </div>
           </div>
@@ -490,9 +509,81 @@ export default function LandingLogin() {
           animation: tabContentIn 0.35s ease;
         }
 
+        .hq-form-slot {
+          height: 340px;
+          position: relative;
+          overflow: hidden;
+        }
+
         @keyframes tabContentIn {
           from { opacity: 0; transform: translateY(8px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+
+        :global(.hq-auth-modes) {
+          display: flex;
+          justify-content: center;
+          gap: 4px;
+          margin-bottom: 8px;
+          padding: 0;
+          background: transparent;
+          border: none;
+        }
+
+        :global(.hq-auth-modes.bio-mode) {
+          margin-bottom: 0;
+        }
+
+        :global(.hq-auth-mode-btn) {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 7px;
+          padding: 10px 16px;
+          border: none;
+          border-radius: 999px;
+          background: transparent;
+          color: #64748b;
+          font-size: 0.82rem;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.25s ease;
+        }
+
+        :global(.hq-auth-mode-btn.bio-tab) {
+          padding: 8px 14px;
+          font-size: 0.78rem;
+          color: rgba(15, 23, 42, 0.45);
+          background: rgba(255, 255, 255, 0.5);
+          backdrop-filter: blur(8px);
+        }
+
+        :global(.hq-auth-mode-btn.bio-tab.active) {
+          color: white;
+          background: linear-gradient(135deg, #4f46e5, #7c3aed);
+          box-shadow: 0 8px 24px rgba(79, 70, 229, 0.35);
+        }
+
+        :global(.hq-auth-mode-btn.active) {
+          color: white;
+          box-shadow: 0 6px 16px rgba(79, 70, 229, 0.3);
+        }
+
+        :global(.hq-auth-modes:not(.bio-mode)) {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 8px;
+          margin-bottom: 20px;
+          padding: 5px;
+          background: #f1f5f9;
+          border-radius: 14px;
+          border: 1px solid #e2e8f0;
+        }
+
+        :global(.hq-auth-modes:not(.bio-mode) .hq-auth-mode-btn) {
+          border: 1px solid transparent;
+          border-radius: 10px;
+          padding: 12px 10px;
         }
 
         .landing-form-footer {

@@ -366,12 +366,12 @@ export default function BiometricAuthDialog({ open, onSuccess, onClose }) {
           </>
         )}
 
-        {authMode === 'fp' && (
+        {authMode === 'fp' && showFingerprint && (
           <div style={{ width: '100%' }}>
             <p style={{ margin: '0 0 10px', fontSize: 12, color: '#64748b', lineHeight: 1.4 }}>
               Requires the HID <strong>DigitalPersona Lite Client / Agent</strong> on this machine (it exposes{' '}
               <code style={{ fontSize: 11 }}>ws://127.0.0.1:9001</code>
-              ) and a supported USB reader.
+              ) and your U.are.U 4500 reader plugged in via USB.
             </p>
             <FingerprintScanner
               format={SampleFormat.PngImage}
@@ -385,8 +385,8 @@ export default function BiometricAuthDialog({ open, onSuccess, onClose }) {
               }}
               hint={
                 fpLoading
-                  ? '🔄 Matching fingerprint automatically...'
-                  : 'Place your finger on the reader to auto-verify.'
+                  ? 'Matching fingerprint…'
+                  : 'Place your finger on the reader to verify.'
               }
             />
 

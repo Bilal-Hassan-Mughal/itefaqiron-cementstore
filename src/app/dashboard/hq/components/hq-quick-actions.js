@@ -1,100 +1,49 @@
 'use client';
 
-import { Box, Grid, Typography } from '@mui/material';
 import { useRouter } from 'next/navigation';
 import { Building2, Users, BarChart3, Settings, Plus } from 'lucide-react';
+import { HQ_SHORTCUT_PALETTE, HQ_UI } from '@/lib/brand-theme';
 
 const ACTIONS = [
-  { label: 'Manage Branches', desc: 'Shops & access', href: '/dashboard/hq/branches', icon: Building2, color: '#4338ca', bg: '#eef2ff' },
-  { label: 'Branch Users', desc: 'Staff accounts', href: '/dashboard/hq/users', icon: Users, color: '#0891b2', bg: '#ecfeff' },
-  { label: 'Reports', desc: 'Analytics', href: '/dashboard/hq/monitoring', icon: BarChart3, color: '#16a34a', bg: '#f0fdf4' },
-  { label: 'Settings', desc: 'HQ security', href: '/dashboard/hq/settings', icon: Settings, color: '#475569', bg: '#f8fafc' },
+  { title: 'Manage Branches', palette: 'indigo', path: '/dashboard/hq/branches', icon: Building2 },
+  { title: 'Branch Users', palette: 'cyan', path: '/dashboard/hq/users', icon: Users },
+  { title: 'Monitoring', palette: 'green', path: '/dashboard/hq/monitoring', icon: BarChart3 },
+  { title: 'HQ Settings', palette: 'slate', path: '/dashboard/hq/settings', icon: Settings },
+  { title: 'Create Branch', palette: 'gold', path: '/dashboard/hq/branches?create=1', icon: Plus },
 ];
 
 export default function HqQuickActions() {
   const router = useRouter();
 
   return (
-    <Box sx={{ mb: 3 }}>
-      <Grid container spacing={1.5}>
-        {ACTIONS.map((action) => {
-          const Icon = action.icon;
-          return (
-            <Grid item xs={6} sm={3} key={action.label}>
-              <Box
-                onClick={() => router.push(action.href)}
-                sx={{
-                  p: 2,
-                  borderRadius: 2.5,
-                  bgcolor: 'white',
-                  border: '1px solid #e2e8f0',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1.5,
-                  transition: 'all 0.22s ease',
-                  '&:hover': {
-                    borderColor: action.color,
-                    boxShadow: `0 8px 20px ${action.color}18`,
-                    transform: 'translateY(-2px)',
-                  },
-                }}
+    <div className={`${HQ_UI.card} overflow-hidden`}>
+      <div className={HQ_UI.sectionHeader}>
+        <h3 className="text-base font-extrabold text-slate-900 tracking-tight">HQ Modules</h3>
+        <p className="text-xs text-slate-500 mt-0.5 font-medium">Branch management & administration</p>
+      </div>
+      <div className={HQ_UI.moduleGrid}>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5 md:gap-3">
+          {ACTIONS.map((action) => {
+            const p = HQ_SHORTCUT_PALETTE[action.palette] || HQ_SHORTCUT_PALETTE.indigo;
+            const Icon = action.icon;
+            return (
+              <button
+                key={action.title}
+                type="button"
+                onClick={() => router.push(action.path)}
+                className="group flex flex-col items-center justify-center gap-2 py-4 px-2 min-h-[96px] rounded-xl bg-white border border-gray-200/90 shadow-sm hover:shadow-lg hover:border-indigo-200/80 active:scale-[0.98] transition-all duration-200 cursor-pointer"
               >
-                <Box
-                  sx={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: 2,
-                    bgcolor: action.bg,
-                    color: action.color,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  <Icon size={20} />
-                </Box>
-                <Box sx={{ minWidth: 0 }}>
-                  <Typography variant="body2" fontWeight={800} sx={{ color: '#0f172a' }} noWrap>
-                    {action.label}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" fontWeight={500}>
-                    {action.desc}
-                  </Typography>
-                </Box>
-              </Box>
-            </Grid>
-          );
-        })}
-      </Grid>
-
-      <Box
-        onClick={() => router.push('/dashboard/hq/branches?create=1')}
-        sx={{
-          mt: 1.5,
-          p: 1.75,
-          borderRadius: 2.5,
-          background: 'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)',
-          color: 'white',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 1,
-          fontWeight: 700,
-          fontSize: '0.875rem',
-          boxShadow: '0 4px 16px rgba(79, 70, 229, 0.3)',
-          transition: 'all 0.22s ease',
-          '&:hover': {
-            transform: 'translateY(-1px)',
-            boxShadow: '0 8px 24px rgba(79, 70, 229, 0.4)',
-          },
-        }}
-      >
-        <Plus size={18} />
-        Create New Shop Branch
-      </Box>
-    </Box>
+                <div className={`w-10 h-10 rounded-xl ${p.iconBg} flex items-center justify-center transition-transform duration-200 group-hover:scale-110 shadow-sm`}>
+                  <Icon className={`w-[18px] h-[18px] ${p.icon}`} strokeWidth={2.25} />
+                </div>
+                <p className="text-[11px] md:text-xs font-semibold text-gray-700 text-center leading-snug px-0.5">
+                  {action.title}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }

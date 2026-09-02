@@ -89,6 +89,7 @@ export function useAuthLogin(loginMode) {
     showPassword,
     setShowPassword,
     error,
+    setError,
     loading,
     handleSubmit,
   };

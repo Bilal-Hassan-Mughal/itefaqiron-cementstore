@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { HQ_BRAND, HQ_GRADIENTS } from '@/lib/brand-theme';
 import {
   Box, Grid, Typography, LinearProgress, Chip, Button,
 } from '@mui/material';
@@ -8,10 +9,10 @@ import { Store, ChevronRight, BarChart3 } from 'lucide-react';
 
 const cardSx = {
   p: 2.5,
-  borderRadius: 3,
-  border: '1px solid #e2e8f0',
+  borderRadius: '1.25rem',
+  border: '1px solid rgba(226,232,240,0.9)',
   bgcolor: 'white',
-  boxShadow: '0 2px 10px rgba(15,23,42,0.03)',
+  boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 28px rgba(15,23,42,0.06)',
 };
 
 function SalesBar({ label, sublabel, value, max, active }) {
@@ -29,7 +30,7 @@ function SalesBar({ label, sublabel, value, max, active }) {
             </Typography>
           )}
         </Box>
-        <Typography variant="body2" fontWeight={800} sx={{ color: active ? '#4338ca' : '#94a3b8' }}>
+        <Typography variant="body2" fontWeight={800} sx={{ color: active ? HQ_BRAND.primary : '#94a3b8' }}>
           {value.toLocaleString()}
         </Typography>
       </Box>
@@ -42,9 +43,7 @@ function SalesBar({ label, sublabel, value, max, active }) {
           bgcolor: '#f1f5f9',
           '& .MuiLinearProgress-bar': {
             borderRadius: 4,
-            background: active
-              ? 'linear-gradient(90deg, #4f46e5, #6366f1)'
-              : '#cbd5e1',
+            background: active ? HQ_GRADIENTS.activeNav : '#cbd5e1',
           },
         }}
       />
@@ -67,7 +66,7 @@ export default function HqBranchSnapshot({ branches = [] }) {
         <Box sx={cardSx}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2.5, pb: 2, borderBottom: '1px solid #f1f5f9' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
-              <Box sx={{ p: 1, borderRadius: 2, bgcolor: '#eef2ff', color: '#4338ca', display: 'flex' }}>
+              <Box sx={{ p: 1, borderRadius: 2, bgcolor: HQ_BRAND.tint, color: HQ_BRAND.primary, display: 'flex' }}>
                 <BarChart3 size={18} />
               </Box>
               <Box>
@@ -173,7 +172,7 @@ export default function HqBranchSnapshot({ branches = [] }) {
                       height: 40,
                       borderRadius: 2,
                       background: b.status === 'ACTIVE'
-                        ? 'linear-gradient(135deg, #4338ca, #6366f1)'
+                        ? HQ_GRADIENTS.activeNav
                         : 'linear-gradient(135deg, #64748b, #94a3b8)',
                       display: 'flex',
                       alignItems: 'center',

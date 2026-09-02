@@ -9,6 +9,7 @@ import { Settings, Shield, Building2, Key, Eye, EyeOff, CheckCircle2, Copy } fro
 import HqPageHeader from '../components/hq-page-header';
 import { useHqSession } from '../components/use-hq-session';
 import { branchFetch } from '@/lib/branch-client';
+import HqBiometricPanel from '@/components/HqBiometricPanel';
 
 export default function HqSettingsPage() {
   const { user, ready } = useHqSession();
@@ -371,6 +372,10 @@ export default function HqSettingsPage() {
           </Box>
         </Grid>
       </Grid>
+
+      <Box sx={{ mt: 3 }}>
+        <HqBiometricPanel user={user} />
+      </Box>
     </>
   );
 }

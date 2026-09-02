@@ -5,6 +5,7 @@ import {
   FingerprintReader,
   SampleFormat,
 } from "@digitalpersona/devices";
+import { translateReaderError } from "@/lib/fingerprint-reader-errors";
 
 /**
  * @typedef {"initializing"|"disconnected"|"connected"|"scanning"|"error"} ReaderStatus
@@ -86,7 +87,7 @@ export function useFingerprintReader(options = {}) {
 
         reader.on("ErrorOccurred", (e) => {
           setStatus("error");
-          setError(`Reader error code: ${e.error}`);
+          setError(translateReaderError(e.error));
         });
 
         reader.on("CommunicationFailed", () => {
@@ -167,12 +168,19 @@ export function useFingerprintReader(options = {}) {
     if (!reader) return;
     setError(null);
     try {
-      await reader.startAcquisition(format);
+      try {
+        await reader.stopAcquisition();
+      } catch {
+        // ignore — may not be acquiring
+      }
+      const deviceUid = devices.length === 1 ? devices[0] : undefined;
+      await reader.startAcquisition(format, deviceUid);
     } catch (err) {
       setStatus("error");
-      setError(err instanceof Error ? err.message : String(err));
+      const raw = err instanceof Error ? err.message : String(err);
+      setError(raw.includes('80070057') ? translateReaderError('0x80070057') : raw);
     }
-  }, [format]);
+  }, [format, devices]);
 
   const stop = useCallback(async () => {
     const reader = readerRef.current;

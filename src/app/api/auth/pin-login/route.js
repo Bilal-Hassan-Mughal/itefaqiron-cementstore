@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
-
+import { isHqUser } from '@/lib/branch-roles';
 
 export async function POST(request) {
   try {
-    const { userId, pin } = await request.json();
+    const { userId, pin, login_mode: loginMode, branch_code: branchCode } = await request.json();
 
     if (!userId || !pin) {
       return NextResponse.json({ error: 'userId and pin required' }, { status: 400 });
@@ -23,9 +23,19 @@ export async function POST(request) {
         email: true,
         role: true,
         status: true,
+        branch_id: true,
         fingerprint_enrolled: true,
         allowed_modules: true,
+        is_verified: true,
         pin_code: true,
+        branch: {
+          select: {
+            branch_id: true,
+            branch_code: true,
+            branch_name: true,
+            status: true,
+          },
+        },
       },
     });
 
@@ -37,8 +47,30 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Account is inactive' }, { status: 401 });
     }
 
+    const userIsHq = isHqUser(user);
+
+    if (loginMode === 'hq' && !userIsHq) {
+      return NextResponse.json({ error: 'This account is for branch login. Please use Branch Login.' }, { status: 403 });
+    }
+
+    if (loginMode === 'branch') {
+      if (userIsHq) {
+        return NextResponse.json({ error: 'Head Office accounts must use HQ Login.' }, { status: 403 });
+      }
+      if (!user.branch_id) {
+        return NextResponse.json({ error: 'This account is not assigned to a branch.' }, { status: 403 });
+      }
+      if (user.branch?.status === 'SUSPENDED') {
+        return NextResponse.json({ error: 'This branch is suspended. Contact Head Office.' }, { status: 403 });
+      }
+      const code = (branchCode || '').trim().toUpperCase();
+      if (code && user.branch?.branch_code?.toUpperCase() !== code) {
+        return NextResponse.json({ error: 'Branch code does not match this account.' }, { status: 403 });
+      }
+    }
+
     if (!user.pin_code) {
-      return NextResponse.json({ error: 'PIN not set for this user. Ask admin to set a PIN in Settings.' }, { status: 401 });
+      return NextResponse.json({ error: 'PIN not set for this user. Set a PIN in Settings first.' }, { status: 401 });
     }
 
     const isValid = await bcrypt.compare(String(pin), user.pin_code);
@@ -52,7 +84,11 @@ export async function POST(request) {
     });
 
     const { pin_code, ...safeUser } = user;
-    return NextResponse.json({ user: safeUser });
+    return NextResponse.json({
+      user: safeUser,
+      is_hq: userIsHq,
+      login_mode: loginMode || null,
+    });
   } catch (error) {
     console.error('pin-login error:', error);
     return NextResponse.json({ error: 'Login failed' }, { status: 500 });
