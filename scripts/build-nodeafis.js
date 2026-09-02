@@ -1,5 +1,5 @@
 /**
- * GitHub-installed nodeafis ships without dist/ — build it after npm install (Vercel + local).
+ * GitHub-installed nodeafis ships without dist/ — compile it after npm install (Vercel + local).
  */
 const { existsSync } = require("node:fs");
 const { execSync } = require("node:child_process");
@@ -16,9 +16,14 @@ if (existsSync(distEntry)) {
   process.exit(0);
 }
 
-console.log("[postinstall] Building nodeafis (embedded fingerprint matcher)...");
-execSync("npm install && npm run build", {
+console.log("[build-nodeafis] Compiling embedded fingerprint matcher...");
+execSync("npx tsc -p tsconfig.json", {
   cwd: dir,
   stdio: "inherit",
   env: process.env,
 });
+
+if (!existsSync(distEntry)) {
+  console.error("[build-nodeafis] Build finished but dist/index.js is missing.");
+  process.exit(1);
+}

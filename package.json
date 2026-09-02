@@ -11,7 +11,7 @@
     "dev": "npm run dev:full",
     "build:matcher": "dotnet publish fingerprint-matcher/FingerprintMatcher -c Release -o fingerprint-matcher/publish",
     "start:matcher": "dotnet fingerprint-matcher/publish/FingerprintMatcher.dll",
-    "build": "npx prisma generate && next build --webpack",
+    "build": "node scripts/build-nodeafis.js && npx prisma generate && next build --webpack",
     "postinstall": "node scripts/build-nodeafis.js",
     "start": "next start -H 0.0.0.0",
     "app:start": "npm --prefix laravel-pos run app:start",
@@ -53,7 +53,7 @@
     "mysql2": "^3.24.2",
     "next": "^16.0.7",
     "node-fetch": "^3.3.2",
-    "nodeafis": "github:martines205/nodeafis",
+    "nodeafis": "https://github.com/martines205/nodeafis/archive/7a0b873e177058581b903de15060a3b2012123e9.tar.gz",
     "pngjs": "^7.0.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
@@ -69,6 +69,7 @@
     "eslint": "^9",
     "eslint-config-next": "^16.0.7",
     "prisma": "^6.17.1",
-    "tailwindcss": "^4"
+    "tailwindcss": "^4",
+    "typescript": "^5.6.0"
   }
 }
