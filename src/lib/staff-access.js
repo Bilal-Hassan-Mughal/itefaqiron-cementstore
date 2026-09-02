@@ -2,26 +2,37 @@
  * Staff (Users table) role checks and module permissions for the POS dashboard.
  */
 
-export const SYSTEM_MODULES = [
-  { id: 'dashboard', name: 'Dashboard', category: 'General', description: 'Main overview dashboard & quick metrics' },
-  { id: 'user_management', name: 'User Management', category: 'System Control', description: 'Manage system users, roles, and access permissions' },
-  { id: 'store_management', name: 'Store Management', category: 'Stores & Stock', description: 'Manage store branches and physical store locations' },
-  { id: 'store_stock', name: 'Store Stock', category: 'Stores & Stock', description: 'View and manage inventory stock quantities per store' },
-  { id: 'stock_transfer', name: 'Stock Transfer', category: 'Stores & Stock', description: 'Transfer product stock between different store locations' },
-  { id: 'customers', name: 'Accounts & Customers', category: 'Core', description: 'Customer profiles, customer categories, and customer balance' },
-  { id: 'products', name: 'Products & Categories', category: 'Core', description: 'Product catalog, product categories, and subcategories' },
-  { id: 'sales', name: 'Sales & Orders', category: 'Sales', description: 'POS New Sale, Order List, Sales Analytics, and Hold Bills' },
-  { id: 'sale_returns', name: 'Sale Returns & Loaders', category: 'Sales', description: 'Sale Returns, Loader/Transport management, and Quotations' },
-  { id: 'purchases', name: 'Purchases & Vehicles', category: 'Procurement', description: 'New Purchase, Purchase List, Purchase Returns, and Supplier Vehicles' },
-  { id: 'cargo', name: 'Cargo Management', category: 'Logistics', description: 'Cargo tracking, freight charges, and logistics' },
-  { id: 'finance', name: 'Finance & Expenses', category: 'Finance', description: 'Expense management, Expense titles, Journal vouchers, and Adjustments' },
-  { id: 'cash_bank_day_end', name: 'Cash, Bank & Day End', category: 'Finance', description: 'Cash reports, Bank reports, and Day End / Day Close operations' },
-  { id: 'hr', name: 'HR & Payroll', category: 'Operations', description: 'Employee records, Daily attendance, and Payroll/Salary processing' },
-  { id: 'reports', name: 'Business Reports', category: 'Analytics', description: 'Sales, Purchases, Stock, Customer Ledger, and Balance Sheet reports' },
-  { id: 'profit_report', name: 'Profit & Loss Report', category: 'Analytics', description: 'Confidential profitability analysis and margin reporting' },
-  { id: 'biometrics', name: 'Biometric Settings', category: 'System Control', description: 'Fingerprint enrollment, PIN code management, and device auth' },
-  { id: 'import', name: 'Excel Data Import', category: 'System Control', description: 'Import product catalog, customer records, and bulk data from Excel' }
-];
+import {
+  expandLegacyModules,
+  parseAllowedModules,
+  hasPageAccess,
+  canAccessPathWithModules,
+  getPagesBySection,
+  getAllPageIds,
+  SYSTEM_PAGES,
+} from './page-modules';
+
+/** Every sidebar page — use for User Management checkboxes */
+export {
+  SYSTEM_PAGES,
+  PAGE_SECTIONS,
+  getPagesBySection,
+  getAllPageIds,
+  hasPageAccess,
+  normalizeAllowedModules,
+  expandLegacyModules,
+  parseAllowedModules,
+} from './page-modules';
+
+/** @deprecated use SYSTEM_PAGES — kept for imports that expect SYSTEM_MODULES */
+export const SYSTEM_MODULES = SYSTEM_PAGES.map((p) => ({
+  id: p.id,
+  name: p.name,
+  category: p.section,
+  description: p.path,
+  section: p.section,
+  adminOnly: p.adminOnly,
+}));
 
 export const SYSTEM_ROLES = [
   {
@@ -83,8 +94,9 @@ export const SYSTEM_ROLES = [
 ];
 
 export function getRoleDefaultModules(roleKey) {
-  const role = SYSTEM_ROLES.find(r => r.key === roleKey);
-  return role ? [...role.defaultModules] : ['dashboard', 'sales', 'sale_returns'];
+  const role = SYSTEM_ROLES.find((r) => r.key === roleKey);
+  const coarse = role ? [...role.defaultModules] : ['dashboard', 'sales'];
+  return expandLegacyModules(coarse);
 }
 
 export function getStaffRoleName(user) {
@@ -140,162 +152,42 @@ export function isPathAllowedForSalesman(pathname) {
 export function canStaffAccessPath(userOrRole, pathname) {
   const user = typeof userOrRole === 'object' ? userOrRole : null;
   const roleName = user ? getStaffRoleName(user) : userOrRole;
-  
+
   if (roleName === 'SUPER_ADMIN' || roleName === 'HQ_SUPER_ADMIN' || roleName === 'BRANCH_SUPER_ADMIN') return true;
 
   const p = normalizePath(pathname);
+  if (p.startsWith('/dashboard/hq')) return roleName === 'HQ_SUPER_ADMIN' || roleName === 'SUPER_ADMIN';
 
-  // Check allowed modules if user object is available
-  let allowed = [];
-  if (user) {
-    try {
-      if (user.allowed_modules) {
-        allowed = typeof user.allowed_modules === 'string'
-          ? JSON.parse(user.allowed_modules)
-          : user.allowed_modules;
-      }
-    } catch (e) {
-      console.error('Failed to parse user.allowed_modules:', e);
-    }
-  }
-
-  // If user object has no explicit allowed_modules array, use role defaults
+  let allowed = user ? parseAllowedModules(user.allowed_modules) : [];
   if (!Array.isArray(allowed) || allowed.length === 0) {
     allowed = getRoleDefaultModules(roleName);
+  } else {
+    allowed = expandLegacyModules(allowed);
   }
 
-  // Dashboard homepage permission check
   if (p === '/dashboard' || p === '/dashboard/') {
-    return Array.isArray(allowed) && allowed.includes('dashboard');
+    return allowed.includes('dashboard');
   }
 
-  if (Array.isArray(allowed) && allowed.length > 0) {
-    const modulePrefixMap = {
-      '/dashboard/usermanagement': 'user_management',
-      '/dashboard/stores': 'store_management',
-      '/dashboard/store-stock': 'store_stock',
-      '/dashboard/stock-transfer': 'stock_transfer',
-      '/dashboard/settings': 'biometrics',
-      '/dashboard/import': 'import',
+  if (roleName === 'ADMIN' && allowed.length === 0) return true;
 
-      '/dashboard/subscriptions': 'customers',
-      '/dashboard/customercategory': 'customers',
-      '/dashboard/customer-types': 'customers',
-      '/dashboard/customers': 'customers',
-
-      '/dashboard/categories': 'products',
-      '/dashboard/subcategories': 'products',
-      '/dashboard/products': 'products',
-
-      '/dashboard/vehicles': 'purchases',
-      '/dashboard/purchases': 'purchases',
-      '/dashboard/purchase-returns': 'purchases',
-      '/dashboard/purchase-details': 'purchases',
-
-      '/dashboard/cargo': 'cargo',
-
-      '/dashboard/orders': 'sales',
-      '/dashboard/new-sale': 'sales',
-      '/dashboard/sales': 'sales',
-      '/dashboard/hold-bills': 'sales',
-
-      '/dashboard/quotations': 'sale_returns',
-      '/dashboard/loaders': 'sale_returns',
-      '/dashboard/sale-returns': 'sale_returns',
-
-      '/dashboard/expense-titles': 'finance',
-      '/dashboard/expenses': 'finance',
-      '/dashboard/journal': 'finance',
-      '/dashboard/finance': 'finance',
-      '/dashboard/internal-transfer': 'finance',
-      '/dashboard/adjustment-management': 'finance',
-      '/dashboard/bank-accounts': 'finance',
-
-      '/dashboard/day-end': 'cash_bank_day_end',
-      '/dashboard/reports/cash-report': 'cash_bank_day_end',
-      '/dashboard/reports/bank-report': 'cash_bank_day_end',
-
-      '/dashboard/reports/profit-report': 'profit_report',
-      '/dashboard/reports': 'reports',
-
-      '/dashboard/employees': 'hr',
-      '/dashboard/attendance': 'hr',
-      '/dashboard/payroll': 'hr',
-      '/dashboard/salary-management': 'hr',
-    };
-
-    const sortedPrefixes = Object.keys(modulePrefixMap).sort((a, b) => b.length - a.length);
-    for (const prefix of sortedPrefixes) {
-      if (p === prefix || p.startsWith(`${prefix}/`)) {
-        const requiredModule = modulePrefixMap[prefix];
-        // Check direct match or legacy fallback keys
-        if (allowed.includes(requiredModule)) return true;
-        if (requiredModule === 'user_management' && (allowed.includes('system') || allowed.includes('system_settings'))) return true;
-        if (requiredModule === 'store_management' && (allowed.includes('system') || allowed.includes('stores_stock'))) return true;
-        if (requiredModule === 'store_stock' && (allowed.includes('system') || allowed.includes('stores_stock'))) return true;
-        if (requiredModule === 'stock_transfer' && (allowed.includes('system') || allowed.includes('stores_stock'))) return true;
-        if (requiredModule === 'biometrics' && (allowed.includes('system') || allowed.includes('system_settings'))) return true;
-        if (requiredModule === 'import' && (allowed.includes('system') || allowed.includes('system_settings'))) return true;
-        if (requiredModule === 'customers' && allowed.includes('accounts')) return true;
-        if (requiredModule === 'sale_returns' && allowed.includes('sales')) return true;
-        if (requiredModule === 'cash_bank_day_end' && (allowed.includes('cash_bank_day_end') || allowed.includes('finance') || allowed.includes('reports') || allowed.includes('sales') || allowed.includes('cash_day_end'))) return true;
-        return false;
-      }
-    }
-    return false;
-  }
-
-  // Fallback to role-based check if allowed_modules is empty/null or not user object
-  if (roleName === 'SUPER_ADMIN' || roleName === 'ADMIN' || roleName === 'BRANCH_SUPER_ADMIN') return true;
-  if (roleName === 'SALESMAN') return isPathAllowedForSalesman(pathname);
-  return false;
+  return canAccessPathWithModules(allowed, p);
 }
 
 export function getFirstAllowedPathForStaff(userOrRole) {
   const user = typeof userOrRole === 'object' ? userOrRole : null;
   const roleName = user ? getStaffRoleName(user) : userOrRole;
-  if (roleName === 'SUPER_ADMIN') return '/dashboard';
+  if (roleName === 'SUPER_ADMIN' || roleName === 'BRANCH_SUPER_ADMIN') return '/dashboard';
 
-  let allowed = [];
-  if (user) {
-    try {
-      if (user.allowed_modules) {
-        allowed = typeof user.allowed_modules === 'string'
-          ? JSON.parse(user.allowed_modules)
-          : user.allowed_modules;
-      }
-    } catch (e) {
-      console.error('Failed to parse allowed_modules:', e);
-    }
-  }
-
+  let allowed = user ? parseAllowedModules(user.allowed_modules) : [];
   if (!Array.isArray(allowed) || allowed.length === 0) {
     allowed = getRoleDefaultModules(roleName);
+  } else {
+    allowed = expandLegacyModules(allowed);
   }
 
-  const moduleToPathOrder = [
-    { module: 'dashboard', path: '/dashboard' },
-    { module: 'sales', path: '/dashboard/sales' },
-    { module: 'sale_returns', path: '/dashboard/sale-returns' },
-    { module: 'customers', path: '/dashboard/customers' },
-    { module: 'products', path: '/dashboard/products' },
-    { module: 'purchases', path: '/dashboard/purchases' },
-    { module: 'store_stock', path: '/dashboard/store-stock' },
-    { module: 'stock_transfer', path: '/dashboard/stock-transfer' },
-    { module: 'cargo', path: '/dashboard/cargo' },
-    { module: 'finance', path: '/dashboard/finance' },
-    { module: 'cash_bank_day_end', path: '/dashboard/day-end' },
-    { module: 'hr', path: '/dashboard/employees' },
-    { module: 'reports', path: '/dashboard/reports' },
-    { module: 'profit_report', path: '/dashboard/reports/profit-report' },
-    { module: 'user_management', path: '/dashboard/usermanagement' },
-    { module: 'store_management', path: '/dashboard/stores' },
-    { module: 'biometrics', path: '/dashboard/settings' },
-    { module: 'import', path: '/dashboard/import' }
-  ];
-
-  for (const item of moduleToPathOrder) {
-    if (allowed.includes(item.module)) return item.path;
+  for (const page of SYSTEM_PAGES) {
+    if (allowed.includes(page.id)) return page.path;
   }
 
   return '/dashboard';

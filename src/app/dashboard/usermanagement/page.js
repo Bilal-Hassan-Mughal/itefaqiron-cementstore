@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   Plus, Edit, Trash2, Check, X, Mail, Lock, User, Shield, Clock, 
@@ -13,11 +13,64 @@ import {
   getStaffRoleName, 
   isAdminRole, 
   canStaffAccessPath,
-  SYSTEM_MODULES, 
   SYSTEM_ROLES, 
-  getRoleDefaultModules 
+  getRoleDefaultModules,
+  getPagesBySection,
+  normalizeAllowedModules,
+  getAllPageIds,
 } from '@/lib/staff-access';
 import BranchLoginCredentialsPanel, { BranchCodeCopyChip } from '@/components/BranchLoginCredentialsPanel';
+
+function PagePermissionGrid({ selected = [], onToggle, onToggleSection, compact = false }) {
+  const sections = getPagesBySection();
+  const selectedSet = new Set(normalizeAllowedModules(selected));
+
+  return (
+    <div className="space-y-4 max-h-[420px] overflow-y-auto pr-1">
+      {sections.map(({ section, pages }) => {
+        const sectionIds = pages.map((p) => p.id);
+        const allOn = sectionIds.every((id) => selectedSet.has(id));
+        return (
+          <div key={section} className="rounded-xl border border-gray-200 bg-gray-50/50 overflow-hidden">
+            <div className="flex items-center justify-between px-3 py-2 bg-white border-b border-gray-100">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-gray-600">{section}</span>
+              <button
+                type="button"
+                onClick={() => onToggleSection?.(sectionIds, !allOn)}
+                className="text-[10px] font-bold text-blue-600 hover:text-blue-800"
+              >
+                {allOn ? 'Clear section' : 'Select all'}
+              </button>
+            </div>
+            <div className={`grid ${compact ? 'grid-cols-2' : 'grid-cols-2 md:grid-cols-3'} gap-2 p-3`}>
+              {pages.map((page) => {
+                const isChecked = selectedSet.has(page.id);
+                return (
+                  <label
+                    key={page.id}
+                    className={`flex items-start gap-2 cursor-pointer p-2 rounded-lg border transition-all ${
+                      isChecked
+                        ? 'bg-blue-50/80 border-blue-200 text-blue-900'
+                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => onToggle(page.id)}
+                      className="w-3.5 h-3.5 mt-0.5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 shrink-0"
+                    />
+                    <span className="text-[11px] font-semibold leading-snug">{page.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function UserManagementPage() {
   const router = useRouter();
@@ -36,7 +89,7 @@ export default function UserManagementPage() {
   const [rolePermissions, setRolePermissions] = useState(() => {
     const initial = {};
     SYSTEM_ROLES.forEach(role => {
-      initial[role.key] = [...role.defaultModules];
+      initial[role.key] = getRoleDefaultModules(role.key);
     });
     return initial;
   });
@@ -48,7 +101,11 @@ export default function UserManagementPage() {
       if (savedRoles) {
         try {
           const parsed = JSON.parse(savedRoles);
-          setRolePermissions(prev => ({ ...prev, ...parsed }));
+          const normalized = {};
+          Object.keys(parsed).forEach((key) => {
+            normalized[key] = normalizeAllowedModules(parsed[key]);
+          });
+          setRolePermissions(prev => ({ ...prev, ...normalized }));
         } catch (e) {
           console.error('Failed to parse saved role permissions:', e);
         }
@@ -173,11 +230,27 @@ export default function UserManagementPage() {
 
   const handleModuleToggle = (moduleId) => {
     setFormData(prev => {
-      const current = prev.allowed_modules || [];
+      const current = normalizeAllowedModules(prev.allowed_modules);
       const updated = current.includes(moduleId)
         ? current.filter(id => id !== moduleId)
         : [...current, moduleId];
       return { ...prev, allowed_modules: updated };
+    });
+  };
+
+  const handleToggleSectionModules = (sectionIds, enable) => {
+    setFormData(prev => {
+      const current = new Set(normalizeAllowedModules(prev.allowed_modules));
+      sectionIds.forEach((id) => (enable ? current.add(id) : current.delete(id)));
+      return { ...prev, allowed_modules: [...current] };
+    });
+  };
+
+  const handleToggleRoleSection = (sectionIds, enable) => {
+    setRoleFormModules((prev) => {
+      const current = new Set(normalizeAllowedModules(prev));
+      sectionIds.forEach((id) => (enable ? current.add(id) : current.delete(id)));
+      return [...current];
     });
   };
 
@@ -187,7 +260,10 @@ export default function UserManagementPage() {
       const response = await apiFetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          allowed_modules: normalizeAllowedModules(formData.allowed_modules),
+        }),
       });
 
       if (response.ok) {
@@ -235,19 +311,19 @@ export default function UserManagementPage() {
 
   const handleEditUser = (user) => {
     setEditingUser(user);
-    let modulesList = [];
+    const userRole = user.role || 'SALESMAN';
+    const fallbackModules = rolePermissions[userRole] || getRoleDefaultModules(userRole);
+    let modulesList = fallbackModules;
     try {
       if (user.allowed_modules) {
-        modulesList = typeof user.allowed_modules === 'string'
+        const raw = typeof user.allowed_modules === 'string'
           ? JSON.parse(user.allowed_modules)
           : user.allowed_modules;
+        modulesList = normalizeAllowedModules(raw);
       }
     } catch (e) {
       console.error('Failed to parse allowed_modules:', e);
     }
-
-    const userRole = user.role || 'SALESMAN';
-    const fallbackModules = rolePermissions[userRole] || getRoleDefaultModules(userRole);
 
     setFormData({
       full_name: user.full_name || '',
@@ -256,7 +332,7 @@ export default function UserManagementPage() {
       role: userRole,
       status: user.status || 'ACTIVE',
       is_verified: user.is_verified || false,
-      allowed_modules: Array.isArray(modulesList) && modulesList.length > 0 ? modulesList : fallbackModules
+      allowed_modules: modulesList.length > 0 ? modulesList : fallbackModules
     });
     setShowUserForm(true);
   };
@@ -269,7 +345,8 @@ export default function UserManagementPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: editingUser.user_id,
-          ...formData
+          ...formData,
+          allowed_modules: normalizeAllowedModules(formData.allowed_modules),
         }),
       });
 
@@ -364,22 +441,25 @@ export default function UserManagementPage() {
   // Role Edit Handlers
   const handleOpenEditRole = (role) => {
     setEditingRole(role);
-    setRoleFormModules(rolePermissions[role.key] || [...role.defaultModules]);
+    setRoleFormModules(
+      normalizeAllowedModules(rolePermissions[role.key] || getRoleDefaultModules(role.key))
+    );
   };
 
   const handleToggleRoleModule = (moduleId) => {
-    setRoleFormModules(prev => 
-      prev.includes(moduleId)
-        ? prev.filter(m => m !== moduleId)
-        : [...prev, moduleId]
-    );
+    setRoleFormModules((prev) => {
+      const current = normalizeAllowedModules(prev);
+      return current.includes(moduleId)
+        ? current.filter((m) => m !== moduleId)
+        : [...current, moduleId];
+    });
   };
 
   const handleSaveRolePermissions = () => {
     if (!editingRole) return;
     const updated = {
       ...rolePermissions,
-      [editingRole.key]: roleFormModules
+      [editingRole.key]: normalizeAllowedModules(roleFormModules),
     };
     saveRolePermissions(updated);
     setEditingRole(null);
@@ -388,14 +468,14 @@ export default function UserManagementPage() {
 
   // Matrix Cell Toggle Handler
   const handleToggleMatrixPermission = (roleKey, moduleId) => {
-    const currentModules = rolePermissions[roleKey] || [];
+    const currentModules = normalizeAllowedModules(rolePermissions[roleKey] || []);
     const updatedModules = currentModules.includes(moduleId)
-      ? currentModules.filter(m => m !== moduleId)
+      ? currentModules.filter((m) => m !== moduleId)
       : [...currentModules, moduleId];
-    
+
     const updated = {
       ...rolePermissions,
-      [roleKey]: updatedModules
+      [roleKey]: updatedModules,
     };
     saveRolePermissions(updated);
   };
@@ -403,13 +483,15 @@ export default function UserManagementPage() {
   const resetAllRolesToDefault = () => {
     if (window.confirm('Reset all roles to their standard factory default permissions?')) {
       const resetState = {};
-      SYSTEM_ROLES.forEach(role => {
-        resetState[role.key] = [...role.defaultModules];
+      SYSTEM_ROLES.forEach((role) => {
+        resetState[role.key] = getRoleDefaultModules(role.key);
       });
       saveRolePermissions(resetState);
       alert('All role permissions reset to default successfully!');
     }
   };
+
+  const totalPageCount = getAllPageIds().length;
 
   const getRoleIcon = (role) => {
     switch (role) {
@@ -707,15 +789,18 @@ export default function UserManagementPage() {
                       let userModules = [];
                       try {
                         if (user.allowed_modules) {
-                          userModules = typeof user.allowed_modules === 'string'
+                          const raw = typeof user.allowed_modules === 'string'
                             ? JSON.parse(user.allowed_modules)
                             : user.allowed_modules;
+                          userModules = normalizeAllowedModules(raw);
                         }
                       } catch (e) {
                         userModules = [];
                       }
                       if (!Array.isArray(userModules) || userModules.length === 0) {
-                        userModules = rolePermissions[user.role] || getRoleDefaultModules(user.role);
+                        userModules = normalizeAllowedModules(
+                          rolePermissions[user.role] || getRoleDefaultModules(user.role)
+                        );
                       }
 
                       return (
@@ -745,7 +830,7 @@ export default function UserManagementPage() {
 
                           <td className="px-6 py-4">
                             <span className="text-xs font-semibold px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg border border-slate-200">
-                              {userModules.length} / {SYSTEM_MODULES.length} Modules
+                              {userModules.length} / {totalPageCount} Pages
                             </span>
                           </td>
 
@@ -826,8 +911,17 @@ export default function UserManagementPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {visibleSystemRoles.map(role => {
-                const assignedModules = rolePermissions[role.key] || role.defaultModules;
+                const assignedModules = normalizeAllowedModules(
+                  rolePermissions[role.key] || getRoleDefaultModules(role.key)
+                );
+                const assignedSet = new Set(assignedModules);
                 const userCount = users.filter(u => u.role === role.key).length;
+                const sectionSummaries = getPagesBySection()
+                  .map(({ section, pages }) => {
+                    const allowed = pages.filter((p) => assignedSet.has(p.id)).length;
+                    return allowed > 0 ? { section, allowed, total: pages.length } : null;
+                  })
+                  .filter(Boolean);
 
                 return (
                   <div key={role.key} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 flex flex-col justify-between hover:shadow-md transition-shadow">
@@ -846,26 +940,19 @@ export default function UserManagementPage() {
 
                       <div className="space-y-2 mb-6">
                         <div className="flex items-center justify-between text-xs font-bold text-gray-700">
-                          <span>Allowed Modules</span>
-                          <span className="text-blue-600">{assignedModules.length} / {SYSTEM_MODULES.length}</span>
+                          <span>Allowed Pages</span>
+                          <span className="text-blue-600">{assignedModules.length} / {totalPageCount}</span>
                         </div>
-                        
+
                         <div className="flex flex-wrap gap-1.5">
-                          {SYSTEM_MODULES.map(m => {
-                            const isAllowed = assignedModules.includes(m.id);
-                            return (
-                              <span 
-                                key={m.id} 
-                                className={`text-[10px] px-2 py-0.5 rounded-md font-medium border ${
-                                  isAllowed 
-                                    ? 'bg-blue-50 text-blue-700 border-blue-200' 
-                                    : 'bg-gray-50 text-gray-400 border-gray-100 line-through opacity-60'
-                                }`}
-                              >
-                                {m.name}
-                              </span>
-                            );
-                          })}
+                          {sectionSummaries.map(({ section, allowed, total }) => (
+                            <span
+                              key={section}
+                              className="text-[10px] px-2 py-0.5 rounded-md font-medium border bg-blue-50 text-blue-700 border-blue-200"
+                            >
+                              {section}: {allowed}/{total}
+                            </span>
+                          ))}
                         </div>
                       </div>
                     </div>
@@ -890,8 +977,8 @@ export default function UserManagementPage() {
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="text-md font-bold text-gray-900">Module Permissions Matrix</h3>
-                  <p className="text-xs text-gray-500 mt-0.5">Toggle module access across all system roles in real time.</p>
+                  <h3 className="text-md font-bold text-gray-900">Page Permissions Matrix</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">Toggle individual sidebar page access for each system role.</p>
                 </div>
 
                 <button
@@ -907,7 +994,7 @@ export default function UserManagementPage() {
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
-                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase w-1/3">System Module</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase w-1/3">Sidebar Page</th>
                       {visibleSystemRoles.map(role => (
                         <th key={role.key} className="px-3 py-3 text-center text-xs font-bold text-gray-700 uppercase">
                           <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold border ${role.color}`}>
@@ -918,31 +1005,44 @@ export default function UserManagementPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {SYSTEM_MODULES.map((module) => (
-                      <tr key={module.id} className="hover:bg-gray-50/70 transition-colors">
-                        <td className="px-4 py-3">
-                          <div className="font-semibold text-xs text-gray-900">{module.name}</div>
-                          <div className="text-[11px] text-gray-400">{module.description}</div>
-                        </td>
-
-                        {visibleSystemRoles.map(role => {
-                          const isAllowed = (rolePermissions[role.key] || []).includes(module.id);
-                          return (
-                            <td key={role.key} className="px-3 py-3 text-center">
-                              <button
-                                onClick={() => handleToggleMatrixPermission(role.key, module.id)}
-                                className={`w-8 h-8 rounded-xl flex items-center justify-center mx-auto transition-all ${
-                                  isAllowed
-                                    ? 'bg-blue-600 text-white shadow-sm hover:bg-blue-700'
-                                    : 'bg-gray-100 text-gray-300 hover:bg-gray-200'
-                                }`}
-                              >
-                                {isAllowed ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
-                              </button>
+                    {getPagesBySection().map(({ section, pages }) => (
+                      <Fragment key={section}>
+                        <tr key={`section-${section}`} className="bg-slate-100/80">
+                          <td
+                            colSpan={visibleSystemRoles.length + 1}
+                            className="px-4 py-2 text-[11px] font-extrabold uppercase tracking-wider text-slate-600"
+                          >
+                            {section}
+                          </td>
+                        </tr>
+                        {pages.map((page) => (
+                          <tr key={page.id} className="hover:bg-gray-50/70 transition-colors">
+                            <td className="px-4 py-3">
+                              <div className="font-semibold text-xs text-gray-900">{page.name}</div>
+                              <div className="text-[11px] text-gray-400">{page.path}</div>
                             </td>
-                          );
-                        })}
-                      </tr>
+
+                            {visibleSystemRoles.map((role) => {
+                              const roleModules = normalizeAllowedModules(rolePermissions[role.key] || []);
+                              const isAllowed = roleModules.includes(page.id);
+                              return (
+                                <td key={role.key} className="px-3 py-3 text-center">
+                                  <button
+                                    onClick={() => handleToggleMatrixPermission(role.key, page.id)}
+                                    className={`w-8 h-8 rounded-xl flex items-center justify-center mx-auto transition-all ${
+                                      isAllowed
+                                        ? 'bg-blue-600 text-white shadow-sm hover:bg-blue-700'
+                                        : 'bg-gray-100 text-gray-300 hover:bg-gray-200'
+                                    }`}
+                                  >
+                                    {isAllowed ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
+                                  </button>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -1076,7 +1176,7 @@ export default function UserManagementPage() {
                       <div className="flex items-center justify-between mb-3">
                         <h4 className="text-xs font-bold text-gray-900 flex items-center uppercase tracking-wider">
                           <Shield className="w-4 h-4 mr-1.5 text-blue-600" />
-                          Module Permissions Matrix
+                          Page Permissions
                         </h4>
 
                         <button
@@ -1089,31 +1189,11 @@ export default function UserManagementPage() {
                         </button>
                       </div>
 
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                        {SYSTEM_MODULES.map(module => {
-                          const isChecked = (formData.allowed_modules || []).includes(module.id);
-                          return (
-                            <label 
-                              key={module.id} 
-                              className={`flex items-start space-x-2 cursor-pointer p-2.5 rounded-xl border transition-all ${
-                                isChecked 
-                                  ? 'bg-blue-50/70 border-blue-200 text-blue-900' 
-                                  : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-100'
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={() => handleModuleToggle(module.id)}
-                                className="w-4 h-4 mt-0.5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                              />
-                              <div>
-                                <div className="text-xs font-bold">{module.name}</div>
-                              </div>
-                            </label>
-                          );
-                        })}
-                      </div>
+                      <PagePermissionGrid
+                        selected={formData.allowed_modules}
+                        onToggle={handleModuleToggle}
+                        onToggleSection={handleToggleSectionModules}
+                      />
                     </div>
 
                     <div className="flex items-center justify-end space-x-3 pt-3 border-t border-gray-100">
@@ -1149,7 +1229,7 @@ export default function UserManagementPage() {
                 onClick={() => setEditingRole(null)}
               />
               
-              <div className="relative inline-block w-full max-w-2xl p-0 my-8 overflow-hidden text-left align-middle transition-all transform bg-white shadow-2xl rounded-3xl border border-gray-100">
+              <div className="relative inline-block w-full max-w-3xl p-0 my-8 overflow-hidden text-left align-middle transition-all transform bg-white shadow-2xl rounded-3xl border border-gray-100">
                 <div className="bg-gray-900 p-6 text-white flex items-center justify-between">
                   <div className="flex items-center">
                     <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center mr-3">
@@ -1170,32 +1250,11 @@ export default function UserManagementPage() {
                 </div>
 
                 <div className="p-6 space-y-5">
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {SYSTEM_MODULES.map(module => {
-                      const isChecked = roleFormModules.includes(module.id);
-                      return (
-                        <label 
-                          key={module.id} 
-                          className={`flex items-start space-x-2 cursor-pointer p-3 rounded-xl border transition-all ${
-                            isChecked 
-                              ? 'bg-blue-50 border-blue-300 text-blue-900' 
-                              : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => handleToggleRoleModule(module.id)}
-                            className="w-4 h-4 mt-0.5 text-blue-600 rounded focus:ring-blue-500"
-                          />
-                          <div>
-                            <div className="text-xs font-bold">{module.name}</div>
-                            <div className="text-[10px] text-gray-400">{module.category}</div>
-                          </div>
-                        </label>
-                      );
-                    })}
-                  </div>
+                  <PagePermissionGrid
+                    selected={roleFormModules}
+                    onToggle={handleToggleRoleModule}
+                    onToggleSection={handleToggleRoleSection}
+                  />
 
                   <div className="flex items-center justify-end space-x-3 pt-3 border-t border-gray-100">
                     <button

@@ -11,13 +11,39 @@ builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
 });
 
-// Default bind only when ASPNETCORE_URLS is not set (so you can move off 5050 if busy).
-if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
+// Cloud hosts (Railway, Render, Fly.io) set PORT — bind all interfaces.
+var port = Environment.GetEnvironmentVariable("PORT");
+if (!string.IsNullOrWhiteSpace(port))
+{
+    builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+}
+else if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
 {
     builder.WebHost.UseUrls("http://127.0.0.1:5050");
 }
 
 var app = builder.Build();
+
+var matcherApiKey = Environment.GetEnvironmentVariable("MATCHER_API_KEY");
+
+app.Use(async (context, next) =>
+{
+    if (string.IsNullOrWhiteSpace(matcherApiKey) || context.Request.Path == "/health")
+    {
+        await next();
+        return;
+    }
+
+    if (!context.Request.Headers.TryGetValue("X-Matcher-Key", out var provided) ||
+        provided != matcherApiKey)
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await context.Response.WriteAsJsonAsync(new { error = "Unauthorized" });
+        return;
+    }
+
+    await next();
+});
 
 app.MapGet("/health", () => Results.Ok(new { ok = true, matcher = "SourceAFIS", version = typeof(FingerprintTemplate).Assembly.GetName().Version?.ToString() }));
 

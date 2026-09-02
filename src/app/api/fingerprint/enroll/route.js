@@ -64,7 +64,7 @@ export async function POST(req) {
   if (prepared.length < 2) {
     return NextResponse.json(
       {
-        error: `Only ${prepared.length} of ${templates.length} samples produced a valid fingerprint template. Is the matcher running on ${process.env.FINGERPRINT_MATCHER_URL ?? "http://127.0.0.1:5050"}?`,
+        error: `Only ${prepared.length} of ${templates.length} samples produced a valid fingerprint template. Try scanning again with a clean, dry finger.`,
       },
       { status: 400 }
     );
