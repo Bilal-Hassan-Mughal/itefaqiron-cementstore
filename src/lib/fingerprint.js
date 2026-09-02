@@ -39,6 +39,36 @@ function pngBase64ToBuffer(pngBase64) {
   return Buffer.from(toStandardBase64(pngBase64), "base64");
 }
 
+/** DigitalPersona PNG captures are often palette (color type 3); nodeafis only accepts gray/RGB/RGBA. */
+function rgbaToGrayscalePixels(data, width, height) {
+  const pixels = new Uint8Array(width * height);
+  for (let i = 0; i < width * height; i++) {
+    const o = i * 4;
+    const r = data[o];
+    const g = data[o + 1];
+    const b = data[o + 2];
+    pixels[i] = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+  }
+  return pixels;
+}
+
+async function pngBase64ToFingerprintImage(pngBase64) {
+  const { FingerprintImage } = await loadNodeafis();
+  const bytes = pngBase64ToBuffer(pngBase64);
+
+  try {
+    return FingerprintImage.decode(bytes, { dpi: 500 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes("Unsupported PNG color type")) throw err;
+
+    const { PNG } = await import("pngjs");
+    const png = PNG.sync.read(bytes);
+    const pixels = rgbaToGrayscalePixels(png.data, png.width, png.height);
+    return FingerprintImage.fromRaw(png.width, png.height, pixels, { dpi: 500 });
+  }
+}
+
 /** @type {Promise<typeof import('nodeafis')> | null} */
 let nodeafisPromise = null;
 
@@ -50,8 +80,8 @@ async function loadNodeafis() {
 }
 
 async function extractTemplateEmbedded(pngBase64) {
-  const { FingerprintImage, FingerprintTemplate } = await loadNodeafis();
-  const image = FingerprintImage.decode(pngBase64ToBuffer(pngBase64), { dpi: 500 });
+  const { FingerprintTemplate } = await loadNodeafis();
+  const image = await pngBase64ToFingerprintImage(pngBase64);
   const template = FingerprintTemplate.fromImage(image);
   return Buffer.from(template.toByteArray()).toString("base64");
 }
@@ -60,8 +90,8 @@ async function matchFingerprintEmbedded(candidatePng, enrolled) {
   const usable = enrolled.filter((t) => !!t.descriptor);
   if (usable.length === 0) return { best: null, matched: null };
 
-  const { FingerprintImage, FingerprintTemplate, FingerprintMatcher } = await loadNodeafis();
-  const probeImage = FingerprintImage.decode(pngBase64ToBuffer(candidatePng), { dpi: 500 });
+  const { FingerprintTemplate, FingerprintMatcher } = await loadNodeafis();
+  const probeImage = await pngBase64ToFingerprintImage(candidatePng);
   const probe = FingerprintTemplate.fromImage(probeImage);
   const matcher = new FingerprintMatcher(probe);
 
