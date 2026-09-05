@@ -40,7 +40,7 @@ export async function POST(request) {
 
   try {
     const body = await request.json();
-    const { emp_name, emp_phone, emp_cnic, emp_address, designation, department, join_date, basic_salary } = body;
+    const { emp_name, emp_phone, emp_cnic, emp_address, designation, department, join_date, basic_salary, allowed_leaves_per_month, allowed_absents_per_month } = body;
     if (!emp_name) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
 
     const employee = await prisma.employee.create({
@@ -53,6 +53,8 @@ export async function POST(request) {
         department: department || null,
         join_date: join_date ? new Date(join_date) : new Date(),
         basic_salary: parseFloat(basic_salary) || 0,
+        allowed_leaves_per_month: Number.isFinite(parseInt(allowed_leaves_per_month, 10)) ? parseInt(allowed_leaves_per_month, 10) : 2,
+        allowed_absents_per_month: Number.isFinite(parseInt(allowed_absents_per_month, 10)) ? parseInt(allowed_absents_per_month, 10) : 0,
       },
     });
     return NextResponse.json(employee, { status: 201 });
@@ -68,7 +70,7 @@ export async function PUT(request) {
 
   try {
     const body = await request.json();
-    const { emp_id, emp_name, emp_phone, emp_cnic, emp_address, designation, department, join_date, basic_salary, status } = body;
+    const { emp_id, emp_name, emp_phone, emp_cnic, emp_address, designation, department, join_date, basic_salary, status, allowed_leaves_per_month, allowed_absents_per_month } = body;
     if (!emp_id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
 
     const employee = await prisma.employee.update({
@@ -83,6 +85,8 @@ export async function PUT(request) {
         join_date: join_date ? new Date(join_date) : undefined,
         basic_salary: parseFloat(basic_salary) || 0,
         status: status || 'ACTIVE',
+        allowed_leaves_per_month: Number.isFinite(parseInt(allowed_leaves_per_month, 10)) ? parseInt(allowed_leaves_per_month, 10) : undefined,
+        allowed_absents_per_month: Number.isFinite(parseInt(allowed_absents_per_month, 10)) ? parseInt(allowed_absents_per_month, 10) : undefined,
       },
     });
     return NextResponse.json(employee);

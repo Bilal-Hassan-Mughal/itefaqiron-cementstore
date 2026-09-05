@@ -284,7 +284,7 @@ export default function SaleReturnsPage() {
         fetch('/api/sales'),
         fetch('/api/products?dropdown=true'),
         fetch('/api/stores'),
-        fetch('/api/loaders'),
+        fetch('/api/loaders?limit=500'),
         fetch('/api/customer-types'),
         fetch('/api/customer-category'),
         fetch('/api/cities')
@@ -296,7 +296,7 @@ export default function SaleReturnsPage() {
       setSales(data[1] || []);
       setProducts(data[2] || []);
       setStores(data[3]?.data || data[3] || []);
-      setLoaders(data[4] || []);
+      setLoaders(Array.isArray(data[4]) ? data[4] : (data[4]?.loaders || []));
       setCustomerTypes(data[5] || []);
       setCustomerCategories(data[6] || []);
       setCities(data[7] || []);

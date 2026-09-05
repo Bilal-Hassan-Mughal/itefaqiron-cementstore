@@ -747,39 +747,54 @@ export async function POST(request) {
           });
         }
 
-        // Re-adjust transporter customer account balance if original sale transport ledger entry exists
+        // Re-adjust transporter account when original sale had transport charges (credit transport on return)
         if (sale_id && shippingAmount > 0) {
-          const originalTransportLedgerEntry = await tx.ledger.findFirst({
+          const originalTransportLedgerEntries = await tx.ledger.findMany({
             where: {
               bill_no: sale_id.toString(),
-              details: { contains: 'Transport' }
-            }
+              details: { contains: 'Transport' },
+              credit_amount: { gt: 0 },
+            },
+            orderBy: { l_id: 'asc' },
           });
 
-          if (originalTransportLedgerEntry) {
-            const transportCusId = originalTransportLedgerEntry.cus_id;
-            affectedCusIds.push(transportCusId);
+          const entriesToReverse = originalTransportLedgerEntries.length > 0
+            ? originalTransportLedgerEntries
+            : null;
 
-            const currentTransportBalance = await resolveOpeningBalance(tx, transportCusId, saleReturn.created_at);
+          if (entriesToReverse) {
+            for (const originalTransportLedgerEntry of entriesToReverse) {
+              const transportCusId = originalTransportLedgerEntry.cus_id;
+              const transportAmount = parseFloat(originalTransportLedgerEntry.credit_amount || 0);
+              if (transportAmount <= 0) continue;
 
-            // Create a DEBIT entry to reverse the original CREDIT transport charge
-            const l_id_trans = await getNextId('ledger', 'l_id', tx);
-            await tx.ledger.create({
-              data: {
-                l_id: l_id_trans,
+              if (!affectedCusIds.includes(transportCusId)) {
+                affectedCusIds.push(transportCusId);
+              }
+
+              const currentTransportBalance = await resolveOpeningBalance(tx, transportCusId, saleReturn.created_at);
+
+              const transportReturnEntry = createLedgerEntry({
                 cus_id: transportCusId,
                 opening_balance: currentTransportBalance,
-                debit_amount: shippingAmount,
-                credit_amount: 0,
-                closing_balance: currentTransportBalance + shippingAmount,
+                debit_amount: 0,
+                credit_amount: Number(transportAmount.toFixed(2)),
                 bill_no: saleReturn.return_id.toString(),
-                trnx_type: 'DEBIT',
-                ledger_type: 'Sale Return',
-                details: `Transport Fare Deduction - Sale Return #${saleReturn.return_id} - Original Bill #${sale_id}`,
+                trnx_type: 'CREDIT',
+                details: `Transport Charges - Sale Return #${saleReturn.return_id} - Original Bill #${sale_id} (Credit)`,
                 payments: 0,
-                updated_by: validatedUpdatedBy
-              }
-            });
+                updated_by: validatedUpdatedBy,
+                ledger_type: 'Sale Return',
+              });
+
+              const l_id_trans = await getNextId('ledger', 'l_id', tx);
+              await tx.ledger.create({
+                data: {
+                  l_id: l_id_trans,
+                  ...transportReturnEntry,
+                },
+              });
+            }
           }
         }
       } // End of if (!isQuotationReturn)

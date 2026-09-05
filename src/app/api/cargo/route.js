@@ -1,6 +1,29 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { initBranchScope } from '@/lib/branch-server';
+import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
+
+const sumCargoExpenses = (row) =>
+  ['exp1', 'exp2', 'exp3', 'exp4', 'exp5', 'exp6', 'others'].reduce(
+    (sum, key) => sum + parseFloat(row?.[key] || 0),
+    0
+  );
+
+const buildCargoSummary = (rows) => {
+  const list = Array.isArray(rows) ? rows : [];
+  const totalFare = list.reduce((sum, row) => sum + parseFloat(row.total_cargo_fare || 0), 0);
+  const totalExpenses = list.reduce((sum, row) => sum + sumCargoExpenses(row), 0);
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const thisMonth = list.filter((row) => row.created_at && new Date(row.created_at) >= monthStart).length;
+
+  return {
+    totalRecords: list.length,
+    totalFare: Number(totalFare.toFixed(2)),
+    totalExpenses: Number(totalExpenses.toFixed(2)),
+    netAmount: Number((totalFare - totalExpenses).toFixed(2)),
+    thisMonth,
+  };
+};
 
 
 export async function GET(request) {
@@ -46,7 +69,7 @@ export async function GET(request) {
         ]
       } : {}; 
 
-      const [cargo, total] = await Promise.all([
+      const [cargo, total, summaryRows] = await Promise.all([
         prisma.cargo.findMany({
           where,
           include: {
@@ -61,11 +84,26 @@ export async function GET(request) {
           skip,
           take: limit
         }),
-        prisma.cargo.count({ where })
+        prisma.cargo.count({ where }),
+        prisma.cargo.findMany({
+          where,
+          select: {
+            total_cargo_fare: true,
+            exp1: true,
+            exp2: true,
+            exp3: true,
+            exp4: true,
+            exp5: true,
+            exp6: true,
+            others: true,
+            created_at: true,
+          },
+        }),
       ]);
 
       return NextResponse.json({
         cargo,
+        summary: buildCargoSummary(summaryRows),
         pagination: {
           page,
           limit,
@@ -104,9 +142,11 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Vehicle number is required' }, { status: 400 });
     }
 
+    const validatedUpdatedBy = await resolveUpdatedByUserId(request, updated_by, prisma);
+
     const cargo = await prisma.cargo.create({
       data: {
-        vehicle_no,
+        vehicle_no: String(vehicle_no).trim(),
         total_cargo_fare: parseFloat(total_cargo_fare) || 0,
         exp1: parseFloat(exp1) || 0,
         exp2: parseFloat(exp2) || 0,
@@ -115,7 +155,7 @@ export async function POST(request) {
         exp5: parseFloat(exp5) || 0,
         exp6: parseFloat(exp6) || 0,
         others: parseFloat(others) || 0,
-        updated_by
+        updated_by: validatedUpdatedBy
       },
       include: {
         updated_by_user: {
@@ -163,10 +203,12 @@ export async function PUT(request) {
       return NextResponse.json({ error: 'Vehicle number is required' }, { status: 400 });
     }
 
+    const validatedUpdatedBy = await resolveUpdatedByUserId(request, updated_by, prisma);
+
     const cargo = await prisma.cargo.update({
       where: { cargo_id: id },
       data: {
-        vehicle_no,
+        vehicle_no: String(vehicle_no).trim(),
         total_cargo_fare: parseFloat(total_cargo_fare) || 0,
         exp1: parseFloat(exp1) || 0,
         exp2: parseFloat(exp2) || 0,
@@ -175,7 +217,7 @@ export async function PUT(request) {
         exp5: parseFloat(exp5) || 0,
         exp6: parseFloat(exp6) || 0,
         others: parseFloat(others) || 0,
-        updated_by
+        updated_by: validatedUpdatedBy
       },
       include: {
         updated_by_user: {

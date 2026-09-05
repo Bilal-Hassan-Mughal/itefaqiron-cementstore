@@ -1062,8 +1062,10 @@ model Employee {
   designation   String?
   department    String?
   join_date     DateTime          @db.Date
-  basic_salary  Decimal           @default(0.00) @db.Decimal(10, 2)
-  status        EmpStatus         @default(ACTIVE)
+  basic_salary             Decimal           @default(0.00) @db.Decimal(10, 2)
+  allowed_leaves_per_month Int               @default(2)
+  allowed_absents_per_month Int              @default(0)
+  status                   EmpStatus         @default(ACTIVE)
   created_at    DateTime          @default(now())
   updated_at    DateTime          @updatedAt
   branch        Branch            @relation(fields: [branch_id], references: [branch_id])
@@ -1102,8 +1104,11 @@ model Payroll {
   total_days        Int               @default(30)
   days_present      Int               @default(0)
   leaves_taken      Int               @default(0)
+  absents_taken     Int               @default(0)
   allowed_leaves    Int               @default(0)
+  allowed_absents   Int               @default(0)
   excess_leaves     Int               @default(0)
+  excess_absents    Int               @default(0)
   deduction_per_day Decimal           @default(0.00) @db.Decimal(10, 2)
   total_deduction   Decimal           @default(0.00) @db.Decimal(10, 2)
   advance_deduction Decimal           @default(0.00) @db.Decimal(10, 2)
@@ -1112,7 +1117,7 @@ model Payroll {
   net_salary        Decimal           @default(0.00) @db.Decimal(10, 2)
   status            PayrollStatus     @default(PENDING)
   payment_date      DateTime?
-  notes             String?
+  notes             String?           @db.Text
   created_at        DateTime          @default(now())
   updated_at        DateTime          @updatedAt
   employee          Employee          @relation(fields: [emp_id], references: [emp_id], onDelete: Cascade)

@@ -152,10 +152,11 @@ const ROUTE_MAP = {
   'stores': '/dashboard/stores',
   'store-stock': '/dashboard/store-stock',
   'stock-transfer': '/dashboard/stock-transfer',
-  'employees': '/dashboard/employees',
-  'attendance': '/dashboard/attendance',
-  'payroll': '/dashboard/payroll',
-  'salary-management': '/dashboard/salary-management',
+  'employees': '/dashboard/hr?module=employees',
+  'attendance': '/dashboard/hr?module=attendance',
+  'payroll': '/dashboard/hr?module=salary-sheet',
+  'salary-management': '/dashboard/hr?module=salary-sheet',
+  'hr': '/dashboard/hr',
   'settings': '/dashboard/settings',
   'import': '/dashboard/import',
   'internal-transfer': '/dashboard/internal-transfer',
@@ -254,10 +255,7 @@ export default function Sidebar({
     { id: 'rebate-report', name: 'Rebate Report', icon: PieChartIcon, category: 'reports', parent: 'Reports' },
     { id: 'balance-sheet', name: 'Balance Sheet', icon: TableChartIcon, category: 'reports', parent: 'Reports' },
 
-    { id: 'employees', name: 'Employees', icon: BadgeIcon, category: 'hr-management', parent: 'HR Management' },
-    { id: 'attendance', name: 'Attendance', icon: EventNoteIcon, category: 'hr-management', parent: 'HR Management' },
-    { id: 'payroll', name: 'Payroll / Salary', icon: PaymentsIcon, category: 'hr-management', parent: 'HR Management' },
-    { id: 'salary-management', name: 'Salary & Advances', icon: PaymentsIcon, category: 'hr-management', parent: 'HR Management' },
+    { id: 'hr', name: 'HR Management', icon: BadgeIcon, category: 'hr-management', parent: 'HR Management' },
 
     { id: 'usermanagement', name: 'User Management', icon: PersonIcon, category: 'system', parent: 'System' },
     { id: 'stores', name: 'Store Management', icon: StoreIcon, category: 'system', parent: 'System' },
@@ -284,7 +282,10 @@ export default function Sidebar({
     if (roleName === 'SUPER_ADMIN' || roleName === 'HQ_SUPER_ADMIN' || roleName === 'BRANCH_SUPER_ADMIN') return true;
 
     const pageId = getRequiredModule(item);
-    if (pageId && hasPageAccess(allowed, pageId)) return true;
+    if (pageId === 'hr') {
+      const hrPages = ['hr', 'employees', 'attendance', 'payroll', 'salary-management'];
+      if (hrPages.some((id) => hasPageAccess(allowed, id))) return true;
+    } else if (pageId && hasPageAccess(allowed, pageId)) return true;
 
     if (isAdmin) return true;
     return SALESMAN_ALLOWED_MENU_IDS.has(item.id);
@@ -366,6 +367,7 @@ export default function Sidebar({
       { path: '/dashboard/stores', id: 'stores', category: 'system' },
       { path: '/dashboard/store-stock', id: 'store-stock', category: 'system' },
       { path: '/dashboard/stock-transfer', id: 'stock-transfer', category: 'system' },
+      { path: '/dashboard/hr', id: 'hr', category: 'hr-management' },
       { path: '/dashboard/employees', id: 'employees', category: 'hr-management' },
       { path: '/dashboard/attendance', id: 'attendance', category: 'hr-management' },
       { path: '/dashboard/payroll', id: 'payroll', category: 'hr-management' },

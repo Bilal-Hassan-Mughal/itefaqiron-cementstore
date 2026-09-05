@@ -552,6 +552,12 @@ const getLedgerEntryDisplayAmounts = (entry) => {
 
   if (isCashBank) {
     const type = (entry.ledger_type || '').toLowerCase();
+    const billNo = (entry.bill_no || '').toString();
+    const detailsLower = (entry.details || '').toLowerCase();
+    const isReversal = billNo.endsWith('-REV') || detailsLower.includes('reversal —') || detailsLower.includes('reversal -');
+    if (isReversal) {
+      return { debit: entryAmount, credit: 0 };
+    }
     if (type === 'transfer' || type === 'adjustment') {
       return { debit: debitAmt, credit: creditAmt };
     }
