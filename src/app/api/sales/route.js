@@ -522,6 +522,7 @@ export async function GET(request) {
             FROM sale_details sd
             LEFT JOIN products p ON sd.pro_id = p.pro_id
             WHERE sd.sale_id = ${id}
+            ORDER BY sd.sale_detail_id ASC
           `;
 
           // Fetch split_payments separately for this sale
@@ -746,6 +747,7 @@ export async function GET(request) {
                   LEFT JOIN categories cat ON p.cat_id = cat.cat_id
                   LEFT JOIN subcategories sub ON p.sub_cat_id = sub.sub_cat_id
                   WHERE sd.sale_id IN (${Prisma.join(saleIds)})
+                  ORDER BY sd.sale_id ASC, sd.sale_detail_id ASC
                 `;
                 console.log('📊 Sale details fetched:', saleDetails?.length || 0);
               } catch (subcatError) {
@@ -763,6 +765,7 @@ export async function GET(request) {
                     LEFT JOIN products p ON sd.pro_id = p.pro_id
                     LEFT JOIN categories cat ON p.cat_id = cat.cat_id
                     WHERE sd.sale_id IN (${Prisma.join(saleIds)})
+                  ORDER BY sd.sale_id ASC, sd.sale_detail_id ASC
                   `;
                   console.log('📊 Sale details fetched (without subcategories):', saleDetails?.length || 0);
                 } else {

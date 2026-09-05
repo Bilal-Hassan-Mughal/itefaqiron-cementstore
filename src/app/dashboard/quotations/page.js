@@ -2,7 +2,11 @@
 
 import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { formatDatePK } from '@/lib/date-helper';
+import { BRAND, COMPANY } from '@/lib/brand-theme';
+import { openAccountLedgerTab, FINANCE_LEDGER_PATH } from '@/lib/ledger-tabs';
 import DashboardLayout from '../components/dashboard-layout';
+import SaveProgressBackdrop from '../components/save-progress-backdrop';
 
 // Material-UI imports
 import {
@@ -46,6 +50,7 @@ import {
 
   Add as AddIcon,
   Search as SearchIcon,
+  ArrowBack as ArrowBackIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
   Visibility as VisibilityIcon,
@@ -55,8 +60,7 @@ import {
   Print as PrintIcon,
   AttachMoney as AttachMoneyIcon,
   TrendingDown as TrendingDownIcon,
-  CreditCard as CreditCardIcon,
-  Inventory as PackageIcon,
+  Description as DescriptionIcon,
   Clear as ClearIcon,
   Person as PersonIcon,
   FilterList as FilterIcon,
@@ -73,6 +77,277 @@ const fmtAmt = (val) => {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
+const QUOTE_PAGE_CARD_SX = {
+  borderRadius: '12px',
+  border: '1px solid #dce3ed',
+  boxShadow: '0 1px 4px rgba(15, 23, 42, 0.06)',
+  bgcolor: '#ffffff',
+  overflow: 'hidden',
+};
+
+const QUOTE_EXCEL_TABLE_SX = {
+  minWidth: 1100,
+  borderCollapse: 'collapse',
+  '& .MuiTableCell-root': {
+    border: '1px solid #cbd5e1',
+    py: 0.65,
+    px: 1.1,
+    fontSize: '0.8125rem',
+    lineHeight: 1.35,
+  },
+};
+
+const QUOTE_EXCEL_HEAD_SX = {
+  bgcolor: '#e8effd',
+  color: '#1347c4',
+  fontWeight: 700,
+  fontSize: '0.72rem',
+  textTransform: 'uppercase',
+  letterSpacing: '0.05em',
+  whiteSpace: 'nowrap',
+  position: 'sticky',
+  top: 0,
+  zIndex: 2,
+  borderBottom: '2px solid #94a3b8 !important',
+};
+
+const QUOTE_NUM_CELL_SX = {
+  textAlign: 'right',
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontVariantNumeric: 'tabular-nums',
+};
+
+const QUOTE_STATS_GRID = {
+  display: 'grid',
+  gridTemplateColumns: {
+    xs: 'repeat(2, 1fr)',
+    sm: 'repeat(2, 1fr)',
+    lg: 'repeat(4, 1fr)',
+  },
+  gap: 1.5,
+  width: '100%',
+};
+
+const QUOTE_FILTER_GRID = {
+  display: 'grid',
+  gridTemplateColumns: {
+    xs: '1fr',
+    sm: 'repeat(2, 1fr)',
+    md: 'repeat(4, 1fr)',
+  },
+  gap: { xs: 1.5, md: 2 },
+  width: '100%',
+};
+
+const QUOTE_FILTER_FIELD_SX = {
+  '& .MuiOutlinedInput-root': {
+    borderRadius: '8px',
+    bgcolor: '#fff',
+    fontSize: '0.8125rem',
+    '& fieldset': { borderColor: '#cbd5e1' },
+    '&:hover fieldset': { borderColor: '#94a3b8' },
+    '&.Mui-focused fieldset': {
+      borderColor: BRAND.supporting.periwinkle,
+      borderWidth: '1.5px',
+    },
+  },
+  '& .MuiInputLabel-root': { fontSize: '0.8125rem', fontWeight: 500 },
+};
+
+const getSortLabel = (value) => {
+  const labels = {
+    'created_at-desc': 'Newest First',
+    'created_at-asc': 'Oldest First',
+    'customer-asc': 'Customer A-Z',
+    'customer-desc': 'Customer Z-A',
+    'total_amount-desc': 'Amount High-Low',
+    'total_amount-asc': 'Amount Low-High',
+  };
+  return labels[value] || 'Newest First';
+};
+
+const getQuotationPrintTotals = (billData) => {
+  const totalAmount = parseFloat(billData?.total_amount || 0);
+  const discountAmount = parseFloat(billData?.discount || 0);
+  const shippingAmount = parseFloat(billData?.shipping_amount || 0);
+  const labourAmount = parseFloat(billData?.labour_charges || billData?.labour || 0);
+  const itemsSubtotal = (billData?.sale_details || []).reduce(
+    (sum, d) => sum + parseFloat(d.total_amount || 0),
+    0
+  ) || totalAmount - labourAmount - shippingAmount + discountAmount;
+  return { totalAmount, discountAmount, shippingAmount, labourAmount, itemsSubtotal };
+};
+
+function QuotationPrintTemplates({ billData }) {
+  if (!billData) return null;
+
+  const { totalAmount, discountAmount, shippingAmount, labourAmount, itemsSubtotal } = getQuotationPrintTotals(billData);
+  const details = billData.sale_details || [];
+  const quoteDate = formatDatePK(billData.created_at) || new Date(billData.created_at || Date.now()).toLocaleDateString('en-GB');
+
+  return (
+    <>
+      {/* A4 — off screen until print */}
+      <Box sx={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '21cm', overflow: 'hidden', pointerEvents: 'none' }}>
+        <Box id="printable-invoice-a4" sx={{ width: '100%', bgcolor: '#fff', color: '#000', fontFamily: 'Arial, sans-serif' }}>
+          <Box sx={{ textAlign: 'center', py: 2.5, borderBottom: '2px solid #000' }}>
+            <Typography sx={{ fontWeight: 900, fontSize: '1.35rem', direction: 'rtl' }}>{COMPANY.nameUr}</Typography>
+            <Typography sx={{ fontSize: '0.9rem', mt: 0.5 }}>{COMPANY.name}</Typography>
+            <Typography sx={{ fontSize: '0.85rem', direction: 'rtl', mt: 0.25 }}>{COMPANY.address}</Typography>
+            <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, mt: 0.5 }}>Ph: {COMPANY.phones.join(', ')}</Typography>
+            <Typography sx={{ mt: 1.5, fontWeight: 900, letterSpacing: 2, fontSize: '1rem' }}>QUOTATION</Typography>
+          </Box>
+
+          <Box sx={{ px: 2.5, py: 1.5, display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #ddd', fontSize: '0.875rem' }}>
+            <Box>
+              <Typography sx={{ fontWeight: 700 }}>{billData.customer?.cus_name || 'N/A'}</Typography>
+              {billData.customer?.cus_phone_no && (
+                <Typography sx={{ color: '#444' }}>{billData.customer.cus_phone_no}</Typography>
+              )}
+              {billData.customer?.cus_address && (
+                <Typography sx={{ color: '#444' }}>{billData.customer.cus_address}</Typography>
+              )}
+            </Box>
+            <Box sx={{ textAlign: 'right' }}>
+              <Typography><strong>Quote #:</strong> {billData.sale_id}</Typography>
+              <Typography><strong>Date:</strong> {quoteDate}</Typography>
+              {(billData.reference || billData.notes) && (
+                <Typography><strong>Ref:</strong> {billData.reference || billData.notes}</Typography>
+              )}
+            </Box>
+          </Box>
+
+          <Box sx={{ px: 2.5, py: 1.5 }}>
+            <Table size="small" sx={{ border: '1px solid #bbb' }}>
+              <TableHead>
+                <TableRow sx={{ bgcolor: '#e8effd' }}>
+                  {['#', 'Item', 'Qty', 'Rate', 'Amount'].map((h, i) => (
+                    <TableCell key={h} align={i >= 2 ? 'right' : 'left'} sx={{ fontWeight: 800, border: '1px solid #bbb', py: 0.75, fontSize: '0.8125rem' }}>{h}</TableCell>
+                  ))}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {details.length > 0 ? details.map((d, i) => (
+                  <TableRow key={i}>
+                    <TableCell sx={{ border: '1px solid #ddd', py: 0.5 }}>{i + 1}</TableCell>
+                    <TableCell sx={{ border: '1px solid #ddd', py: 0.5, fontWeight: 600 }}>{d.product?.pro_title || 'Item'}</TableCell>
+                    <TableCell align="right" sx={{ border: '1px solid #ddd', py: 0.5 }}>{d.qnty}</TableCell>
+                    <TableCell align="right" sx={{ border: '1px solid #ddd', py: 0.5 }}>{fmtAmt(d.unit_rate)}</TableCell>
+                    <TableCell align="right" sx={{ border: '1px solid #ddd', py: 0.5, fontWeight: 700 }}>{fmtAmt(d.total_amount)}</TableCell>
+                  </TableRow>
+                )) : (
+                  <TableRow><TableCell colSpan={5} align="center">No items</TableCell></TableRow>
+                )}
+              </TableBody>
+            </Table>
+
+            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+              <Box sx={{ minWidth: 240, fontSize: '0.875rem' }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.35 }}>
+                  <span>Items Subtotal</span><strong>{fmtAmt(itemsSubtotal)}</strong>
+                </Box>
+                {labourAmount > 0 && (
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.35 }}>
+                    <span>Labour</span><strong>{fmtAmt(labourAmount)}</strong>
+                  </Box>
+                )}
+                {shippingAmount > 0 && (
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.35 }}>
+                    <span>Shipping</span><strong>{fmtAmt(shippingAmount)}</strong>
+                  </Box>
+                )}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.35 }}>
+                  <span>Discount</span><strong>{fmtAmt(discountAmount)}</strong>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.75, mt: 0.5, borderTop: '2px solid #000', fontSize: '1rem' }}>
+                  <strong>Quoted Total</strong><strong>{fmtAmt(totalAmount)}</strong>
+                </Box>
+              </Box>
+            </Box>
+
+            <Typography sx={{ mt: 2.5, fontSize: '0.75rem', color: '#666', fontStyle: 'italic', textAlign: 'center' }}>
+              This is a quotation only. Prices and availability may change until converted to a sale.
+            </Typography>
+          </Box>
+        </Box>
+      </Box>
+
+      {/* Thermal — off screen until print */}
+      <Box sx={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '80mm', overflow: 'hidden', pointerEvents: 'none' }}>
+        <Box
+          id="printable-invoice-thermal"
+          sx={{
+            width: '78mm',
+            maxWidth: '78mm',
+            bgcolor: '#fff',
+            color: '#000',
+            p: '2mm',
+            fontFamily: 'monospace, Arial, sans-serif',
+            boxSizing: 'border-box',
+          }}
+        >
+          <Box sx={{ textAlign: 'center', pb: 1, borderBottom: '2px solid #000' }}>
+            <Typography sx={{ fontSize: '14px', fontWeight: 900, direction: 'rtl' }}>{COMPANY.nameUr}</Typography>
+            <Typography sx={{ fontSize: '10px', direction: 'rtl', mt: 0.25 }}>{COMPANY.address}</Typography>
+            <Typography sx={{ fontSize: '10px', fontWeight: 700, mt: 0.25 }}>Ph: {COMPANY.phones.join(', ')}</Typography>
+            <Box sx={{ mt: 0.75, px: 1, py: 0.25, bgcolor: '#000', color: '#fff', display: 'inline-block', fontSize: '10px', fontWeight: 800, letterSpacing: 1 }}>
+              QUOTATION
+            </Box>
+          </Box>
+
+          <Box sx={{ py: 0.75, fontSize: '10px', borderBottom: '1px dashed #000' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Quot #: <strong>{billData.sale_id}</strong></span>
+              <span>Date: <strong>{quoteDate}</strong></span>
+            </Box>
+            <Box sx={{ mt: 0.25 }}>Cust: <strong>{billData.customer?.cus_name || 'N/A'}</strong></Box>
+          </Box>
+
+          <Box sx={{ borderBottom: '1px solid #000', py: 0.4, my: 0.4, fontSize: '10px', fontWeight: 700 }}>
+            <Box sx={{ display: 'flex' }}>
+              <Box sx={{ flex: 1 }}>Item</Box>
+              <Box sx={{ width: 28, textAlign: 'center' }}>Qty</Box>
+              <Box sx={{ width: 42, textAlign: 'right' }}>Rate</Box>
+              <Box sx={{ width: 46, textAlign: 'right' }}>Total</Box>
+            </Box>
+          </Box>
+
+          <Box sx={{ borderBottom: '1px dashed #000', pb: 0.5, mb: 0.5 }}>
+            {details.length > 0 ? details.map((d, i) => (
+              <Box key={i} sx={{ mb: 0.5, fontSize: '10px' }}>
+                <Typography sx={{ fontWeight: 700, wordBreak: 'break-word', fontSize: '10px' }}>{d.product?.pro_title || 'Item'}</Typography>
+                <Box sx={{ display: 'flex' }}>
+                  <Box sx={{ flex: 1 }} />
+                  <Box sx={{ width: 28, textAlign: 'center' }}>{d.qnty}</Box>
+                  <Box sx={{ width: 42, textAlign: 'right' }}>{fmtAmt(d.unit_rate)}</Box>
+                  <Box sx={{ width: 46, textAlign: 'right', fontWeight: 700 }}>{fmtAmt(d.total_amount)}</Box>
+                </Box>
+              </Box>
+            )) : (
+              <Typography sx={{ fontSize: '10px', textAlign: 'center' }}>No items</Typography>
+            )}
+          </Box>
+
+          <Box sx={{ fontSize: '10px', lineHeight: 1.45 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}><span>Subtotal</span><span>{fmtAmt(itemsSubtotal)}</span></Box>
+            {discountAmount > 0 && (
+              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}><span>Discount</span><span>-{fmtAmt(discountAmount)}</span></Box>
+            )}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: '11px', borderTop: '2px solid #000', borderBottom: '2px solid #000', py: 0.3, my: 0.4 }}>
+              <span>QUOTED TOTAL</span><span>{fmtAmt(totalAmount)}</span>
+            </Box>
+          </Box>
+
+          <Box sx={{ textAlign: 'center', borderTop: '1px solid #000', mt: 0.75, pt: 0.5, fontSize: '10px' }}>
+            <Typography sx={{ fontWeight: 700, direction: 'rtl', fontSize: '10px' }}>شکریہ! دوبارہ تشریف لائیےگا</Typography>
+            <Typography sx={{ fontSize: '9px', mt: 0.2 }}>Quotation — not a tax invoice</Typography>
+          </Box>
+        </Box>
+      </Box>
+    </>
+  );
+}
+
 function QuotationsPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -83,7 +358,9 @@ function QuotationsPageContent() {
   const [customerTypes, setCustomerTypes] = useState([]);
   const [products, setProducts] = useState([]);
   const [stores, setStores] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(true);
+  const [savingQuotation, setSavingQuotation] = useState(false);
+  const [saveStatusMessage, setSaveStatusMessage] = useState('');
 
   // Filter state
   const [searchTerm, setSearchTerm] = useState('');
@@ -101,14 +378,6 @@ function QuotationsPageContent() {
   const [viewBillDialog, setViewBillDialog] = useState(false);
   const [selectedBill, setSelectedBill] = useState(null);
   const [currentView, setCurrentView] = useState('list');
-
-  // Handle URL query parameter for view
-  useEffect(() => {
-    const viewParam = searchParams?.get('view');
-    if (viewParam === 'create') {
-      setCurrentView('create');
-    }
-  }, [searchParams]);
 
   // Form state for sales creation
   const [formSelectedCustomer, setFormSelectedCustomer] = useState(null);
@@ -197,6 +466,20 @@ function QuotationsPageContent() {
     setSnackbar({ open: true, message, severity });
   };
 
+  const beginSaving = (message) => {
+    setSavingQuotation(true);
+    setSaveStatusMessage(message);
+  };
+
+  const updateSaveStatus = (message) => {
+    setSaveStatusMessage(message);
+  };
+
+  const endSaving = () => {
+    setSavingQuotation(false);
+    setSaveStatusMessage('');
+  };
+
   const handleSnackbarClose = () => {
     setSnackbar(prev => ({ ...prev, open: false }));
   };
@@ -252,10 +535,101 @@ function QuotationsPageContent() {
     });
   }, [sales, searchTerm, filterCustomer, filterStore, filterPaymentType, filterMinAmount, filterMaxAmount, filterBalanceStatus, dateFrom, dateTo]);
 
+  const sortedQuotations = useMemo(() => {
+    const list = [...filteredSales];
+    list.sort((a, b) => {
+      let aVal;
+      let bVal;
+      if (sortBy === 'customer') {
+        aVal = (a.customer?.cus_name || '').toLowerCase();
+        bVal = (b.customer?.cus_name || '').toLowerCase();
+        return sortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      }
+      if (sortBy === 'total_amount') {
+        aVal = parseFloat(a.total_amount || 0);
+        bVal = parseFloat(b.total_amount || 0);
+      } else {
+        aVal = new Date(a.created_at || 0).getTime();
+        bVal = new Date(b.created_at || 0).getTime();
+      }
+      return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+    });
+    return list;
+  }, [filteredSales, sortBy, sortOrder]);
+
+  const quotationStats = useMemo(() => {
+    const list = sortedQuotations;
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    return {
+      totalCount: list.length,
+      totalValue: list.reduce((s, q) => s + parseFloat(q.total_amount || 0), 0),
+      totalDiscount: list.reduce((s, q) => s + parseFloat(q.discount || 0), 0),
+      thisMonth: list.filter((q) => q.created_at && new Date(q.created_at) >= monthStart).length,
+    };
+  }, [sortedQuotations]);
+
+  const renderQuotationLineItemsCell = (sale) => {
+    const details = sale.sale_details || [];
+    if (details.length === 0) return <Typography sx={{ fontSize: '0.8125rem', color: '#94a3b8' }}>—</Typography>;
+    const preview = details.slice(0, 2).map((d) => {
+      const title = d.product?.pro_title || 'Item';
+      const qty = parseFloat(d.qnty || 0);
+      return `${title} (${qty})`;
+    }).join(', ');
+    const more = details.length > 2 ? ` +${details.length - 2} more` : '';
+    return (
+      <Typography sx={{ fontSize: '0.8125rem', color: '#475569', lineHeight: 1.4 }} title={preview + more}>
+        {preview}{more}
+      </Typography>
+    );
+  };
+
+  const handleOpenCustomerLedger = (sale, e) => {
+    if (e) e.stopPropagation();
+    const cusId = sale?.cus_id ?? sale?.customer?.cus_id;
+    const cusName = sale?.customer?.cus_name;
+    if (!cusId) {
+      showSnackbar('Customer not found for this quotation', 'error');
+      return;
+    }
+    openAccountLedgerTab(cusId, cusName);
+    router.push(FINANCE_LEDGER_PATH);
+  };
+
+  const handleNewQuotation = () => {
+    setEditSaleId(null);
+    setFormSelectedCustomer(null);
+    setSelectedCustomerTypeFilter(null);
+    setFormSelectedProduct(null);
+    setFormSelectedStore(stores.length > 0 ? stores[0] : null);
+    setProductTableData([]);
+    setTransportOptions([]);
+    setPaymentData({
+      cash: 0,
+      bank: 0,
+      bankAccountId: '',
+      totalCashReceived: 0,
+      discount: 0,
+      labour: 0,
+      deliveryCharges: 0,
+      notes: '',
+    });
+    setBillType('QUOTATION');
+    setCurrentView('create');
+  };
+
+  useEffect(() => {
+    const viewParam = searchParams?.get('view');
+    if (viewParam === 'create') {
+      handleNewQuotation();
+    }
+  }, [searchParams]);
+
   // Fetch data
   const fetchData = async () => {
     try {
-      setLoading(true);
+      setListLoading(true);
 
       const salesRes = await fetch('/api/sales');
       if (salesRes.ok) {
@@ -314,7 +688,7 @@ function QuotationsPageContent() {
       console.error('Error fetching data:', error);
       showSnackbar('Error fetching data', 'error');
     } finally {
-      setLoading(false);
+      setListLoading(false);
     }
   };
 
@@ -398,7 +772,7 @@ function QuotationsPageContent() {
   // Handle edit quotation
   const handleEdit = async (sale) => {
     try {
-      setLoading(true);
+      setListLoading(true);
       showSnackbar('Loading quotation details...', 'info');
 
       const response = await fetch(`/api/sales?id=${sale.sale_id}`);
@@ -446,7 +820,7 @@ function QuotationsPageContent() {
       console.error('Error editing quotation:', e);
       showSnackbar('Error loading quotation details', 'error');
     } finally {
-      setLoading(false);
+      setListLoading(false);
     }
   };
 
@@ -746,8 +1120,9 @@ function QuotationsPageContent() {
         updated_by: 1
       };
 
-      setLoading(true);
+      beginSaving(editSaleId ? 'Updating quotation...' : 'Saving quotation...');
 
+      updateSaveStatus(editSaleId ? 'Updating quotation on server...' : 'Saving quotation to server...');
       const response = await fetch('/api/sales', {
         method: editSaleId ? 'PUT' : 'POST',
         headers: {
@@ -792,6 +1167,7 @@ function QuotationsPageContent() {
           labour: parseFloat(paymentData.labour) || 0,
           notes: paymentData.notes || ''
         };
+        updateSaveStatus('Generating quotation preview...');
         setCurrentBillData(billDataForPrint);
 
         setReceiptDialogOpen(true);
@@ -820,7 +1196,7 @@ function QuotationsPageContent() {
       console.error('Error saving quotation:', error);
       showSnackbar(`Failed to save quotation: ${error.message}`, 'error');
     } finally {
-      setLoading(false);
+      endSaving();
     }
   };
 
@@ -828,7 +1204,7 @@ function QuotationsPageContent() {
     if (!confirm('Are you sure you want to delete this quotation?')) return;
 
     try {
-      setLoading(true);
+      setListLoading(true);
       const response = await fetch(`/api/sales?id=${saleId}`, {
         method: 'DELETE',
       });
@@ -844,107 +1220,81 @@ function QuotationsPageContent() {
       console.error('Error deleting quotation:', error);
       showSnackbar('Error deleting quotation', 'error');
     } finally {
-      setLoading(false);
+      setListLoading(false);
     }
   };
 
-  const handlePrintBill = (mode = 'A4', fromDialog = false) => {
+  const handlePrintBill = (mode = 'A4', targetBill = null) => {
     try {
-      const className = mode === 'THERMAL' ? 'print-thermal' : 'print-a4';
-      const isThermal = mode === 'THERMAL';
+      const actualMode = mode === 'THERMAL' ? 'THERMAL' : 'A4';
+      const className = actualMode === 'THERMAL' ? 'print-thermal' : 'print-a4';
+      const activeBill = targetBill || currentBillData;
 
-      const printableContainer = mode === 'THERMAL'
-        ? document.getElementById('printable-invoice-thermal')
-        : document.getElementById('printable-invoice-a4');
-
-      if (!printableContainer) {
-        console.error('Printable container not found');
+      if (!activeBill) {
+        showSnackbar('No quotation data to print', 'error');
         return;
       }
 
-      if (fromDialog && !isThermal) {
-        const receiptPreview = document.getElementById('receipt-preview');
-        if (receiptPreview && printableContainer) {
-          printableContainer.innerHTML = receiptPreview.innerHTML;
-        }
+      if (targetBill || !currentBillData) {
+        setCurrentBillData(activeBill);
       }
 
-      const originalParent = printableContainer.parentElement;
-      const originalStyles = {
-        position: printableContainer.style.position,
-        left: printableContainer.style.left,
-        top: printableContainer.style.top,
-        visibility: printableContainer.style.visibility,
-        display: printableContainer.style.display
-      };
+      const printableContainer = document.getElementById(
+        actualMode === 'THERMAL' ? 'printable-invoice-thermal' : 'printable-invoice-a4'
+      );
 
-      printableContainer.style.position = 'fixed';
-      printableContainer.style.left = '0';
-      printableContainer.style.top = '0';
-      printableContainer.style.visibility = 'visible';
-      printableContainer.style.display = 'block';
-      printableContainer.style.zIndex = '9999';
-      printableContainer.style.backgroundColor = 'white';
-
-      let styleId = 'dynamic-print-style';
-      let styleElement = document.getElementById(styleId);
-
-      if (isThermal) {
-        if (!styleElement) {
-          styleElement = document.createElement('style');
-          styleElement.id = styleId;
-          document.head.appendChild(styleElement);
-        }
-        styleElement.textContent = `
-          @media print {
-            @page {
-              size: 80mm portrait;
-              margin: 0;
-            }
-          }
-        `;
-      } else if (styleElement) {
-        styleElement.textContent = `
-          @media print {
-            @page {
-              size: A4;
-              margin: 0.5cm 1cm;
-            }
-          }
-        `;
+      if (!printableContainer) {
+        showSnackbar('Print template not ready. Please try again.', 'error');
+        return;
       }
+
+      let styleElement = document.getElementById('dynamic-print-style');
+      if (!styleElement) {
+        styleElement = document.createElement('style');
+        styleElement.id = 'dynamic-print-style';
+        document.head.appendChild(styleElement);
+      }
+
+      styleElement.textContent = actualMode === 'THERMAL'
+        ? `@media print { @page { size: 80mm portrait !important; margin: 0 !important; } body { margin: 0 !important; padding: 0 !important; } }`
+        : `@media print { @page { size: A4 portrait !important; margin: 0.5cm 1cm !important; } }`;
 
       document.body.classList.add(className);
 
       setTimeout(() => {
         window.print();
         setTimeout(() => {
-          printableContainer.style.position = originalStyles.position;
-          printableContainer.style.left = originalStyles.left;
-          printableContainer.style.top = originalStyles.top;
-          printableContainer.style.visibility = originalStyles.visibility;
-          printableContainer.style.display = originalStyles.display;
-          printableContainer.style.zIndex = '';
-          printableContainer.style.backgroundColor = '';
-
-          document.body.classList.remove('print-thermal');
-          document.body.classList.remove('print-a4');
-
-          if (styleElement && isThermal) {
-            styleElement.remove();
-          }
-        }, 100);
-      }, 100);
+          document.body.classList.remove('print-thermal', 'print-a4');
+          styleElement?.remove();
+        }, 150);
+      }, 200);
     } catch (e) {
       console.error('Print error:', e);
-      window.print();
+      showSnackbar('Failed to open print dialog', 'error');
     }
   };
 
-  const handleViewReceipt = (sale) => {
-    // For list view print logic
-    setCurrentBillData(sale);
+  const loadQuotationDetails = async (sale) => {
+    try {
+      const res = await fetch(`/api/sales?id=${sale.sale_id}`);
+      if (!res.ok) return sale;
+      const data = await res.json();
+      return Array.isArray(data) ? data[0] : data;
+    } catch {
+      return sale;
+    }
+  };
+
+  const handleViewReceipt = async (sale) => {
+    const full = await loadQuotationDetails(sale);
+    setCurrentBillData(full);
     setReceiptDialogOpen(true);
+  };
+
+  const handlePrintFromList = async (sale, mode = 'A4') => {
+    const full = await loadQuotationDetails(sale);
+    setCurrentBillData(full);
+    setTimeout(() => handlePrintBill(mode, full), 300);
   };
 
   const clearFilters = () => {
@@ -1020,11 +1370,12 @@ function QuotationsPageContent() {
     }
   };
 
-  if (loading && sales.length === 0) {
+  if (listLoading && sales.length === 0) {
     return (
       <DashboardLayout>
-        <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <CircularProgress />
+        <Box sx={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 2 }}>
+          <CircularProgress size={48} sx={{ color: BRAND.supporting.periwinkle }} />
+          <Typography color="text.secondary">Loading quotations...</Typography>
         </Box>
       </DashboardLayout>
     );
@@ -1033,33 +1384,33 @@ function QuotationsPageContent() {
   // Render Create View
   const renderCreateView = () => (
     <DashboardLayout>
-      <Container maxWidth="xl" sx={{ py: 1 }}>
-        <Stack spacing={2}>
-          {/* Header */}
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+      <SaveProgressBackdrop
+        open={savingQuotation}
+        message={saveStatusMessage}
+        subMessage="Do not close or refresh until the quotation is saved and the preview is ready"
+      />
+      <Container maxWidth={false} sx={{ py: { xs: 2, md: 2.5 }, px: { xs: 2, sm: 3, md: 4 }, maxWidth: 1400, mx: 'auto' }}>
+        <Stack spacing={2.5}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
               <IconButton
                 onClick={() => setCurrentView('list')}
-                color="primary"
                 sx={{
-                  bgcolor: 'primary.main',
-                  color: 'white',
+                  bgcolor: BRAND.supporting.periwinkle,
+                  color: '#fff',
                   borderRadius: 2,
-                  '&:hover': {
-                    bgcolor: 'primary.dark',
-                    transform: 'scale(1.05)'
-                  },
-                  transition: 'all 0.2s ease-in-out'
+                  '&:hover': { bgcolor: '#4a57d4', transform: 'scale(1.04)' },
+                  transition: 'all 0.2s ease',
                 }}
               >
-                <SearchIcon />
+                <ArrowBackIcon />
               </IconButton>
               <Box>
-                <Typography variant="h5" component="h1" sx={{ fontWeight: 'bold', color: 'text.primary' }}>
-                  {editSaleId ? 'Edit Quotation' : 'Create New Quotation'}
+                <Typography variant="h5" sx={{ fontWeight: 800, color: '#1e293b' }}>
+                  {editSaleId ? 'Edit Quotation' : 'Create Quotation'}
                 </Typography>
-                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                  Select products and create quotation
+                <Typography variant="body2" sx={{ color: '#64748b' }}>
+                  Price estimate only — no stock or ledger impact until converted to sale
                 </Typography>
               </Box>
             </Box>
@@ -1068,23 +1419,22 @@ function QuotationsPageContent() {
               startIcon={<AddIcon />}
               onClick={handleOpenCustomerPopup}
               sx={{
-                borderColor: '#6f42c1',
-                color: '#6f42c1',
-                '&:hover': {
-                  borderColor: '#5a2d91',
-                  backgroundColor: '#f8f5ff'
-                }
+                borderColor: BRAND.supporting.periwinkle,
+                color: BRAND.text.periwinkle,
+                fontWeight: 700,
+                textTransform: 'none',
+                borderRadius: 2,
+                '&:hover': { borderColor: '#4a57d4', bgcolor: BRAND.tint.periwinkle },
               }}
             >
-              Create Customer
+              New Customer
             </Button>
           </Box>
 
-          {/* Main Form */}
-          <Card>
-            <CardContent sx={{ p: 2 }}>
+          <Card sx={QUOTE_PAGE_CARD_SX}>
+            <CardContent sx={{ p: { xs: 2, md: 2.5 } }}>
               {/* Top Filter Bar: Customer Type */}
-              <Box sx={{ mb: 2, p: 2, bgcolor: '#f8fafc', borderRadius: 2, border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+              <Box sx={{ mb: 2, p: 2, bgcolor: BRAND.tint.periwinkle, borderRadius: 2, border: '1px solid #c7d2fe', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                   <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'text.primary', whiteSpace: 'nowrap' }}>
                     Customer Type:
@@ -1228,23 +1578,16 @@ function QuotationsPageContent() {
                           placeholder="Search by name, phone, address, city, reference..."
                           onFocus={(e) => e.target.select()}
                           sx={{
-                            bgcolor: '#2e7d32',
+                            bgcolor: BRAND.supporting.periwinkle,
                             minWidth: 450,
                             borderRadius: 1,
                             '& .MuiOutlinedInput-root': {
-                              fontSize: '1.1rem',
+                              fontSize: '1.05rem',
                               color: 'white !important',
                               WebkitTextFillColor: 'white !important',
-                              '& fieldset': {
-                                borderColor: '#1b5e20',
-                                borderWidth: '2px'
-                              },
-                              '&:hover fieldset': {
-                                borderColor: '#1b5e20'
-                              },
-                              '&.Mui-focused fieldset': {
-                                borderColor: '#1b5e20'
-                              }
+                              '& fieldset': { borderColor: '#4a57d4', borderWidth: '2px' },
+                              '&:hover fieldset': { borderColor: '#3b44b8' },
+                              '&.Mui-focused fieldset': { borderColor: '#3b44b8' },
                             },
                             '& .MuiInputBase-input': {
                               fontWeight: 'bold',
@@ -1294,191 +1637,233 @@ function QuotationsPageContent() {
                 </Grid>
               </Grid>
 
-              {/* Product Selection Row */}
-              <Grid container spacing={2} sx={{ mb: 2 }}>
-                <Grid item xs={12} md={4}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                      SELECT PRODUCT
-                    </Typography>
-                    <Autocomplete
-                      size="small"
-                      sx={{ minWidth: 450 }}
-                      options={products || []}
-                      getOptionLabel={(option) => option.pro_title || ''}
-                      ListboxProps={{ sx: { maxHeight: 180 } }}
-                      filterOptions={(options, { inputValue }) => {
-                        const q = inputValue.toLowerCase().trim();
-                        if (!q) return options;
-                        return options.filter(o =>
-                          (o.pro_title || '').toLowerCase().startsWith(q) ||
-                          (o.pro_code || '').toLowerCase().startsWith(q)
-                        );
-                      }}
-                      renderOption={(props, option) => (
-                        <li {...props} key={option.pro_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Typography sx={{ fontWeight: 500 }}>{option.pro_title}</Typography>
-                          </Box>
-                        </li>
-                      )}
-                      value={formSelectedProduct}
-                      onChange={(event, newValue) => handleProductSelect(newValue)}
-                      isOptionEqualToValue={(option, value) => option.pro_id === value?.pro_id}
-                      autoSelect={true}
-                      autoHighlight={true}
-                      openOnFocus={true}
-                      selectOnFocus={true}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && formSelectedProduct) {
-                          e.preventDefault();
-                          const storeInput = document.querySelector('input[placeholder*="Select Store"]');
-                          if (storeInput) storeInput.focus();
-                        }
-                      }}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          id="product-select-dropdown-input"
-                          placeholder={products.length === 0 ? "No products available" : "Select product"}
-                          onFocus={(e) => e.target.select()}
-                          sx={{ bgcolor: 'white', width: 450, minWidth: 450, '& .MuiInputBase-input': { fontWeight: formSelectedProduct ? 'bold' : 'normal' } }}
-                        />
-                      )}
-                      disabled={products.length === 0}
-                    />
-                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                      Debug: {products.length} products available
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={1.5}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                      SELECT STORE
-                    </Typography>
-                    <Autocomplete
-                      size="small"
-                      options={stores || []}
-                      getOptionLabel={(option) => option.store_name || ''}
-                      value={formSelectedStore}
-                      onChange={(event, newValue) => setFormSelectedStore(newValue)}
-                      isOptionEqualToValue={(option, value) => option.storeid === value?.storeid}
-                      autoSelect={true}
-                      autoHighlight={true}
-                      openOnFocus={true}
-                      selectOnFocus={true}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          placeholder="Select Store"
-                          onFocus={(e) => e.target.select()}
-                          sx={{ bgcolor: 'white', '& .MuiInputBase-input': { fontWeight: formSelectedStore ? 'bold' : 'normal' } }}
-                        />
-                      )}
-                    />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={1.2}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                      QTY
-                    </Typography>
-                    <TextField
-                      fullWidth
-                      size="small"
-                      type="number"
-                      value={productFormData.quantity}
-                      onChange={(e) => handleQuantityChange(e.target.value)}
-                      onFocus={(e) => e.target.select()}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (productFormData.rate > 0) {
-                            handleAddProductToTable();
-                          }
-                        }
-                      }}
-                      sx={{ bgcolor: 'white' }}
-                    />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={1.5}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                      SALE RATE:
-                    </Typography>
-                    <TextField
-                      fullWidth
-                      size="small"
-                      type="number"
-                      value={productFormData.rate}
-                      onChange={(e) => handleRateChange(e.target.value)}
-                      onFocus={(e) => e.target.select()}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleAddProductToTable();
-                        }
-                      }}
-                      sx={{ bgcolor: 'white' }}
-                    />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={1.5}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                      AMOUNT:
-                    </Typography>
-                    <TextField
-                      fullWidth
-                      size="small"
-                      type="number"
-                      value={productFormData.amount}
-                      disabled
-                      sx={{ bgcolor: 'white', '& .MuiInputBase-input': { fontWeight: 'bold' } }}
-                    />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={1.3}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                      STOCK
-                    </Typography>
-                    <TextField
-                      fullWidth
-                      size="small"
-                      value={productFormData.stock}
-                      disabled
-                      sx={{ bgcolor: 'white', '& .MuiInputBase-input': { fontWeight: 'bold' } }}
-                    />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={0.8} sx={{ display: 'flex', alignItems: 'flex-end' }}>
+              {/* Product entry — single aligned row */}
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(200px, 2.5fr) minmax(110px, 1.1fr) 72px 96px 96px 72px 44px',
+                  gap: 1.5,
+                  alignItems: 'end',
+                  mb: 2,
+                  p: { xs: 1.5, md: 2 },
+                  borderRadius: 2,
+                  border: '1px solid #e2e8f0',
+                  bgcolor: '#fafbfc',
+                  overflowX: 'auto',
+                  minWidth: 0,
+                  width: '100%',
+                }}
+              >
+                <Box sx={{ minWidth: { sm: 160 } }}>
+                  <Typography variant="caption" sx={{ mb: 0.75, display: 'block', fontWeight: 700, color: '#64748b', letterSpacing: '0.04em' }}>
+                    SELECT PRODUCT
+                  </Typography>
+                  <Autocomplete
+                    size="small"
+                    fullWidth
+                    options={products || []}
+                    getOptionLabel={(option) => option.pro_title || ''}
+                    ListboxProps={{ sx: { maxHeight: 180 } }}
+                    filterOptions={(options, { inputValue }) => {
+                      const q = inputValue.toLowerCase().trim();
+                      if (!q) return options;
+                      return options.filter(o =>
+                        (o.pro_title || '').toLowerCase().startsWith(q) ||
+                        (o.pro_code || '').toLowerCase().startsWith(q)
+                      );
+                    }}
+                    renderOption={(props, option) => (
+                      <li {...props} key={option.pro_id}>
+                        <Typography sx={{ fontWeight: 500, fontSize: '0.875rem' }}>{option.pro_title}</Typography>
+                      </li>
+                    )}
+                    value={formSelectedProduct}
+                    onChange={(event, newValue) => handleProductSelect(newValue)}
+                    isOptionEqualToValue={(option, value) => option.pro_id === value?.pro_id}
+                    autoSelect
+                    autoHighlight
+                    openOnFocus
+                    selectOnFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && formSelectedProduct) {
+                        e.preventDefault();
+                        document.getElementById('quote-store-input')?.focus();
+                      }
+                    }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        id="product-select-dropdown-input"
+                        placeholder={products.length === 0 ? 'No products' : 'Select product'}
+                        onFocus={(e) => e.target.select()}
+                        sx={{
+                          bgcolor: 'white',
+                          '& .MuiOutlinedInput-root': { height: 40 },
+                          '& .MuiInputBase-input': { fontWeight: formSelectedProduct ? 700 : 500, fontSize: '0.875rem' },
+                        }}
+                      />
+                    )}
+                    disabled={products.length === 0}
+                  />
+                </Box>
+
+                <Box sx={{ minWidth: { sm: 100 } }}>
+                  <Typography variant="caption" sx={{ mb: 0.75, display: 'block', fontWeight: 700, color: '#64748b', letterSpacing: '0.04em' }}>
+                    SELECT STORE
+                  </Typography>
+                  <Autocomplete
+                    size="small"
+                    fullWidth
+                    options={stores || []}
+                    getOptionLabel={(option) => option.store_name || ''}
+                    value={formSelectedStore}
+                    onChange={(event, newValue) => setFormSelectedStore(newValue)}
+                    isOptionEqualToValue={(option, value) => option.storeid === value?.storeid}
+                    autoSelect
+                    autoHighlight
+                    openOnFocus
+                    selectOnFocus
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        id="quote-store-input"
+                        placeholder="Store"
+                        onFocus={(e) => e.target.select()}
+                        sx={{
+                          bgcolor: 'white',
+                          '& .MuiOutlinedInput-root': { height: 40 },
+                          '& .MuiInputBase-input': { fontWeight: formSelectedStore ? 700 : 500, fontSize: '0.875rem' },
+                        }}
+                      />
+                    )}
+                  />
+                </Box>
+
+                <Box>
+                  <Typography variant="caption" sx={{ mb: 0.75, display: 'block', fontWeight: 700, color: '#64748b', letterSpacing: '0.04em' }}>
+                    QTY
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    type="number"
+                    value={productFormData.quantity}
+                    onChange={(e) => handleQuantityChange(e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                    inputProps={{ step: 'any' }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        document.getElementById('quote-rate-input')?.focus();
+                      }
+                    }}
+                    sx={{
+                      bgcolor: 'white',
+                      '& .MuiOutlinedInput-root': { height: 40 },
+                      '& .MuiInputBase-input': { fontWeight: 700, textAlign: 'center', px: 0.5 },
+                    }}
+                  />
+                </Box>
+
+                <Box>
+                  <Typography variant="caption" sx={{ mb: 0.75, display: 'block', fontWeight: 700, color: '#64748b', letterSpacing: '0.04em' }}>
+                    SALE RATE
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    type="number"
+                    id="quote-rate-input"
+                    value={productFormData.rate}
+                    onChange={(e) => handleRateChange(e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                    inputProps={{ step: 'any' }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddProductToTable();
+                      }
+                    }}
+                    sx={{
+                      bgcolor: 'white',
+                      '& .MuiOutlinedInput-root': { height: 40 },
+                      '& .MuiInputBase-input': { fontWeight: 700, textAlign: 'right', px: 1 },
+                    }}
+                  />
+                </Box>
+
+                <Box>
+                  <Typography variant="caption" sx={{ mb: 0.75, display: 'block', fontWeight: 700, color: '#64748b', letterSpacing: '0.04em' }}>
+                    AMOUNT
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    value={productFormData.amount ?? ''}
+                    disabled
+                    sx={{
+                      bgcolor: '#f1f5f9',
+                      '& .MuiOutlinedInput-root': { height: 40 },
+                      '& .MuiInputBase-input': { fontWeight: 700, textAlign: 'right', color: '#1e293b', WebkitTextFillColor: '#1e293b' },
+                    }}
+                  />
+                </Box>
+
+                <Box>
+                  <Typography variant="caption" sx={{ mb: 0.75, display: 'block', fontWeight: 700, color: '#64748b', letterSpacing: '0.04em' }}>
+                    STOCK
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    value={productFormData.stock ?? ''}
+                    disabled
+                    sx={{
+                      bgcolor: '#f1f5f9',
+                      '& .MuiOutlinedInput-root': { height: 40 },
+                      '& .MuiInputBase-input': {
+                        fontWeight: 700,
+                        textAlign: 'center',
+                        color: productFormData.stock < 0 ? BRAND.primary.pink : '#1e293b',
+                        WebkitTextFillColor: productFormData.stock < 0 ? BRAND.primary.pink : '#1e293b',
+                      },
+                    }}
+                  />
+                </Box>
+
+                <Box>
+                  <Typography variant="caption" sx={{ mb: 0.75, display: 'block', fontWeight: 700, color: 'transparent', userSelect: 'none' }}>
+                    .
+                  </Typography>
                   <Button
+                    id="add-product-btn"
                     variant="contained"
                     onClick={handleAddProductToTable}
                     sx={{
-                      bgcolor: '#673ab7',
+                      bgcolor: BRAND.supporting.periwinkle,
                       color: 'white',
-                      minWidth: '42px',
-                      height: '40px',
-                      borderRadius: 2,
-                      fontWeight: 'bold',
-                      fontSize: '1.2rem',
-                      '&:hover': { bgcolor: '#5e35b1' }
+                      minWidth: 44,
+                      width: 44,
+                      height: 40,
+                      p: 0,
+                      borderRadius: 1.5,
+                      fontWeight: 800,
+                      fontSize: '1.35rem',
+                      lineHeight: 1,
+                      boxShadow: 'none',
+                      '&:hover': { bgcolor: '#4a57d4', boxShadow: '0 2px 8px rgba(94,110,237,0.35)' },
                     }}
                   >
                     +
                   </Button>
-                </Grid>
-              </Grid>
+                </Box>
+              </Box>
 
               {/* Product Table */}
               <TableContainer component={Paper} sx={{ mb: 2, border: '1px solid #e9ecef' }}>
                 <Table size="small">
                   <TableHead>
-                    <TableRow sx={{ bgcolor: '#2e7d32' }}>
+                    <TableRow sx={{ bgcolor: BRAND.supporting.periwinkle }}>
                       <TableCell sx={{ fontWeight: 'bold', color: 'white' }}>S. No</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Store</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Product</TableCell>
@@ -1515,65 +1900,179 @@ function QuotationsPageContent() {
                 </Table>
               </TableContainer>
 
-              {/* Totals and Actions */}
-              <Grid container spacing={3}>
-                <Grid item xs={12} md={6}>
+              {/* Notes + quotation summary */}
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: { xs: '1fr', lg: '1fr minmax(320px, 400px)' },
+                  gap: 2,
+                  alignItems: 'stretch',
+                  mt: 0.5,
+                }}
+              >
+                <Box
+                  sx={{
+                    p: 2,
+                    borderRadius: 2,
+                    border: '1px solid #e2e8f0',
+                    bgcolor: '#fff',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    minHeight: 220,
+                  }}
+                >
+                  <Typography sx={{ fontSize: '0.6875rem', fontWeight: 800, color: '#64748b', letterSpacing: '0.06em', textTransform: 'uppercase', mb: 1.25 }}>
+                    Notes & Reference
+                  </Typography>
                   <TextField
                     fullWidth
                     multiline
-                    rows={3}
-                    label="Notes / Reference"
+                    minRows={5}
+                    placeholder="Add terms, delivery notes, or customer reference for this quotation..."
                     value={paymentData.notes}
                     onChange={(e) => handlePaymentDataChange('notes', e.target.value)}
-                    sx={{ bgcolor: 'white' }}
+                    sx={{
+                      flex: 1,
+                      '& .MuiOutlinedInput-root': {
+                        height: '100%',
+                        alignItems: 'flex-start',
+                        borderRadius: 1.5,
+                        bgcolor: '#f8fafc',
+                        fontSize: '0.875rem',
+                        '& fieldset': { borderColor: '#e2e8f0' },
+                        '&:hover fieldset': { borderColor: '#cbd5e1' },
+                        '&.Mui-focused fieldset': { borderColor: BRAND.supporting.periwinkle },
+                      },
+                    }}
                   />
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <Paper variant="outlined" sx={{ p: 2, bgcolor: '#f8f9fa' }}>
-                    <Stack spacing={2}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Typography color="text.secondary">Total Amount:</Typography>
-                        <Typography fontWeight="bold" variant="h6">{calculateTotalAmount().toFixed(2)}</Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Typography color="text.secondary">Discount:</Typography>
-                        <TextField
-                          size="small"
-                          sx={{ width: 150, bgcolor: 'white' }}
-                          type="number"
-                          value={paymentData.discount}
-                          onChange={(e) => handlePaymentDataChange('discount', e.target.value)}
-                        />
-                      </Box>
-                      <Divider />
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Typography variant="h6">Grand Total:</Typography>
-                        <Typography fontWeight="bold" variant="h5" color="primary">
-                          {calculateGrandTotal().toFixed(2)}
+                  <Typography sx={{ mt: 1.25, fontSize: '0.75rem', color: '#94a3b8' }}>
+                    {productTableData.length} item{productTableData.length === 1 ? '' : 's'} in this quotation
+                  </Typography>
+                </Box>
+
+                <Box
+                  sx={{
+                    borderRadius: 2.5,
+                    overflow: 'hidden',
+                    border: '1px solid #c7d2fe',
+                    boxShadow: '0 4px 14px rgba(94, 110, 237, 0.12)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                  }}
+                >
+                  <Box sx={{ px: 2.5, py: 1.75, bgcolor: BRAND.supporting.periwinkle, color: '#fff' }}>
+                    <Typography sx={{ fontWeight: 800, fontSize: '0.9375rem', letterSpacing: '0.02em' }}>
+                      Quotation Summary
+                    </Typography>
+                    <Typography sx={{ fontSize: '0.75rem', opacity: 0.9, mt: 0.25 }}>
+                      Price estimate — not posted to ledger
+                    </Typography>
+                  </Box>
+
+                  <Box sx={{ p: 2.5, bgcolor: BRAND.tint.periwinkle, flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 0.25 }}>
+                      <Typography sx={{ fontSize: '0.875rem', color: '#475569', fontWeight: 600 }}>Items Subtotal</Typography>
+                      <Typography sx={{ fontWeight: 800, fontSize: '1rem', color: '#1e293b', fontFamily: 'ui-monospace, monospace' }}>
+                        {fmtAmt(calculateTotalAmount())}
+                      </Typography>
+                    </Box>
+
+                    {(parseFloat(paymentData.labour) || 0) > 0 && (
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 0.25 }}>
+                        <Typography sx={{ fontSize: '0.875rem', color: '#475569', fontWeight: 600 }}>Labour</Typography>
+                        <Typography sx={{ fontWeight: 700, fontSize: '0.9375rem', color: '#1e293b', fontFamily: 'ui-monospace, monospace' }}>
+                          {fmtAmt(paymentData.labour)}
                         </Typography>
                       </Box>
-                      <Button
-                        fullWidth
-                        variant="contained"
-                        size="large"
-                        onClick={handleSaveBill}
-                        sx={{
-                          mt: 2,
-                          py: 1.5,
-                          bgcolor: 'primary.main',
-                          fontSize: '1.1rem',
-                          fontWeight: 'bold',
-                          '&:hover': {
-                            bgcolor: 'primary.dark'
-                          }
+                    )}
+
+                    {(parseFloat(paymentData.deliveryCharges) || 0) + calculateTransportTotal() > 0 && (
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 0.25 }}>
+                        <Typography sx={{ fontSize: '0.875rem', color: '#475569', fontWeight: 600 }}>Shipping / Transport</Typography>
+                        <Typography sx={{ fontWeight: 700, fontSize: '0.9375rem', color: '#1e293b', fontFamily: 'ui-monospace, monospace' }}>
+                          {fmtAmt((parseFloat(paymentData.deliveryCharges) || 0) + calculateTransportTotal())}
+                        </Typography>
+                      </Box>
+                    )}
+
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, py: 0.25 }}>
+                      <Typography sx={{ fontSize: '0.875rem', color: '#475569', fontWeight: 600 }}>Discount</Typography>
+                      <TextField
+                        size="small"
+                        type="number"
+                        value={paymentData.discount || ''}
+                        onChange={(e) => handlePaymentDataChange('discount', e.target.value)}
+                        placeholder="0"
+                        InputProps={{
+                          startAdornment: <InputAdornment position="start"><Typography sx={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 700 }}>PKR</Typography></InputAdornment>,
                         }}
-                      >
-                        {editSaleId ? 'Update Quotation' : 'Save Quotation'}
-                      </Button>
-                    </Stack>
-                  </Paper>
-                </Grid>
-              </Grid>
+                        sx={{
+                          width: 140,
+                          '& .MuiOutlinedInput-root': {
+                            height: 36,
+                            bgcolor: '#fff',
+                            borderRadius: 1.25,
+                            '& fieldset': { borderColor: '#c7d2fe' },
+                            '&:hover fieldset': { borderColor: BRAND.supporting.periwinkle },
+                            '&.Mui-focused fieldset': { borderColor: BRAND.supporting.periwinkle },
+                          },
+                          '& .MuiInputBase-input': {
+                            fontWeight: 700,
+                            textAlign: 'right',
+                            fontSize: '0.875rem',
+                            py: 0.75,
+                          },
+                        }}
+                      />
+                    </Box>
+
+                    <Divider sx={{ borderColor: '#c7d2fe', my: 0.5 }} />
+
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        px: 1.75,
+                        py: 1.25,
+                        borderRadius: 1.5,
+                        bgcolor: '#fff',
+                        border: '1px solid #c7d2fe',
+                      }}
+                    >
+                      <Typography sx={{ fontWeight: 800, fontSize: '1rem', color: '#1e293b' }}>Quoted Total</Typography>
+                      <Typography sx={{ fontWeight: 900, fontSize: '1.375rem', color: BRAND.text.periwinkle, fontFamily: 'ui-monospace, monospace', lineHeight: 1 }}>
+                        {fmtAmt(calculateGrandTotal())}
+                      </Typography>
+                    </Box>
+
+                    <Button
+                      fullWidth
+                      variant="contained"
+                      size="large"
+                      onClick={handleSaveBill}
+                      disabled={savingQuotation || productTableData.length === 0}
+                      startIcon={savingQuotation ? <CircularProgress size={18} color="inherit" /> : <ReceiptLongIcon />}
+                      sx={{
+                        mt: 'auto',
+                        py: 1.35,
+                        bgcolor: BRAND.supporting.periwinkle,
+                        fontSize: '1rem',
+                        fontWeight: 800,
+                        textTransform: 'none',
+                        borderRadius: 1.75,
+                        boxShadow: '0 4px 12px rgba(94, 110, 237, 0.35)',
+                        '&:hover': { bgcolor: '#4a57d4', boxShadow: '0 6px 16px rgba(94, 110, 237, 0.4)' },
+                        '&:disabled': { bgcolor: '#c7d2fe', color: '#fff' },
+                      }}
+                    >
+                      {savingQuotation
+                        ? (saveStatusMessage || (editSaleId ? 'Updating...' : 'Saving...'))
+                        : (editSaleId ? 'Update Quotation' : 'Save Quotation')}
+                    </Button>
+                  </Box>
+                </Box>
+              </Box>
             </CardContent>
           </Card>
         </Stack>
@@ -1584,119 +2083,248 @@ function QuotationsPageContent() {
   // Render List View
   const renderListView = () => (
     <DashboardLayout>
-      <Container maxWidth="xl" sx={{ py: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h4" fontWeight="bold">Quotations</Typography>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => setCurrentView('create')}
-          >
-            Create Quotation
-          </Button>
-        </Box>
+      <Container maxWidth={false} sx={{ py: { xs: 2, md: 2.5 }, px: { xs: 2, sm: 3, md: 4 }, maxWidth: 1400, mx: 'auto' }}>
+        <Stack spacing={3}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon sx={{ fontSize: 26 }} />}
+              onClick={handleNewQuotation}
+              size="large"
+              sx={{
+                background: `linear-gradient(135deg, ${BRAND.supporting.periwinkle} 0%, #4a57d4 100%)`,
+                boxShadow: '0 4px 16px rgba(94, 110, 237, 0.32)',
+                px: 5,
+                py: 1.75,
+                fontSize: '1.125rem',
+                fontWeight: 700,
+                minWidth: 320,
+                height: 70,
+                borderRadius: 2.5,
+                textTransform: 'none',
+                letterSpacing: '0.02em',
+                color: '#fff',
+                transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                '&:hover': {
+                  background: 'linear-gradient(135deg, #4a57d4 0%, #3b44b8 100%)',
+                  boxShadow: '0 6px 22px rgba(94, 110, 237, 0.42)',
+                  transform: 'translateY(-1px)',
+                },
+              }}
+            >
+              New Quotation
+            </Button>
+          </Box>
 
-        {/* Filters */}
-        <Card sx={{ mb: 3 }}>
-          <CardContent>
-            <Grid container spacing={2} alignItems="center">
-              <Grid item xs={12} md={4}>
-                <TextField
-                  fullWidth
+          <Card sx={QUOTE_PAGE_CARD_SX}>
+            <Box sx={{ px: { xs: 1.5, md: 2 }, py: 1.75, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+              <Box sx={QUOTE_STATS_GRID}>
+                {[
+                  { title: 'Total Quotations', val: quotationStats.totalCount, color: BRAND.text.periwinkle, bg: BRAND.tint.periwinkle, icon: <DescriptionIcon fontSize="small" />, isCount: true },
+                  { title: 'Quoted Value', val: quotationStats.totalValue, color: BRAND.text.blue, bg: BRAND.tint.blue, icon: <AttachMoneyIcon fontSize="small" /> },
+                  { title: 'Total Discount', val: quotationStats.totalDiscount, color: BRAND.text.pink, bg: BRAND.tint.pink, icon: <TrendingDownIcon fontSize="small" /> },
+                  { title: 'This Month', val: quotationStats.thisMonth, color: BRAND.text.green, bg: BRAND.tint.green, icon: <ReceiptLongIcon fontSize="small" />, isCount: true },
+                ].map((stat, i) => (
+                  <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1.25, p: 1.5, borderRadius: 1.5, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
+                    <Box sx={{ width: 38, height: 38, borderRadius: 1.25, bgcolor: stat.bg, color: stat.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      {stat.icon}
+                    </Box>
+                    <Box sx={{ minWidth: 0, flex: 1 }}>
+                      <Typography noWrap sx={{ fontSize: '0.625rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        {stat.title}
+                      </Typography>
+                      <Typography noWrap sx={{ fontWeight: 800, color: stat.color, fontSize: '0.9375rem', mt: 0.25 }}>
+                        {!stat.isCount && <Box component="span" sx={{ fontSize: '0.625rem', mr: 0.35, opacity: 0.85, fontWeight: 700 }}>PKR</Box>}
+                        {stat.isCount ? stat.val : fmtAmt(stat.val)}
+                      </Typography>
+                    </Box>
+                  </Box>
+                ))}
+              </Box>
+            </Box>
+
+            <Box sx={{ px: { xs: 1.5, md: 2 }, py: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1.5, borderBottom: '1px solid #e2e8f0' }}>
+              <Typography sx={{ fontWeight: 700, color: '#1e293b', fontSize: '0.9375rem', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <FilterIcon sx={{ color: BRAND.supporting.periwinkle, fontSize: 20 }} />
+                Filters & Sorting
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.25 }}>
+                <Chip
                   size="small"
-                  placeholder="Search quotations..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  onFocus={(e) => e.target.select()}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <SearchIcon />
-                      </InputAdornment>
-                    ),
-                  }}
+                  label={`${sortedQuotations.length} / ${sales.filter((s) => s.bill_type === 'QUOTATION').length}`}
+                  sx={{ bgcolor: BRAND.tint.periwinkle, color: BRAND.text.periwinkle, fontWeight: 700, height: 32, borderRadius: '8px' }}
                 />
-              </Grid>
-              <Grid item xs={12} md={2}>
-                <Button variant="outlined" fullWidth onClick={clearFilters}>
-                  Clear Filters
+                <Button
+                  onClick={clearFilters}
+                  size="small"
+                  variant="outlined"
+                  startIcon={<ClearIcon sx={{ fontSize: 18 }} />}
+                  sx={{ textTransform: 'none', fontWeight: 600, color: '#64748b', borderColor: '#cbd5e1', borderRadius: '8px', height: 32 }}
+                >
+                  Clear All
                 </Button>
-              </Grid>
-            </Grid>
-          </CardContent>
-        </Card>
+              </Box>
+            </Box>
 
-        {/* Sales Table */}
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Date</TableCell>
-                <TableCell>Quotation #</TableCell>
-                <TableCell>Customer</TableCell>
-                <TableCell align="right">Total Amount</TableCell>
-                <TableCell align="center">Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredSales.map((sale) => (
-                <TableRow key={sale.sale_id} hover>
-                  <TableCell>{new Date(sale.created_at).toLocaleDateString('en-GB')}</TableCell>
-                  <TableCell>{sale.sale_id}</TableCell>
-                  <TableCell>{sale.customer?.cus_name}</TableCell>
-                  <TableCell align="right">{fmtAmt(sale.total_amount)}</TableCell>
-                  <TableCell align="center">
-                    <Stack direction="row" spacing={1} justifyContent="center">
-                      <Tooltip title="Create Bill">
-                        <IconButton
-                          size="small"
-                          color="success"
-                          onClick={() => router.push(`/dashboard/sales?view=create&quotationId=${sale.sale_id}`)}
-                        >
-                          <ReceiptLongIcon />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="View Receipt">
-                        <IconButton size="small" onClick={() => handleViewReceipt(sale)}>
-                          <ReceiptIcon />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Print A4">
-                        <IconButton
-                          size="small"
-                          color="secondary"
-                          onClick={() => {
-                            setCurrentBillData(sale);
-                            setTimeout(() => handlePrintBill('A4'), 100);
-                          }}
-                        >
-                          <PrintIcon />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Edit">
-                        <IconButton size="small" color="primary" onClick={() => handleEdit(sale)}>
-                          <EditIcon />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Delete">
-                        <IconButton size="small" color="error" onClick={() => handleDelete(sale.sale_id)}>
-                          <DeleteIcon />
-                        </IconButton>
-                      </Tooltip>
-                    </Stack>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {filteredSales.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
-                    No quotations found
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+            <Box sx={{ px: { xs: 1.5, md: 2 }, py: 2, borderBottom: '1px solid #e2e8f0', bgcolor: '#fafbfc' }}>
+              <Box sx={QUOTE_FILTER_GRID}>
+                <Box sx={{ gridColumn: { xs: '1', md: 'span 2' } }}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Search Quotations"
+                    placeholder="ID, Customer, Reference, or Amount..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon sx={{ color: '#94a3b8', fontSize: 20 }} /></InputAdornment> }}
+                    sx={QUOTE_FILTER_FIELD_SX}
+                  />
+                </Box>
+                <Box>
+                  <Autocomplete
+                    fullWidth
+                    size="small"
+                    options={customers}
+                    getOptionLabel={(option) => option.cus_name || ''}
+                    value={customers.find((c) => c.cus_id?.toString() === filterCustomer) || null}
+                    onChange={(event, newValue) => setFilterCustomer(newValue ? newValue.cus_id.toString() : '')}
+                    renderInput={(params) => <TextField {...params} label="Customer" placeholder="All Customers" sx={QUOTE_FILTER_FIELD_SX} />}
+                  />
+                </Box>
+                <Box>
+                  <TextField fullWidth size="small" type="date" label="From Date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} InputLabelProps={{ shrink: true }} sx={QUOTE_FILTER_FIELD_SX} />
+                </Box>
+                <Box>
+                  <TextField fullWidth size="small" type="date" label="To Date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} InputLabelProps={{ shrink: true }} sx={QUOTE_FILTER_FIELD_SX} />
+                </Box>
+                <Box>
+                  <Autocomplete
+                    fullWidth
+                    size="small"
+                    options={[
+                      { value: 'created_at-desc', label: 'Newest First' },
+                      { value: 'created_at-asc', label: 'Oldest First' },
+                      { value: 'customer-asc', label: 'Customer A-Z' },
+                      { value: 'customer-desc', label: 'Customer Z-A' },
+                      { value: 'total_amount-desc', label: 'Amount High-Low' },
+                      { value: 'total_amount-asc', label: 'Amount Low-High' },
+                    ]}
+                    getOptionLabel={(option) => option.label}
+                    value={{ value: `${sortBy}-${sortOrder}`, label: getSortLabel(`${sortBy}-${sortOrder}`) }}
+                    onChange={(event, newValue) => {
+                      if (newValue) {
+                        const [field, order] = newValue.value.split('-');
+                        setSortBy(field);
+                        setSortOrder(order);
+                      }
+                    }}
+                    renderInput={(params) => <TextField {...params} label="Sort By" sx={QUOTE_FILTER_FIELD_SX} />}
+                  />
+                </Box>
+              </Box>
+            </Box>
+
+            <Box sx={{ px: { xs: 1.5, md: 2 }, py: 1.25, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #cbd5e1', bgcolor: '#f1f5f9' }}>
+              <Typography sx={{ fontWeight: 700, color: '#1e293b', fontSize: '0.875rem' }}>Quotations List</Typography>
+              <Typography sx={{ fontSize: '0.8125rem', color: '#64748b', fontWeight: 600 }}>
+                Showing {sortedQuotations.length} quotation{sortedQuotations.length === 1 ? '' : 's'}
+              </Typography>
+            </Box>
+
+            <TableContainer sx={{ overflowX: 'auto', maxHeight: 'calc(100vh - 340px)' }}>
+              <Table stickyHeader sx={QUOTE_EXCEL_TABLE_SX}>
+                <TableHead>
+                  <TableRow>
+                    {[
+                      { label: 'Quote #', align: 'left' },
+                      { label: 'Customer', align: 'left' },
+                      { label: 'Items', align: 'left' },
+                      { label: 'Reference', align: 'left' },
+                      { label: 'Total', align: 'right' },
+                      { label: 'Discount', align: 'right' },
+                      { label: 'Date', align: 'center' },
+                      { label: 'Actions', align: 'center' },
+                    ].map((col) => (
+                      <TableCell key={col.label} align={col.align} sx={QUOTE_EXCEL_HEAD_SX}>{col.label}</TableCell>
+                    ))}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {sortedQuotations.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
+                        <DescriptionIcon sx={{ fontSize: 48, color: '#cbd5e1', mb: 1 }} />
+                        <Typography sx={{ fontWeight: 600, color: '#64748b' }}>
+                          {sales.filter((s) => s.bill_type === 'QUOTATION').length === 0 ? 'No quotations yet' : 'No quotations match your filters'}
+                        </Typography>
+                        <Typography sx={{ fontSize: '0.8125rem', color: '#94a3b8', mt: 0.5 }}>
+                          Create a quotation to share prices with customers before billing.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    sortedQuotations.map((sale, rowIndex) => (
+                      <TableRow
+                        key={sale.sale_id}
+                        onClick={() => handleOpenCustomerLedger(sale)}
+                        sx={{
+                          bgcolor: rowIndex % 2 === 0 ? '#ffffff' : '#f8fafc',
+                          '&:hover': { bgcolor: BRAND.tint.periwinkle },
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <TableCell sx={{ fontWeight: 700, color: BRAND.text.periwinkle, whiteSpace: 'nowrap' }}>
+                          #{sale.sale_id}
+                        </TableCell>
+                        <TableCell sx={{ fontWeight: 600, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {sale.customer?.cus_name || 'N/A'}
+                        </TableCell>
+                        <TableCell sx={{ minWidth: 180, maxWidth: 280 }}>{renderQuotationLineItemsCell(sale)}</TableCell>
+                        <TableCell sx={{ color: '#64748b', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {sale.reference || '—'}
+                        </TableCell>
+                        <TableCell sx={{ ...QUOTE_NUM_CELL_SX, fontWeight: 700, color: '#1e293b' }}>{fmtAmt(sale.total_amount)}</TableCell>
+                        <TableCell sx={QUOTE_NUM_CELL_SX}>{fmtAmt(sale.discount)}</TableCell>
+                        <TableCell align="center" sx={{ color: '#64748b', whiteSpace: 'nowrap' }}>
+                          {formatDatePK(sale.created_at) || '—'}
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 0.4, whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                          <Stack direction="row" spacing={0} justifyContent="center">
+                            <Tooltip title="Convert to Sale">
+                              <IconButton size="small" sx={{ color: BRAND.text.green, p: 0.4 }} onClick={() => router.push(`/dashboard/sales?view=create&quotationId=${sale.sale_id}`)}>
+                                <ReceiptLongIcon sx={{ fontSize: 17 }} />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="View / Print">
+                              <IconButton size="small" color="primary" sx={{ p: 0.4 }} onClick={() => handleViewReceipt(sale)}>
+                                <ReceiptIcon sx={{ fontSize: 17 }} />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Print A4">
+                              <IconButton size="small" sx={{ color: '#64748b', p: 0.4 }} onClick={() => handlePrintFromList(sale, 'A4')}>
+                                <PrintIcon sx={{ fontSize: 17 }} />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Edit">
+                              <IconButton size="small" sx={{ color: '#f59e0b', p: 0.4 }} onClick={() => handleEdit(sale)}>
+                                <EditIcon sx={{ fontSize: 17 }} />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Delete">
+                              <IconButton size="small" sx={{ color: BRAND.primary.pink, p: 0.4 }} onClick={() => handleDelete(sale.sale_id)}>
+                                <DeleteIcon sx={{ fontSize: 17 }} />
+                              </IconButton>
+                            </Tooltip>
+                          </Stack>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Card>
+        </Stack>
       </Container>
     </DashboardLayout>
   );
@@ -1742,65 +2370,120 @@ function QuotationsPageContent() {
         onClose={() => setReceiptDialogOpen(false)}
         maxWidth="md"
         fullWidth
+        className="no-print"
+        PaperProps={{ sx: { borderRadius: 3, overflow: 'hidden' } }}
       >
-        <DialogTitle>
-          Quotation Receipt
-          <IconButton
-            aria-label="close"
-            onClick={() => setReceiptDialogOpen(false)}
-            sx={{ position: 'absolute', right: 8, top: 8 }}
-          >
+        <DialogTitle sx={{
+          bgcolor: BRAND.supporting.periwinkle,
+          color: '#fff',
+          fontWeight: 800,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          py: 2,
+        }}>
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 800 }}>Quotation Preview</Typography>
+            <Typography variant="caption" sx={{ opacity: 0.9 }}>
+              {currentBillData ? `#${currentBillData.sale_id}` : ''} · Valid price estimate
+            </Typography>
+          </Box>
+          <IconButton onClick={() => setReceiptDialogOpen(false)} size="small" sx={{ color: '#fff' }}>
             <CloseIcon />
           </IconButton>
         </DialogTitle>
-        <DialogContent dividers id="receipt-preview">
+        <DialogContent dividers sx={{ bgcolor: '#f8fafc', p: { xs: 2, md: 3 } }}>
           {currentBillData && (
-            <Box sx={{ p: 2 }}>
-              <Typography variant="h6" align="center" gutterBottom>
-                QUOTATION
-              </Typography>
-              <Typography variant="body1" align="center" gutterBottom>
-                Quotation #{currentBillData.sale_id}
-              </Typography>
-              <Grid container spacing={2} sx={{ mt: 2 }}>
-                <Grid item xs={6}>
-                  <Typography variant="body2"><strong>Date:</strong> {new Date(currentBillData.created_at).toLocaleDateString('en-GB')}</Typography>
-                  <Typography variant="body2"><strong>Customer:</strong> {currentBillData.customer?.cus_name}</Typography>
+            <Paper elevation={0} sx={{ p: { xs: 2, md: 3 }, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
+              <Box sx={{ textAlign: 'center', mb: 3, pb: 2, borderBottom: `3px solid ${BRAND.supporting.periwinkle}` }}>
+                <Typography sx={{ fontWeight: 900, fontSize: '1.25rem', color: '#1e293b' }}>{COMPANY.name}</Typography>
+                <Typography sx={{ fontSize: '0.875rem', color: '#64748b', direction: 'rtl' }}>{COMPANY.nameUr}</Typography>
+                <Typography sx={{ fontSize: '0.8125rem', color: '#64748b', mt: 0.5 }}>{COMPANY.address}</Typography>
+                <Chip
+                  label="QUOTATION"
+                  sx={{
+                    mt: 1.5,
+                    bgcolor: BRAND.tint.periwinkle,
+                    color: BRAND.text.periwinkle,
+                    fontWeight: 800,
+                    letterSpacing: '0.08em',
+                  }}
+                />
+              </Box>
+
+              <Grid container spacing={2} sx={{ mb: 2 }}>
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="overline" sx={{ color: '#94a3b8', fontWeight: 700 }}>Customer</Typography>
+                  <Typography sx={{ fontWeight: 700, color: '#1e293b' }}>{currentBillData.customer?.cus_name || 'N/A'}</Typography>
+                  {currentBillData.customer?.cus_phone_no && (
+                    <Typography sx={{ fontSize: '0.8125rem', color: '#64748b' }}>{currentBillData.customer.cus_phone_no}</Typography>
+                  )}
                 </Grid>
-                <Grid item xs={6} sx={{ textAlign: 'right' }}>
-                  <Typography variant="body2"><strong>Total Amount:</strong> {fmtAmt(currentBillData.total_amount)}</Typography>
+                <Grid item xs={12} sm={6} sx={{ textAlign: { sm: 'right' } }}>
+                  <Typography variant="overline" sx={{ color: '#94a3b8', fontWeight: 700 }}>Quotation Details</Typography>
+                  <Typography sx={{ fontSize: '0.875rem' }}><strong>Quote #:</strong> {currentBillData.sale_id}</Typography>
+                  <Typography sx={{ fontSize: '0.875rem' }}><strong>Date:</strong> {formatDatePK(currentBillData.created_at)}</Typography>
+                  {currentBillData.reference && (
+                    <Typography sx={{ fontSize: '0.875rem' }}><strong>Ref:</strong> {currentBillData.reference}</Typography>
+                  )}
                 </Grid>
               </Grid>
-              <TableContainer sx={{ mt: 2 }}>
+
+              <TableContainer sx={{ border: '1px solid #e2e8f0', borderRadius: 1.5, mb: 2 }}>
                 <Table size="small">
                   <TableHead>
-                    <TableRow>
-                      <TableCell>Item</TableCell>
-                      <TableCell align="right">Qty</TableCell>
-                      <TableCell align="right">Rate</TableCell>
-                      <TableCell align="right">Total</TableCell>
+                    <TableRow sx={{ bgcolor: BRAND.tint.periwinkle }}>
+                      <TableCell sx={{ fontWeight: 700, color: BRAND.text.periwinkle }}>#</TableCell>
+                      <TableCell sx={{ fontWeight: 700, color: BRAND.text.periwinkle }}>Item</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 700, color: BRAND.text.periwinkle }}>Qty</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 700, color: BRAND.text.periwinkle }}>Rate</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 700, color: BRAND.text.periwinkle }}>Amount</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {currentBillData.sale_details?.map((detail, index) => (
                       <TableRow key={index}>
-                        <TableCell>{detail.product?.pro_title || 'Item'}</TableCell>
+                        <TableCell>{index + 1}</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>{detail.product?.pro_title || 'Item'}</TableCell>
                         <TableCell align="right">{detail.qnty}</TableCell>
                         <TableCell align="right">{fmtAmt(detail.unit_rate)}</TableCell>
-                        <TableCell align="right">{fmtAmt(detail.total_amount)}</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700 }}>{fmtAmt(detail.total_amount)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </TableContainer>
-            </Box>
+
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <Box sx={{ minWidth: 240 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5 }}>
+                    <Typography color="text.secondary">Subtotal</Typography>
+                    <Typography>{fmtAmt(parseFloat(currentBillData.total_amount || 0) + parseFloat(currentBillData.discount || 0))}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5 }}>
+                    <Typography color="text.secondary">Discount</Typography>
+                    <Typography>{fmtAmt(currentBillData.discount)}</Typography>
+                  </Box>
+                  <Divider sx={{ my: 1 }} />
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5 }}>
+                    <Typography sx={{ fontWeight: 800, color: BRAND.text.periwinkle }}>Quoted Total</Typography>
+                    <Typography sx={{ fontWeight: 800, fontSize: '1.125rem', color: BRAND.text.periwinkle }}>{fmtAmt(currentBillData.total_amount)}</Typography>
+                  </Box>
+                </Box>
+              </Box>
+
+              <Typography sx={{ mt: 3, fontSize: '0.75rem', color: '#94a3b8', textAlign: 'center', fontStyle: 'italic' }}>
+                This is a quotation only. Prices and availability may change until converted to a sale.
+              </Typography>
+            </Paper>
           )}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => handlePrintBill('A4', true)} startIcon={<PrintIcon />}>
+        <DialogActions sx={{ px: 3, py: 2, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+          <Button onClick={() => setReceiptDialogOpen(false)} sx={{ color: '#64748b' }}>Close</Button>
+          <Button onClick={() => handlePrintBill('A4')} startIcon={<PrintIcon />} variant="outlined" sx={{ borderColor: BRAND.supporting.periwinkle, color: BRAND.text.periwinkle }}>
             Print A4
           </Button>
-          <Button onClick={() => handlePrintBill('THERMAL', true)} startIcon={<PrintIcon />}>
+          <Button onClick={() => handlePrintBill('THERMAL')} startIcon={<PrintIcon />} variant="contained" sx={{ bgcolor: BRAND.supporting.periwinkle, '&:hover': { bgcolor: '#4a57d4' } }}>
             Print Thermal
           </Button>
         </DialogActions>
@@ -1817,169 +2500,67 @@ function QuotationsPageContent() {
         </Alert>
       </Snackbar>
 
-      {/* Hidden Print Containers */}
-      <div id="printable-invoice-a4" style={{ display: 'none' }}></div>
-      {(() => {
-        const activeBillData = currentBillData || selectedBill;
-        if (!activeBillData) return <div id="printable-invoice-thermal" style={{ display: 'none' }}></div>;
-
-        const totalAmount = parseFloat(activeBillData.total_amount || 0);
-        const discountAmount = parseFloat(activeBillData.discount || 0);
-        const shippingAmount = parseFloat(activeBillData.shipping_amount || 0);
-        const labourAmount = parseFloat(activeBillData.labour_charges || activeBillData.labour || 0);
-        const subtotalAmount = totalAmount - labourAmount - shippingAmount + discountAmount;
-
-        return (
-          <Box
-            id="printable-invoice-thermal"
-            sx={{
-              width: '78mm',
-              maxWidth: '78mm',
-              bgcolor: '#ffffff',
-              color: '#000000',
-              mx: 'auto',
-              p: '2mm',
-              fontFamily: 'monospace, Arial, sans-serif',
-              boxSizing: 'border-box',
-              display: 'none',
-            }}
-          >
-            {/* Header */}
-            <Box sx={{ textAlign: 'center', pb: 1, borderBottom: '2px solid #000' }}>
-              <Typography sx={{ fontSize: '15px', fontWeight: '900', fontFamily: 'Arial, sans-serif', direction: 'rtl', color: '#000' }}>
-                اتفاق آئرن اینڈ سیمنٹ سٹور
-              </Typography>
-              <Typography sx={{ fontSize: '11px', direction: 'rtl', mt: 0.25, color: '#000' }}>
-                گجرات سرگودھا روڈ، پاہڑیانوالی
-              </Typography>
-              <Typography sx={{ fontSize: '11px', fontWeight: 'bold', mt: 0.25, color: '#000' }}>
-                Ph: 0346-7560306, 0300-7560306
-              </Typography>
-              <Typography
-                sx={{
-                  mt: 0.75,
-                  px: 1,
-                  py: 0.25,
-                  bgcolor: '#000',
-                  color: '#fff',
-                  fontSize: '11px',
-                  fontWeight: 'bold',
-                  letterSpacing: '1px',
-                  display: 'inline-block',
-                }}
-              >
-                QUOTATION RECEIPT
-              </Typography>
-            </Box>
-
-            {/* Meta */}
-            <Box sx={{ py: 0.75, fontSize: '11px', borderBottom: '1px dashed #000', color: '#000' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Quot #: <strong>{activeBillData.sale_id}</strong></span>
-                <span>Date: <strong>{new Date(activeBillData.created_at).toLocaleDateString('en-GB')}</strong></span>
-              </Box>
-              <Box sx={{ mt: 0.25 }}>
-                <span>Cust: <strong>{activeBillData.customer?.cus_name || 'N/A'}</strong></span>
-              </Box>
-            </Box>
-
-            {/* Items Header */}
-            <Box sx={{ borderBottom: '1px solid #000', py: 0.5, my: 0.5, fontWeight: 'bold', fontSize: '11px', color: '#000' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                <Typography sx={{ fontSize: '11px', fontWeight: 'bold', flex: 1, color: '#000' }}>Item Description</Typography>
-                <Typography sx={{ fontSize: '11px', fontWeight: 'bold', width: '35px', textAlign: 'center', color: '#000' }}>Qty</Typography>
-                <Typography sx={{ fontSize: '11px', fontWeight: 'bold', width: '50px', textAlign: 'right', color: '#000' }}>Rate</Typography>
-                <Typography sx={{ fontSize: '11px', fontWeight: 'bold', width: '55px', textAlign: 'right', color: '#000' }}>Total</Typography>
-              </Box>
-            </Box>
-
-            {/* Items List */}
-            <Box sx={{ borderBottom: '1px dashed #000', pb: 0.75, mb: 0.75 }}>
-              {activeBillData.sale_details && activeBillData.sale_details.length > 0 ? (
-                activeBillData.sale_details.map((d, i) => (
-                  <Box key={i} sx={{ mb: 0.75 }}>
-                    <Typography sx={{ fontSize: '11px', fontWeight: 'bold', color: '#000', wordBreak: 'break-word' }}>
-                      {d.product?.pro_title || 'Item'}
-                    </Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', color: '#000' }}>
-                      <Box sx={{ flex: 1 }} />
-                      <Typography sx={{ fontSize: '11px', width: '35px', textAlign: 'center', color: '#000' }}>
-                        {fmtAmt(d.qnty)}
-                      </Typography>
-                      <Typography sx={{ fontSize: '11px', width: '50px', textAlign: 'right', color: '#000' }}>
-                        {fmtAmt(d.unit_rate)}
-                      </Typography>
-                      <Typography sx={{ fontSize: '11px', fontWeight: 'bold', width: '55px', textAlign: 'right', color: '#000' }}>
-                        {fmtAmt(d.total_amount)}
-                      </Typography>
-                    </Box>
-                  </Box>
-                ))
-              ) : (
-                <Typography sx={{ fontSize: '11px', textAlign: 'center', py: 0.5, color: '#000' }}>No items</Typography>
-              )}
-            </Box>
-
-            {/* Financial Summary */}
-            <Box sx={{ fontSize: '11px', lineHeight: 1.4, color: '#000' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                <Typography sx={{ fontSize: '11px', color: '#000' }}>Subtotal</Typography>
-                <Typography sx={{ fontSize: '11px', color: '#000' }}>{fmtAmt(subtotalAmount)}</Typography>
-              </Box>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                <Typography sx={{ fontSize: '11px', color: '#000' }}>Discount</Typography>
-                <Typography sx={{ fontSize: '11px', color: '#000' }}>
-                  {discountAmount > 0 ? `-${fmtAmt(discountAmount)}` : '0'}
-                </Typography>
-              </Box>
-              <Box
-                sx={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  fontWeight: '900',
-                  fontSize: '12px',
-                  borderTop: '2px solid #000',
-                  borderBottom: '2px solid #000',
-                  py: 0.25,
-                  my: 0.5,
-                }}
-              >
-                <Typography sx={{ fontSize: '12px', fontWeight: '900', color: '#000' }}>GRAND TOTAL</Typography>
-                <Typography sx={{ fontSize: '12px', fontWeight: '900', color: '#000' }}>{fmtAmt(totalAmount)}</Typography>
-              </Box>
-            </Box>
-
-            {/* Footer */}
-            <Box sx={{ textAlign: 'center', borderTop: '1px solid #000', mt: 1, pt: 0.75 }}>
-              <Typography sx={{ fontSize: '11px', fontWeight: 'bold', direction: 'rtl', color: '#000' }}>
-                شکریہ! دوبارہ تشریف لائیےگا
-              </Typography>
-              <Typography sx={{ fontSize: '10px', color: '#333', mt: 0.25 }}>
-                Thank you for your business!
-              </Typography>
-            </Box>
-          </Box>
-        );
-      })()}
+      {/* Off-screen print templates — never shown on screen, only in print dialog */}
+      <QuotationPrintTemplates billData={currentBillData || selectedBill} />
 
       <style jsx global>{`
         @media print {
+          body.print-thermal *,
+          body.print-a4 * {
+            visibility: hidden !important;
+          }
+
+          body.print-thermal .dashboard-layout-root,
+          body.print-thermal .MuiContainer-root,
+          body.print-thermal .MuiDialog-root,
+          body.print-thermal .MuiDialog-container,
+          body.print-thermal .no-print,
+          body.print-a4 .dashboard-layout-root,
+          body.print-a4 .MuiDialog-root,
+          body.print-a4 .MuiDialog-container,
+          body.print-a4 .no-print {
+            display: none !important;
+            height: 0 !important;
+            overflow: hidden !important;
+          }
+
           body.print-thermal #printable-invoice-thermal,
           body.print-thermal #printable-invoice-thermal * {
             visibility: visible !important;
           }
+
           body.print-thermal #printable-invoice-thermal {
             display: block !important;
-            position: absolute !important;
+            position: fixed !important;
             left: 0 !important;
             top: 0 !important;
-            width: 80mm !important;
-            max-width: 80mm !important;
+            width: 78mm !important;
+            max-width: 78mm !important;
             margin: 0 !important;
-            padding: 4mm !important;
+            padding: 2mm !important;
             box-sizing: border-box !important;
-            z-index: 9999 !important;
-            background: white !important;
+            z-index: 999999 !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+          }
+
+          body.print-a4 #printable-invoice-a4,
+          body.print-a4 #printable-invoice-a4 * {
+            visibility: visible !important;
+          }
+
+          body.print-a4 #printable-invoice-a4 {
+            display: block !important;
+            position: fixed !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            z-index: 999999 !important;
+            background: #ffffff !important;
+            color: #000000 !important;
           }
         }
       `}</style>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   ArrowLeft,
   Download,
@@ -17,11 +17,15 @@ import {
   FileText,
   DollarSign,
   Star,
-  Highlighter,
   X
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '../../components/dashboard-layout';
+import { openAccountLedgerTab, FINANCE_LEDGER_PATH } from '@/lib/ledger-tabs';
+import {
+  collectBoldAccountTerms,
+  buildAccountTermCustomerMap,
+} from '@/lib/report-account-links';
 
 const fmtAmt = (val) => {
   const n = parseFloat(val || 0);
@@ -60,7 +64,11 @@ export default function CashReport() {
   const [typeFilter, setTypeFilter] = useState('ALL'); // 'ALL', 'DEBIT', 'CREDIT'
   const [highlightedRowIds, setHighlightedRowIds] = useState(new Set());
   const [onlyHighlighted, setOnlyHighlighted] = useState(false);
+  const [selectedEntryId, setSelectedEntryId] = useState(null);
+  const [customers, setCustomers] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
+  const listContainerRef = useRef(null);
+  const rowRefs = useRef({});
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -69,6 +77,13 @@ export default function CashReport() {
         setCurrentUser(u);
       } catch (e) {}
     }
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/customers?dropdown=true')
+      .then((response) => (response.ok ? response.json() : []))
+      .then((data) => setCustomers(Array.isArray(data) ? data : []))
+      .catch(() => setCustomers([]));
   }, []);
 
   // Auto-fetch report when dates are set
@@ -174,6 +189,20 @@ export default function CashReport() {
   const totalCredit = parseFloat(reportData?.summary?.totalLedgerCredit || 0);
   const netCashFlow = totalDebit - totalCredit;
 
+  const ensureVisibleInContainer = (el) => {
+    const container = listContainerRef.current;
+    if (!container || !el) return;
+    const elTop = el.offsetTop;
+    const elBottom = elTop + el.offsetHeight;
+    const viewTop = container.scrollTop;
+    const viewBottom = container.scrollTop + container.clientHeight;
+    if (elTop < viewTop) {
+      container.scrollTop = elTop - 8;
+    } else if (elBottom > viewBottom) {
+      container.scrollTop = elBottom - container.clientHeight + 8;
+    }
+  };
+
   const toggleHighlightRow = (l_id, e) => {
     if (e) e.stopPropagation();
     setHighlightedRowIds((prev) => {
@@ -209,6 +238,67 @@ export default function CashReport() {
     );
   };
 
+  const handleOpenAccountLedger = (cusId, cusName, e) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    if (!openAccountLedgerTab(cusId, cusName)) return;
+    router.push(FINANCE_LEDGER_PATH);
+  };
+
+  const renderAccountLink = (customer, content, key) => {
+    if (!customer?.cus_id) {
+      return (
+        <strong key={key} className="font-extrabold text-slate-900">
+          {content}
+        </strong>
+      );
+    }
+    return (
+      <button
+        key={key}
+        type="button"
+        onClick={(e) => handleOpenAccountLedger(customer.cus_id, customer.cus_name, e)}
+        className="font-extrabold text-blue-700 hover:text-blue-900 hover:underline cursor-pointer bg-transparent border-0 p-0 inline text-left"
+        title={`Open ledger: ${customer.cus_name}`}
+      >
+        {content}
+      </button>
+    );
+  };
+
+  const renderDescriptionWithBoldAccounts = (entry, query) => {
+    const text = entry.details;
+    if (text === null || text === undefined || text === '') return '-';
+
+    const str = String(text);
+    const terms = collectBoldAccountTerms(entry);
+    if (!terms.length) return renderHighlightedText(str, query);
+
+    const termMap = buildAccountTermCustomerMap(entry, customers);
+    const escaped = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const parts = str.split(new RegExp(`(${escaped.join('|')})`, 'gi'));
+
+    return parts.map((part, i) => {
+      if (!part) return null;
+      const isAccount = terms.some((t) => t.toLowerCase() === part.toLowerCase());
+      const content = query ? renderHighlightedText(part, query) : part;
+      if (!isAccount) return <span key={i}>{content}</span>;
+      const customer = termMap.get(part.toLowerCase());
+      return renderAccountLink(customer, content, i);
+    });
+  };
+
+  const renderAccountTitleCell = (entry) => {
+    const title = entry.customer?.cus_name || 'General Cash';
+    const content = renderHighlightedText(title, searchQuery);
+    if (!entry.customer?.cus_id) {
+      return <span className="font-bold text-slate-900">{content}</span>;
+    }
+    return renderAccountLink(entry.customer, content, `title-${entry.l_id}`);
+  };
+
   // Screen entries ordering & filtering
   const allEntries = reportData?.ledgerEntries || [];
 
@@ -232,6 +322,44 @@ export default function CashReport() {
   });
 
   const displayedEntries = sortOrder === 'desc' ? [...filteredEntries].reverse() : filteredEntries;
+
+  useEffect(() => {
+    if (selectedEntryId && !displayedEntries.some((e) => e.l_id === selectedEntryId)) {
+      setSelectedEntryId(null);
+    }
+  }, [displayedEntries, selectedEntryId]);
+
+  const handleListKeyDown = (e) => {
+    if (!displayedEntries.length) return;
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+
+    const currentIdx = selectedEntryId
+      ? displayedEntries.findIndex((entry) => entry.l_id === selectedEntryId)
+      : -1;
+
+    let nextIdx = currentIdx;
+    if (e.key === 'ArrowDown') {
+      nextIdx = currentIdx < 0 ? 0 : Math.min(currentIdx + 1, displayedEntries.length - 1);
+    } else {
+      nextIdx = currentIdx < 0 ? displayedEntries.length - 1 : Math.max(currentIdx - 1, 0);
+    }
+
+    const entry = displayedEntries[nextIdx];
+    if (!entry) return;
+
+    setSelectedEntryId(entry.l_id);
+    const el = rowRefs.current[entry.l_id];
+    if (el?.focus) {
+      el.focus({ preventScroll: true });
+      ensureVisibleInContainer(el);
+    }
+  };
+
+  const selectEntry = (l_id) => {
+    setSelectedEntryId(l_id);
+    listContainerRef.current?.focus({ preventScroll: true });
+  };
 
   return (
     <DashboardLayout>
@@ -532,12 +660,18 @@ export default function CashReport() {
                 </div>
 
                 {/* Table Grid */}
-                <div className="overflow-x-auto">
+                <div
+                  ref={listContainerRef}
+                  tabIndex={0}
+                  onKeyDown={handleListKeyDown}
+                  className="overflow-x-auto outline-none focus:ring-2 focus:ring-emerald-500/40 focus:ring-inset rounded-b-2xl"
+                  title="Click a row to select. Use ↑ ↓ arrow keys to move between entries."
+                >
                   <table className="w-full text-xs text-left border-collapse">
                     <thead>
                       <tr className="bg-slate-900 text-slate-100 border-b border-slate-800 font-bold uppercase tracking-wider text-[11px]">
-                        <th className="px-3 py-3.5 w-10 text-center border-r border-slate-800" title="Click star to highlight entry">
-                          <Highlighter className="w-3.5 h-3.5 mx-auto text-amber-400" />
+                        <th className="px-3 py-3.5 w-10 text-center border-r border-slate-800" title="Click star only to mark entry">
+                          <Star className="w-3.5 h-3.5 mx-auto text-amber-400" />
                         </th>
                         <th className="px-4 py-3.5 w-14 text-center border-r border-slate-800">#</th>
                         <th className="px-4 py-3.5 w-28 border-r border-slate-800">Date</th>
@@ -545,9 +679,9 @@ export default function CashReport() {
                         <th className="px-4 py-3.5 border-r border-slate-800">Account Title</th>
                         <th className="px-4 py-3.5 border-r border-slate-800">Description</th>
                         <th className="px-4 py-3.5 w-28 border-r border-slate-800">Bill / Ref</th>
-                        <th className="px-4 py-3.5 w-36 text-right border-r border-slate-800 text-emerald-400">Cash In (Dr)</th>
-                        <th className="px-4 py-3.5 w-36 text-right border-r border-slate-800 text-rose-400">Cash Out (Cr)</th>
-                        <th className="px-4 py-3.5 w-36 text-right">Balance</th>
+                        <th className="px-4 py-3.5 w-36 text-right border-r border-slate-800 text-emerald-400 text-sm">Cash In (Dr)</th>
+                        <th className="px-4 py-3.5 w-36 text-right border-r border-slate-800 text-rose-400 text-sm">Cash Out (Cr)</th>
+                        <th className="px-4 py-3.5 w-36 text-right text-blue-400 text-sm">Balance</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -568,8 +702,8 @@ export default function CashReport() {
                           </td>
                           <td className="px-4 py-3 text-right border-r border-blue-100 text-slate-400">—</td>
                           <td className="px-4 py-3 text-right border-r border-blue-100 text-slate-400">—</td>
-                          <td className={`px-4 py-3 text-right font-black tabular-nums text-sm ${openingBalance >= 0 ? 'text-blue-900' : 'text-rose-700'}`}>
-                            Rs. {formatCurrency(openingBalance)}
+                          <td className={`px-4 py-3 text-right font-bold tabular-nums ${openingBalance >= 0 ? 'text-blue-900' : 'text-rose-700'}`}>
+                            <span className="font-black text-base">Rs. {formatCurrency(openingBalance)}</span>
                           </td>
                         </tr>
                       )}
@@ -581,23 +715,32 @@ export default function CashReport() {
                         const isDebit = displayAmts.debit > 0;
                         const sno = sortOrder === 'desc' ? reportData.ledgerEntries.length - index : index + 1;
                         const isHighlighted = highlightedRowIds.has(entry.l_id);
+                        const isSelected = selectedEntryId === entry.l_id;
 
                         return (
                           <tr
                             key={entry.l_id}
-                            onClick={() => toggleHighlightRow(entry.l_id)}
-                            className={`cursor-pointer transition-colors ${
-                              isHighlighted
+                            ref={(el) => {
+                              if (el) rowRefs.current[entry.l_id] = el;
+                              else delete rowRefs.current[entry.l_id];
+                            }}
+                            tabIndex={-1}
+                            onClick={() => selectEntry(entry.l_id)}
+                            className={`cursor-pointer transition-colors outline-none ${
+                              isSelected
+                                ? 'ring-2 ring-inset ring-blue-400 bg-blue-50/90'
+                                : isHighlighted
                                 ? 'bg-amber-100/90 hover:bg-amber-200/90 border-l-4 border-l-amber-500 font-medium'
                                 : index % 2 === 0
                                 ? 'bg-white hover:bg-slate-100/80'
                                 : 'bg-slate-50/50 hover:bg-slate-100/80'
-                            }`}
+                            } ${isSelected && isHighlighted ? 'border-l-4 border-l-amber-500' : ''}`}
                           >
                             <td className="px-3 py-3 text-center border-r border-slate-100/80">
                               <button
+                                type="button"
                                 onClick={(e) => toggleHighlightRow(entry.l_id, e)}
-                                title={isHighlighted ? 'Remove highlight' : 'Highlight row'}
+                                title={isHighlighted ? 'Remove star' : 'Star this entry'}
                                 className="p-1 rounded-md hover:bg-amber-200/60 text-slate-400 hover:text-amber-600 transition-colors"
                               >
                                 <Star
@@ -621,10 +764,10 @@ export default function CashReport() {
                               )}
                             </td>
                             <td className="px-4 py-3 text-slate-900 font-bold border-r border-slate-100/80">
-                              {renderHighlightedText(entry.customer?.cus_name || 'General Cash', searchQuery)}
+                              {renderAccountTitleCell(entry)}
                             </td>
-                            <td className="px-4 py-3 text-slate-600 border-r border-slate-100/80 max-w-sm" title={entry.details || '-'}>
-                              {renderHighlightedText(entry.details, searchQuery)}
+                            <td className="px-4 py-3 text-slate-600 border-r border-slate-100/80 max-w-sm leading-relaxed" title={entry.details || '-'}>
+                              {renderDescriptionWithBoldAccounts(entry, searchQuery)}
                             </td>
                             <td className="px-4 py-3 border-r border-slate-100/80 font-medium">
                               {entry.bill_no ? (
@@ -637,20 +780,22 @@ export default function CashReport() {
                             </td>
                             <td className="px-4 py-3 text-right font-bold border-r border-slate-100/80 tabular-nums">
                               {displayAmts.debit > 0 ? (
-                                <span className="text-emerald-700 font-black text-sm">Rs. {formatCurrency(displayAmts.debit)}</span>
+                                <span className="text-emerald-700 font-black text-base">Rs. {formatCurrency(displayAmts.debit)}</span>
                               ) : (
                                 <span className="text-slate-300">—</span>
                               )}
                             </td>
                             <td className="px-4 py-3 text-right font-bold border-r border-slate-100/80 tabular-nums">
                               {displayAmts.credit > 0 ? (
-                                <span className="text-rose-700 font-black text-sm">Rs. {formatCurrency(displayAmts.credit)}</span>
+                                <span className="text-rose-700 font-black text-base">Rs. {formatCurrency(displayAmts.credit)}</span>
                               ) : (
                                 <span className="text-slate-300">—</span>
                               )}
                             </td>
-                            <td className={`px-4 py-3 text-right font-black tabular-nums text-xs ${balance >= 0 ? 'text-slate-900' : 'text-rose-700'}`}>
-                              Rs. {formatCurrency(balance)}
+                            <td className="px-4 py-3 text-right font-bold tabular-nums">
+                              <span className={`font-black text-base ${balance >= 0 ? 'text-blue-700' : 'text-rose-700'}`}>
+                                Rs. {formatCurrency(balance)}
+                              </span>
                             </td>
                           </tr>
                         );
@@ -672,8 +817,8 @@ export default function CashReport() {
                           </td>
                           <td className="px-4 py-3 text-right border-r border-blue-100 text-slate-400">—</td>
                           <td className="px-4 py-3 text-right border-r border-blue-100 text-slate-400">—</td>
-                          <td className={`px-4 py-3 text-right font-black tabular-nums text-sm ${openingBalance >= 0 ? 'text-blue-900' : 'text-rose-700'}`}>
-                            Rs. {formatCurrency(openingBalance)}
+                          <td className={`px-4 py-3 text-right font-bold tabular-nums ${openingBalance >= 0 ? 'text-blue-900' : 'text-rose-700'}`}>
+                            <span className="font-black text-base">Rs. {formatCurrency(openingBalance)}</span>
                           </td>
                         </tr>
                       )}
@@ -698,13 +843,13 @@ export default function CashReport() {
                         <td colSpan="7" className="px-4 py-3.5 text-right uppercase tracking-wider border-r border-slate-800 text-slate-300">
                           Total Period Summary ({displayedEntries.length} Visible / {reportData.ledgerEntries.length} Total)
                         </td>
-                        <td className="px-4 py-3.5 text-right border-r border-slate-800 tabular-nums text-emerald-400 font-black text-sm">
+                        <td className="px-4 py-3.5 text-right border-r border-slate-800 tabular-nums text-emerald-400 font-black text-base">
                           Rs. {formatCurrency(displayedEntries.reduce((acc, e) => acc + getLedgerEntryDisplayAmounts(e).debit, 0))}
                         </td>
-                        <td className="px-4 py-3.5 text-right border-r border-slate-800 tabular-nums text-rose-400 font-black text-sm">
+                        <td className="px-4 py-3.5 text-right border-r border-slate-800 tabular-nums text-rose-400 font-black text-base">
                           Rs. {formatCurrency(displayedEntries.reduce((acc, e) => acc + getLedgerEntryDisplayAmounts(e).credit, 0))}
                         </td>
-                        <td className="px-4 py-3.5 text-right tabular-nums text-amber-300 font-black text-sm">
+                        <td className="px-4 py-3.5 text-right tabular-nums text-blue-400 font-black text-base">
                           Rs. {formatCurrency(closingBalance)}
                         </td>
                       </tr>
@@ -738,7 +883,7 @@ export default function CashReport() {
                       </td>
                       <td className="px-2 py-1.5 text-right border-r border-slate-900 text-slate-400">—</td>
                       <td className="px-2 py-1.5 text-right border-r border-slate-900 text-slate-400">—</td>
-                      <td className="px-2 py-1.5 text-right font-black tabular-nums">{formatCurrency(openingBalance)}</td>
+                      <td className="px-2 py-1.5 text-right font-black text-base tabular-nums text-blue-700">{formatCurrency(openingBalance)}</td>
                     </tr>
 
                     {/* Always Ascending Chronological List for Print */}
@@ -750,11 +895,11 @@ export default function CashReport() {
                           <td className="px-2 py-1.5 text-center border-r border-slate-900">{index + 1}</td>
                           <td className="px-2 py-1.5 border-r border-slate-900 whitespace-nowrap">{formatDate(entry.created_at)}</td>
                           <td className="px-2 py-1.5 border-r border-slate-900 font-semibold">{entry.customer?.cus_name || 'General Cash'}</td>
-                          <td className="px-2 py-1.5 border-r border-slate-900 truncate max-w-xs">{entry.details || '-'}</td>
+                          <td className="px-2 py-1.5 border-r border-slate-900 leading-relaxed">{renderDescriptionWithBoldAccounts(entry, '')}</td>
                           <td className="px-2 py-1.5 border-r border-slate-900">{entry.bill_no ? `#${entry.bill_no}` : '-'}</td>
-                          <td className="px-2 py-1.5 text-right border-r border-slate-900 tabular-nums">{displayAmts.debit > 0 ? formatCurrency(displayAmts.debit) : '-'}</td>
-                          <td className="px-2 py-1.5 text-right border-r border-slate-900 tabular-nums">{displayAmts.credit > 0 ? formatCurrency(displayAmts.credit) : '-'}</td>
-                          <td className="px-2 py-1.5 text-right font-bold tabular-nums">{formatCurrency(balance)}</td>
+                          <td className="px-2 py-1.5 text-right border-r border-slate-900 font-black text-base tabular-nums text-emerald-800">{displayAmts.debit > 0 ? formatCurrency(displayAmts.debit) : '-'}</td>
+                          <td className="px-2 py-1.5 text-right border-r border-slate-900 font-black text-base tabular-nums text-rose-800">{displayAmts.credit > 0 ? formatCurrency(displayAmts.credit) : '-'}</td>
+                          <td className={`px-2 py-1.5 text-right font-black text-base tabular-nums ${balance >= 0 ? 'text-blue-700' : 'text-rose-700'}`}>{formatCurrency(balance)}</td>
                         </tr>
                       );
                     })}
@@ -770,9 +915,9 @@ export default function CashReport() {
                   <tfoot>
                     <tr className="bg-slate-200 text-slate-900 font-black border-t-2 border-slate-900">
                       <td colSpan="5" className="px-2 py-2 text-right uppercase tracking-wider border-r border-slate-900">Grand Total</td>
-                      <td className="px-2 py-2 text-right border-r border-slate-900 tabular-nums">{formatCurrency(totalDebit)}</td>
-                      <td className="px-2 py-2 text-right border-r border-slate-900 tabular-nums">{formatCurrency(totalCredit)}</td>
-                      <td className="px-2 py-2 text-right tabular-nums">{formatCurrency(closingBalance)}</td>
+                      <td className="px-2 py-2 text-right border-r border-slate-900 tabular-nums font-black text-base text-emerald-800">{formatCurrency(totalDebit)}</td>
+                      <td className="px-2 py-2 text-right border-r border-slate-900 tabular-nums font-black text-base text-rose-800">{formatCurrency(totalCredit)}</td>
+                      <td className="px-2 py-2 text-right tabular-nums font-black text-base text-blue-700">{formatCurrency(closingBalance)}</td>
                     </tr>
                   </tfoot>
                 </table>

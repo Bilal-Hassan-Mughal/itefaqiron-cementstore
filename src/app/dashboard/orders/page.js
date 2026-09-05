@@ -7,6 +7,7 @@ import { useSearchParams } from 'next/navigation';
 import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
+import SaveProgressBackdrop from '../components/save-progress-backdrop';
 
 // Material-UI imports
 import {
@@ -244,6 +245,21 @@ function OrdersPageContent() {
   const [stores, setStores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [savingBill, setSavingBill] = useState(false);
+  const [saveStatusMessage, setSaveStatusMessage] = useState('');
+
+  const beginSaving = (message) => {
+    setSavingBill(true);
+    setSaveStatusMessage(message);
+  };
+
+  const updateSaveStatus = (message) => {
+    setSaveStatusMessage(message);
+  };
+
+  const endSaving = () => {
+    setSavingBill(false);
+    setSaveStatusMessage('');
+  };
 
   // Filter state
   const [searchTerm, setSearchTerm] = useState('');
@@ -1256,11 +1272,12 @@ function OrdersPageContent() {
       };
 
       // Show saving indicator without unmounting the create view / receipt dialog
-      setSavingBill(true);
+      beginSaving(editSaleId ? 'Updating order...' : 'Saving order...');
 
       console.log('🔍 Frontend - Sale data being sent:', saleData);
       console.log('🔍 Frontend - Sale data JSON:', JSON.stringify(saleData, null, 2));
 
+      updateSaveStatus(editSaleId ? 'Updating order on server...' : 'Saving order to server...');
       // Call API
       const response = await fetch('/api/sales', {
         method: editSaleId ? 'PUT' : 'POST',
@@ -1272,6 +1289,7 @@ function OrdersPageContent() {
 
       if (response.ok) {
         const result = await response.json();
+        updateSaveStatus('Updating ledger & stock...');
         const successMessage = editSaleId ? 'Order updated successfully!' : 'Order saved successfully!';
         showSnackbar(successMessage, 'success');
 
@@ -1284,6 +1302,7 @@ function OrdersPageContent() {
 
         if (savedSaleId) {
           try {
+            updateSaveStatus('Preparing order receipt...');
             const detailRes = await fetch(`/api/sales?id=${savedSaleId}`);
             if (detailRes.ok) {
               billForPrint = await detailRes.json();
@@ -1329,6 +1348,7 @@ function OrdersPageContent() {
         }
 
         setCurrentBillData(billForPrint);
+        updateSaveStatus('Generating receipt...');
         setReceiptDialogOpen(true);
 
         // Reset form
@@ -1360,7 +1380,7 @@ function OrdersPageContent() {
       console.error('❌ Error details:', error.message);
       showSnackbar(`Failed to save bill: ${error.message}`, 'error');
     } finally {
-      setSavingBill(false);
+      endSaving();
     }
   };
 
@@ -2741,6 +2761,11 @@ function OrdersPageContent() {
   // Render Sales Create View
   const renderSalesCreateView = () => (
     <DashboardLayout>
+      <SaveProgressBackdrop
+        open={savingBill}
+        message={saveStatusMessage}
+        subMessage="Do not close or refresh until the order is saved and the receipt is ready"
+      />
       <Container
         maxWidth={false}
         sx={{
@@ -3922,7 +3947,7 @@ function OrdersPageContent() {
                   {savingBill ? (
                     <>
                       <CircularProgress size={16} sx={{ mr: 1, color: 'white' }} />
-                      Saving...
+                      {saveStatusMessage || 'Saving...'}
                     </>
                   ) : (
                     editSaleId ? 'Update Order' : 'Save Order'

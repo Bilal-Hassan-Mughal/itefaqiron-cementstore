@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useMemo, Suspense, useRef, useCallback } from 'react';
 import { formatDatePK, formatDateTimePK, formatTimePK, getCreatedByName } from '@/lib/date-helper';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
+import SaveProgressBackdrop from '../components/save-progress-backdrop';
+import { openAccountLedgerTab, FINANCE_LEDGER_PATH } from '@/lib/ledger-tabs';
 
 // Material-UI imports
 import {
@@ -242,8 +244,15 @@ const getBillTypeChipSx = (billType) => {
   return { bgcolor: '#e6fff4', color: '#00a868', border: '1px solid #99ebc9' };
 };
 
+let salesPageBootId = 0;
+if (typeof window !== 'undefined') {
+  window.__salesPageBootId = (window.__salesPageBootId ?? 0) + 1;
+  salesPageBootId = window.__salesPageBootId;
+}
+
 function SalesPageContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { requireAuth, authDialogOpen, handleAuthSuccess, handleAuthCancel } = usePinAuth();
 
   // Network & Offline Queue state
@@ -260,7 +269,9 @@ function SalesPageContent() {
   const [productSubcategories, setProductSubcategories] = useState([]);
   const [stores, setStores] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(true);
   const [savingBill, setSavingBill] = useState(false);
+  const [saveStatusMessage, setSaveStatusMessage] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
 
   const getCurrentUserId = () => {
@@ -308,6 +319,7 @@ function SalesPageContent() {
 
   // Track which data bundles have been loaded (avoid duplicate API calls)
   const dataLoadedRef = useRef({ list: false, form: false, listFilters: false, dialogLookups: false });
+  const lastBootIdRef = useRef(salesPageBootId);
 
   // Offline Auto-Sync Helpers & Event Listeners
   const refreshOfflineCount = useCallback(() => {
@@ -669,6 +681,20 @@ function SalesPageContent() {
   });
 
   // Helper functions
+  const beginSaving = (message) => {
+    setSavingBill(true);
+    setSaveStatusMessage(message);
+  };
+
+  const updateSaveStatus = (message) => {
+    setSaveStatusMessage(message);
+  };
+
+  const endSaving = () => {
+    setSavingBill(false);
+    setSaveStatusMessage('');
+  };
+
   const showSnackbar = (message, severity = 'success') => {
     setSnackbar({ open: true, message, severity });
   };
@@ -721,6 +747,18 @@ function SalesPageContent() {
     } else {
       showSnackbar('Please select a customer first', 'error');
     }
+  };
+
+  const handleOpenCustomerLedger = (sale, e) => {
+    if (e) e.stopPropagation();
+    const cusId = sale?.cus_id ?? sale?.customer?.cus_id;
+    const cusName = sale?.customer?.cus_name;
+    if (!cusId) {
+      showSnackbar('Customer not found for this sale', 'error');
+      return;
+    }
+    openAccountLedgerTab(cusId, cusName);
+    router.push(FINANCE_LEDGER_PATH);
   };
 
   const handleSnackbarClose = () => {
@@ -1202,6 +1240,21 @@ function SalesPageContent() {
     });
   };
 
+  // Cart shows newest item on top; invoice/DB should list first-added item first (S# 1).
+  const getCartItemsInAddOrder = (cart = productTableData) => [...cart].reverse();
+
+  const getSaleDetailsInAddOrder = (details) => {
+    if (!Array.isArray(details) || !details.length) return [];
+    if (details.some((d) => d.sale_detail_id != null)) {
+      return [...details].sort(
+        (a, b) => Number(a.sale_detail_id || 0) - Number(b.sale_detail_id || 0)
+      );
+    }
+    return [...details];
+  };
+
+  const getSaleDetailsForCart = (details) => [...getSaleDetailsInAddOrder(details)].reverse();
+
   // Smart rate and quantity formatter: hide .00 for whole numbers, keep decimals otherwise
   const fmtRateQty = (val) => {
     if (val === undefined || val === null || val === '') return '';
@@ -1217,6 +1270,141 @@ function SalesPageContent() {
     const n = parseFloat(val);
     if (isNaN(n)) return '';
     return Math.round(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  };
+
+  const saleDetailQtyMatchesItemFilter = (qty, term) => {
+    const t = term.trim();
+    if (!t) return false;
+    const parsedQty = parseFloat(qty || 0);
+    if (Number.isNaN(parsedQty)) return false;
+
+    if (/^\d+(\.\d+)?$/.test(t)) {
+      const num = parseFloat(t);
+      return Math.abs(parsedQty - num) < 0.001;
+    }
+
+    return fmtRateQty(parsedQty).includes(t);
+  };
+
+  const saleDetailNameMatchesItemFilter = (name, term) => {
+    const t = term.trim();
+    if (!t) return false;
+    return String(name || '').toLowerCase().includes(t.toLowerCase());
+  };
+
+  const saleDetailMatchesItemFilter = (detail, term) => {
+    const t = term.trim();
+    if (!t) return true;
+    const name = detail.product?.pro_title || detail.product_name || '';
+    return (
+      saleDetailNameMatchesItemFilter(name, t) ||
+      saleDetailQtyMatchesItemFilter(detail.qnty, t)
+    );
+  };
+
+  const renderHighlightedText = (text, term, nameMatches) => {
+    const t = term.trim();
+    if (!t || !nameMatches) return text;
+
+    const lowerText = text.toLowerCase();
+    const lowerTerm = t.toLowerCase();
+    const idx = lowerText.indexOf(lowerTerm);
+    if (idx === -1) return text;
+
+    return (
+      <>
+        {text.slice(0, idx)}
+        <Box
+          component="span"
+          sx={{
+            bgcolor: '#fef08a',
+            color: '#854d0e',
+            fontWeight: 800,
+            px: 0.3,
+            borderRadius: '3px',
+            boxShadow: 'inset 0 0 0 1px #fde047',
+          }}
+        >
+          {text.slice(idx, idx + t.length)}
+        </Box>
+        {text.slice(idx + t.length)}
+      </>
+    );
+  };
+
+  const renderSaleLineItemsCell = (sale) => {
+    const details = getSaleDetailsInAddOrder(sale?.sale_details || []);
+    const highlightTerm = filterItem.trim();
+
+    if (!details.length) {
+      return (
+        <Typography sx={{ color: '#94a3b8', fontSize: '0.78rem', fontStyle: 'italic' }}>—</Typography>
+      );
+    }
+
+    return (
+      <Box sx={{ minWidth: 160, maxWidth: 280, display: 'flex', flexDirection: 'column', gap: 0.35 }}>
+        {details.map((d, i) => {
+          const name = d.product?.pro_title || d.product_name || `Item ${i + 1}`;
+          const qty = parseFloat(d.qnty || 0);
+          const nameMatches = saleDetailNameMatchesItemFilter(name, highlightTerm);
+          const qtyMatches = saleDetailQtyMatchesItemFilter(qty, highlightTerm);
+
+          return (
+            <Box
+              key={d.sale_detail_id || `${sale.sale_id}-${i}`}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 1,
+                py: 0.35,
+                px: 0.5,
+                borderBottom: i < details.length - 1 ? '1px dashed #e2e8f0' : 'none',
+                bgcolor: qtyMatches && highlightTerm ? '#fffbeb' : 'transparent',
+                borderRadius: qtyMatches && highlightTerm ? '4px' : 0,
+              }}
+            >
+              <Typography
+                sx={{
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  color: '#1e293b',
+                  lineHeight: 1.3,
+                  flex: 1,
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                title={name}
+              >
+                {renderHighlightedText(name, highlightTerm, nameMatches)}
+              </Typography>
+              <Box
+                sx={{
+                  flexShrink: 0,
+                  minWidth: 32,
+                  px: 0.75,
+                  py: 0.2,
+                  bgcolor: qtyMatches && highlightTerm ? '#fef08a' : '#dbeafe',
+                  color: qtyMatches && highlightTerm ? '#854d0e' : '#1d4ed8',
+                  border: qtyMatches && highlightTerm ? '2px solid #facc15' : '1px solid #93c5fd',
+                  borderRadius: '4px',
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  textAlign: 'center',
+                  lineHeight: 1.2,
+                  boxShadow: qtyMatches && highlightTerm ? '0 0 0 2px rgba(250, 204, 21, 0.35)' : 'none',
+                }}
+              >
+                {fmtRateQty(qty)}
+              </Box>
+            </Box>
+          );
+        })}
+      </Box>
+    );
   };
 
   /** Same display name can exist for different accounts (e.g. cus_name "1781"); show id + category/type in the transport picker. */
@@ -1559,7 +1747,7 @@ function SalesPageContent() {
           reference: paymentData.notes || '',
 
           // Return details from product table
-          return_details: productTableData.map(item => ({
+          return_details: getCartItemsInAddOrder().map(item => ({
             pro_id: item.pro_id,
             store_id: item.storeid || formSelectedStore?.storeid || selectedSaleForReturnMain?.store_id || null,
             qnty: item.quantity, // Quantity to return
@@ -1571,7 +1759,7 @@ function SalesPageContent() {
         };
 
         // Call the return API
-        setSavingBill(true);
+        beginSaving('Processing sale return...');
         const response = await fetch('/api/sale-returns', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1600,7 +1788,7 @@ function SalesPageContent() {
             ...fullReturn,
             return_id: fullReturn.return_id ?? saleReturnData.return_id,
             customer: formSelectedCustomer || fullReturn.customer || selectedSaleForReturnMain?.customer || {},
-            sale_details: productTableData.map((item, idx) => ({
+            sale_details: getCartItemsInAddOrder().map((item, idx) => ({
               sale_detail_id: idx,
               product: { pro_title: item.pro_title || item.product_name || 'Unknown Product' },
               qnty: item.quantity,
@@ -1632,6 +1820,8 @@ function SalesPageContent() {
             )
           };
 
+          updateSaveStatus('Generating return invoice...');
+
           // Set current bill data and open receipt dialog
           setCurrentBillData(returnReceipt);
           setReceiptDialogOpen(true);
@@ -1653,7 +1843,7 @@ function SalesPageContent() {
           const errorData = await response.json();
           showSnackbar('Error: ' + (errorData.error || 'Failed to process return'), 'error');
         }
-        setSavingBill(false);
+        endSaving();
         return; // Exit function
       }
 
@@ -1768,7 +1958,7 @@ function SalesPageContent() {
         is_loaded_order: paymentData.isLoadedOrder || !!loadedOrderId, // Flag to indicate if this is a loaded order
         order_id: loadedOrderId || null, // Pass order_id to backend for direct conversion
         loaded_order_id: loadedOrderId || null,
-        sale_details: productTableData.map(product => ({
+        sale_details: getCartItemsInAddOrder().map(product => ({
           pro_id: product.pro_id,
           vehicle_no: null,
           qnty: product.quantity,
@@ -1795,17 +1985,17 @@ function SalesPageContent() {
         updated_by: 6 // System Administrator
       };
 
-      // Show loading
-      setLoading(true);
+      const isEditing = !!editingSale;
+      beginSaving(isEditing ? 'Updating sale...' : 'Saving sale...');
 
       // Use PUT when editing an existing sale, POST for new
-      const isEditing = !!editingSale;
       const apiBody = isEditing ? { ...saleData, id: editingSale.sale_id } : saleData;
       let response;
       let isNetworkFailure = typeof navigator !== 'undefined' && !navigator.onLine;
 
       if (!isNetworkFailure) {
         try {
+          updateSaveStatus(isEditing ? 'Updating sale on server...' : 'Saving sale to server...');
           response = await fetch('/api/sales', {
             method: isEditing ? 'PUT' : 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1819,6 +2009,7 @@ function SalesPageContent() {
 
       // Offline mode fallback when server cannot be reached
       if (isNetworkFailure || (response && response.status === 0)) {
+        updateSaveStatus('Saving bill offline...');
         const offlineId = saveOfflineSale(saleData);
         refreshOfflineCount();
 
@@ -1843,7 +2034,7 @@ function SalesPageContent() {
             reference: (paymentData.notes ? paymentData.notes + ' ' : '') + `[OFFLINE - Local]`,
             created_at: new Date().toISOString(),
             customer: formSelectedCustomer,
-            sale_details: productTableData.map((product, index) => ({
+            sale_details: getCartItemsInAddOrder().map((product, index) => ({
               sale_detail_id: index + 1,
               pro_id: product.pro_id,
               qnty: product.quantity,
@@ -1870,18 +2061,20 @@ function SalesPageContent() {
           setNewTransport({ amount: 0, accountId: '' });
           setScreenStack([]);
           setCurrentScreenIndex(-1);
-          setLoading(false);
+          endSaving();
           return;
         }
       }
 
       if (response && response.ok) {
+        updateSaveStatus('Updating ledger & stock...');
         const result = await response.json();
         showSnackbar('Bill saved successfully!', 'success');
 
         // If this bill was converted from an order, move the order to ORDER_TRASH
         if (loadedOrderId) {
           try {
+            updateSaveStatus('Finalizing order conversion...');
             await fetch('/api/sales', {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
@@ -1897,6 +2090,7 @@ function SalesPageContent() {
         // If this bill was loaded from a held bill / draft, delete the draft so it is removed from held bills
         if (currentDraftId) {
           try {
+            updateSaveStatus('Removing held bill...');
             await fetch(`/api/draft-sales?id=${currentDraftId}`, { method: 'DELETE' });
             console.log(`✅ Held bill / draft ${currentDraftId} deleted after sale completion`);
             setCurrentDraftId(null);
@@ -1925,7 +2119,7 @@ function SalesPageContent() {
           reference: paymentData.notes || null,
           created_at: new Date().toISOString(),
           customer: formSelectedCustomer,
-          sale_details: productTableData.map((product, index) => ({
+          sale_details: getCartItemsInAddOrder().map((product, index) => ({
             sale_detail_id: index + 1,
             pro_id: product.pro_id,
             qnty: product.quantity,
@@ -1939,6 +2133,7 @@ function SalesPageContent() {
           labour: parseFloat(paymentData.labour) || 0,
           notes: paymentData.notes || ''
         };
+        updateSaveStatus('Generating invoice...');
         setCurrentBillData(billDataForPrint);
 
         // Open receipt dialog
@@ -2008,7 +2203,7 @@ function SalesPageContent() {
       console.error('❌ Error details:', error.message);
       showSnackbar(`Failed to save bill: ${error.message}`, 'error');
     } finally {
-      setLoading(false);
+      endSaving();
     }
   };
 
@@ -2025,11 +2220,25 @@ function SalesPageContent() {
     const isCreate = viewParam === 'create' || typeParam === 'return' || saleReturnFlag;
 
     if (isCreate) {
+      setListLoading(false);
       fetchFormReferenceData();
-    } else {
-      fetchSalesList();
-      fetchListFilterData();
+      return;
     }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        await fetchSalesList(false);
+        if (!cancelled) await fetchListFilterData();
+      } catch (e) {
+        console.error('Initial sales list load failed:', e);
+        if (!cancelled) setListLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Load missing data when switching between list and create views (skip initial mount)
@@ -2043,14 +2252,14 @@ function SalesPageContent() {
     if (currentView === 'create' && !dataLoadedRef.current.form) {
       fetchFormReferenceData();
     } else if (currentView === 'list') {
-      if (!dataLoadedRef.current.list) {
+      if (!dataLoadedRef.current.list || sales.length === 0) {
         fetchSalesList();
       }
       if (!dataLoadedRef.current.form && !dataLoadedRef.current.listFilters) {
         fetchListFilterData();
       }
     }
-  }, [currentView]);
+  }, [currentView, sales.length]);
 
   // Lazy-load cities/categories when opening customer or product dialogs
   useEffect(() => {
@@ -2575,7 +2784,7 @@ function SalesPageContent() {
 
   const fetchSalesList = async (silent = false) => {
     try {
-      if (!silent) setLoading(true);
+      if (!silent) setListLoading(true);
 
       const [salesRes, returnsRes] = await Promise.all([
         fetch('/api/sales', { cache: 'no-store' }),
@@ -2601,16 +2810,14 @@ function SalesPageContent() {
       console.error('Sales/Returns fetch error:', salesError);
       setSales([]);
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent) setListLoading(false);
     }
   };
 
-  const fetchListFilterData = async (silent = false) => {
+  const fetchListFilterData = async () => {
     if (dataLoadedRef.current.form || dataLoadedRef.current.listFilters) return;
 
     try {
-      if (!silent) setLoading(true);
-
       const [customersRes, storesRes] = await Promise.all([
         fetch('/api/customers?dropdown=true'),
         fetch('/api/stores')
@@ -2635,8 +2842,6 @@ function SalesPageContent() {
       dataLoadedRef.current.listFilters = true;
     } catch (error) {
       console.error('Error fetching list filter data:', error);
-    } finally {
-      if (!silent) setLoading(false);
     }
   };
 
@@ -2763,7 +2968,7 @@ function SalesPageContent() {
 
     if (mode === 'list') {
       await fetchSalesList(silent);
-      await fetchListFilterData(silent);
+      await fetchListFilterData();
     } else if (mode === 'create') {
       await fetchFormReferenceData(silent);
     } else {
@@ -2772,6 +2977,22 @@ function SalesPageContent() {
       await fetchDialogLookups();
     }
   };
+
+  // Re-fetch after dev hot reload when React state resets but module re-executes
+  useEffect(() => {
+    if (lastBootIdRef.current === salesPageBootId) return;
+    lastBootIdRef.current = salesPageBootId;
+
+    dataLoadedRef.current = { list: false, form: false, listFilters: false, dialogLookups: false };
+    setSales([]);
+
+    if (currentView === 'list') {
+      fetchSalesList();
+      fetchListFilterData();
+    } else {
+      fetchFormReferenceData();
+    }
+  }, [salesPageBootId, currentView]);
 
   // ======================== DRAFT SALES FUNCTIONS ========================
   // Fetch all drafts
@@ -2793,13 +3014,13 @@ function SalesPageContent() {
   };
 
   // Save current form as draft
-  const handleSendWhatsApp = async (bill, customPhone) => {
+  const handleSendWhatsApp = async (bill, customPhone, elementId = 'receipt-preview') => {
     try {
       setIsSendingWhatsApp(true);
       const { shareViaWhatsAppDesktop, whatsAppSuccessMessage } = await import('@/lib/whatsapp-local');
       const phone = customPhone || bill?.customer?.cus_phone_no;
       const { opened } = await shareViaWhatsAppDesktop({
-        elementId: 'receipt-preview',
+        elementId,
         phone,
       });
       showSnackbar(`✅ ${whatsAppSuccessMessage(opened)}`, 'success');
@@ -2808,6 +3029,354 @@ function SalesPageContent() {
     } finally {
       setIsSendingWhatsApp(false);
     }
+  };
+
+  const escapePrintHtml = (value) =>
+    String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+  const formatSaleItemsForListPrint = (sale) => {
+    const details = sale?.sale_details || [];
+    if (!details.length) return '—';
+
+    return details
+      .map((d, i) => {
+        const name = d.product?.pro_title || d.product_name || `Item ${i + 1}`;
+        const qty = fmtRateQty(d.qnty);
+        return `<div class="item-row">
+          <span class="item-name">${escapePrintHtml(name)}</span>
+          <span class="item-qty">${escapePrintHtml(qty)}</span>
+        </div>`;
+      })
+      .join('');
+  };
+
+  const getSalesListFilterSummary = () => {
+    const parts = [];
+    if (searchTerm) parts.push(`Search: ${searchTerm}`);
+    if (filterCustomer) {
+      const customer = customers.find((c) => c.cus_id?.toString() === filterCustomer);
+      parts.push(`Customer: ${customer?.cus_name || filterCustomer}`);
+    }
+    if (filterBillType) parts.push(`Bill type: ${filterBillType}`);
+    if (filterStore) parts.push(`Store: ${filterStore}`);
+    if (filterPaymentType) parts.push(`Payment: ${filterPaymentType}`);
+    if (filterItem) parts.push(`Item: ${filterItem}`);
+    if (filterNotes) parts.push(`Notes: ${filterNotes}`);
+    if (filterAmount) parts.push(`Amount: ${filterAmount}`);
+    if (filterMinAmount) parts.push(`Min: ${filterMinAmount}`);
+    if (filterMaxAmount) parts.push(`Max: ${filterMaxAmount}`);
+    if (filterBalanceStatus) parts.push(`Balance: ${filterBalanceStatus}`);
+    if (dateFrom) parts.push(`From: ${dateFrom}`);
+    if (dateTo) parts.push(`To: ${dateTo}`);
+    return parts.length ? parts.join(' | ') : 'All sales (no filters applied)';
+  };
+
+  const buildSalesListPrintHTML = (rows) => {
+    const filterLine = getSalesListFilterSummary();
+    const printedAt = new Date().toLocaleString('en-GB');
+    const totalAmount = rows.reduce((sum, sale) => sum + parseFloat(sale.total_amount || 0), 0);
+    const totalDiscount = rows.reduce((sum, sale) => sum + parseFloat(sale.discount || 0), 0);
+    const totalShipping = rows.reduce((sum, sale) => sum + parseFloat(sale.shipping_amount || 0), 0);
+    const totalPayment = rows.reduce((sum, sale) => sum + parseFloat(sale.payment || 0), 0);
+    const totalBalance = rows.reduce(
+      (sum, sale) => sum + (parseFloat(sale.total_amount || 0) - parseFloat(sale.payment || 0)),
+      0
+    );
+
+    const tableRows = rows
+      .map((sale, index) => {
+        const balance = parseFloat(sale.total_amount || 0) - parseFloat(sale.payment || 0);
+        const saleId = sale.is_return ? `#SR-${sale.return_id}` : `#${getBillDisplayNo(sale) || sale.sale_id}`;
+        const billType = sale.bill_type || 'BILL';
+        const isReturn = billType === 'SALE_RETURN' || sale.is_return;
+        const balanceClass = balance > 0 ? 'balance-due' : balance < 0 ? 'balance-credit' : '';
+
+        return `
+          <tr class="${index % 2 === 0 ? 'row-even' : 'row-odd'}">
+            <td class="col-id">${escapePrintHtml(saleId)}</td>
+            <td class="col-customer">${escapePrintHtml(sale.customer?.cus_name || 'N/A')}</td>
+            <td class="col-items">${formatSaleItemsForListPrint(sale)}</td>
+            <td class="col-ref">${escapePrintHtml(sale.reference || '—')}</td>
+            <td class="num col-total">${fmtAmt(sale.total_amount)}</td>
+            <td class="num">${fmtAmt(sale.discount)}</td>
+            <td class="num">${fmtAmt(sale.shipping_amount)}</td>
+            <td class="num col-payment">${fmtAmt(sale.payment)}</td>
+            <td class="num col-balance ${balanceClass}">${fmtAmt(balance)}</td>
+            <td class="c col-type ${isReturn ? 'type-return' : 'type-bill'}">${escapePrintHtml(billType)}</td>
+            <td class="c col-date">${formatDatePK(sale?.created_at) || '—'}</td>
+          </tr>`;
+      })
+      .join('');
+
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Sales List Report</title>
+<style>
+  @page { size: A4 landscape; margin: 10mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    color: #1e293b;
+    background: #fff;
+    font-size: 9px;
+    line-height: 1.35;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .page { width: 100%; margin: 0 auto; }
+
+  .company-header {
+    text-align: center;
+    border-bottom: 2px solid #000;
+    padding-bottom: 8px;
+    margin-bottom: 10px;
+  }
+  .company-header .urdu-name {
+    font-size: 20px;
+    font-weight: 700;
+    direction: rtl;
+    margin-bottom: 2px;
+  }
+  .company-header .urdu-address {
+    font-size: 11px;
+    direction: rtl;
+    color: #333;
+    margin-bottom: 3px;
+  }
+  .company-header .phone { font-size: 10px; color: #444; margin-bottom: 6px; }
+  .company-header .doc-title {
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    border-top: 1px solid #ccc;
+    padding-top: 6px;
+  }
+
+  .report-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 8px;
+    font-size: 9px;
+  }
+  .report-bar .filters {
+    flex: 1;
+    padding: 6px 8px;
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+  }
+  .report-bar .filters strong { color: #475569; }
+  .report-bar .stats {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .stat-box {
+    border: 1px solid #94a3b8;
+    padding: 5px 10px;
+    text-align: center;
+    min-width: 72px;
+    background: #fff;
+  }
+  .stat-box .lbl {
+    font-size: 7px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+    margin-bottom: 2px;
+  }
+  .stat-box .val { font-size: 11px; font-weight: 800; }
+  .stat-box.balance .val { color: #15803d; font-size: 12px; }
+
+  .list-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 8px;
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-bottom: none;
+    font-size: 9px;
+    font-weight: 700;
+    color: #1e293b;
+  }
+
+  .sales-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 8.5px;
+  }
+  .sales-table thead th {
+    background: #1e3a5f;
+    color: #fff;
+    font-weight: 700;
+    padding: 6px 5px;
+    border: 1px solid #1e3a5f;
+    text-align: left;
+    font-size: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .sales-table thead th.num { text-align: right; }
+  .sales-table thead th.c { text-align: center; }
+  .sales-table tbody td {
+    padding: 5px 5px;
+    border: 1px solid #cbd5e1;
+    vertical-align: top;
+    word-wrap: break-word;
+  }
+  .sales-table tbody tr.row-even td { background: #fff; }
+  .sales-table tbody tr.row-odd td { background: #f8fafc; }
+  .sales-table .col-id { width: 5%; font-weight: 700; color: #1d4ed8; white-space: nowrap; }
+  .sales-table .col-customer { width: 11%; font-weight: 600; }
+  .sales-table .col-items { width: 20%; vertical-align: top; }
+  .item-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+    border-bottom: 1px dashed #e2e8f0;
+    font-size: 8px;
+  }
+  .item-row:last-child { border-bottom: none; }
+  .item-name { font-weight: 600; color: #1e293b; flex: 1; min-width: 0; }
+  .item-qty {
+    flex-shrink: 0;
+    font-weight: 800;
+    color: #1d4ed8;
+    background: #dbeafe;
+    border: 1px solid #93c5fd;
+    border-radius: 2px;
+    padding: 1px 5px;
+    font-size: 7.5px;
+  }
+  .sales-table .col-ref { width: 9%; color: #64748b; font-size: 8px; }
+  .sales-table .col-total { width: 7%; font-weight: 800; }
+  .sales-table .num { text-align: right; white-space: nowrap; font-weight: 600; }
+  .sales-table .col-payment { color: #15803d; font-weight: 700; }
+  .sales-table .col-balance { font-weight: 800; font-size: 9px; }
+  .sales-table .balance-due { color: #be185d; }
+  .sales-table .balance-credit { color: #15803d; }
+  .sales-table .c { text-align: center; }
+  .sales-table .col-type { font-size: 7.5px; font-weight: 700; }
+  .sales-table .type-bill { color: #15803d; }
+  .sales-table .type-return { color: #dc2626; }
+  .sales-table .col-date { width: 7%; white-space: nowrap; color: #64748b; font-size: 8px; }
+
+  .sales-table tfoot td {
+    padding: 7px 5px;
+    border: 1px solid #1e3a5f;
+    font-weight: 800;
+    background: #e2e8f0;
+    font-size: 9px;
+  }
+  .sales-table tfoot .num { text-align: right; }
+  .sales-table tfoot .balance-total {
+    background: #dcfce7;
+    color: #15803d;
+    font-size: 10px;
+  }
+
+  .print-footer {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid #cbd5e1;
+    display: flex;
+    justify-content: space-between;
+    font-size: 8px;
+    color: #94a3b8;
+  }
+
+  @media print {
+    thead { display: table-header-group; }
+    tfoot { display: table-footer-group; }
+    tr { page-break-inside: avoid; }
+  }
+</style></head><body>
+  <div class="page">
+    <header class="company-header">
+      <div class="urdu-name">اتفاق آئرن اینڈ سیمنٹ سٹور</div>
+      <div class="urdu-address">گجرات سرگودھا روڈ، پاہڑیانوالی</div>
+      <div class="phone">Ph: 0346-7560306 &nbsp;|&nbsp; 0300-7560306</div>
+      <div class="doc-title">Sales List Report</div>
+    </header>
+
+    <div class="report-bar">
+      <div class="filters">
+        <strong>Printed:</strong> ${escapePrintHtml(printedAt)} &nbsp;|&nbsp;
+        <strong>Filters:</strong> ${escapePrintHtml(filterLine)}
+      </div>
+      <div class="stats">
+        <div class="stat-box"><div class="lbl">Records</div><div class="val">${rows.length}</div></div>
+        <div class="stat-box"><div class="lbl">Total</div><div class="val">${fmtAmt(totalAmount)}</div></div>
+        <div class="stat-box"><div class="lbl">Received</div><div class="val">${fmtAmt(totalPayment)}</div></div>
+        <div class="stat-box balance"><div class="lbl">Balance</div><div class="val">${fmtAmt(totalBalance)}</div></div>
+      </div>
+    </div>
+
+    <div class="list-label">
+      <span>Sales List</span>
+      <span>${rows.length} row${rows.length === 1 ? '' : 's'}</span>
+    </div>
+
+    <table class="sales-table">
+      <thead>
+        <tr>
+          <th>Sale ID</th>
+          <th>Customer</th>
+          <th>Items &amp; Qty</th>
+          <th>Reference</th>
+          <th class="num">Total</th>
+          <th class="num">Discount</th>
+          <th class="num">Shipping</th>
+          <th class="num">Payment</th>
+          <th class="num">Balance</th>
+          <th class="c">Bill Type</th>
+          <th class="c">Date</th>
+        </tr>
+      </thead>
+      <tbody>${tableRows}</tbody>
+      <tfoot>
+        <tr>
+          <td colspan="4"><strong>TOTALS (${rows.length} sales)</strong></td>
+          <td class="num">${fmtAmt(totalAmount)}</td>
+          <td class="num">${fmtAmt(totalDiscount)}</td>
+          <td class="num">${fmtAmt(totalShipping)}</td>
+          <td class="num">${fmtAmt(totalPayment)}</td>
+          <td class="num balance-total">${fmtAmt(totalBalance)}</td>
+          <td colspan="2"></td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <footer class="print-footer">
+      <span>Itefaq Iron &amp; Cement Store</span>
+      <span>Generated: ${escapePrintHtml(printedAt)}</span>
+    </footer>
+  </div>
+  <script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>
+</body></html>`;
+  };
+
+  const handlePrintSalesList = () => {
+    const rows = filteredSales;
+    if (!rows.length) {
+      showSnackbar('No sales to print for the current filters.', 'warning');
+      return;
+    }
+    const printWindow = window.open('', '_blank', 'width=1100,height=800');
+    if (!printWindow) {
+      showSnackbar('Pop-up blocked. Allow pop-ups to print the sales list.', 'error');
+      return;
+    }
+    printWindow.document.write(buildSalesListPrintHTML(rows));
+    printWindow.document.close();
   };
 
   const latestStateRef = useRef();
@@ -3479,7 +4048,7 @@ function SalesPageContent() {
 
       // Update product table with sale items
       if (fullSale.sale_details && Array.isArray(fullSale.sale_details)) {
-        const products = fullSale.sale_details.map(detail => ({
+        const products = getSaleDetailsForCart(fullSale.sale_details).map(detail => ({
           id: Date.now() + Math.random(),
           pro_id: detail.pro_id,
           pro_title: detail.product?.pro_title || detail.product?.pro_name || 'Unknown Product',
@@ -3784,10 +4353,7 @@ function SalesPageContent() {
         sale.total_amount?.toString().includes(searchTerm);
 
       const matchesItem = filterItem === '' ||
-        (sale.sale_details && sale.sale_details.some(d =>
-          (d.product?.pro_title || d.product_name || '').toLowerCase().includes(filterItem.toLowerCase()) ||
-          String(d.qnty || '').includes(filterItem.trim())
-        ));
+        (sale.sale_details && sale.sale_details.some((d) => saleDetailMatchesItemFilter(d, filterItem)));
 
       const matchesCustomer = filterCustomer === '' ||
         sale.customer?.cus_id?.toString() === filterCustomer;
@@ -4012,7 +4578,7 @@ function SalesPageContent() {
       setBillType(fullSale.bill_type === 'SALE_RETURN' ? 'BILL' : (fullSale.bill_type || 'BILL'));
 
       // Product rows
-      setProductTableData((fullSale.sale_details || []).map((detail, index) => {
+      setProductTableData(getSaleDetailsForCart(fullSale.sale_details || []).map((detail, index) => {
         const detailStoreId = detail.store_id || fullSale.store_id;
         const matchingStore = stores.find(s => s.storeid === detailStoreId);
         return {
@@ -4133,7 +4699,11 @@ function SalesPageContent() {
     setSortOrder('desc');
   };
 
-  if (loading) {
+  const showPageLoader =
+    (currentView === 'list' && listLoading) ||
+    (currentView === 'create' && loading);
+
+  if (showPageLoader) {
     return (
       <DashboardLayout>
         <Box
@@ -4154,6 +4724,11 @@ function SalesPageContent() {
   // Render Sales Create View
   const renderSalesCreateView = () => (
     <DashboardLayout>
+      <SaveProgressBackdrop
+        open={savingBill}
+        message={saveStatusMessage}
+        subMessage="Do not close or refresh until the sale is saved and the invoice is ready"
+      />
       <Container maxWidth={false} sx={{ py: 1 }}>
         <Stack spacing={2} className="no-print">
           {/* Header */}
@@ -4534,17 +5109,28 @@ function SalesPageContent() {
                       </Typography>
                       {formSelectedCustomer && (
                         <Stack direction="row" spacing={1} alignItems="center">
-                          <Box sx={{
-                            bgcolor: 'success.light',
-                            color: 'success.contrastText',
-                            px: 1.5,
-                            py: 0.5,
-                            borderRadius: 1,
-                            fontSize: '0.75rem',
-                            fontWeight: 'bold'
-                          }}>
-                            Balance: {parseFloat(formSelectedCustomer.cus_balance || 0).toFixed(0)}
-                          </Box>
+                          <Typography
+                            component="span"
+                            sx={{
+                              bgcolor: '#bbf7d0',
+                              color: '#14532d',
+                              border: '1px solid #22c55e',
+                              px: 2,
+                              py: 0.75,
+                              borderRadius: 1.5,
+                              fontSize: '0.95rem',
+                              fontWeight: 900,
+                              lineHeight: 1.3,
+                              letterSpacing: '0.02em',
+                              display: 'inline-block',
+                              boxShadow: '0 1px 2px rgba(22, 163, 74, 0.15)',
+                            }}
+                          >
+                            Balance:{' '}
+                            <Box component="span" sx={{ fontSize: '1.05rem', fontWeight: 900 }}>
+                              {parseFloat(formSelectedCustomer.cus_balance || 0).toLocaleString('en-PK', { maximumFractionDigits: 0 })}
+                            </Box>
+                          </Typography>
                           <Button
                             size="small"
                             variant="outlined"
@@ -6040,7 +6626,7 @@ function SalesPageContent() {
                     await autoHoldIfActive();
                     clearFormState();
                   }}
-                  disabled={loading}
+                  disabled={loading || savingBill}
                   title="Clear current form only (screen stays in stack)"
                 >
                   🧹 Clear Form
@@ -6193,12 +6779,12 @@ function SalesPageContent() {
                     '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 10px 24px rgba(40,167,69,0.22)' }
                   }}
                   onClick={() => handleSaveBill(false)}
-                  disabled={loading}
+                  disabled={savingBill}
                 >
-                  {loading ? (
+                  {savingBill ? (
                     <>
                       <CircularProgress size={16} sx={{ mr: 1, color: 'white' }} />
-                      {editingSale ? 'Updating...' : 'Saving...'}
+                      {saveStatusMessage || (editingSale ? 'Updating...' : 'Saving...')}
                     </>
                   ) : (
                     editingSale ? 'Update Sale' : 'Save Sale'
@@ -6340,7 +6926,7 @@ function SalesPageContent() {
                       </TableHead>
                       <TableBody>
                         {currentBillData.sale_details && currentBillData.sale_details.length > 0 ? (
-                          currentBillData.sale_details.map((detail, index) => (
+                          getSaleDetailsInAddOrder(currentBillData.sale_details).map((detail, index) => (
                             <TableRow key={detail.sale_detail_id || index}>
                               <TableCell sx={{ px: 1, border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: 600 }}>{index + 1}</TableCell>
                               <TableCell sx={{ px: 1, border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: 600 }}>{detail.product?.pro_title || 'N/A'}</TableCell>
@@ -6736,7 +7322,7 @@ function SalesPageContent() {
                       </TableHead>
                       <TableBody>
                         {currentBillData.sale_details && currentBillData.sale_details.length > 0 ? (
-                          currentBillData.sale_details.map((detail, index) => (
+                          getSaleDetailsInAddOrder(currentBillData.sale_details).map((detail, index) => (
                             <TableRow key={detail.sale_detail_id || index}>
                               <TableCell sx={{ px: 1, border: '1px solid #ddd' }}>{index + 1}</TableCell>
                               <TableCell sx={{ px: 1, border: '1px solid #ddd' }}>{detail.product?.pro_title || 'N/A'}</TableCell>
@@ -7625,6 +8211,23 @@ function SalesPageContent() {
                   }}
                 />
                 <Button
+                  onClick={handlePrintSalesList}
+                  size="small"
+                  variant="contained"
+                  startIcon={<PrintIcon sx={{ fontSize: 18 }} />}
+                  sx={{
+                    textTransform: 'none',
+                    fontWeight: 700,
+                    bgcolor: BRAND.primary.blue,
+                    borderRadius: '8px',
+                    height: 32,
+                    px: 1.5,
+                    '&:hover': { bgcolor: '#1e40af' },
+                  }}
+                >
+                  Print List
+                </Button>
+                <Button
                   onClick={clearFilters}
                   size="small"
                   variant="outlined"
@@ -7853,7 +8456,7 @@ function SalesPageContent() {
                     fullWidth
                     size="small"
                     label="Search by Item"
-                    placeholder="Product name or quantity..."
+                    placeholder="Product name or qty (e.g. 5)..."
                     value={filterItem}
                     onChange={(e) => setFilterItem(e.target.value)}
                     onFocus={(e) => e.target.select()}
@@ -7987,9 +8590,11 @@ function SalesPageContent() {
                       return (
                         <TableRow
                           key={sale.sale_id}
+                          onClick={() => handleOpenCustomerLedger(sale)}
                           sx={{
                             bgcolor: rowIndex % 2 === 0 ? '#ffffff' : '#f8fafc',
                             '&:hover': { bgcolor: '#eff6ff' },
+                            cursor: 'pointer',
                           }}
                         >
                           <TableCell sx={{ fontWeight: 700, color: BRAND.primary.blue, whiteSpace: 'nowrap' }}>
@@ -7998,22 +8603,8 @@ function SalesPageContent() {
                           <TableCell sx={{ fontWeight: 500, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {sale.customer?.cus_name || 'N/A'}
                           </TableCell>
-                          <TableCell sx={{ minWidth: 180, maxWidth: 260, fontSize: '0.78rem' }}>
-                            {(sale.sale_details || []).length === 0 ? (
-                              <Typography sx={{ color: '#94a3b8', fontSize: '0.78rem' }}>—</Typography>
-                            ) : (
-                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.2 }}>
-                                {sale.sale_details.map((d, i) => (
-                                  <Typography key={i} sx={{ fontSize: '0.78rem', color: '#475569', lineHeight: 1.3 }}>
-                                    {(d.product?.pro_title || d.product_name || `Item ${i + 1}`).slice(0, 28)}
-                                    {' '}
-                                    <Box component="span" sx={{ color: '#64748b' }}>
-                                      @ {parseFloat(d.unit_rate || 0).toLocaleString()} × {parseFloat(d.qnty || 0)}
-                                    </Box>
-                                  </Typography>
-                                ))}
-                              </Box>
-                            )}
+                          <TableCell sx={{ minWidth: 180, maxWidth: 280, verticalAlign: 'top', py: 0.75 }}>
+                            {renderSaleLineItemsCell(sale)}
                           </TableCell>
                           <TableCell sx={{ color: '#64748b', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {sale.reference || '—'}
@@ -8049,7 +8640,7 @@ function SalesPageContent() {
                           <TableCell align="center" sx={{ color: '#64748b', whiteSpace: 'nowrap' }}>
                             {formatDatePK(sale?.created_at) || '—'}
                           </TableCell>
-                          <TableCell align="center" sx={{ p: 0.4, whiteSpace: 'nowrap' }}>
+                          <TableCell align="center" sx={{ p: 0.4, whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
                             <Stack direction="row" spacing={0} justifyContent="center" flexWrap="nowrap">
                               <Tooltip title="View Details">
                                 <IconButton size="small" color="primary" onClick={() => handleViewBill(sale)} sx={{ p: 0.4 }}>
@@ -8065,11 +8656,7 @@ function SalesPageContent() {
                                 <IconButton
                                   size="small"
                                   sx={{ color: BRAND.supporting.cyan, p: 0.4 }}
-                                  onClick={() => {
-                                    setFormSelectedCustomer(sale.customer);
-                                    fetchLedgerData(sale.cus_id);
-                                    setLedgerDialogOpen(true);
-                                  }}
+                                  onClick={(e) => handleOpenCustomerLedger(sale, e)}
                                 >
                                   <ListAltIcon sx={{ fontSize: 17 }} />
                                 </IconButton>
@@ -8079,13 +8666,13 @@ function SalesPageContent() {
                                   <PrintIcon sx={{ fontSize: 17 }} />
                                 </IconButton>
                               </Tooltip>
-                              <Tooltip title="Print A4">
+                              <Tooltip title="Print A4 Invoice">
                                 <IconButton
                                   size="small"
                                   color="primary"
                                   sx={{ p: 0.4 }}
                                   onClick={() => {
-                                    setSelectedBill(sale);
+                                    setCurrentBillData(sale);
                                     setReceiptDialogOpen(true);
                                   }}
                                 >
@@ -8963,7 +9550,7 @@ function SalesPageContent() {
                     </TableHead>
                     <TableBody>
                       {selectedBill.sale_details && selectedBill.sale_details.length > 0 ? (
-                        selectedBill.sale_details.map((detail, index) => (
+                        getSaleDetailsInAddOrder(selectedBill.sale_details).map((detail, index) => (
                           <TableRow key={detail.sale_detail_id || index}>
                             <TableCell sx={{ px: 1, border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: 600 }}>{index + 1}</TableCell>
                             <TableCell sx={{ px: 1, border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: 600 }}>{detail.product?.pro_title || detail.product?.pro_name || detail.product?.prod_name || 'N/A'}</TableCell>
@@ -9148,6 +9735,21 @@ function SalesPageContent() {
             sx={{ minWidth: 100 }}
           >
             Close
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={isSendingWhatsApp ? <CircularProgress size={16} sx={{ color: 'white' }} /> : null}
+            sx={{
+              minWidth: 150,
+              bgcolor: '#25D366',
+              '&:hover': { bgcolor: '#1ebe5d' },
+              color: 'white',
+            }}
+            onClick={() => handleSendWhatsApp(selectedBill, selectedBill?.customer?.cus_phone_no, 'printable-invoice')}
+            disabled={isSendingWhatsApp || !selectedBill?.customer?.cus_phone_no}
+            title={selectedBill?.customer?.cus_phone_no ? 'Send invoice via WhatsApp Desktop' : 'Customer has no phone number'}
+          >
+            {isSendingWhatsApp ? 'Copying...' : 'WhatsApp'}
           </Button>
           <Button
             variant="contained"
@@ -10512,7 +11114,7 @@ function SalesPageContent() {
             {/* Items List */}
             <Box sx={{ borderBottom: '1px dashed #000', pb: 0.75, mb: 0.75 }}>
               {activeBillData.sale_details && activeBillData.sale_details.length > 0 ? (
-                activeBillData.sale_details.map((d, i) => (
+                getSaleDetailsInAddOrder(activeBillData.sale_details).map((d, i) => (
                   <Box key={d.sale_detail_id || i} sx={{ mb: 0.75 }}>
                     <Typography sx={{ fontSize: '11px', fontWeight: 'bold', color: '#000', wordBreak: 'break-word' }}>
                       {d.product?.pro_title || 'Item'}

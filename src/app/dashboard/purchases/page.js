@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useCallback, Suspense, useRef, useLayoutEffect } from 'react';
 import { getCreatedByName, formatTimePK, formatDatePK } from '@/lib/date-helper';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
+import SaveProgressBackdrop from '../components/save-progress-backdrop';
+import { openAccountLedgerTab, FINANCE_LEDGER_PATH } from '@/lib/ledger-tabs';
 
 // Material-UI imports
 import {
@@ -105,6 +107,7 @@ const normalizeProductFormData = (data) => ({
 });
 
 function PurchasesPageContent() {
+  const router = useRouter();
   // PIN auth
   const { requireAuth, authDialogOpen, handleAuthSuccess, handleAuthCancel } = usePinAuth();
 
@@ -263,11 +266,26 @@ function PurchasesPageContent() {
     }
   }, [searchParams]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [saveStatusMessage, setSaveStatusMessage] = useState('');
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: '',
     severity: 'success'
   });
+
+  const beginSaving = (message) => {
+    setIsSubmitting(true);
+    setSaveStatusMessage(message);
+  };
+
+  const updateSaveStatus = (message) => {
+    setSaveStatusMessage(message);
+  };
+
+  const endSaving = () => {
+    setIsSubmitting(false);
+    setSaveStatusMessage('');
+  };
 
   // Customer form states
   const [showCustomerForm, setShowCustomerForm] = useState(false);
@@ -1507,7 +1525,13 @@ function PurchasesPageContent() {
       const authOk = await requireAuth();
       if (!authOk) return;
     }
-    setIsSubmitting(true);
+    beginSaving(
+      editingPurchase
+        ? 'Updating purchase...'
+        : purchaseType === 'return'
+          ? 'Processing purchase return...'
+          : 'Saving purchase...'
+    );
     try {
 
       const url = editingPurchase ? '/api/purchases' : '/api/purchases';
@@ -1610,6 +1634,7 @@ function PurchasesPageContent() {
         allCashAccounts: customers.filter(c => c.cus_name.toLowerCase().includes('cash'))
       });
 
+      updateSaveStatus(editingPurchase ? 'Updating purchase on server...' : 'Saving purchase to server...');
       const response = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -1619,6 +1644,7 @@ function PurchasesPageContent() {
       if (response.ok) {
         const result = await response.json();
 
+        updateSaveStatus('Updating stock & ledger...');
         // Fetch fresh purchase data to ensure accurate balance info
         const freshResponse = await fetch(`/api/purchases?id=${result.pur_id}`);
         const freshData = freshResponse.ok ? await freshResponse.json() : result;
@@ -1656,6 +1682,7 @@ function PurchasesPageContent() {
         setCurrentBillData(billDataForPrint);
 
         // Persist any edited sale_rate (pro_sale_price) and cost_rate (pro_cost_price) values to product records
+        updateSaveStatus('Updating product prices...');
         try {
           const updatePromises = formData.purchase_details.map(async (detail) => {
             const pid = parseInt(detail.pro_id, 10);
@@ -1690,6 +1717,7 @@ function PurchasesPageContent() {
         }
 
         // Open receipt dialog
+        updateSaveStatus('Generating receipt...');
         setReceiptDialogOpen(true);
 
         // After successful purchase creation, restore previous screen state if available
@@ -1747,7 +1775,7 @@ function PurchasesPageContent() {
     } catch (error) {
       console.error('Error saving purchase:', error);
     } finally {
-      setIsSubmitting(false);
+      endSaving();
     }
   };
 
@@ -1895,6 +1923,18 @@ function PurchasesPageContent() {
     // Set viewingPurchase (the invoice UI will now use previous_customer_balance when available)
     setViewingPurchase(enhancedPurchase);
     setViewDialogOpen(true);
+  };
+
+  const handleOpenCustomerLedger = (purchase, e) => {
+    if (e) e.stopPropagation();
+    const cusId = purchase?.cus_id ?? purchase?.customer?.cus_id;
+    const cusName = purchase?.customer?.cus_name;
+    if (!cusId) {
+      setSnackbar({ open: true, message: 'Customer not found for this purchase', severity: 'error' });
+      return;
+    }
+    openAccountLedgerTab(cusId, cusName);
+    router.push(FINANCE_LEDGER_PATH);
   };
 
   // Handle purchase search for returns - filter by selected supplier
@@ -2810,7 +2850,11 @@ function PurchasesPageContent() {
                   <div className="divide-y divide-gray-200">
                     {finalPurchases.map((purchase) => {
                       return (
-                        <div key={purchase.pur_id} className="grid grid-cols-12 gap-4 px-6 py-4 hover:bg-gray-50 transition-colors duration-200">
+                        <div
+                          key={purchase.pur_id}
+                          onClick={() => handleOpenCustomerLedger(purchase)}
+                          className="grid grid-cols-12 gap-4 px-6 py-4 hover:bg-gray-50 transition-colors duration-200 cursor-pointer"
+                        >
                           {/* Purchase */}
                           <div className="col-span-2 flex items-center">
                             <div>
@@ -2884,7 +2928,7 @@ function PurchasesPageContent() {
                           </div>
 
                           {/* Actions */}
-                          <div className="col-span-1 flex items-center">
+                          <div className="col-span-1 flex items-center" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center space-x-2">
                               <button
                                 onClick={() => handleViewPurchase(purchase)}
@@ -2925,6 +2969,11 @@ function PurchasesPageContent() {
   // Render Purchase Create View
   const renderPurchaseCreateView = () => (
     <DashboardLayout>
+      <SaveProgressBackdrop
+        open={isSubmitting}
+        message={saveStatusMessage}
+        subMessage="Do not close or refresh until the purchase is saved and the receipt is ready"
+      />
       <Container maxWidth={false} disableGutters sx={{ py: 1, px: { xs: 0, sm: 1 } }}>
         <Stack spacing={2} sx={{ width: '100%', pb: 4 }}>
         {/* Header */}
@@ -4672,7 +4721,9 @@ function PurchasesPageContent() {
                     '&:hover': { bgcolor: 'secondary.dark' }
                   }}
                 >
-                  {isSubmitting ? (editingPurchase ? 'Updating...' : 'Creating...') : (editingPurchase ? 'Update Purchase' : 'Save')}
+                  {isSubmitting
+                    ? (saveStatusMessage || (editingPurchase ? 'Updating...' : 'Saving...'))
+                    : (editingPurchase ? 'Update Purchase' : 'Save')}
                 </Button>
               </Box>
             </Box>

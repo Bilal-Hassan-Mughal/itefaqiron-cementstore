@@ -74,10 +74,10 @@ export async function GET(request) {
 
       const where = mergeBranchWhere(branchId, {});
 
-      // 1. Search filter
+      // 1. Search filter (name, phone, address, reference, city, balance)
       if (search && search.trim() !== '') {
         const s = search.trim();
-        where.OR = [
+        const orConditions = [
           { cus_name: { contains: s } },
           { cus_phone_no: { contains: s } },
           { cus_phone_no2: { contains: s } },
@@ -85,6 +85,28 @@ export async function GET(request) {
           { cus_reference: { contains: s } },
           { city: { city_name: { contains: s } } },
         ];
+
+        const numericStr = s.replace(/,/g, '');
+        if (/^-?\d+\.?\d*$/.test(numericStr)) {
+          const num = parseFloat(numericStr);
+          if (!Number.isNaN(num)) {
+            orConditions.push({ cus_balance: num });
+            orConditions.push({ cus_balance: -num });
+
+            const absNum = Math.abs(num);
+            if (absNum >= 1) {
+              for (let exp = 0; exp <= 4; exp++) {
+                const mult = Math.pow(10, exp);
+                const lo = absNum * mult;
+                const hi = (absNum + 1) * mult - 0.005;
+                orConditions.push({ cus_balance: { gte: lo, lt: hi } });
+                orConditions.push({ cus_balance: { gt: -hi, lte: -lo } });
+              }
+            }
+          }
+        }
+
+        where.OR = orConditions;
       }
 
       // 2. Type filter

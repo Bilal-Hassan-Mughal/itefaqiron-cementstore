@@ -29,6 +29,18 @@ import {
 import DashboardLayout from '../components/dashboard-layout';
 
 export default function JournalPage() {
+  const getCurrentUserId = () => {
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || 'null');
+      const raw = user?.user_id ?? user?.id;
+      if (raw == null || raw === '') return null;
+      const parsed = parseInt(raw, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
+
   // State management
   const [journals, setJournals] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -321,6 +333,12 @@ export default function JournalPage() {
 
       const totalAmount = Math.max(calculateTotalDebits(), calculateTotalCredits());
       
+      const actorUserId = getCurrentUserId();
+      if (!actorUserId) {
+        alert('Session expired. Please log in again.');
+        return;
+      }
+
       const url = '/api/journals';
       const method = editingJournal ? 'PUT' : 'POST';
       
@@ -333,7 +351,7 @@ export default function JournalPage() {
         : { 
             ...formData, 
             total_amount: totalAmount.toString(),
-            created_by: 6 // System Administrator
+            created_by: actorUserId
           };
 
       const response = await fetch(url, {

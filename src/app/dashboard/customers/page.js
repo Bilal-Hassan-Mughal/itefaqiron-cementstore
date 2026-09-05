@@ -69,9 +69,11 @@ import {
   Check as CheckIcon,
   AttachMoney as AttachMoneyIcon
 } from '@mui/icons-material';
-import { Plus, Edit, Trash2, Check, X, Phone, Mail, MapPin, User, Building, CreditCard, Calendar, Search, Loader2, Users, TrendingUp, TrendingDown, Wallet, DollarSign, Filter, ArrowUp } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Plus, Edit, Trash2, Check, X, Phone, Mail, MapPin, User, Building, CreditCard, Calendar, Search, Loader2, Users, TrendingUp, TrendingDown, Wallet, DollarSign, Filter, ArrowUp, ArrowUpDown, RotateCcw, ChevronDown, ChevronUp, SlidersHorizontal, ExternalLink } from 'lucide-react';
 import { Fragment } from 'react';
 import DashboardLayout from '../components/dashboard-layout';
+import { openAccountLedgerTab, FINANCE_LEDGER_PATH } from '@/lib/ledger-tabs';
 
 const fmtAmt = (val) => {
   const n = parseFloat(val || 0);
@@ -80,6 +82,7 @@ const fmtAmt = (val) => {
 };
 
 export default function CustomersPage() {
+  const router = useRouter();
   const [customers, setCustomers] = useState([]);
   const [customerCategories, setCustomerCategories] = useState([]);
   const [customerTypes, setCustomerTypes] = useState([]);
@@ -140,12 +143,10 @@ export default function CustomersPage() {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [balanceFilter, setBalanceFilter] = useState('all');
   const [activityFilter, setActivityFilter] = useState('all');
+  const [filtersExpanded, setFiltersExpanded] = useState(true);
 
-  // Print / WhatsApp
+  // Print
   const tableRef = useRef(null);
-  const [showWhatsAppDialog, setShowWhatsAppDialog] = useState(false);
-  const [whatsappPhone, setWhatsappPhone] = useState('');
-  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
 
   // Snackbar states
   const [snackbar, setSnackbar] = useState({
@@ -301,8 +302,25 @@ export default function CustomersPage() {
   };
 
   const renderSortIndicator = (field) => {
-    if (sortBy !== field) return null;
-    return sortOrder === 'asc' ? ' 🔼' : ' 🔽';
+    if (sortBy !== field) {
+      return <ArrowUpDown className="w-3.5 h-3.5 inline ml-1 opacity-40" />;
+    }
+    return sortOrder === 'asc'
+      ? <ArrowUp className="w-3.5 h-3.5 inline ml-1 text-blue-600" />
+      : <ArrowUp className="w-3.5 h-3.5 inline ml-1 text-blue-600 rotate-180" />;
+  };
+
+  const activeFilterCount = [
+    debouncedSearch,
+    debouncedMinAmount,
+    typeFilter !== 'all',
+    categoryFilter !== 'all',
+    balanceFilter !== 'all',
+    activityFilter !== 'all',
+  ].filter(Boolean).length;
+
+  const setQuickBalanceFilter = (value) => {
+    setBalanceFilter((prev) => (prev === value ? 'all' : value));
   };
 
   const handleAddCustomer = async (e) => {
@@ -591,21 +609,24 @@ export default function CustomersPage() {
     const customerType = customerTypes.find(type => type.cus_type_id === typeId);
     const title = (customerType?.cus_type_title || '').toLowerCase();
     if (title.includes('cash')) {
-      return 'bg-yellow-100 text-yellow-800';
+      return 'bg-yellow-100 text-yellow-800 border-yellow-200';
     }
     if (title.includes('supplier')) {
-      return 'bg-red-100 text-red-800';
+      return 'bg-red-100 text-red-800 border-red-200';
     }
     if (title.includes('bank')) {
-      return 'bg-indigo-100 text-indigo-800';
+      return 'bg-indigo-100 text-indigo-800 border-indigo-200';
+    }
+    if (title.includes('transport')) {
+      return 'bg-teal-100 text-teal-800 border-teal-200';
     }
     if (title.includes('builders') || title.includes('iron')) {
-      return 'bg-orange-100 text-orange-800';
+      return 'bg-orange-100 text-orange-800 border-orange-200';
     }
     if (title) {
-      return 'bg-emerald-100 text-emerald-800';
+      return 'bg-emerald-100 text-emerald-800 border-emerald-200';
     }
-    return 'bg-gray-100 text-gray-800';
+    return 'bg-gray-100 text-gray-800 border-gray-200';
   };
 
   const getBalanceColor = (balance) => {
@@ -613,6 +634,48 @@ export default function CustomersPage() {
     if (bal > 0) return 'text-green-600';
     if (bal < 0) return 'text-red-600';
     return 'text-gray-600';
+  };
+
+  const getActivityRowClass = (customer) => {
+    const balance = parseFloat(customer.cus_balance);
+    if (balance <= 0) return 'bg-white hover:bg-slate-50';
+    const now = new Date();
+    const lastActivity = customer.updated_at ? new Date(customer.updated_at) : new Date(customer.created_at);
+    const diffDays = (now - lastActivity) / (1000 * 60 * 60 * 24);
+    if (diffDays <= 30) return 'bg-emerald-50/80 hover:bg-emerald-100/80';
+    if (diffDays <= 90) return 'bg-blue-50/80 hover:bg-blue-100/80';
+    if (diffDays <= 180) return 'bg-amber-50/80 hover:bg-amber-100/80';
+    return 'bg-rose-50/80 hover:bg-rose-100/80';
+  };
+
+  const getBalanceMeta = (balance) => {
+    const bal = parseFloat(balance) || 0;
+    if (bal > 0) {
+      return {
+        amountClass: 'text-emerald-700',
+        badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+        label: 'Receivable',
+      };
+    }
+    if (bal < 0) {
+      return {
+        amountClass: 'text-rose-700',
+        badgeClass: 'bg-rose-100 text-rose-800 border-rose-200',
+        label: 'Payable',
+      };
+    }
+    return {
+      amountClass: 'text-slate-500',
+      badgeClass: 'bg-slate-100 text-slate-600 border-slate-200',
+      label: 'Settled',
+    };
+  };
+
+  const handleOpenLedger = (customer, e) => {
+    if (e) e.stopPropagation();
+    if (!customer?.cus_id) return;
+    openAccountLedgerTab(customer.cus_id, customer.cus_name);
+    router.push(FINANCE_LEDGER_PATH);
   };
 
   const getActivityRowBg = (customer) => {
@@ -695,144 +758,14 @@ export default function CustomersPage() {
     w.document.close();
   };
 
-  const handleSendWhatsApp = async () => {
-    if (!whatsappPhone.trim()) return;
-    setIsSendingWhatsApp(true);
-    try {
-      const fullList = await fetchFullFilteredList();
-      const { jsPDF } = await import('jspdf');
-
-      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      const pageW = doc.internal.pageSize.getWidth();
-      const pageH = doc.internal.pageSize.getHeight();
-      const margin = 12;
-      const colWidths = [10, 50, 30, 35, 33, 28]; // # | Name | Phone | Category | Balance | Last Activity
-      const rowH = 7;
-      let y = margin;
-
-      // Header block
-      doc.setFillColor(30, 58, 95);
-      doc.rect(margin, y, pageW - margin * 2, 12, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(13);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Itefaq Iron & Cement Store — Accounts List', margin + 4, y + 8);
-      y += 16;
-
-      doc.setFontSize(8);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(100, 116, 139);
-      doc.text(`Date: ${new Date().toLocaleDateString('en-GB')}   |   Total: ${fullList.length} accounts`, margin, y);
-      y += 6;
-
-      // Table header
-      const headers = ['#', 'Name', 'Phone', 'Category', 'Balance (PKR)', 'Last Activity'];
-      doc.setFillColor(30, 58, 95);
-      doc.rect(margin, y, pageW - margin * 2, rowH, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(8);
-      doc.setFont('helvetica', 'bold');
-      let x = margin;
-      headers.forEach((h, i) => {
-        const align = (i === 4) ? 'right' : (i === 0 || i === 5) ? 'center' : 'left';
-        const cellX = align === 'right' ? x + colWidths[i] - 2 : align === 'center' ? x + colWidths[i] / 2 : x + 2;
-        doc.text(h, cellX, y + 5, { align });
-        x += colWidths[i];
-      });
-      y += rowH;
-
-      // Table rows
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.5);
-
-      fullList.forEach((c, i) => {
-        if (y + rowH > pageH - margin) {
-          doc.addPage();
-          y = margin;
-        }
-
-        const bal = parseFloat(c.cus_balance || 0);
-        const bg = getActivityRowBg(c);
-        const lastAct = c.updated_at
-          ? new Date(c.updated_at).toLocaleDateString('en-GB')
-          : new Date(c.created_at).toLocaleDateString('en-GB');
-        const cat = c.customer_category?.cus_cat_title || c.cus_category || '';
-
-        // Row background
-        if (bg) {
-          const rgb = bg === '#dcfce7' ? [220, 252, 231] : bg === '#dbeafe' ? [219, 234, 254] : bg === '#fef9c3' ? [254, 249, 195] : [254, 226, 226];
-          doc.setFillColor(...rgb);
-          doc.rect(margin, y, pageW - margin * 2, rowH, 'F');
-        } else if (i % 2 === 1) {
-          doc.setFillColor(248, 250, 252);
-          doc.rect(margin, y, pageW - margin * 2, rowH, 'F');
-        }
-
-        // Row border
-        doc.setDrawColor(229, 231, 235);
-        doc.rect(margin, y, pageW - margin * 2, rowH, 'S');
-
-        // Cell text
-        doc.setTextColor(30, 41, 59);
-        x = margin;
-        const cells = [String(i + 1), c.cus_name || '', c.cus_phone_no || '', cat, bal.toLocaleString(), lastAct];
-        cells.forEach((cell, ci) => {
-          if (ci === 4) {
-            // Balance — colored
-            doc.setTextColor(bal > 0 ? 22 : bal < 0 ? 220 : 55, bal > 0 ? 163 : bal < 0 ? 38 : 65, bal > 0 ? 74 : bal < 0 ? 38 : 81);
-            doc.setFont('helvetica', 'bold');
-          } else {
-            doc.setTextColor(30, 41, 59);
-            doc.setFont('helvetica', 'normal');
-          }
-          const align = ci === 4 ? 'right' : (ci === 0 || ci === 5) ? 'center' : 'left';
-          const maxW = colWidths[ci] - 3;
-          const clipped = doc.getTextWidth(cell) > maxW ? doc.splitTextToSize(cell, maxW)[0] : cell;
-          const cellX = align === 'right' ? x + colWidths[ci] - 2 : align === 'center' ? x + colWidths[ci] / 2 : x + 2;
-          doc.text(clipped, cellX, y + 5, { align });
-          x += colWidths[ci];
-        });
-        y += rowH;
-      });
-
-      // Legend at bottom of last page
-      y += 4;
-      if (y + 8 > pageH - margin) { doc.addPage(); y = margin; }
-      const legend = [
-        { color: [134, 239, 172], label: '\u22641 Month' },
-        { color: [147, 197, 253], label: '1\u20133 Months' },
-        { color: [253, 224, 71], label: '3\u20136 Months' },
-        { color: [252, 165, 165], label: '>6 Months' },
-      ];
-      doc.setFontSize(7);
-      doc.setFont('helvetica', 'normal');
-      let lx = margin;
-      legend.forEach(({ color, label }) => {
-        doc.setFillColor(...color);
-        doc.rect(lx, y, 6, 4, 'F');
-        doc.setTextColor(30, 41, 59);
-        doc.text(label, lx + 8, y + 3.5);
-        lx += 40;
-      });
-
-      // Convert PDF to clipboard + open WhatsApp Desktop
-      const { sharePdfViaWhatsAppDesktop, whatsAppSuccessMessage } = await import('@/lib/whatsapp-local');
-      const { opened } = await sharePdfViaWhatsAppDesktop(doc, whatsappPhone.trim());
-      setSnackbar({ open: true, message: whatsAppSuccessMessage(opened), severity: 'success' });
-      setShowWhatsAppDialog(false);
-      setWhatsappPhone('');
-    } catch (err) {
-      setSnackbar({ open: true, message: 'Error: ' + err.message, severity: 'error' });
-    } finally {
-      setIsSendingWhatsApp(false);
-    }
-  };
-
   // Get customer type title from ID
   const getCustomerTypeTitle = (typeId) => {
     const customerType = customerTypes.find(type => type.cus_type_id === typeId);
     return customerType ? customerType.cus_type_title : typeId || 'Unknown';
   };
+
+  const showingFrom = totalCustomers === 0 ? 0 : (page - 1) * limit + 1;
+  const showingTo = Math.min(page * limit, totalCustomers);
 
   if (loading) {
     return (
@@ -846,10 +779,10 @@ export default function CustomersPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6 w-full p-4 md:p-6 lg:p-8">
-        {/* Header with prominent animated New Account button at far left */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
+      <div className="w-full bg-slate-100 pb-6">
+        {/* Top actions — New Account left (original position), Print right */}
+        <div className="px-4 sm:px-6 pt-2 md:pt-4">
+          <div className="flex items-center justify-between gap-4">
             <Button
               variant="contained"
               onClick={() => setShowCustomerForm(true)}
@@ -869,212 +802,170 @@ export default function CustomersPage() {
                 boxShadow: '0 14px 36px rgba(0,0,0,0.26)',
                 transition: 'transform 160ms cubic-bezier(.2,.9,.2,1), box-shadow 160ms ease',
                 position: 'relative',
-                overflow: 'visible'
+                overflow: 'visible',
               }}
               aria-label="Create new account"
             >
               New Account
             </Button>
-
-            {/* removed redundant 'Accounts' title per request */}
-          </div>
-
-          {/* Print & WhatsApp */}
-          <Box sx={{ display: 'flex', gap: 1.5 }}>
             <Button
               variant="outlined"
               onClick={handlePrint}
               startIcon={<span style={{ fontSize: 18 }}>🖨️</span>}
               sx={{
-                borderColor: '#3b82f6', color: '#3b82f6', fontWeight: 700, borderRadius: 2,
-                '&:hover': { bgcolor: '#eff6ff', borderColor: '#2563eb' }
+                borderColor: '#3b82f6',
+                color: '#3b82f6',
+                fontWeight: 700,
+                borderRadius: 2,
+                px: 3,
+                py: 1.25,
+                '&:hover': { bgcolor: '#eff6ff', borderColor: '#2563eb' },
               }}
             >
               Print List
             </Button>
-            <Button
-              variant="contained"
-              onClick={() => setShowWhatsAppDialog(true)}
-              startIcon={<span style={{ fontSize: 18 }}>📲</span>}
-              sx={{
-                bgcolor: '#25d366', color: '#fff', fontWeight: 700, borderRadius: 2,
-                '&:hover': { bgcolor: '#128c7e' }
-              }}
-            >
-              Send WhatsApp
-            </Button>
-          </Box>
+          </div>
         </div>
 
+        {/* Stats Cards */}
+        <div className="flex-shrink-0 px-4 sm:px-6 pt-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {[
+              { title: 'Total Accounts', val: totalCustomers, color: 'blue', icon: Users, currency: false },
+              { title: 'Receivables', val: totalReceivables, color: 'emerald', icon: TrendingUp, currency: true },
+              { title: 'Payables', val: totalPayables, color: 'rose', icon: TrendingDown, currency: true },
+              { title: 'Net Balance', val: netBalance, color: 'amber', icon: Wallet, currency: true },
+            ].map((stat) => {
+              const Icon = stat.icon;
+              const colorMap = {
+                blue: 'from-blue-50 to-indigo-100 border-blue-200 text-blue-800',
+                emerald: 'from-emerald-50 to-teal-100 border-emerald-200 text-emerald-800',
+                rose: 'from-rose-50 to-red-100 border-rose-200 text-rose-800',
+                amber: 'from-amber-50 to-orange-100 border-amber-200 text-amber-900',
+              };
+              return (
+                <div key={stat.title} className={`bg-gradient-to-br ${colorMap[stat.color]} border rounded-2xl p-4 shadow-sm`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider opacity-70">{stat.title}</p>
+                    <Icon className="w-4 h-4 opacity-60" />
+                  </div>
+                  <p className="text-xl sm:text-2xl font-black mt-2 tabular-nums">
+                    {stat.currency && <span className="text-xs font-semibold opacity-60 mr-1">Rs.</span>}
+                    {stat.val.toLocaleString()}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
-        {/* Premium Filters Section */}
-        <Box sx={{ flexShrink: 0, mb: 3, width: '100%' }}>
-          <Card sx={{
-            borderRadius: 2,
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
-            width: '100%',
-            border: '1px solid #e2e8f0',
-            bgcolor: '#f8fafc'
-          }}>
-            <CardContent sx={{ p: 3 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-                <Typography variant="h6" sx={{ fontWeight: 700, color: '#334155' }}>
-                  Filters & Sorting
-                </Typography>
-                <Button
-                  onClick={clearFilters}
-                  size="small"
-                  sx={{
-                    color: '#64748b',
-                    textTransform: 'none',
-                    fontWeight: 600,
-                    '&:hover': { color: '#ef4444' }
-                  }}
+        {/* Filters Toolbar */}
+        <div className="flex-shrink-0 px-4 sm:px-6 py-3">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+            <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal className="w-4 h-4 text-slate-500" />
+                <span className="text-sm font-bold text-slate-800">Search &amp; Filters</span>
+                {activeFilterCount > 0 && (
+                  <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    {activeFilterCount} active
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {activeFilterCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" /> Clear all
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setFiltersExpanded((p) => !p)}
+                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
                 >
-                  Clear All Filters
-                </Button>
-              </Box>
+                  {filtersExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  {filtersExpanded ? 'Hide' : 'Show'} filters
+                </button>
+              </div>
+            </div>
 
-              <Box sx={{
-                display: 'grid',
-                gridTemplateColumns: {
-                  xs: '1fr',
-                  sm: '1fr 1fr',
-                  md: 'repeat(3, 1fr)',
-                  lg: 'repeat(6, 1fr)'
-                },
-                gap: 3,
-                width: '100%'
-              }}>
-                {/* Search */}
-                <Box>
-                  <TextField
-                    fullWidth
-                    label="Search"
-                    placeholder="Search by name, phone, address, city, reference..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <Search size={18} color="#94a3b8" />
-                        </InputAdornment>
-                      ),
-                    }}
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        borderRadius: 1.5,
-                        bgcolor: 'white',
-                      }
-                    }}
-                  />
-                </Box>
+            <div className="px-4 sm:px-5 py-4 space-y-4">
+              {/* Main Search */}
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search by name, phone, address, reference, city, or balance (e.g. 50000)..."
+                  className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white transition-all"
+                />
+              </div>
 
-                {/* Type Filter */}
-                <Box>
+              {/* Quick balance chips */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mr-1">Quick:</span>
+                {[
+                  { id: 'positive', label: 'Receivable (+)', cls: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
+                  { id: 'negative', label: 'Payable (−)', cls: 'bg-rose-100 text-rose-800 border-rose-300' },
+                  { id: 'zero', label: 'Zero Balance', cls: 'bg-slate-100 text-slate-700 border-slate-300' },
+                  { id: 'non-zero', label: 'Has Balance', cls: 'bg-blue-100 text-blue-800 border-blue-300' },
+                ].map((chip) => (
+                  <button
+                    key={chip.id}
+                    type="button"
+                    onClick={() => setQuickBalanceFilter(chip.id)}
+                    className={`px-3 py-1 rounded-full text-[11px] font-bold border transition-all ${
+                      balanceFilter === chip.id ? `${chip.cls} ring-2 ring-offset-1 ring-blue-400` : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+
+              {filtersExpanded && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 pt-1">
                   <Autocomplete
                     fullWidth
-                    autoSelect={true}
-                    autoHighlight={true}
-                    openOnFocus={true}
-                    selectOnFocus={true}
+                    size="small"
                     options={[
                       { value: 'all', label: 'All Types' },
-                      ...customerTypes.map(type => ({
-                        value: type.cus_type_id,
-                        label: type.cus_type_title
-                      }))
+                      ...customerTypes.map((type) => ({ value: type.cus_type_id, label: type.cus_type_title })),
                     ]}
                     getOptionLabel={(option) => option.label}
                     value={(() => {
                       if (typeFilter === 'all') return { value: 'all', label: 'All Types' };
-                      const selected = customerTypes.find(type => type.cus_type_id === typeFilter);
+                      const selected = customerTypes.find((type) => type.cus_type_id === typeFilter);
                       return selected ? { value: selected.cus_type_id, label: selected.cus_type_title } : { value: 'all', label: 'All Types' };
                     })()}
-                    onChange={(event, newValue) => {
-                      setTypeFilter(newValue ? newValue.value : 'all');
-                    }}
+                    onChange={(event, newValue) => setTypeFilter(newValue ? newValue.value : 'all')}
                     renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Account Type"
-                        placeholder="Select type"
-                        onFocus={(e) => e.target.select()}
-                        InputProps={{
-                          ...params.InputProps,
-                          startAdornment: (
-                            <Fragment>
-                              <InputAdornment position="start">
-                                <Building size={18} color="#94a3b8" />
-                              </InputAdornment>
-                              {params.InputProps.startAdornment}
-                            </Fragment>
-                          ),
-                        }}
-                        sx={{
-                          '& .MuiOutlinedInput-root': {
-                            borderRadius: 1.5,
-                            bgcolor: 'white',
-                          }
-                        }}
-                      />
+                      <TextField {...params} label="Account Type" placeholder="All types" />
                     )}
                   />
-                </Box>
-
-                {/* Category Filter */}
-                <Box>
                   <Autocomplete
                     fullWidth
-                    autoSelect={true}
-                    autoHighlight={true}
-                    openOnFocus={true}
-                    selectOnFocus={true}
+                    size="small"
                     options={[
                       { value: 'all', label: 'All Categories' },
-                      ...customerCategories.map(category => ({
-                        value: category.cus_cat_title,
-                        label: category.cus_cat_title
-                      }))
+                      ...customerCategories.map((category) => ({ value: category.cus_cat_title, label: category.cus_cat_title })),
                     ]}
                     getOptionLabel={(option) => option.label}
                     value={{ value: categoryFilter, label: categoryFilter === 'all' ? 'All Categories' : categoryFilter }}
-                    onChange={(event, newValue) => {
-                      setCategoryFilter(newValue ? newValue.value : 'all');
-                    }}
+                    onChange={(event, newValue) => setCategoryFilter(newValue ? newValue.value : 'all')}
                     renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Category"
-                        placeholder="Select category"
-                        onFocus={(e) => e.target.select()}
-                        InputProps={{
-                          ...params.InputProps,
-                          startAdornment: (
-                            <Fragment>
-                              <InputAdornment position="start">
-                                <Filter size={18} color="#94a3b8" />
-                              </InputAdornment>
-                              {params.InputProps.startAdornment}
-                            </Fragment>
-                          ),
-                        }}
-                        sx={{
-                          '& .MuiOutlinedInput-root': {
-                            borderRadius: 1.5,
-                            bgcolor: 'white',
-                          }
-                        }}
-                      />
+                      <TextField {...params} label="Category" placeholder="All categories" />
                     )}
                   />
-                </Box>
-
-                {/* Balance > Amount Filter */}
-                <Box>
                   <TextField
                     fullWidth
-                    label="Balance > Amount"
+                    size="small"
+                    label="Min Balance"
                     placeholder="e.g. 50000"
                     type="number"
                     value={minAmount}
@@ -1082,391 +973,293 @@ export default function CustomersPage() {
                     InputProps={{
                       startAdornment: (
                         <InputAdornment position="start">
-                          <TrendingUp size={18} color="#94a3b8" />
+                          <TrendingUp size={16} className="text-slate-400" />
                         </InputAdornment>
                       ),
                     }}
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        borderRadius: 1.5,
-                        bgcolor: 'white',
-                      }
-                    }}
                   />
-                </Box>
-
-                {/* Balance Filter */}
-                <Box>
                   <Autocomplete
                     fullWidth
-                    autoSelect={true}
-                    autoHighlight={true}
-                    openOnFocus={true}
-                    selectOnFocus={true}
+                    size="small"
                     options={[
                       { value: 'all', label: 'All Balances' },
-                      { value: 'positive', label: 'Positive Balance' },
-                      { value: 'negative', label: 'Negative Balance' },
-                      { value: 'zero', label: 'Zero Balance' },
-                      { value: 'non-zero', label: 'With Balance (Non-Zero)' }
+                      { value: 'positive', label: 'Positive (+)' },
+                      { value: 'negative', label: 'Negative (−)' },
+                      { value: 'zero', label: 'Zero' },
+                      { value: 'non-zero', label: 'Non-Zero' },
                     ]}
                     getOptionLabel={(option) => option.label}
                     value={{
-                      value: balanceFilter, label:
+                      value: balanceFilter,
+                      label:
                         balanceFilter === 'all' ? 'All Balances' :
-                          balanceFilter === 'positive' ? 'Positive Balance' :
-                            balanceFilter === 'negative' ? 'Negative Balance' :
-                              balanceFilter === 'zero' ? 'Zero Balance' :
-                                balanceFilter === 'non-zero' ? 'With Balance (Non-Zero)' : 'All Balances'
+                        balanceFilter === 'positive' ? 'Positive (+)' :
+                        balanceFilter === 'negative' ? 'Negative (−)' :
+                        balanceFilter === 'zero' ? 'Zero' :
+                        balanceFilter === 'non-zero' ? 'Non-Zero' : 'All Balances',
                     }}
-                    onChange={(event, newValue) => {
-                      setBalanceFilter(newValue ? newValue.value : 'all');
-                    }}
+                    onChange={(event, newValue) => setBalanceFilter(newValue ? newValue.value : 'all')}
                     renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Balance Status"
-                        placeholder="Select balance"
-                        onFocus={(e) => e.target.select()}
-                        InputProps={{
-                          ...params.InputProps,
-                          startAdornment: (
-                            <Fragment>
-                              <InputAdornment position="start">
-                                <Wallet size={18} color="#94a3b8" />
-                              </InputAdornment>
-                              {params.InputProps.startAdornment}
-                            </Fragment>
-                          ),
-                        }}
-                        sx={{
-                          '& .MuiOutlinedInput-root': {
-                            borderRadius: 1.5,
-                            bgcolor: 'white',
-                          }
-                        }}
-                      />
+                      <TextField {...params} label="Balance Status" />
                     )}
                   />
-                </Box>
- 
-                {/* Activity Filter */}
-                <Box>
                   <Autocomplete
                     fullWidth
-                    autoSelect={true}
-                    autoHighlight={true}
-                    openOnFocus={true}
-                    selectOnFocus={true}
+                    size="small"
                     options={[
                       { value: 'all', label: 'All Activity' },
-                      { value: '1month', label: '≤ 1 Month (Active)' },
+                      { value: '1month', label: '≤ 1 Month' },
                       { value: '1to3months', label: '1–3 Months' },
                       { value: '3to6months', label: '3–6 Months' },
-                      { value: 'over6months', label: '> 6 Months (Inactive)' }
+                      { value: 'over6months', label: '> 6 Months' },
                     ]}
                     getOptionLabel={(option) => option.label}
                     value={{
                       value: activityFilter,
-                      label: activityFilter === 'all' ? 'All Activity' :
-                        activityFilter === '1month' ? '≤ 1 Month (Active)' :
-                          activityFilter === '1to3months' ? '1–3 Months' :
-                            activityFilter === '3to6months' ? '3–6 Months' :
-                              activityFilter === 'over6months' ? '> 6 Months (Inactive)' : 'All Activity'
+                      label:
+                        activityFilter === 'all' ? 'All Activity' :
+                        activityFilter === '1month' ? '≤ 1 Month' :
+                        activityFilter === '1to3months' ? '1–3 Months' :
+                        activityFilter === '3to6months' ? '3–6 Months' :
+                        activityFilter === 'over6months' ? '> 6 Months' : 'All Activity',
                     }}
-                    onChange={(event, newValue) => {
-                      setActivityFilter(newValue ? newValue.value : 'all');
-                    }}
+                    onChange={(event, newValue) => setActivityFilter(newValue ? newValue.value : 'all')}
                     renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Last Activity"
-                        placeholder="Select activity"
-                        onFocus={(e) => e.target.select()}
-                        InputProps={{
-                          ...params.InputProps,
-                          startAdornment: (
-                            <Fragment>
-                              <InputAdornment position="start">
-                                <Calendar size={18} color="#94a3b8" />
-                              </InputAdornment>
-                              {params.InputProps.startAdornment}
-                            </Fragment>
-                          ),
-                        }}
-                        sx={{
-                          '& .MuiOutlinedInput-root': {
-                            borderRadius: 1.5,
-                            bgcolor: 'white',
-                          }
-                        }}
-                      />
+                      <TextField {...params} label="Last Activity" />
                     )}
                   />
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Box>
- 
-        {/* Unified Professional Stats Bar */}
-        <Box sx={{ flexShrink: 0, mb: 4, width: '100%' }}>
-          <Card sx={{
-            borderRadius: 2,
-            boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
-            overflow: 'hidden',
-            bgcolor: 'white',
-            border: '1px solid #e5e7eb'
-          }}>
-            <Box sx={{
-              display: 'flex',
-              flexDirection: { xs: 'column', md: 'row' },
-              alignItems: 'stretch',
-              justifyContent: 'space-between',
-              p: 0
-            }}>
-              {[
-                { title: 'Total Accounts', val: totalCustomers, color: '#2563eb', bg: '#eff6ff', icon: <Users size={24} />, isCurrency: false },
-                { title: 'Total Receivables', val: totalReceivables, color: '#16a34a', bg: '#f0fdf4', icon: <TrendingUp size={24} />, isCurrency: true },
-                { title: 'Total Payables', val: totalPayables, color: '#dc2626', bg: '#fef2f2', icon: <TrendingDown size={24} />, isCurrency: true },
-                { title: 'Net Balance', val: netBalance, color: '#d97706', bg: '#fffbeb', icon: <Wallet size={24} />, isCurrency: true }
-              ].map((stat, i) => (
-                <Fragment key={i}>
-                  <Box sx={{
-                    flex: 1,
-                    p: 3,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 2.5,
-                    width: '100%',
-                    bgcolor: stat.bg,
-                    position: 'relative',
-                    borderBottom: i < 3 && { xs: '1px solid #e5e7eb', md: 'none' },
-                    '&:hover': {
-                      bgcolor: 'white',
-                      transition: 'background-color 0.3s'
-                    }
-                  }}>
-                    <Avatar sx={{
-                      bgcolor: 'white',
-                      color: stat.color,
-                      width: 52,
-                      height: 52,
-                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                      border: `1.5px solid ${stat.color}20`
-                    }}>
-                      {stat.icon}
-                    </Avatar>
-                    <Box>
-                      <Typography variant="overline" sx={{
-                        display: 'block',
-                        lineHeight: 1,
-                        mb: 0.5,
-                        color: '#6b7280',
-                        fontWeight: 700,
-                        letterSpacing: 1.2
-                      }}>
-                        {stat.title}
-                      </Typography>
-                      <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: 0.5, color: stat.color }}>
-                        {stat.isCurrency && <span style={{ fontSize: '0.8rem', marginRight: 4, opacity: 0.6 }}>PKR</span>}
-                        {stat.val.toLocaleString()}
-                      </Typography>
-                    </Box>
-                  </Box>
-                  {i < 3 && (
-                    <Divider
-                      orientation="vertical"
-                      flexItem
-                      sx={{
-                        display: { xs: 'none', md: 'block' },
-                        bgcolor: '#e5e7eb',
-                        height: 60,
-                        my: 'auto'
-                      }}
-                    />
-                  )}
-                </Fragment>
-              ))}
-            </Box>
-          </Card>
-        </Box>
- 
-        {/* Customers Table */}
-        <Card sx={{ minHeight: 600, height: 'auto', display: 'flex', flexDirection: 'column' }}>
-          <Box sx={{ p: 3, borderBottom: 1, borderColor: 'divider', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="h6" component="h3" sx={{ fontWeight: 600 }}>
-              Accounts List
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Total Accounts: {totalCustomers}
-            </Typography>
-          </Box>
-          <Box sx={{ flex: 1, overflow: 'auto', position: 'relative' }}>
-            {isFetching && (
-              <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, bgcolor: 'rgba(255,255,255,0.7)', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <CircularProgress color="primary" />
-              </Box>
-            )}
-            <TableContainer ref={tableRef} component={Paper} sx={{ height: '100%' }}>
-              <Table stickyHeader>
-                <TableHead>
-                  <TableRow>
-                    <TableCell onClick={() => handleSort('cus_name')} style={{ cursor: 'pointer', userSelect: 'none' }}>
-                      Account {renderSortIndicator('cus_name')}
-                    </TableCell>
-                    <TableCell>Contact</TableCell>
-                    <TableCell>Type</TableCell>
-                    <TableCell>Category</TableCell>
-                    <TableCell onClick={() => handleSort('cus_balance')} style={{ cursor: 'pointer', userSelect: 'none' }}>
-                      Balance {renderSortIndicator('cus_balance')}
-                    </TableCell>
-                    <TableCell onClick={() => handleSort('created_at')} style={{ cursor: 'pointer', userSelect: 'none' }}>
-                      Created {renderSortIndicator('created_at')}
-                    </TableCell>
-                    <TableCell>Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {customers.map((customer) => (
-                    <TableRow
-                      key={customer.cus_id}
-                      hover
-                      sx={{ bgcolor: getActivityRowBg(customer) }}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Accounts Table */}
+        <div className="px-4 sm:px-6 pb-4">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+            <div className="px-4 sm:px-5 py-3 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Accounts List</h2>
+                <span className="bg-blue-100 text-blue-800 text-xs px-2.5 py-0.5 rounded-full font-bold">
+                  {totalCustomers} total
+                </span>
+                {isFetching && <Loader2 className="w-4 h-4 animate-spin text-blue-600" />}
+              </div>
+              <p className="text-xs text-slate-500">
+                Showing {showingFrom}–{showingTo} of {totalCustomers} · Page {page} of {totalPages}
+              </p>
+            </div>
+
+            <div className="overflow-x-auto relative" ref={tableRef}>
+              {isFetching && (
+                <div className="absolute inset-0 bg-white/70 z-10 flex items-center justify-center">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                </div>
+              )}
+
+              <table className="w-full text-sm border-collapse min-w-[960px]">
+                <thead className="sticky top-0 z-[1]">
+                  <tr className="bg-slate-900 text-slate-100 text-[11px] font-bold uppercase tracking-wider">
+                    <th className="px-3 py-3 w-12 text-center border-r border-slate-800">#</th>
+                    <th
+                      className="px-4 py-3 text-left border-r border-slate-800 cursor-pointer select-none"
+                      onClick={() => handleSort('cus_name')}
                     >
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <Avatar sx={{
-                            bgcolor: 'primary.main',
-                            mr: 2,
-                            width: 40,
-                            height: 40
-                          }}>
-                            {customer.cus_name.charAt(0)}
-                          </Avatar>
-                          <Box>
-                            <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                              {customer.cus_name}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              ID: #{customer.sequentialId}
-                            </Typography>
-                            {customer.cus_reference && (
-                              <Typography variant="caption" color="primary" display="block">
-                                Ref: {customer.cus_reference}
-                              </Typography>
-                            )}
-                          </Box>
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        <Box>
-                          <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
-                            <PhoneIcon sx={{ fontSize: 16, mr: 1, color: 'text.secondary' }} />
-                            <Typography variant="body2">{customer.cus_phone_no}</Typography>
-                          </Box>
-                          {customer.cus_phone_no2 && (
-                            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
-                              <PhoneIcon sx={{ fontSize: 16, mr: 1, color: 'text.secondary' }} />
-                              <Typography variant="body2">{customer.cus_phone_no2}</Typography>
-                            </Box>
-                          )}
-                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                            <LocationIcon sx={{ fontSize: 16, mr: 1, color: 'text.secondary' }} />
-                            <Typography variant="body2" sx={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {customer.cus_address}
-                            </Typography>
-                          </Box>
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={getCustomerTypeTitle(customer.cus_type)}
-                          size="small"
-                          sx={{
-                            backgroundColor: getTypeColor(customer.cus_type).includes('yellow') ? '#fef3c7' :
-                              getTypeColor(customer.cus_type).includes('red') ? '#fee2e2' :
-                                getTypeColor(customer.cus_type).includes('emerald') ? '#d1fae5' :
-                                  getTypeColor(customer.cus_type).includes('orange') ? '#fed7aa' :
-                                    getTypeColor(customer.cus_type).includes('indigo') ? '#e0e7ff' :
-                                      getTypeColor(customer.cus_type).includes('pink') ? '#fce7f3' : '#f3f4f6',
-                            color: getTypeColor(customer.cus_type).includes('yellow') ? '#92400e' :
-                              getTypeColor(customer.cus_type).includes('red') ? '#dc2626' :
-                                getTypeColor(customer.cus_type).includes('emerald') ? '#059669' :
-                                  getTypeColor(customer.cus_type).includes('orange') ? '#ea580c' :
-                                    getTypeColor(customer.cus_type).includes('indigo') ? '#4338ca' :
-                                      getTypeColor(customer.cus_type).includes('pink') ? '#be185d' : '#374151'
-                          }}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">
-                          {customer.customer_category?.cus_cat_title || customer.cus_category}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            fontWeight: 500,
-                            color: getBalanceColor(customer.cus_balance).includes('green') ? 'success.main' :
-                              getBalanceColor(customer.cus_balance).includes('red') ? 'error.main' : 'text.secondary'
-                          }}
+                      <span className="inline-flex items-center gap-1">Account Name {renderSortIndicator('cus_name')}</span>
+                    </th>
+                    <th className="px-4 py-3 text-left border-r border-slate-800 w-44">Phone</th>
+                    <th className="px-4 py-3 text-left border-r border-slate-800 min-w-[140px]">Address</th>
+                    <th className="px-4 py-3 text-center border-r border-slate-800 w-28">Type</th>
+                    <th className="px-4 py-3 text-left border-r border-slate-800 w-32">Category</th>
+                    <th
+                      className="px-4 py-3 text-right border-r border-slate-800 w-36 cursor-pointer select-none text-blue-300"
+                      onClick={() => handleSort('cus_balance')}
+                    >
+                      <span className="inline-flex items-center justify-end gap-1 w-full">Balance {renderSortIndicator('cus_balance')}</span>
+                    </th>
+                    <th
+                      className="px-4 py-3 text-center border-r border-slate-800 w-28 cursor-pointer select-none"
+                      onClick={() => handleSort('created_at')}
+                    >
+                      <span className="inline-flex items-center justify-center gap-1">Created {renderSortIndicator('created_at')}</span>
+                    </th>
+                    <th className="px-3 py-3 text-center w-24">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {customers.length === 0 && !isFetching ? (
+                    <tr>
+                      <td colSpan={9} className="px-6 py-16 text-center">
+                        <Users className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                        <p className="font-bold text-slate-700">No accounts found</p>
+                        <p className="text-xs text-slate-400 mt-1">Try changing search or filters</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    customers.map((customer) => {
+                      const balanceMeta = getBalanceMeta(customer.cus_balance);
+                      const typeTitle = getCustomerTypeTitle(customer.cus_type);
+                      const categoryTitle = customer.customer_category?.cus_cat_title || customer.cus_category || '—';
+                      const typeClass = getTypeColor(customer.cus_type);
+
+                      return (
+                        <tr
+                          key={customer.cus_id}
+                          className={`transition-colors ${getActivityRowClass(customer)}`}
                         >
-                          {fmtAmt(customer.cus_balance)}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" color="text.secondary">
-                          {formatDatePK(customer.created_at)}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', gap: 1 }}>
-                          <IconButton
-                            size="small"
-                            onClick={() => handleEditCustomer(customer)}
-                            sx={{ color: 'primary.main' }}
-                          >
-                            <EditIcon />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            onClick={() => handleDeleteCustomer(customer.cus_id)}
-                            sx={{ color: 'error.main' }}
-                          >
-                            <DeleteIcon />
-                          </IconButton>
-                        </Box>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
-          <Box sx={{ borderTop: 1, borderColor: 'divider', px: 3, py: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
-            <FormControl variant="outlined" size="small" sx={{ minWidth: 140 }}>
-              <InputLabel id="rows-per-page-label">Rows per page</InputLabel>
-              <Select
-                labelId="rows-per-page-label"
-                id="rows-per-page"
-                value={limit}
-                onChange={(e) => {
-                  setLimit(parseInt(e.target.value));
-                  setPage(1);
-                }}
-                label="Rows per page"
-              >
-                <MenuItem value={10}>10 per page</MenuItem>
-                <MenuItem value={25}>25 per page</MenuItem>
-                <MenuItem value={50}>50 per page</MenuItem>
-                <MenuItem value={100}>100 per page</MenuItem>
-                <MenuItem value={200}>200 per page</MenuItem>
-              </Select>
-            </FormControl>
-            
-            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400 border-r border-slate-100/80">
+                            {customer.sequentialId}
+                          </td>
+                          <td className="px-4 py-3 border-r border-slate-100/80">
+                            <div className="flex items-center gap-3 min-w-[180px]">
+                              <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white font-black text-sm flex items-center justify-center shadow-sm">
+                                {(customer.cus_name || '?').charAt(0).toUpperCase()}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleOpenLedger(customer, e)}
+                                  className="font-bold text-slate-900 text-sm leading-snug text-left hover:text-blue-700 hover:underline block w-full truncate"
+                                  title={`Open ledger: ${customer.cus_name}`}
+                                >
+                                  {customer.cus_name || '—'}
+                                </button>
+                                {customer.name_urdu && (
+                                  <p className="text-xs text-slate-500 truncate mt-0.5" dir="rtl">{customer.name_urdu}</p>
+                                )}
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1">
+                                  <span className="text-[10px] font-semibold text-slate-400">ID {customer.cus_id}</span>
+                                  {customer.cus_reference && (
+                                    <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+                                      Ref: {customer.cus_reference}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 border-r border-slate-100/80">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1.5">
+                                <Phone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                <span className="text-sm font-medium text-slate-800 tabular-nums">
+                                  {customer.cus_phone_no || '—'}
+                                </span>
+                              </div>
+                              {customer.cus_phone_no2 && (
+                                <div className="flex items-center gap-1.5 text-slate-500">
+                                  <Phone className="w-3 h-3 flex-shrink-0 opacity-60" />
+                                  <span className="text-xs tabular-nums">{customer.cus_phone_no2}</span>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 border-r border-slate-100/80">
+                            <div className="flex items-start gap-1.5 max-w-[200px]">
+                              <MapPin className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
+                              <span className="text-xs text-slate-600 leading-relaxed line-clamp-2" title={customer.cus_address || ''}>
+                                {customer.cus_address || customer.city?.city_name || '—'}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center border-r border-slate-100/80">
+                            <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide border ${typeClass}`}>
+                              {typeTitle}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 border-r border-slate-100/80">
+                            <span className="text-xs font-semibold text-slate-700">{categoryTitle}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right border-r border-slate-100/80 tabular-nums">
+                            <p className={`font-black text-base ${balanceMeta.amountClass}`}>
+                              Rs. {fmtAmt(customer.cus_balance)}
+                            </p>
+                            <span className={`inline-block mt-1 text-[9px] font-bold uppercase px-2 py-0.5 rounded-full border ${balanceMeta.badgeClass}`}>
+                              {balanceMeta.label}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center border-r border-slate-100/80">
+                            <span className="text-xs font-medium text-slate-600 whitespace-nowrap">
+                              {formatDatePK(customer.created_at)}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenLedger(customer)}
+                                title="Open ledger"
+                                className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"
+                              >
+                                <ExternalLink className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleEditCustomer(customer)}
+                                title="Edit account"
+                                className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition-colors"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteCustomer(customer.cus_id)}
+                                title="Delete account"
+                                className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+                {customers.length > 0 && (
+                  <tfoot>
+                    <tr className="bg-slate-900 text-white font-bold text-xs">
+                      <td colSpan={6} className="px-4 py-3 text-right uppercase tracking-wider border-r border-slate-700 text-slate-300">
+                        Page total ({customers.length} shown)
+                      </td>
+                      <td className="px-4 py-3 text-right border-r border-slate-700 tabular-nums">
+                        <span className={`font-black text-base ${getBalanceMeta(customers.reduce((s, c) => s + parseFloat(c.cus_balance || 0), 0)).amountClass}`}>
+                          Rs. {fmtAmt(customers.reduce((s, c) => s + parseFloat(c.cus_balance || 0), 0))}
+                        </span>
+                      </td>
+                      <td colSpan={2} className="px-4 py-3" />
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+
+            <Box sx={{ borderTop: 1, borderColor: 'divider', px: 3, py: 2.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2, bgcolor: '#f8fafc' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                <FormControl variant="outlined" size="small" sx={{ minWidth: 140 }}>
+                  <InputLabel id="rows-per-page-label">Rows per page</InputLabel>
+                  <Select
+                    labelId="rows-per-page-label"
+                    id="rows-per-page"
+                    value={limit}
+                    onChange={(e) => {
+                      setLimit(parseInt(e.target.value));
+                      setPage(1);
+                    }}
+                    label="Rows per page"
+                  >
+                    <MenuItem value={10}>10 per page</MenuItem>
+                    <MenuItem value={25}>25 per page</MenuItem>
+                    <MenuItem value={50}>50 per page</MenuItem>
+                    <MenuItem value={100}>100 per page</MenuItem>
+                    <MenuItem value={200}>200 per page</MenuItem>
+                  </Select>
+                </FormControl>
+                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
+                  {customers.length} on this page · {totalCustomers} total accounts
+                </Typography>
+              </Box>
+
               <Pagination
                 count={totalPages}
                 page={page}
@@ -1474,44 +1267,24 @@ export default function CustomersPage() {
                 color="primary"
                 showFirstButton
                 showLastButton
+                siblingCount={1}
+                boundaryCount={1}
               />
             </Box>
-          </Box>
-        </Card>
- 
-        {/* WhatsApp Send Dialog */}
-        <Dialog open={showWhatsAppDialog} onClose={() => setShowWhatsAppDialog(false)} maxWidth="xs" fullWidth>
-          <DialogTitle sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
-            <span style={{ fontSize: 22 }}>📲</span> Send Accounts List via WhatsApp
-          </DialogTitle>
-          <DialogContent>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              This will capture the current filtered list ({totalCustomers} accounts) as an image and send it via WhatsApp.
-            </Typography>
-            <TextField
-              fullWidth
-              label="WhatsApp Phone Number"
-              placeholder="e.g. 03001234567"
-              value={whatsappPhone}
-              onChange={(e) => setWhatsappPhone(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleSendWhatsApp(); }}
-              autoFocus
-              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-            />
-          </DialogContent>
-          <DialogActions sx={{ px: 3, pb: 2 }}>
-            <Button onClick={() => setShowWhatsAppDialog(false)} disabled={isSendingWhatsApp}>Cancel</Button>
-            <Button
-              variant="contained"
-              onClick={handleSendWhatsApp}
-              disabled={isSendingWhatsApp || !whatsappPhone.trim()}
-              sx={{ bgcolor: '#25d366', '&:hover': { bgcolor: '#128c7e' }, fontWeight: 700, minWidth: 130 }}
-            >
-              {isSendingWhatsApp ? 'Sending...' : 'Send'}
-            </Button>
-          </DialogActions>
-        </Dialog>
+          </div>
+        </div>
 
+        {/* Activity legend */}
+        <div className="px-4 sm:px-6 pb-2">
+          <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500 font-medium">
+            <span className="font-bold text-slate-600">Row colors (receivable accounts):</span>
+            <span><span className="inline-block w-3 h-3 rounded-full bg-green-200 mr-1 align-middle" />≤ 1 month</span>
+            <span><span className="inline-block w-3 h-3 rounded-full bg-blue-200 mr-1 align-middle" />1–3 months</span>
+            <span><span className="inline-block w-3 h-3 rounded-full bg-yellow-200 mr-1 align-middle" />3–6 months</span>
+            <span><span className="inline-block w-3 h-3 rounded-full bg-red-200 mr-1 align-middle" />&gt; 6 months</span>
+          </div>
+        </div>
+ 
         {/* Full Replica of Sales Page Customer Modal */}
         <Dialog
           open={showCustomerForm}

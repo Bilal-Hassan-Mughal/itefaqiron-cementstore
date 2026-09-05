@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { calculateClosingBalance, createLedgerEntry, createPayableLedgerEntry } from '@/lib/ledger-helper';
 import { getNextId } from '@/lib/id-helper';
-import { initBranchScope } from '@/lib/branch-server';
+import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 
 // GET - Fetch all payments with related data
 export async function GET(request) {
@@ -133,8 +133,16 @@ export async function POST(request) {
     } = body;
 
     // Validate required fields
-    if (!payment_date || !payment_type || !account_id || !total_amount || !created_by) {
+    if (!payment_date || !payment_type || !account_id || !total_amount) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    const validatedCreatedBy = await resolveUpdatedByUserId(request, created_by, prisma);
+    if (!validatedCreatedBy) {
+      return NextResponse.json(
+        { error: 'Invalid user session. Please log in again and retry.' },
+        { status: 400 }
+      );
     }
 
     const netAmount = parseFloat(total_amount) - parseFloat(discount_amount);
@@ -204,7 +212,7 @@ export async function POST(request) {
             bank_account_id: bank_account_id ? parseInt(bank_account_id) : null,
             bank_amount: parseFloat(bank_amount),
             description,
-            created_by: parseInt(created_by)
+            created_by: validatedCreatedBy
           }
         });
 
@@ -321,7 +329,7 @@ export async function POST(request) {
           ? `${description || `${payment_type.toLowerCase()} payment`} (Total: ${total_amount}, Discount: ${discount_amount}, Net: ${netAmount})`
           : (description || `${payment_type.toLowerCase()} payment`),
         payments: netAmount,
-        updated_by: parseInt(created_by)
+        updated_by: validatedCreatedBy
       });
 
       // Apply custom payment requirement
@@ -412,7 +420,7 @@ export async function POST(request) {
             ? `payment received from customer account ${mainCustomerName}`
             : `payment made to customer account ${mainCustomerName}`),
           payments: parseFloat(cash_amount),
-          updated_by: parseInt(created_by)
+          updated_by: validatedCreatedBy
         });
         cashAccountEntry.closing_balance = cashClosingBalance;
 
@@ -476,7 +484,7 @@ export async function POST(request) {
             ? `payment received from customer account ${mainCustomerName}`
             : `payment made to customer account ${mainCustomerName}`),
           payments: parseFloat(bank_amount),
-          updated_by: parseInt(created_by)
+          updated_by: validatedCreatedBy
         });
         bankAccountEntry.closing_balance = bankClosingBalance;
 

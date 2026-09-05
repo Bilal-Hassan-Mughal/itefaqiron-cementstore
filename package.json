@@ -12,7 +12,7 @@
     "build:matcher": "dotnet publish fingerprint-matcher/FingerprintMatcher -c Release -o fingerprint-matcher/publish",
     "start:matcher": "dotnet fingerprint-matcher/publish/FingerprintMatcher.dll",
     "build": "node scripts/build-nodeafis.js && npx prisma generate && next build --webpack",
-    "postinstall": "node scripts/build-nodeafis.js",
+    "postinstall": "node scripts/build-nodeafis.js && prisma generate",
     "start": "next start -H 0.0.0.0",
     "app:start": "npm --prefix laravel-pos run app:start",
     "app:dist": "npm --prefix laravel-pos run app:dist",
@@ -27,8 +27,7 @@
     "db:seed:hq": "node prisma/seed-admin.js",
     "db:branches": "node scripts/setup-branches.js",
     "db:branch:migrate": "node scripts/pre-branch-push.js && npx prisma db push && node scripts/setup-branches.js",
-    "db:branch:provision": "node scripts/provision-branch-tables.js",
-    "postinstall": "prisma generate"
+    "db:branch:provision": "node scripts/provision-branch-tables.js"
   },
   "dependencies": {
     "@digitalpersona/core": "^0.2.6",

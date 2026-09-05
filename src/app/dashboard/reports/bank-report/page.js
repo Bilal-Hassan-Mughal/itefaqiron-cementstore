@@ -5,6 +5,11 @@ import { ArrowLeft, Download, Printer, Search, Building2, ArrowUpRight, ArrowDow
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '../../components/dashboard-layout';
 import { Autocomplete, TextField, InputAdornment } from '@mui/material';
+import { openAccountLedgerTab, FINANCE_LEDGER_PATH } from '@/lib/ledger-tabs';
+import {
+  collectBoldAccountTerms,
+  buildAccountTermCustomerMap,
+} from '@/lib/report-account-links';
 
 const fmtAmt = (val) => {
   const n = parseFloat(val || 0);
@@ -50,6 +55,7 @@ export default function BankReport() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [accounts, setAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState('');
+  const [customers, setCustomers] = useState([]);
 
   // Set default dates on mount
   useEffect(() => {
@@ -67,6 +73,13 @@ export default function BankReport() {
   }, [startDate, endDate]);
 
   useEffect(() => { fetchCategories(); }, []);
+
+  useEffect(() => {
+    fetch('/api/customers?dropdown=true')
+      .then((response) => (response.ok ? response.json() : []))
+      .then((data) => setCustomers(Array.isArray(data) ? data : []))
+      .catch(() => setCustomers([]));
+  }, []);
 
   useEffect(() => {
     if (selectedCategory) { fetchAccountsByCategory(selectedCategory); }
@@ -153,6 +166,81 @@ export default function BankReport() {
   const formatDate = (dateStr) => {
     if (!dateStr) return '-';
     return new Date(dateStr).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Karachi' });
+  };
+
+  const renderHighlightedText = (text, query) => {
+    if (text === null || text === undefined || text === '') return '-';
+    const str = String(text);
+    if (!query) return str;
+    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = str.split(new RegExp(`(${escapedQuery})`, 'gi'));
+    return parts.map((part, i) =>
+      part.toLowerCase() === query.toLowerCase() ? (
+        <mark key={i} className="bg-amber-200 text-amber-950 font-bold px-1 py-0.5 rounded shadow-2xs">
+          {part}
+        </mark>
+      ) : (
+        part
+      )
+    );
+  };
+
+  const handleOpenAccountLedger = (cusId, cusName, e) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    if (!openAccountLedgerTab(cusId, cusName)) return;
+    router.push(FINANCE_LEDGER_PATH);
+  };
+
+  const renderAccountLink = (customer, content, key) => {
+    if (!customer?.cus_id) {
+      return (
+        <strong key={key} className="font-extrabold text-slate-900">
+          {content}
+        </strong>
+      );
+    }
+    return (
+      <button
+        key={key}
+        type="button"
+        onClick={(e) => handleOpenAccountLedger(customer.cus_id, customer.cus_name, e)}
+        className="font-extrabold text-blue-700 hover:text-blue-900 hover:underline cursor-pointer bg-transparent border-0 p-0 inline text-left"
+        title={`Open ledger: ${customer.cus_name}`}
+      >
+        {content}
+      </button>
+    );
+  };
+
+  const renderDescriptionWithBoldAccounts = (entry, query = '') => {
+    const text = entry.details;
+    if (text === null || text === undefined || text === '') return '-';
+
+    const str = String(text);
+    const terms = collectBoldAccountTerms(entry, { includeBankNames: true });
+    if (!terms.length) return renderHighlightedText(str, query);
+
+    const termMap = buildAccountTermCustomerMap(entry, customers, { includeBankNames: true });
+    const escaped = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const parts = str.split(new RegExp(`(${escaped.join('|')})`, 'gi'));
+
+    return parts.map((part, i) => {
+      if (!part) return null;
+      const isAccount = terms.some((t) => t.toLowerCase() === part.toLowerCase());
+      const content = query ? renderHighlightedText(part, query) : part;
+      if (!isAccount) return <span key={i}>{content}</span>;
+      const customer = termMap.get(part.toLowerCase());
+      return renderAccountLink(customer, content, i);
+    });
+  };
+
+  const renderAccountTitleCell = (entry) => {
+    const title = entry.customer?.cus_name || '-';
+    if (!entry.customer?.cus_id) return <span className="font-bold text-slate-900">{title}</span>;
+    return renderAccountLink(entry.customer, title, `title-${entry.l_id}`);
   };
 
   const handleExport = () => {
@@ -310,12 +398,12 @@ export default function BankReport() {
                   </div>
                   <p className="text-2xl font-bold text-red-800 mt-1">Rs. {formatCurrency(reportData.summary.totalLedgerCredit)}</p>
                 </div>
-                <div className={`bg-gradient-to-br ${closingBalance >= 0 ? 'from-cyan-50 to-cyan-100 border-cyan-200' : 'from-orange-50 to-orange-100 border-orange-200'} border rounded-xl p-4`}>
+                <div className={`bg-gradient-to-br ${closingBalance >= 0 ? 'from-blue-50 to-blue-100 border-blue-200' : 'from-orange-50 to-orange-100 border-orange-200'} border rounded-xl p-4`}>
                   <div className="flex items-center justify-between">
-                    <p className={`text-xs font-semibold ${closingBalance >= 0 ? 'text-cyan-600' : 'text-orange-600'} uppercase tracking-wide`}>Closing Balance</p>
-                    <Building2 className={`w-4 h-4 ${closingBalance >= 0 ? 'text-cyan-500' : 'text-orange-500'}`} />
+                    <p className={`text-xs font-semibold ${closingBalance >= 0 ? 'text-blue-600' : 'text-orange-600'} uppercase tracking-wide`}>Closing Balance</p>
+                    <Building2 className={`w-4 h-4 ${closingBalance >= 0 ? 'text-blue-500' : 'text-orange-500'}`} />
                   </div>
-                  <p className={`text-2xl font-bold ${closingBalance >= 0 ? 'text-cyan-800' : 'text-orange-800'} mt-1`}>Rs. {formatCurrency(closingBalance)}</p>
+                  <p className={`text-2xl font-black ${closingBalance >= 0 ? 'text-blue-800' : 'text-orange-800'} mt-1`}>Rs. {formatCurrency(closingBalance)}</p>
                   <p className="text-xs text-slate-400 mt-0.5">Opening + Debit − Credit</p>
                 </div>
               </div>
@@ -326,15 +414,15 @@ export default function BankReport() {
                   <tbody>
                     <tr className="border-b border-gray-400">
                       <td className="px-4 py-2 font-medium border-r border-gray-400 w-1/3">Total Debit:</td>
-                      <td className="px-4 py-2 text-right font-bold border-r border-gray-400 w-1/3">{formatCurrency(reportData.summary.totalLedgerDebit)}</td>
+                      <td className="px-4 py-2 text-right font-black text-base border-r border-gray-400 w-1/3 text-emerald-800">{formatCurrency(reportData.summary.totalLedgerDebit)}</td>
                       <td rowSpan="2" className="px-4 py-2 text-center w-1/3">
                         <div className="font-semibold text-xs uppercase">Closing Balance</div>
-                        <div className="text-lg font-bold mt-1">{formatCurrency(closingBalance)}</div>
+                        <div className="text-lg font-black mt-1 text-blue-700">{formatCurrency(closingBalance)}</div>
                       </td>
                     </tr>
                     <tr>
                       <td className="px-4 py-2 font-medium border-r border-gray-400">Total Credit:</td>
-                      <td className="px-4 py-2 text-right font-bold border-r border-gray-400">{formatCurrency(reportData.summary.totalLedgerCredit)}</td>
+                      <td className="px-4 py-2 text-right font-black text-base border-r border-gray-400 text-rose-800">{formatCurrency(reportData.summary.totalLedgerCredit)}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -353,9 +441,9 @@ export default function BankReport() {
                       <th className="px-3 py-3 text-left text-xs font-bold uppercase tracking-wider border-r border-slate-600 print:border-black">Account</th>
                       <th className="px-3 py-3 text-left text-xs font-bold uppercase tracking-wider border-r border-slate-600 print:border-black">Description</th>
                       <th className="px-3 py-3 text-left text-xs font-bold uppercase tracking-wider border-r border-slate-600 print:border-black">Bill</th>
-                      <th className="px-3 py-3 text-right text-xs font-bold uppercase tracking-wider border-r border-slate-600 print:border-black">Debit</th>
-                      <th className="px-3 py-3 text-right text-xs font-bold uppercase tracking-wider border-r border-slate-600 print:border-black">Credit</th>
-                      <th className="px-3 py-3 text-right text-xs font-bold uppercase tracking-wider">Balance</th>
+                      <th className="px-3 py-3 text-right text-sm font-bold uppercase tracking-wider border-r border-slate-600 print:border-black text-emerald-400">Debit</th>
+                      <th className="px-3 py-3 text-right text-sm font-bold uppercase tracking-wider border-r border-slate-600 print:border-black text-rose-400">Credit</th>
+                      <th className="px-3 py-3 text-right text-sm font-bold uppercase tracking-wider text-blue-400">Balance</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 print:divide-black">
@@ -371,8 +459,8 @@ export default function BankReport() {
                           </td>
                           <td className="px-3 py-2.5 text-right border-r border-slate-200 print:border-black text-slate-400">—</td>
                           <td className="px-3 py-2.5 text-right border-r border-slate-200 print:border-black text-slate-400">—</td>
-                          <td className={`px-3 py-2.5 text-right font-bold tabular-nums ${ob >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                            {formatCurrency(ob)}
+                          <td className={`px-3 py-2.5 text-right font-bold tabular-nums ${ob >= 0 ? 'text-blue-700' : 'text-rose-700'}`}>
+                            <span className="font-black text-base">Rs. {formatCurrency(ob)}</span>
                           </td>
                         </tr>
                       );
@@ -384,8 +472,12 @@ export default function BankReport() {
                         <tr key={entry.l_id} className={`${index % 2 === 0 ? 'bg-white' : 'bg-slate-50'} ledger-row-hover cursor-pointer print:bg-white`}>
                           <td className="px-3 py-2.5 text-slate-900 border-r border-slate-200 print:border-black">{index + 1}</td>
                           <td className="px-3 py-2.5 text-slate-900 border-r border-slate-200 print:border-black whitespace-nowrap">{formatDate(entry.created_at)}</td>
-                          <td className="px-3 py-2.5 text-slate-900 font-medium border-r border-slate-200 print:border-black">{entry.customer?.cus_name || '-'}</td>
-                          <td className="px-3 py-2.5 text-slate-700 border-r border-slate-200 print:border-black">{entry.details || '-'}</td>
+                          <td className="px-3 py-2.5 text-slate-900 font-bold border-r border-slate-200 print:border-black">
+                            {renderAccountTitleCell(entry)}
+                          </td>
+                          <td className="px-3 py-2.5 text-slate-700 border-r border-slate-200 print:border-black leading-relaxed max-w-sm" title={entry.details || '-'}>
+                            {renderDescriptionWithBoldAccounts(entry)}
+                          </td>
                           {(() => {
                             const firstIndex = reportData.ledgerEntries.findIndex(e => e.bill_no === entry.bill_no && ((e.cus_id || e.customer?.cus_id) === (entry.cus_id || entry.customer?.cus_id)));
                             const isFirstBill = entry.bill_no && firstIndex === index;
@@ -404,13 +496,25 @@ export default function BankReport() {
                               </td>
                             );
                           })()}
-                          <td className={`px-3 py-2.5 text-right border-r border-slate-200 print:border-black tabular-nums ${displayAmts.debit > 0 ? 'text-green-600 font-semibold print:text-black' : 'text-slate-400'}`}>
-                            {displayAmts.debit > 0 ? formatCurrency(displayAmts.debit) : '-'}
+                          <td className="px-3 py-2.5 text-right border-r border-slate-200 print:border-black tabular-nums">
+                            {displayAmts.debit > 0 ? (
+                              <span className="text-emerald-700 font-black text-base">Rs. {formatCurrency(displayAmts.debit)}</span>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
                           </td>
-                          <td className={`px-3 py-2.5 text-right border-r border-slate-200 print:border-black tabular-nums ${displayAmts.credit > 0 ? 'text-red-600 font-semibold print:text-black' : 'text-slate-400'}`}>
-                            {displayAmts.credit > 0 ? formatCurrency(displayAmts.credit) : '-'}
+                          <td className="px-3 py-2.5 text-right border-r border-slate-200 print:border-black tabular-nums">
+                            {displayAmts.credit > 0 ? (
+                              <span className="text-rose-700 font-black text-base">Rs. {formatCurrency(displayAmts.credit)}</span>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
                           </td>
-                          <td className={`px-3 py-2.5 text-right font-semibold tabular-nums ${balance >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCurrency(balance)}</td>
+                          <td className="px-3 py-2.5 text-right font-bold tabular-nums">
+                            <span className={`font-black text-base ${balance >= 0 ? 'text-blue-700' : 'text-rose-700'}`}>
+                              Rs. {formatCurrency(balance)}
+                            </span>
+                          </td>
                         </tr>
                       );
                     })}
@@ -422,9 +526,15 @@ export default function BankReport() {
                     <tr className="bg-slate-800 text-white font-bold print:bg-gray-200 print:text-black">
                       <td colSpan="4" className="px-3 py-3 text-right uppercase text-xs tracking-wider border-r border-slate-600 print:border-black">Grand Total</td>
                       <td className="px-3 py-3 border-r border-slate-600 print:border-black" />
-                      <td className="px-3 py-3 text-right border-r border-slate-600 print:border-black tabular-nums text-emerald-200 print:text-black">{formatCurrency(reportData.summary.totalLedgerDebit)}</td>
-                      <td className="px-3 py-3 text-right border-r border-slate-600 print:border-black tabular-nums text-red-200 print:text-black">{formatCurrency(reportData.summary.totalLedgerCredit)}</td>
-                      <td className="px-3 py-3 text-right tabular-nums print:text-black">{formatCurrency(closingBalance)}</td>
+                      <td className="px-3 py-3 text-right border-r border-slate-600 print:border-black tabular-nums text-emerald-400 font-black text-base">
+                        Rs. {formatCurrency(reportData.summary.totalLedgerDebit)}
+                      </td>
+                      <td className="px-3 py-3 text-right border-r border-slate-600 print:border-black tabular-nums text-rose-400 font-black text-base">
+                        Rs. {formatCurrency(reportData.summary.totalLedgerCredit)}
+                      </td>
+                      <td className="px-3 py-3 text-right tabular-nums text-blue-400 font-black text-base">
+                        Rs. {formatCurrency(closingBalance)}
+                      </td>
                     </tr>
                   </tfoot>
                 </table>

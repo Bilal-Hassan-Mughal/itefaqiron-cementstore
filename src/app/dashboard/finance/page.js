@@ -29,6 +29,7 @@ import {
 import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
+import SaveProgressBackdrop from '../components/save-progress-backdrop';
 import { BRAND, COMPANY } from '@/lib/brand-theme';
 
 // Material-UI imports
@@ -822,6 +823,13 @@ export default function FinancePage() {
       console.error('Error loading user from localStorage:', e);
     }
   }, []);
+
+  const getCurrentUserId = () => {
+    const raw = currentUser?.user_id ?? currentUser?.id;
+    if (raw == null || raw === '') return null;
+    const parsed = parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  };
   const [showLedgerForm, setShowLedgerForm] = useState(false);
   const [showJournalForm, setShowJournalForm] = useState(false);
   const [editingLedger, setEditingLedger] = useState(null);
@@ -915,6 +923,22 @@ export default function FinancePage() {
   const [cashAccounts, setCashAccounts] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
   const [paymentStatus, setPaymentStatus] = useState({ loading: false, error: null });
+  const [saveStatusMessage, setSaveStatusMessage] = useState('');
+
+  const beginSavingPayment = (message) => {
+    setPaymentStatus({ loading: true, error: null });
+    setSaveStatusMessage(message);
+  };
+
+  const updateSaveStatus = (message) => {
+    setSaveStatusMessage(message);
+  };
+
+  const endSavingPayment = () => {
+    setPaymentStatus({ loading: false, error: null });
+    setSaveStatusMessage('');
+  };
+
   const [selectedLedgerBankAccount, setSelectedLedgerBankAccount] = useState(null);
   const [isSubmittingLedger, setIsSubmittingLedger] = useState(false);
   const [isSendingPaymentWhatsApp, setIsSendingPaymentWhatsApp] = useState(false);
@@ -1788,6 +1812,12 @@ export default function FinancePage() {
     }
 
     try {
+      const actorUserId = getCurrentUserId();
+      if (!actorUserId) {
+        alert('Session expired. Please log in again.');
+        return;
+      }
+
       setJournalStatus({ loading: true, error: null });
       const response = await fetch('/api/journals', {
         method: 'POST',
@@ -1801,7 +1831,7 @@ export default function FinancePage() {
             credit_amount: l.credit_amount || 0,
             description: l.description || journalData.description
           })),
-          created_by: 6 // System Administrator
+          created_by: getCurrentUserId()
         })
       });
 
@@ -1853,7 +1883,7 @@ export default function FinancePage() {
         exp_type: discountTitleId,
         exp_detail: `Payment discount of PKR ${discountAmount}`,
         exp_amount: discountAmount,
-        updated_by: 7 // Super admin user ID
+        updated_by: getCurrentUserId()
       };
 
       const expenseResponse = await fetch('/api/expenses', {
@@ -1949,7 +1979,13 @@ export default function FinancePage() {
       const authOk = await requireAuth();
       if (!authOk) return;
 
-      setPaymentStatus({ loading: true, error: null });
+      const actorUserId = getCurrentUserId();
+      if (!actorUserId) {
+        alert('Session expired. Please log in again.');
+        return;
+      }
+
+      beginSavingPayment('Processing amount received...');
 
       const paymentData = {
         payment_date: new Date().toISOString().split('T')[0],
@@ -1962,12 +1998,13 @@ export default function FinancePage() {
         bank_account_id: receivePaymentData.bank_account || null,
         bank_amount: bankAmount,
         description: receivePaymentData.description,
-        created_by: 7 // Super admin user ID
+        created_by: actorUserId
       };
 
       const customer = customers.find(c => Number(c.cus_id) === Number(selectedCustomer));
       const previousBalance = parseFloat(customer?.cus_balance || 0);
 
+      updateSaveStatus('Saving payment to server...');
       const response = await fetch('/api/payments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1977,9 +2014,11 @@ export default function FinancePage() {
       if (response.ok) {
         const result = await response.json();
         if (parseFloat(receivePaymentData.discount || 0) > 0) {
+          updateSaveStatus('Recording discount...');
           await createDiscountExpense(-parseFloat(receivePaymentData.discount), receivePaymentData.description || 'Payment discount');
         }
 
+        updateSaveStatus('Updating ledger...');
         const bankAcc = bankAccounts.find(b => b.cus_id === parseInt(receivePaymentData.bank_account));
         const cashAcc = cashAccounts.find(c => c.cus_id === parseInt(receivePaymentData.cash_account));
         
@@ -2008,7 +2047,9 @@ export default function FinancePage() {
 
         setShowReceivePaymentForm(false);
         setReceivePaymentData({ total_payment: '', discount: '', cash_account: '', cash_amount: '', bank_account: '', bank_amount: '', description: '' });
+        updateSaveStatus('Refreshing ledger...');
         fetchData();
+        updateSaveStatus('Generating receipt...');
         setShowPaymentReceipt(true);
       } else {
         const error = await response.json();
@@ -2018,7 +2059,7 @@ export default function FinancePage() {
       console.error('Error submitting payment:', error);
       alert('Failed to process payment');
     } finally {
-      setPaymentStatus({ loading: false, error: null });
+      endSavingPayment();
     }
   };
 
@@ -2037,7 +2078,13 @@ export default function FinancePage() {
       const authOk = await requireAuth();
       if (!authOk) return;
 
-      setPaymentStatus({ loading: true, error: null });
+      const actorUserId = getCurrentUserId();
+      if (!actorUserId) {
+        alert('Session expired. Please log in again.');
+        return;
+      }
+
+      beginSavingPayment('Processing payout...');
 
       const paymentData = {
         payment_date: new Date().toISOString().split('T')[0],
@@ -2050,12 +2097,13 @@ export default function FinancePage() {
         bank_account_id: payPaymentData.bank_account || null,
         bank_amount: bankAmount,
         description: payPaymentData.description,
-        created_by: 7 // Super admin user ID
+        created_by: actorUserId
       };
 
       const customer = customers.find(c => Number(c.cus_id) === Number(selectedCustomer));
       const previousBalance = parseFloat(customer?.cus_balance || 0);
 
+      updateSaveStatus('Saving payment to server...');
       const response = await fetch('/api/payments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2065,9 +2113,11 @@ export default function FinancePage() {
       if (response.ok) {
         const result = await response.json();
         if (parseFloat(payPaymentData.discount || 0) > 0) {
+          updateSaveStatus('Recording discount...');
           await createDiscountExpense(parseFloat(payPaymentData.discount), payPaymentData.description || 'Payment discount');
         }
 
+        updateSaveStatus('Updating ledger...');
         const bankAcc = bankAccounts.find(b => b.cus_id === parseInt(payPaymentData.bank_account));
         const cashAcc = cashAccounts.find(c => c.cus_id === parseInt(payPaymentData.cash_account));
         
@@ -2096,7 +2146,9 @@ export default function FinancePage() {
 
         setShowPayPaymentForm(false);
         setPayPaymentData({ total_payment: '', discount: '', cash_account: '', cash_amount: '', bank_account: '', bank_amount: '', description: '' });
+        updateSaveStatus('Refreshing ledger...');
         fetchData();
+        updateSaveStatus('Generating receipt...');
         setShowPaymentReceipt(true);
       } else {
         const error = await response.json();
@@ -2106,7 +2158,7 @@ export default function FinancePage() {
       console.error('Error submitting payment:', error);
       alert('Failed to process payment');
     } finally {
-      setPaymentStatus({ loading: false, error: null });
+      endSavingPayment();
     }
   };
 
@@ -2125,8 +2177,8 @@ export default function FinancePage() {
     if (d.bankAmount > 0) rows.push(`<tr><td style="padding:10px 14px;border-bottom:1px solid #e5e7eb">Bank${d.bankAcc ? ` (${d.bankAcc.cus_name})` : ''}</td><td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;text-align:right">${fmt(d.bankAmount)}</td></tr>`);
     if (d.discountAmount > 0) rows.push(`<tr><td style="padding:10px 14px;border-bottom:1px solid #e5e7eb">Discount</td><td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;text-align:right">${fmt(d.discountAmount)}</td></tr>`);
     rows.push(`<tr style="background:#f1f5f9"><td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;font-weight:700">Total Paid</td><td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:700">${fmt(d.totalAmount)}</td></tr>`);
-    const remColor = d.remainingBalance == null ? '#e2e8f0' : (d.remainingBalance > 0 ? '#fbbf24' : '#4ade80');
-    rows.push(`<tr style="background:#1e293b"><td style="padding:12px 14px;color:white;font-weight:700">Remaining Balance (کل بقایا)</td><td style="padding:12px 14px;text-align:right;font-weight:700;color:${remColor}">${d.remainingBalance == null ? '—' : `PKR ${fmt(d.remainingBalance)}`}</td></tr>`);
+    const remRowBg = isPay ? '#ef4444' : '#16a34a';
+    rows.push(`<tr style="background:${remRowBg}"><td style="padding:12px 14px;color:white;font-weight:700">Remaining Balance (کل بقایا)</td><td style="padding:12px 14px;text-align:right;font-weight:700;color:#ffffff">${d.remainingBalance == null ? '—' : `PKR ${fmt(d.remainingBalance)}`}</td></tr>`);
 
     let tempEl = null;
     try {
@@ -2918,6 +2970,11 @@ export default function FinancePage() {
 
   return (
     <DashboardLayout>
+      <SaveProgressBackdrop
+        open={paymentStatus.loading}
+        message={saveStatusMessage}
+        subMessage="Do not close or refresh until the payment is saved and the receipt is ready"
+      />
       <Container maxWidth={false} sx={{ display: 'flex', flexDirection: 'column', p: { xs: 2, md: 2.5 }, pb: 4, gap: 2.5, ...LEDGER_UI.page }}>
 
         {/* Summary KPIs */}
@@ -4452,6 +4509,7 @@ export default function FinancePage() {
             onClick={handleReceivePaymentSubmit}
             variant="contained"
             disabled={paymentStatus.loading}
+            startIcon={paymentStatus.loading ? <CircularProgress size={20} color="inherit" /> : null}
             sx={{
               bgcolor: '#10b981',
               '&:hover': { bgcolor: '#059669' },
@@ -4459,7 +4517,7 @@ export default function FinancePage() {
               fontWeight: 700
             }}
           >
-            {paymentStatus.loading ? <CircularProgress size={20} color="inherit" /> : 'Confirm Receipt'}
+            {paymentStatus.loading ? (saveStatusMessage || 'Processing...') : 'Confirm Receipt'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -4693,6 +4751,7 @@ export default function FinancePage() {
             onClick={handlePayPaymentSubmit}
             variant="contained"
             disabled={paymentStatus.loading}
+            startIcon={paymentStatus.loading ? <CircularProgress size={20} color="inherit" /> : null}
             sx={{
               bgcolor: '#ef4444',
               '&:hover': { bgcolor: '#dc2626' },
@@ -4700,7 +4759,7 @@ export default function FinancePage() {
               fontWeight: 700
             }}
           >
-            {paymentStatus.loading ? <CircularProgress size={20} color="inherit" /> : 'Confirm Payment'}
+            {paymentStatus.loading ? (saveStatusMessage || 'Processing...') : 'Confirm Payment'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -4789,9 +4848,21 @@ export default function FinancePage() {
                   </Typography>
                 </Box>
                 {/* Remaining Balance */}
-                <Box className="remaining-balance-bar" sx={{ display: 'flex', justifyContent: 'space-between', px: 2, py: 1.5, bgcolor: '#1e293b', color: '#ffffff !important' }}>
-                  <Typography variant="body2" sx={{ fontWeight: 700, color: '#ffffff !important' }}>Remaining Balance (کل بقایا)</Typography>
-                  <Typography variant="body2" sx={{ fontWeight: 700, color: paymentReceiptData.remainingBalance == null ? '#ffffff !important' : (paymentReceiptData.remainingBalance > 0 ? '#facc15 !important' : '#4ade80 !important') }}>
+                <Box
+                  className="remaining-balance-bar"
+                  sx={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    px: 2,
+                    py: 1.5,
+                    bgcolor: paymentReceiptData.type === 'PAY' ? '#ef4444' : '#16a34a',
+                    color: '#ffffff !important',
+                  }}
+                >
+                  <Typography variant="body2" sx={{ fontWeight: 700, color: '#ffffff !important' }}>
+                    Remaining Balance (کل بقایا)
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 700, color: '#ffffff !important' }}>
                     {paymentReceiptData.remainingBalance == null ? '—' : `PKR ${fmtAmt(paymentReceiptData.remainingBalance)}`}
                   </Typography>
                 </Box>
@@ -4840,7 +4911,8 @@ export default function FinancePage() {
               if (d.bankAmount > 0) rows.push(`<tr><td style="padding:10px 14px;border-bottom:1px solid #e5e7eb">Bank${d.bankAcc ? ` (${d.bankAcc.cus_name})` : ''}</td><td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;text-align:right">${fmt(d.bankAmount)}</td></tr>`);
               if (d.discountAmount > 0) rows.push(`<tr><td style="padding:10px 14px;border-bottom:1px solid #e5e7eb">Discount</td><td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;text-align:right">${fmt(d.discountAmount)}</td></tr>`);
               rows.push(`<tr style="background:#f1f5f9"><td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;font-weight:700">Total Paid</td><td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:700">${fmt(d.totalAmount)}</td></tr>`);
-              rows.push(`<tr style="background:#1e293b"><td style="padding:12px 14px;color:white;font-weight:700">Remaining Balance (کل بقایا)</td><td style="padding:12px 14px;text-align:right;font-weight:700;color:${d.remainingBalance == null ? '#e2e8f0' : (d.remainingBalance > 0 ? '#fbbf24' : '#4ade80')}">${d.remainingBalance == null ? '—' : `PKR ${fmt(d.remainingBalance)}`}</td></tr>`);
+              const remRowBg = isRed ? '#ef4444' : '#16a34a';
+              rows.push(`<tr style="background:${remRowBg}"><td style="padding:12px 14px;color:white;font-weight:700">Remaining Balance (کل بقایا)</td><td style="padding:12px 14px;text-align:right;font-weight:700;color:#ffffff">${d.remainingBalance == null ? '—' : `PKR ${fmt(d.remainingBalance)}`}</td></tr>`);
 
               const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payment Receipt</title>
 <style>
