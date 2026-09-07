@@ -82,6 +82,9 @@ const fmtAmt = (val) => {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
+const customerOptionKey = (option) => String(option?.cus_id ?? '');
+const isSameCustomerOption = (a, b) => Number(a?.cus_id) === Number(b?.cus_id);
+
 const LEDGER_FILTER_OUTLINED_SX = {
   borderRadius: '12px',
   bgcolor: '#ffffff',
@@ -3144,6 +3147,8 @@ export default function FinancePage() {
                 size="small"
                 options={filteredAccounts}
                 getOptionLabel={(option) => option.cus_name}
+                getOptionKey={customerOptionKey}
+                isOptionEqualToValue={isSameCustomerOption}
                 value={selectedCustomer ? customers.find(c => Number(c.cus_id) === Number(selectedCustomer)) : null}
                 onChange={(event, newValue) => {
                   if (newValue) openCustomerLedger(newValue.cus_id, newValue.cus_name);
@@ -3645,6 +3650,8 @@ export default function FinancePage() {
                 selectOnFocus={true}
                 options={filteredCustomers}
                 getOptionLabel={(option) => option.cus_name}
+                getOptionKey={customerOptionKey}
+                isOptionEqualToValue={isSameCustomerOption}
                 value={formData.cus_id ? customers.find(c => c.cus_id === formData.cus_id) : null}
                 onChange={(event, newValue) => {
                   if (newValue) {
@@ -3870,6 +3877,8 @@ export default function FinancePage() {
                         size="small"
                         options={bankAccounts.length > 0 ? bankAccounts : []}
                         getOptionLabel={(option) => option.cus_name || ''}
+                        getOptionKey={customerOptionKey}
+                        isOptionEqualToValue={isSameCustomerOption}
                         value={selectedLedgerBankAccount}
                         onChange={(event, newValue) => setSelectedLedgerBankAccount(newValue)}
                         disabled={parseFloat(formData.bank_amount || 0) <= 0}
@@ -3890,7 +3899,7 @@ export default function FinancePage() {
                         renderOption={(props, option) => {
                           const { key, ...optionProps } = props;
                           return (
-                            <Box component="li" key={option.cus_id} {...optionProps}>
+                            <Box component="li" key={key} {...optionProps}>
                               <Box>
                                 <Typography variant="body2" fontWeight={700}>{option.cus_name}</Typography>
                                 <Typography variant="caption" color="text.secondary">{option.cus_phone_no}</Typography>
@@ -4149,6 +4158,8 @@ export default function FinancePage() {
                           selectOnFocus={true}
                           options={customers}
                           getOptionLabel={(option) => option.cus_name}
+                          getOptionKey={customerOptionKey}
+                          isOptionEqualToValue={isSameCustomerOption}
                           value={line.account_id ? customers.find(c => c.cus_id === line.account_id) : null}
                           onChange={(e, val) => {
                             handleJournalLineChange(index, 'account_id', val?.cus_id || '');
