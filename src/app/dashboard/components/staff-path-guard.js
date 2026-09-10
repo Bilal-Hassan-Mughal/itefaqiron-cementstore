@@ -16,15 +16,28 @@ export default function StaffPathGuard({ user, isClient }) {
     if (!isClient || !user || pathname == null) return;
     if (canStaffAccessPath(user, pathname)) return;
 
+    const redirect = (href) => {
+      const id = window.setTimeout(() => {
+        try {
+          router.replace(href);
+        } catch {
+          window.location.href = href;
+        }
+      }, 0);
+      return id;
+    };
+
+    let timerId;
     if (pathname === '/dashboard' || pathname === '/dashboard/') {
       const firstPath = getFirstAllowedPathForStaff(user);
       if (firstPath && firstPath !== '/dashboard') {
-        router.replace(firstPath);
-        return;
+        timerId = redirect(firstPath);
+        return () => window.clearTimeout(timerId);
       }
     }
 
-    router.replace('/dashboard?access=denied');
+    timerId = redirect('/dashboard?access=denied');
+    return () => window.clearTimeout(timerId);
   }, [isClient, user, pathname, router]);
 
   return null;

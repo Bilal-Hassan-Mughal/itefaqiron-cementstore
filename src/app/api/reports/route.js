@@ -78,7 +78,9 @@ export async function GET(request) {
 
       case 'rebate-report':
         const rebateSupplierId = searchParams.get('supplierId') ? parseInt(searchParams.get('supplierId')) : null;
-        return await getRebateReport(rebateSupplierId, startDate, endDate);
+        const rebateMonth = searchParams.get('month');
+        const rebateView = searchParams.get('view');
+        return await getRebateReport(rebateSupplierId, startDate, endDate, { month: rebateMonth, view: rebateView });
 
       case 'customer-balance-report':
         return await getDetailedCustomerBalanceReport();
@@ -1232,50 +1234,37 @@ async function getBalanceSheet() {
   return NextResponse.json({ receivables, payables, products, summary });
 }
 
-// Rebate Report - Detailed products purchased from a supplier
-async function getRebateReport(supplierId, startDate, endDate) {
-  if (!supplierId) {
-    return NextResponse.json({ error: 'Supplier ID is required' }, { status: 400 });
-  }
+function toMonthKey(date) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Karachi',
+    year: 'numeric',
+    month: '2-digit',
+  }).format(new Date(date)).slice(0, 7);
+}
 
-  const whereClause = {
-    cus_id: supplierId,
-  };
+function getMonthDateRange(monthStr) {
+  const [year, month] = monthStr.split('-').map(Number);
+  if (!year || !month) return null;
+  const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  return { startDate, endDate };
+}
 
-  if (startDate && endDate) {
-    whereClause.created_at = parseLocalDateRange(startDate, endDate);
-  }
+function formatMonthLabel(monthKey) {
+  const [year, month] = monthKey.split('-').map(Number);
+  return new Date(year, month - 1, 1).toLocaleDateString('en-GB', {
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Asia/Karachi',
+  });
+}
 
-  const [supplier, purchases] = await Promise.all([
-    prisma.customer.findUnique({
-      where: { cus_id: supplierId },
-      include: {
-        customer_category: true
-      }
-    }),
-    prisma.purchase.findMany({
-      where: whereClause,
-      include: {
-        purchase_details: {
-          include: {
-            product: true
-          }
-        }
-      },
-      orderBy: {
-        created_at: 'desc'
-      }
-    })
-  ]);
-
-  if (!supplier) {
-    return NextResponse.json({ error: 'Supplier not found' }, { status: 404 });
-  }
-
-  // Aggregate by product
+function aggregateRebatePurchases(purchases) {
   const productSummary = {};
-  purchases.forEach(purchase => {
-    purchase.purchase_details.forEach(detail => {
+
+  purchases.forEach((purchase) => {
+    purchase.purchase_details.forEach((detail) => {
       const proId = detail.pro_id;
       if (!productSummary[proId]) {
         productSummary[proId] = {
@@ -1284,29 +1273,288 @@ async function getRebateReport(supplierId, startDate, endDate) {
           total_quantity: 0,
           total_amount: 0,
           purchase_count: 0,
-          unit: detail.unit
+          unit: detail.unit || detail.product?.pro_unit || '-',
         };
       }
       productSummary[proId].total_quantity += parseFloat(detail.qnty);
       productSummary[proId].total_amount += parseFloat(detail.net_total);
-      productSummary[proId].purchase_count++;
+      productSummary[proId].purchase_count += 1;
     });
   });
 
-  const products = Object.values(productSummary).map(p => ({
+  const products = Object.values(productSummary).map((p) => ({
     ...p,
-    avg_rate: p.total_quantity > 0 ? p.total_amount / p.total_quantity : 0
+    avg_rate: p.total_quantity > 0 ? p.total_amount / p.total_quantity : 0,
   }));
 
-  const summary = {
-    totalQuantity: products.reduce((sum, p) => sum + p.total_quantity, 0),
-    totalAmount: products.reduce((sum, p) => sum + p.total_amount, 0),
-    productCount: products.length,
-    purchaseCount: purchases.length,
-    supplierName: supplier.cus_name
+  return products;
+}
+
+function mapRebatePurchaseRows(purchases) {
+  return purchases.map((purchase) => {
+    const items = purchase.purchase_details.map((detail) => ({
+      pro_id: detail.pro_id,
+      pro_title: detail.product?.pro_title || 'N/A',
+      unit: detail.unit || '-',
+      qnty: parseFloat(detail.qnty),
+      unit_rate: parseFloat(detail.unit_rate),
+      discount: parseFloat(detail.discount || 0),
+      net_total: parseFloat(detail.net_total),
+    }));
+
+    return {
+      pur_id: purchase.pur_id,
+      invoice_number: purchase.invoice_number || `PUR-${purchase.pur_id}`,
+      created_at: purchase.created_at,
+      net_total: parseFloat(purchase.net_total),
+      total_amount: parseFloat(purchase.total_amount),
+      payment: parseFloat(purchase.payment),
+      payment_type: purchase.payment_type,
+      vehicle_no: purchase.vehicle_no,
+      item_count: items.length,
+      total_qty: items.reduce((sum, item) => sum + item.qnty, 0),
+      items,
+    };
+  });
+}
+
+function parseRebateMonthFromDetails(details, createdAt) {
+  if (details) {
+    const monthKeyMatch = details.match(/MonthKey:\s*(\d{4}-\d{2})/i);
+    if (monthKeyMatch) return monthKeyMatch[1];
+
+    const isoMatch = details.match(/Month:\s*(\d{4}-\d{2})/i);
+    if (isoMatch) return isoMatch[1];
+
+    const monthLabelMatch = details.match(/Month:\s*([A-Za-z]{3,9}\s+\d{4})/i);
+    if (monthLabelMatch) {
+      const parsed = new Date(`${monthLabelMatch[1]} 1`);
+      if (!Number.isNaN(parsed.getTime())) return toMonthKey(parsed);
+    }
+
+    const fromMatch = details.match(/From:\s*(\d{4}-\d{2}-\d{2})/i);
+    if (fromMatch) return fromMatch[1].slice(0, 7);
+  }
+
+  return toMonthKey(createdAt);
+}
+
+function resolveRebateStatus(row) {
+  if (row.purchaseCount <= 0 && row.rebatePaid <= 0) return 'empty';
+  if (row.purchaseCount > 0 && row.rebatePaid <= 0) return 'unpaid';
+  return 'paid';
+}
+
+function mapRebateLedgerEntry(entry) {
+  return {
+    ledger_id: entry.ledger_id,
+    bill_no: entry.bill_no,
+    created_at: entry.created_at,
+    debit_amount: parseFloat(entry.debit_amount || 0),
+    credit_amount: parseFloat(entry.credit_amount || 0),
+    details: entry.details,
+    rebate_month: parseRebateMonthFromDetails(entry.details, entry.created_at),
+  };
+}
+
+function buildMonthlyBreakdown(purchases, rebateEntries) {
+  const monthMap = {};
+
+  const ensureMonth = (monthKey) => {
+    if (!monthMap[monthKey]) {
+      monthMap[monthKey] = {
+        month: monthKey,
+        monthLabel: formatMonthLabel(monthKey),
+        purchaseCount: 0,
+        productIds: new Set(),
+        totalQuantity: 0,
+        totalAmount: 0,
+        rebatePaid: 0,
+        rebateCount: 0,
+        rebateEntries: [],
+      };
+    }
+    return monthMap[monthKey];
   };
 
-  return NextResponse.json({ supplier, products, summary });
+  purchases.forEach((purchase) => {
+    const monthKey = toMonthKey(purchase.created_at);
+    const bucket = ensureMonth(monthKey);
+    bucket.purchaseCount += 1;
+
+    purchase.purchase_details.forEach((detail) => {
+      bucket.productIds.add(detail.pro_id);
+      bucket.totalQuantity += parseFloat(detail.qnty);
+      bucket.totalAmount += parseFloat(detail.net_total);
+    });
+  });
+
+  rebateEntries.forEach((entry) => {
+    const monthKey = parseRebateMonthFromDetails(entry.details, entry.created_at);
+    const bucket = ensureMonth(monthKey);
+    const mappedEntry = mapRebateLedgerEntry(entry);
+    bucket.rebatePaid += mappedEntry.debit_amount;
+    bucket.rebateCount += 1;
+    bucket.rebateEntries.push(mappedEntry);
+  });
+
+  return Object.values(monthMap)
+    .map((row) => {
+      const status = resolveRebateStatus(row);
+      const lastPaidAt = row.rebateEntries.length > 0 ? row.rebateEntries[0].created_at : null;
+      return {
+        month: row.month,
+        monthLabel: row.monthLabel,
+        purchaseCount: row.purchaseCount,
+        productCount: row.productIds.size,
+        totalQuantity: row.totalQuantity,
+        totalAmount: row.totalAmount,
+        rebatePaid: row.rebatePaid,
+        rebateCount: row.rebateCount,
+        status,
+        lastPaidAt,
+        rebateEntries: row.rebateEntries.sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        ),
+      };
+    })
+    .sort((a, b) => b.month.localeCompare(a.month));
+}
+
+// Rebate Report - Monthly overview + detailed products/purchases for a supplier
+async function getRebateReport(supplierId, startDate, endDate, options = {}) {
+  if (!supplierId) {
+    return NextResponse.json({ error: 'Supplier ID is required' }, { status: 400 });
+  }
+
+  const { month, view } = options;
+
+  if (month) {
+    const monthRange = getMonthDateRange(month);
+    if (!monthRange) {
+      return NextResponse.json({ error: 'Invalid month format. Use YYYY-MM.' }, { status: 400 });
+    }
+    startDate = monthRange.startDate;
+    endDate = monthRange.endDate;
+  }
+
+  const supplier = await prisma.customer.findUnique({
+    where: { cus_id: supplierId },
+    include: {
+      customer_category: true,
+    },
+  });
+
+  if (!supplier) {
+    return NextResponse.json({ error: 'Supplier not found' }, { status: 404 });
+  }
+
+  if (view === 'monthly') {
+    const [purchases, rebateEntries] = await Promise.all([
+      prisma.purchase.findMany({
+        where: { cus_id: supplierId },
+        include: {
+          purchase_details: {
+            include: { product: true },
+          },
+        },
+        orderBy: { created_at: 'desc' },
+      }),
+      prisma.ledger.findMany({
+        where: {
+          cus_id: supplierId,
+          trnx_type: 'REBATE',
+        },
+        orderBy: { created_at: 'desc' },
+      }),
+    ]);
+
+    const monthlyBreakdown = buildMonthlyBreakdown(purchases, rebateEntries);
+    const totals = monthlyBreakdown.reduce(
+      (acc, row) => ({
+        totalQuantity: acc.totalQuantity + row.totalQuantity,
+        totalAmount: acc.totalAmount + row.totalAmount,
+        purchaseCount: acc.purchaseCount + row.purchaseCount,
+        rebatePaid: acc.rebatePaid + row.rebatePaid,
+        paidMonthCount: acc.paidMonthCount + (row.status === 'paid' ? 1 : 0),
+        unpaidMonthCount: acc.unpaidMonthCount + (row.status === 'unpaid' ? 1 : 0),
+      }),
+      { totalQuantity: 0, totalAmount: 0, purchaseCount: 0, rebatePaid: 0, paidMonthCount: 0, unpaidMonthCount: 0 }
+    );
+
+    return NextResponse.json({
+      supplier,
+      view: 'monthly',
+      monthlyBreakdown,
+      summary: {
+        supplierName: supplier.cus_name,
+        monthCount: monthlyBreakdown.length,
+        ...totals,
+      },
+    });
+  }
+
+  const whereClause = { cus_id: supplierId };
+  if (startDate && endDate) {
+    whereClause.created_at = parseLocalDateRange(startDate, endDate);
+  }
+
+  const [purchases, allRebateEntries] = await Promise.all([
+    prisma.purchase.findMany({
+      where: whereClause,
+      include: {
+        purchase_details: {
+          include: { product: true },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    }),
+    prisma.ledger.findMany({
+      where: {
+        cus_id: supplierId,
+        trnx_type: 'REBATE',
+      },
+      orderBy: { created_at: 'desc' },
+    }),
+  ]);
+
+  const rebateEntries = month
+    ? allRebateEntries.filter(
+        (entry) => parseRebateMonthFromDetails(entry.details, entry.created_at) === month
+      )
+    : allRebateEntries;
+
+  const products = aggregateRebatePurchases(purchases);
+  const purchaseRows = mapRebatePurchaseRows(purchases);
+  const rebateHistory = rebateEntries.map((entry) => mapRebateLedgerEntry(entry));
+  const rebatePaid = rebateHistory.reduce((sum, row) => sum + row.debit_amount, 0);
+  const purchaseCount = purchases.length;
+  const totalQuantity = products.reduce((sum, p) => sum + p.total_quantity, 0);
+  const rebateStatus = purchaseCount > 0 ? (rebatePaid > 0 ? 'paid' : 'unpaid') : 'empty';
+
+  const summary = {
+    totalQuantity,
+    totalAmount: products.reduce((sum, p) => sum + p.total_amount, 0),
+    productCount: products.length,
+    purchaseCount,
+    rebatePaid,
+    rebateCount: rebateHistory.length,
+    rebateStatus,
+    supplierName: supplier.cus_name,
+    month: month || null,
+    monthLabel: month ? formatMonthLabel(month) : null,
+    periodStart: startDate || null,
+    periodEnd: endDate || null,
+    lastPaidAt: rebateHistory[0]?.created_at || null,
+  };
+
+  return NextResponse.json({
+    supplier,
+    products,
+    purchases: purchaseRows,
+    rebateHistory,
+    summary,
+  });
 }
 
 // Item Sale Report — product accounts style with running balance

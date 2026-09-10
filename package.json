@@ -27,6 +27,7 @@
     "db:seed:transactions": "node scripts/seed-dummy-purchases-sales.js",
     "db:import:main": "node scripts/import-main-branch-from-sql.js --force --sql \"Ittefaqiron (3).sql\"",
     "db:seed:hq": "node prisma/seed-admin.js",
+    "db:seed:credentials": "node prisma/seed-credentials.js",
     "db:branches": "node scripts/setup-branches.js",
     "db:branch:migrate": "node scripts/pre-branch-push.js && npx prisma db push && node scripts/setup-branches.js",
     "db:branch:provision": "node scripts/provision-branch-tables.js"

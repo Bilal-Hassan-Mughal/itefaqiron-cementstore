@@ -32,16 +32,19 @@ export default function DashboardLayout({ children }) {
   const [branchLabel, setBranchLabel] = useState('');
   const [hqViewingBranch, setHqViewingBranch] = useState(false);
   const userRef = useRef(null);
+  const didInitRef = useRef(false);
 
   const router = useRouter();
 
   useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
+
     setIsClient(true);
 
     const userData = localStorage.getItem('user');
     if (!userData) {
-      router.push('/');
-      if (typeof window !== 'undefined') window.location.href = '/';
+      window.location.href = '/';
       return;
     }
 
@@ -59,25 +62,27 @@ export default function DashboardLayout({ children }) {
         setBranchLabel(`Branch #${parsedUser.branch_id}`);
       }
 
-      // Attach branch + user headers to all dashboard fetch calls
-      const originalFetch = window.fetch.bind(window);
-      window.__branchFetchPatched = true;
-      window.fetch = (input, init = {}) => {
-        const url = typeof input === 'string' ? input : input?.url || '';
-        if (url.startsWith('/api/')) {
-          const headers = new Headers(init.headers || {});
-          const u = userRef.current;
-          if (u && !headers.has('x-user-json')) {
-            headers.set('x-user-json', JSON.stringify(u));
+      if (!window.__branchFetchPatched) {
+        const originalFetch = window.fetch.bind(window);
+        window.__branchFetchPatched = true;
+        window.__branchFetchOriginal = originalFetch;
+        window.fetch = (input, init = {}) => {
+          const url = typeof input === 'string' ? input : input?.url || '';
+          if (url.startsWith('/api/')) {
+            const headers = new Headers(init.headers || {});
+            const u = userRef.current;
+            if (u && !headers.has('x-user-json')) {
+              headers.set('x-user-json', JSON.stringify(u));
+            }
+            const branchId = resolveClientBranchId(u);
+            if (branchId && !headers.has('x-branch-id')) {
+              headers.set('x-branch-id', String(branchId));
+            }
+            return originalFetch(input, { ...init, headers });
           }
-          const branchId = resolveClientBranchId(u);
-          if (branchId && !headers.has('x-branch-id')) {
-            headers.set('x-branch-id', String(branchId));
-          }
-          return originalFetch(input, { ...init, headers });
-        }
-        return originalFetch(input, init);
-      };
+          return originalFetch(input, init);
+        };
+      }
 
       const onBranchChanged = () => {
         const m = getActiveBranchMeta();
@@ -87,14 +92,11 @@ export default function DashboardLayout({ children }) {
       window.addEventListener('branch-changed', onBranchChanged);
 
       return () => {
-        window.fetch = originalFetch;
         window.removeEventListener('branch-changed', onBranchChanged);
       };
     } catch (error) {
-      router.push('/');
-      if (typeof window !== 'undefined') window.location.href = '/';
+      window.location.href = '/';
     }
-
   }, [router]);
 
   useEffect(() => {
@@ -128,14 +130,14 @@ export default function DashboardLayout({ children }) {
     localStorage.removeItem('active_branch_code');
     localStorage.removeItem('login_mode');
     localStorage.removeItem('hq_pos_mode');
-    router.push('/');
+    window.location.href = '/';
   };
 
   const handleBackToHq = () => {
     exitHqPosMode();
     setHqViewingBranch(false);
     setBranchLabel('');
-    router.push('/dashboard/hq');
+    window.location.href = '/dashboard/hq';
   };
 
   const theme = useTheme();

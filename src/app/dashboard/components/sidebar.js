@@ -73,7 +73,7 @@ const SECTION_META = {
 };
 
 const SALES_IDS = new Set(['orders', 'new-sale', 'sales', 'hold-bills', 'sale-returns', 'quotations', 'sales-analytics', 'loaders']);
-const PURCHASE_IDS = new Set(['purchases', 'new-purchase', 'purchase-list', 'purchase-returns', 'vehicles', 'purchase-details']);
+const PURCHASE_IDS = new Set(['purchases', 'new-purchase', 'purchase-list', 'purchase-returns', 'vehicles', 'purchase-details', 'super-order']);
 const INVENTORY_IDS = new Set(['products', 'categories', 'sub-categories', 'store-stock', 'stock-transfer', 'stores', 'cargo']);
 const OPERATIONS_IDS = new Set(['day-end', 'day-end-history', 'cash-report', 'bank-report', 'bank-accounts']);
 const FINANCE_IDS = new Set(['expenses', 'expense-titles', 'journal', 'internal-transfer', 'adjustment-management']);
@@ -147,6 +147,7 @@ const ROUTE_MAP = {
   'profit-report': '/dashboard/reports/profit-report',
   'purchase-report': '/dashboard/reports/purchase-report',
   'purchase-details': '/dashboard/purchases',
+  'super-order': '/dashboard/super-order',
   'rebate-report': '/dashboard/reports/rebate',
   'balance-sheet': '/dashboard/reports/balance-sheet',
   'stores': '/dashboard/stores',
@@ -234,6 +235,7 @@ export default function Sidebar({
     { id: 'purchase-returns', name: 'Purchase Returns', icon: AssignmentReturnIcon, category: 'purchase-operations', parent: 'Purchase' },
     { id: 'vehicles', name: 'Vehicle Management', icon: LocalShippingIcon, category: 'purchase-operations', parent: 'Purchase' },
     { id: 'purchase-details', name: 'Purchase Details', icon: TableChartIcon, category: 'purchase-operations', parent: 'Purchase' },
+    { id: 'super-order', name: 'Super Order', icon: ListAltIcon, category: 'purchase-operations', parent: 'Purchase' },
 
     { id: 'cargo', name: 'Cargo Management', icon: LocalShippingIcon, category: 'cargo-operations', parent: 'Cargo' },
 
@@ -332,6 +334,7 @@ export default function Sidebar({
       { path: '/dashboard/categories', id: 'categories', category: 'product-management' },
       { path: '/dashboard/subcategories', id: 'sub-categories', category: 'product-management' },
       { path: '/dashboard/products', id: 'products', category: 'product-management' },
+      { path: '/dashboard/super-order', id: 'super-order', category: 'purchase-operations' },
       { path: '/dashboard/vehicles', id: 'vehicles', category: 'purchase-operations' },
       { path: '/dashboard/finance', id: 'ledger', category: 'main' },
       { path: '/dashboard/hold-bills', id: 'hold-bills', category: 'sales-operations' },

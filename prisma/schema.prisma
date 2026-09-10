@@ -50,6 +50,7 @@ model Branch {
   stores              Store[]
   stock_transfers     StockTransfer[]
   draft_sales         DraftSale[]
+  super_orders        SuperOrder[]
   vehicles            Vehicle[]
   loaders             Loader[]
   cargo               Cargo[]
@@ -86,6 +87,7 @@ model Users {
   customers           Customer[]
   day_ends            DayEnd[]
   draft_sales         DraftSale[]
+  super_orders        SuperOrder[]       @relation("SuperOrderCreatedBy")
   expenses            Expense[]
   hold_bill_details   HoldBillDetail[]
   hold_bills          HoldBill[]
@@ -1050,6 +1052,32 @@ model DraftSale {
   @@index([is_active], map: "draft_sales_is_active_idx")
   @@index([created_at], map: "draft_sales_created_at_idx")
   @@map("draft_sales")
+}
+
+model SuperOrder {
+  super_order_id  Int      @id @default(autoincrement())
+  branch_id       Int      @default(1)
+  order_no        String
+  order_date      DateTime @db.Date
+  supplier_name   String?
+  notes           String?  @db.Text
+  store_id        Int?
+  payload_json    String   @db.LongText
+  total_lines     Int      @default(0)
+  total_qty       Decimal  @default(0) @db.Decimal(18, 4)
+  is_active       Boolean  @default(true)
+  created_by      Int?
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  branch          Branch   @relation(fields: [branch_id], references: [branch_id])
+  created_by_user Users?   @relation("SuperOrderCreatedBy", fields: [created_by], references: [user_id])
+
+  @@unique([branch_id, order_no])
+  @@index([branch_id], map: "super_orders_branch_id_fkey")
+  @@index([order_date], map: "super_orders_order_date_idx")
+  @@index([is_active], map: "super_orders_is_active_idx")
+  @@index([created_by], map: "super_orders_created_by_fkey")
+  @@map("super_orders")
 }
 
 model Employee {

@@ -1,0 +1,25 @@
+-- Create super_orders table for saved Super Order sheets (branch-scoped)
+CREATE TABLE IF NOT EXISTS `super_orders` (
+  `super_order_id` INT NOT NULL AUTO_INCREMENT,
+  `branch_id` INT NOT NULL DEFAULT 1,
+  `order_no` VARCHAR(191) NOT NULL,
+  `order_date` DATE NOT NULL,
+  `supplier_name` VARCHAR(191) NULL,
+  `notes` TEXT NULL,
+  `store_id` INT NULL,
+  `payload_json` LONGTEXT NOT NULL,
+  `total_lines` INT NOT NULL DEFAULT 0,
+  `total_qty` DECIMAL(18, 4) NOT NULL DEFAULT 0,
+  `is_active` BOOLEAN NOT NULL DEFAULT true,
+  `created_by` INT NULL,
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` DATETIME(3) NOT NULL,
+  PRIMARY KEY (`super_order_id`),
+  UNIQUE INDEX `super_orders_branch_id_order_no_key`(`branch_id`, `order_no`),
+  INDEX `super_orders_branch_id_fkey`(`branch_id`),
+  INDEX `super_orders_order_date_idx`(`order_date`),
+  INDEX `super_orders_is_active_idx`(`is_active`),
+  INDEX `super_orders_created_by_fkey`(`created_by`),
+  CONSTRAINT `super_orders_branch_id_fkey` FOREIGN KEY (`branch_id`) REFERENCES `branches`(`branch_id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `super_orders_created_by_fkey` FOREIGN KEY (`created_by`) REFERENCES `users`(`user_id`) ON DELETE SET NULL ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

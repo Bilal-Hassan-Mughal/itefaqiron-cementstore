@@ -54,6 +54,7 @@ export const SYSTEM_PAGES = [
   { id: 'purchase-returns', name: 'Purchase Returns', section: 'Purchase', path: '/dashboard/purchases' },
   { id: 'vehicles', name: 'Vehicle Management', section: 'Purchase', path: '/dashboard/vehicles' },
   { id: 'purchase-details', name: 'Purchase Details', section: 'Purchase', path: '/dashboard/purchases' },
+  { id: 'super-order', name: 'Super Order', section: 'Purchase', path: '/dashboard/super-order' },
 
   { id: 'cargo', name: 'Cargo Management', section: 'Cargo', path: '/dashboard/cargo' },
 
@@ -104,7 +105,7 @@ export const LEGACY_MODULE_TO_PAGES = {
   products: ['categories', 'sub-categories', 'products'],
   sales: ['orders', 'new-sale', 'sales', 'hold-bills', 'sales-analytics'],
   sale_returns: ['sale-returns', 'loaders', 'quotations'],
-  purchases: ['purchases', 'new-purchase', 'purchase-list', 'purchase-returns', 'vehicles', 'purchase-details'],
+  purchases: ['purchases', 'new-purchase', 'purchase-list', 'purchase-returns', 'vehicles', 'purchase-details', 'super-order'],
   cargo: ['cargo'],
   finance: ['expense-titles', 'expenses', 'journal', 'ledger', 'internal-transfer', 'adjustment-management', 'bank-accounts'],
   cash_bank_day_end: ['day-end', 'day-end-history', 'cash-report', 'bank-report'],
@@ -180,6 +181,7 @@ const PATH_PAGE_RULES = [
   { prefix: '/dashboard/settings', pageIds: ['settings'] },
   { prefix: '/dashboard/import', pageIds: ['import'] },
   { prefix: '/dashboard/sales', pageIds: ['new-sale', 'sales', 'sale-returns'] },
+  { prefix: '/dashboard/super-order', pageIds: ['super-order'] },
   { prefix: '/dashboard/purchases', pageIds: ['purchases', 'new-purchase', 'purchase-list', 'purchase-returns', 'purchase-details'] },
   { prefix: '/dashboard', pageIds: ['dashboard'] },
 ];

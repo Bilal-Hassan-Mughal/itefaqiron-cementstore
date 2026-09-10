@@ -1,89 +1,149 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Suspense } from 'react';
 import {
     Download,
     Printer,
     ArrowLeft,
-    ShoppingBag,
-    Search,
-    Filter,
     Plus,
     X,
     Save,
-    Percent,
     Tag,
     Layers,
-    DollarSign,
     Gift,
-    TrendingUp
+    Calendar,
+    ChevronDown,
+    ChevronRight,
+    Receipt,
+    History,
+    Wallet,
 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '../../components/dashboard-layout';
 import { Autocomplete, TextField } from '@mui/material';
+import {
+  fmtAmt,
+  formatCurrency,
+  formatDate,
+  getCurrentMonthKey,
+  getUnpaidRebateMonths,
+  customerOptionKey,
+  isSameCustomerOption,
+  rebateEntryKey,
+  RebateStatusBadge,
+} from '@/lib/rebate-utils';
+import RebateMonthSelect from './components/rebate-month-select';
+import {
+  REBATE_THEME,
+  REBATE_GRID,
+  REBATE_FIELD_SX,
+  rebateKpiCard,
+  rebateBtnPrimary,
+} from '@/lib/rebate-theme';
+import { BRAND } from '@/lib/brand-theme';
 
-const fmtAmt = (val) => {
-  const n = parseFloat(val || 0);
-  if (n % 1 === 0) return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
+const StatusBadge = RebateStatusBadge;
 
-export default function RebateReport() {
+function RebateReportContent() {
     const router = useRouter();
-    const [loading, setLoading] = useState(false);
+    const searchParams = useSearchParams();
+    const [loadingMonthly, setLoadingMonthly] = useState(false);
+    const [loadingDetail, setLoadingDetail] = useState(false);
+    const [monthlyData, setMonthlyData] = useState(null);
     const [reportData, setReportData] = useState(null);
-    const [startDate, setStartDate] = useState('');
-    const [endDate, setEndDate] = useState('');
+    const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthKey());
     const [suppliers, setSuppliers] = useState([]);
     const [selectedSupplierId, setSelectedSupplierId] = useState('');
+    const [activeTab, setActiveTab] = useState('products');
+    const [expandedPurchaseId, setExpandedPurchaseId] = useState(null);
 
-    // Rebate Dialog State
     const [isRebateOpen, setIsRebateOpen] = useState(false);
     const [rebateRate, setRebateRate] = useState('');
     const [savingRebate, setSavingRebate] = useState(false);
 
-    // Set default dates and fetch suppliers
     useEffect(() => {
-        const today = new Date();
-        const oneMonthAgo = new Date();
-        oneMonthAgo.setMonth(today.getMonth() - 1);
-
-        setStartDate(oneMonthAgo.toISOString().split('T')[0]);
-        setEndDate(today.toISOString().split('T')[0]);
         fetchSuppliers();
     }, []);
 
-    // Auto-fetch report when filters change
     useEffect(() => {
-        if (selectedSupplierId && startDate && endDate) {
-            fetchReport();
-        } else {
+        const supplierParam = searchParams.get('supplierId');
+        const monthParam = searchParams.get('month');
+        if (supplierParam) setSelectedSupplierId(supplierParam);
+        if (monthParam) setSelectedMonth(monthParam);
+    }, [searchParams]);
+
+    useEffect(() => {
+        if (!selectedSupplierId) {
+            setMonthlyData(null);
             setReportData(null);
+            return;
         }
-    }, [selectedSupplierId, startDate, endDate]);
+        fetchMonthlyOverview();
+    }, [selectedSupplierId]);
+
+    const monthOptions = useMemo(
+        () => monthlyData?.monthlyBreakdown || [],
+        [monthlyData]
+    );
+
+    const unpaidMonthOptions = useMemo(
+        () => getUnpaidRebateMonths(monthOptions),
+        [monthOptions]
+    );
+
+    const isViewingPaidMonth =
+        searchParams.get('viewPaid') === '1' &&
+        monthlyData?.monthlyBreakdown?.some(
+            (row) => row.month === selectedMonth && row.status === 'paid'
+        );
+
+    useEffect(() => {
+        if (!selectedSupplierId || !selectedMonth) {
+            setReportData(null);
+            return;
+        }
+        fetchMonthDetail();
+    }, [selectedSupplierId, selectedMonth]);
 
     const fetchSuppliers = async () => {
         try {
             const response = await fetch('/api/customers?dropdown=true');
             const data = await response.json();
-            if (response.ok) {
-                setSuppliers(data);
-            }
+            if (response.ok) setSuppliers(data);
         } catch (error) {
             console.error('Error fetching suppliers:', error);
         }
     };
 
-    const fetchReport = async () => {
-        if (!selectedSupplierId || !startDate || !endDate) {
-            return;
-        }
-
+    const fetchMonthlyOverview = async () => {
+        if (!selectedSupplierId) return;
         try {
-            setLoading(true);
-            const response = await fetch(`/api/reports?type=rebate-report&supplierId=${selectedSupplierId}&startDate=${startDate}&endDate=${endDate}`);
+            setLoadingMonthly(true);
+            const response = await fetch(
+                `/api/reports?type=rebate-report&supplierId=${selectedSupplierId}&view=monthly`
+            );
             const data = await response.json();
+            if (response.ok) {
+                setMonthlyData(data);
+            } else {
+                alert(data.error || 'Error fetching monthly overview');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Error fetching monthly overview');
+        } finally {
+            setLoadingMonthly(false);
+        }
+    };
 
+    const fetchMonthDetail = async () => {
+        if (!selectedSupplierId || !selectedMonth) return;
+        try {
+            setLoadingDetail(true);
+            const response = await fetch(
+                `/api/reports?type=rebate-report&supplierId=${selectedSupplierId}&month=${selectedMonth}`
+            );
+            const data = await response.json();
             if (response.ok) {
                 setReportData(data);
             } else {
@@ -93,7 +153,7 @@ export default function RebateReport() {
             console.error('Error:', error);
             alert('Error fetching report');
         } finally {
-            setLoading(false);
+            setLoadingDetail(false);
         }
     };
 
@@ -113,6 +173,7 @@ export default function RebateReport() {
             setSavingRebate(true);
             const userStr = localStorage.getItem('user');
             const user = userStr ? JSON.parse(userStr) : null;
+            const monthLabel = reportData.summary.monthLabel || selectedMonth;
 
             const billNo = `REB-${Date.now()}`;
             const ledgerEntry = {
@@ -122,14 +183,14 @@ export default function RebateReport() {
                 bill_no: billNo,
                 trnx_type: 'REBATE',
                 ledger_type: 'Rebate',
-                details: `Rebate | ${reportData.summary.supplierName} | From: ${startDate} To: ${endDate} | Qty: ${fmtAmt(totalQty)} | Rate: ${fmtAmt(rate)} | Amt: ${fmtAmt(totalAmount)}`,
-                updated_by: user?.user_id ? parseInt(user.user_id) : (user?.id ? parseInt(user.id) : null)
+                details: `Rebate | ${reportData.summary.supplierName} | MonthKey: ${selectedMonth} | Month: ${monthLabel} | Qty: ${fmtAmt(totalQty)} | Rate: ${fmtAmt(rate)} | Amt: ${fmtAmt(totalAmount)}`,
+                updated_by: user?.user_id ? parseInt(user.user_id) : (user?.id ? parseInt(user.id) : null),
             };
 
             const response = await fetch('/api/ledger', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(ledgerEntry)
+                body: JSON.stringify(ledgerEntry),
             });
 
             if (response.ok) {
@@ -138,6 +199,8 @@ export default function RebateReport() {
                 alert(`Rebate of PKR ${fmtAmt(totalAmount)} saved!\nSupplier balance updated to PKR ${fmtAmt(newBal)}`);
                 setIsRebateOpen(false);
                 setRebateRate('');
+                fetchMonthlyOverview();
+                fetchMonthDetail();
             } else {
                 const error = await response.json();
                 alert(`Error: ${error.error}`);
@@ -155,14 +218,21 @@ export default function RebateReport() {
     const handleExport = () => {
         if (!reportData) return;
 
+        const monthLabel = reportData.summary.monthLabel || selectedMonth;
         let csv = 'Ittefaq Iron and Cement Store\n';
         csv += 'Rebate Report\n';
         csv += `Supplier: ${reportData.summary.supplierName}\n`;
-        csv += `From: ${startDate} To: ${endDate}\n\n`;
-        csv += 'Product,Purchases,Unit,Total Quantity,Total Amount,Avg Rate\n';
+        csv += `Month: ${monthLabel}\n\n`;
+        csv += 'Product,Purchases,Total Quantity,Total Amount,Avg Rate\n';
 
-        reportData.products.forEach(p => {
-            csv += `"${p.pro_title}",${p.purchase_count},${p.unit},${fmtAmt(p.total_quantity)},${fmtAmt(p.total_amount)},${fmtAmt(p.avg_rate)}\n`;
+        reportData.products.forEach((p) => {
+            csv += `"${p.pro_title}",${p.purchase_count},${fmtAmt(p.total_quantity)},${fmtAmt(p.total_amount)},${fmtAmt(p.avg_rate)}\n`;
+        });
+
+        csv += '\nPurchase Bills\n';
+        csv += 'Date,Invoice,Items,Total Qty,Net Total\n';
+        reportData.purchases.forEach((p) => {
+            csv += `${formatDate(p.created_at)},"${p.invoice_number}",${p.item_count},${fmtAmt(p.total_qty)},${fmtAmt(p.net_total)}\n`;
         });
 
         csv += '\n';
@@ -172,60 +242,77 @@ export default function RebateReport() {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `rebate-report-${reportData.summary.supplierName}-${startDate}-to-${endDate}.csv`;
+        a.download = `rebate-report-${reportData.summary.supplierName}-${selectedMonth}.csv`;
         a.click();
         window.URL.revokeObjectURL(url);
     };
 
-    const rebateTotalAmount = reportData ? Number((reportData.summary.totalQuantity * (parseFloat(rebateRate) || 0)).toFixed(2)) : 0;
+    const rebateTotalAmount = reportData
+        ? Number((reportData.summary.totalQuantity * (parseFloat(rebateRate) || 0)).toFixed(2))
+        : 0;
 
     const supplierOptions = useMemo(() => {
-        const list = suppliers.filter(s => s.customer_category?.cus_cat_title?.toLowerCase().includes('supplier'));
+        const list = suppliers.filter((s) => s.customer_category?.cus_cat_title?.toLowerCase().includes('supplier'));
         return list.length > 0 ? list : suppliers;
     }, [suppliers]);
 
-    const formatCurrency = (amount) => {
-        const num = parseFloat(amount) || 0;
-        return num.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const selectedSupplier = suppliers.find((s) => s.cus_id.toString() === selectedSupplierId) || null;
+    const selectedMonthRow = monthlyData?.monthlyBreakdown?.find((row) => row.month === selectedMonth);
+    const isLoading = loadingMonthly || loadingDetail;
+
+    const historySummary = useMemo(() => {
+        const rows = monthlyData?.monthlyBreakdown || [];
+        return {
+            unpaid: rows.filter((row) => row.status === 'unpaid').length,
+        };
+    }, [monthlyData]);
+
+    const goToRebateHistory = () => {
+        if (!selectedSupplierId) return;
+        router.push(`/dashboard/reports/rebate/history?supplierId=${selectedSupplierId}`);
     };
 
-    const formatDate = (dateStr) => {
-        if (!dateStr) return '-';
-        return new Date(dateStr).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Karachi' });
-    };
+    const tabs = [
+        { id: 'products', label: 'Product Summary', icon: Layers },
+        { id: 'purchases', label: 'Purchase Bills', icon: Receipt },
+        { id: 'rebates', label: 'Rebate History', icon: History },
+    ];
 
     return (
         <DashboardLayout>
-            <div id="printable-report" className="h-full flex flex-col bg-white print:bg-white overflow-hidden">
-                {/* Header Banner */}
-                <div className="flex-shrink-0 bg-gradient-to-r from-indigo-800 via-indigo-900 to-slate-900 text-white px-6 py-4 print:hidden">
-                    <div className="flex items-center justify-between">
+            <div id="printable-report" className="h-full flex flex-col print:bg-white overflow-hidden" style={{ backgroundColor: REBATE_THEME.pageBg }}>
+                {/* Header */}
+                <div className="flex-shrink-0 text-white px-6 py-4 print:hidden" style={{ background: REBATE_THEME.headerGradient }}>
+                    <div className="max-w-[1280px] mx-auto flex items-center justify-between gap-4 flex-wrap">
                         <div className="flex items-center space-x-4">
                             <button onClick={() => router.push('/dashboard/reports')} className="p-2 hover:bg-white/10 rounded-lg transition-colors">
                                 <ArrowLeft className="w-5 h-5" />
                             </button>
                             <div className="flex items-center space-x-3">
-                                <div className="p-2 bg-indigo-500/20 rounded-xl border border-indigo-400/30">
-                                    <Gift className="w-6 h-6 text-indigo-300" />
+                                <div className="p-2 rounded-xl border border-white/25" style={{ backgroundColor: 'rgba(255,255,255,0.12)' }}>
+                                    <Gift className="w-6 h-6 text-white" />
                                 </div>
                                 <div>
                                     <h1 className="text-xl font-bold tracking-wide">Rebate Report</h1>
-                                    <p className="text-indigo-200 text-sm">Supplier product purchases & rebate calculation</p>
+                                    <p className="text-sm" style={{ color: 'rgba(255,255,255,0.82)' }}>Monthly supplier purchases & rebate calculation</p>
                                 </div>
                             </div>
                         </div>
-                        {reportData && (
-                            <div className="flex items-center space-x-2">
-                                <button
-                                    onClick={() => setIsRebateOpen(true)}
-                                    className="flex items-center px-4 py-2 bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white rounded-lg text-sm font-semibold shadow-md transition-all transform active:scale-95"
-                                >
-                                    <Plus className="w-4 h-4 mr-2" /> Add Rebate
-                                </button>
-                                <button onClick={handleExport} className="flex items-center px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-medium transition-colors">
+                        {reportData && reportData.summary.purchaseCount > 0 && (
+                            <div className="flex items-center flex-wrap gap-2">
+                                {reportData.summary.rebateStatus === 'unpaid' && (
+                                    <button
+                                        onClick={() => setIsRebateOpen(true)}
+                                        className={rebateBtnPrimary()}
+                                        style={{ background: `linear-gradient(135deg, ${BRAND.supporting.green}, ${BRAND.text.green})` }}
+                                    >
+                                        <Plus className="w-4 h-4" /> Add Rebate
+                                    </button>
+                                )}
+                                <button onClick={handleExport} className="flex items-center px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-medium transition-colors">
                                     <Download className="w-4 h-4 mr-2" /> Export CSV
                                 </button>
-                                <button onClick={handlePrint} className="flex items-center px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm font-medium transition-colors">
+                                <button onClick={handlePrint} className="flex items-center px-4 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-sm font-medium transition-colors">
                                     <Printer className="w-4 h-4 mr-2" /> Print
                                 </button>
                             </div>
@@ -233,288 +320,558 @@ export default function RebateReport() {
                     </div>
                 </div>
 
-                {/* Filters Bar */}
-                <div className="flex-shrink-0 bg-slate-50 border-b border-slate-200 px-6 py-3.5 print:hidden">
-                    <div className="flex flex-wrap items-end gap-3">
-                        <div className="flex-1 min-w-[260px] max-w-[340px]">
-                            <label className="block text-xs font-semibold text-slate-600 mb-1">SELECT SUPPLIER</label>
+                {/* Filters */}
+                <div className={`flex-shrink-0 ${REBATE_THEME.card} border-x-0 border-t-0 rounded-none px-6 py-4 print:hidden`}>
+                    <div className={REBATE_GRID.filterBar}>
+                        <div className={REBATE_GRID.filterMonth}>
+                            <label className={REBATE_THEME.label}>Select Month</label>
+                            <RebateMonthSelect
+                                value={selectedMonth}
+                                onChange={(monthKey) => {
+                                    setSelectedMonth(monthKey);
+                                    setExpandedPurchaseId(null);
+                                }}
+                                monthOptions={monthOptions}
+                                loading={loadingMonthly}
+                                disabled={!selectedSupplierId}
+                            />
+                        </div>
+                        <div className={REBATE_GRID.filterSupplier}>
+                            <label className={REBATE_THEME.label}>Select Account / Supplier</label>
                             <Autocomplete
                                 size="small"
                                 options={supplierOptions}
-                                getOptionLabel={(option) => option.cus_name ? `${option.cus_name}${option.customer_category?.cus_cat_title ? ` (${option.customer_category.cus_cat_title})` : ''}` : ''}
-                                value={suppliers.find(s => s.cus_id.toString() === selectedSupplierId) || null}
+                                getOptionLabel={(option) =>
+                                    option.cus_name
+                                        ? `${option.cus_name}${option.customer_category?.cus_cat_title ? ` (${option.customer_category.cus_cat_title})` : ''}`
+                                        : ''
+                                }
+                                getOptionKey={customerOptionKey}
+                                isOptionEqualToValue={isSameCustomerOption}
+                                value={selectedSupplier}
                                 onChange={(event, newValue) => {
                                     setSelectedSupplierId(newValue ? newValue.cus_id.toString() : '');
+                                    setSelectedMonth(getCurrentMonthKey());
+                                    setExpandedPurchaseId(null);
                                 }}
-                                isOptionEqualToValue={(option, value) => option.cus_id === value?.cus_id}
-                                autoSelect={true}
-                                autoHighlight={true}
-                                openOnFocus={true}
-                                selectOnFocus={true}
+                                autoSelect
+                                autoHighlight
+                                openOnFocus
+                                selectOnFocus
                                 filterOptions={(options, { inputValue }) => {
                                     const q = inputValue.toLowerCase().trim();
                                     if (!q) return options;
-                                    return options.filter(o =>
+                                    return options.filter((o) =>
                                         (o.cus_name || '').toLowerCase().includes(q) ||
                                         (o.customer_category?.cus_cat_title || '').toLowerCase().includes(q) ||
-                                        (o.cus_phone_no || '').toLowerCase().includes(q) ||
-                                        (o.cus_address || '').toLowerCase().includes(q)
+                                        (o.cus_phone_no || '').toLowerCase().includes(q)
                                     );
                                 }}
                                 renderInput={(params) => (
                                     <TextField
                                         {...params}
-                                        placeholder="Type to search supplier..."
-                                        variant="outlined"
-                                        onFocus={(e) => e.target.select()}
-                                        sx={{
-                                            bgcolor: 'white',
-                                            borderRadius: '8px',
-                                            '& .MuiOutlinedInput-root': { py: '2px', borderRadius: '8px', bgcolor: 'white' },
-                                            '& .MuiInputBase-input': { fontWeight: 'bold', color: 'black' }
-                                        }}
+                                        placeholder="Search supplier account..."
+                                        sx={REBATE_FIELD_SX}
                                     />
                                 )}
                             />
                         </div>
-                        <div className="flex-1 min-w-[150px] max-w-[200px]">
-                            <label className="block text-xs font-semibold text-slate-600 mb-1">FROM DATE</label>
-                            <input
-                                type="date"
-                                value={startDate}
-                                onChange={(e) => setStartDate(e.target.value)}
-                                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                            />
-                        </div>
-                        <div className="flex-1 min-w-[150px] max-w-[200px]">
-                            <label className="block text-xs font-semibold text-slate-600 mb-1">TO DATE</label>
-                            <input
-                                type="date"
-                                value={endDate}
-                                onChange={(e) => setEndDate(e.target.value)}
-                                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                            />
-                        </div>
-                        <button
-                            onClick={fetchReport}
-                            disabled={loading || !selectedSupplierId}
-                            className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg text-sm font-semibold transition-colors min-w-[140px]"
-                        >
-                            {loading ? 'Generating...' : 'Generate Report'}
-                        </button>
+                        {selectedSupplier && (
+                            <>
+                                <div className={REBATE_GRID.filterBalance}>
+                                    <p className={REBATE_THEME.label} style={{ marginBottom: '0.25rem' }}>Account Balance</p>
+                                    <p className="text-lg font-bold tabular-nums leading-tight" style={{ color: BRAND.text.green }}>
+                                        PKR {formatCurrency(Math.abs(selectedSupplier.cus_balance || 0))}
+                                    </p>
+                                </div>
+                                <div className={REBATE_GRID.filterAction}>
+                                    <button
+                                        type="button"
+                                        onClick={goToRebateHistory}
+                                        className={`${rebateBtnPrimary('w-full md:w-auto')} whitespace-nowrap`}
+                                        style={{ background: `linear-gradient(135deg, ${BRAND.supporting.periwinkle}, ${BRAND.primary.blue})` }}
+                                    >
+                                        <History className="w-4 h-4 shrink-0" />
+                                        Rebate History
+                                        {historySummary.unpaid > 0 && (
+                                            <span
+                                                className="ml-1 px-2 py-0.5 rounded-full text-[11px] font-bold"
+                                                style={{ backgroundColor: BRAND.tint.pink, color: BRAND.text.pink }}
+                                            >
+                                                {historySummary.unpaid} unpaid
+                                            </span>
+                                        )}
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
 
-                {/* Report Content */}
-                {reportData ? (
-                    <div className="flex-1 overflow-auto p-4 print:p-0 print:overflow-visible">
-                        <div className="max-w-[1200px] mx-auto">
-                            {/* Print Header */}
-                            <div className="hidden print:block border-b-2 border-black pb-4 mb-4">
-                                <div className="text-center">
-                                    <h1 className="text-2xl font-bold tracking-wider">ITTEFAQ IRON STORE</h1>
-                                    <p className="text-sm text-gray-600">Parianwali, Pakistan | Tel: +92 346 7560306</p>
-                                    <div className="mt-3 py-2 bg-black text-white">
-                                        <h2 className="text-lg font-bold tracking-widest">REBATE REPORT</h2>
-                                    </div>
-                                    <div className="flex justify-between items-center mt-3 text-sm border-t border-b border-black py-1">
-                                        <span>Supplier: <strong>{reportData.summary.supplierName}</strong></span>
-                                        <span>Period: {formatDate(startDate)} to {formatDate(endDate)}</span>
-                                    </div>
-                                </div>
+                {!selectedSupplierId ? (
+                    <div className="flex-1 flex items-center justify-center p-6 print:hidden">
+                        <div className="text-center bg-white border border-slate-200 rounded-2xl p-10 max-w-md shadow-sm">
+                            <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 border" style={{ backgroundColor: BRAND.tint.blue, borderColor: `${BRAND.primary.blue}25` }}>
+                                <Gift className="w-10 h-10" style={{ color: BRAND.primary.blue }} />
                             </div>
-
-                            {/* Summary KPI Cards (4 Cards Grid - Screen) */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-4 print:hidden">
-                                <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 border border-indigo-200 rounded-xl p-4">
-                                    <div className="flex items-center justify-between">
-                                        <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Supplier</p>
-                                        <Tag className="w-4 h-4 text-indigo-500" />
-                                    </div>
-                                    <p className="text-xl font-bold text-indigo-900 mt-1 truncate">{reportData.summary.supplierName}</p>
-                                    <p className="text-xs text-indigo-600/70 mt-0.5">Selected Account</p>
-                                </div>
-                                <div className="bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200 rounded-xl p-4">
-                                    <div className="flex items-center justify-between">
-                                        <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Products</p>
-                                        <Layers className="w-4 h-4 text-slate-500" />
-                                    </div>
-                                    <p className="text-2xl font-bold text-slate-800 mt-1">{reportData.summary.productCount}</p>
-                                    <p className="text-xs text-slate-500 mt-0.5">Purchased items</p>
-                                </div>
-                                <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-xl p-4">
-                                    <div className="flex items-center justify-between">
-                                        <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide">Total Quantity</p>
-                                        <ShoppingBag className="w-4 h-4 text-blue-500" />
-                                    </div>
-                                    <p className="text-2xl font-bold text-blue-900 mt-1">{fmtAmt(reportData.summary.totalQuantity)}</p>
-                                    <p className="text-xs text-blue-600/70 mt-0.5">Aggregated units</p>
-                                </div>
-                                <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 rounded-xl p-4">
-                                    <div className="flex items-center justify-between">
-                                        <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Total Amount</p>
-                                        <TrendingUp className="w-4 h-4 text-emerald-500" />
-                                    </div>
-                                    <p className="text-2xl font-bold text-emerald-900 mt-1">Rs. {formatCurrency(reportData.summary.totalAmount)}</p>
-                                    <p className="text-xs text-emerald-600/70 mt-0.5">Total purchase value</p>
-                                </div>
-                            </div>
-
-                            {/* Print Summary */}
-                            <div className="hidden print:block mb-4 border border-black">
-                                <table className="w-full text-sm">
-                                    <tbody>
-                                        <tr>
-                                            <td className="p-2 font-semibold border-r border-black w-1/4">Supplier Name:</td>
-                                            <td className="p-2 border-r border-black w-1/4 font-bold">{reportData.summary.supplierName}</td>
-                                            <td className="p-2 font-semibold border-r border-black w-1/4">Total Products:</td>
-                                            <td className="p-2 text-right w-1/4 font-bold">{reportData.summary.productCount}</td>
-                                        </tr>
-                                        <tr className="border-t border-black">
-                                            <td className="p-2 font-semibold border-r border-black">Total Quantity:</td>
-                                            <td className="p-2 border-r border-black font-bold">{fmtAmt(reportData.summary.totalQuantity)}</td>
-                                            <td className="p-2 font-semibold border-r border-black">Total Amount:</td>
-                                            <td className="p-2 text-right font-bold">{formatCurrency(reportData.summary.totalAmount)}</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            {/* Table Container (Screen View) */}
-                            <div className="bg-white border border-slate-300 rounded-xl overflow-hidden print:hidden shadow-sm">
-                                <div className="bg-slate-100 px-4 py-2.5 border-b border-slate-300 flex items-center justify-between">
-                                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Purchased Products Summary</h3>
-                                    <span className="text-xs text-slate-500 font-medium">Aggregated per product for selected period</span>
-                                </div>
-                                <table className="w-full text-sm">
-                                    <thead>
-                                        <tr className="bg-slate-800 text-white">
-                                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-r border-slate-600 w-12">S.No</th>
-                                            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider border-r border-slate-600">Product Title</th>
-                                            <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider border-r border-slate-600 w-24">Unit</th>
-                                            <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider border-r border-slate-600 w-28">Purchases</th>
-                                            <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider border-r border-slate-600 w-36">Total Quantity</th>
-                                            <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider border-r border-slate-600 w-40">Total Amount (PKR)</th>
-                                            <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider w-36">Avg Rate (PKR)</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-200">
-                                        {reportData.products.map((p, index) => (
-                                            <tr key={p.pro_id} className={`${index % 2 === 0 ? 'bg-white' : 'bg-slate-50'} hover:bg-indigo-50/40 transition-colors`}>
-                                                <td className="px-4 py-3 text-slate-700 border-r border-slate-200 text-center font-medium">{index + 1}</td>
-                                                <td className="px-4 py-3 text-slate-900 border-r border-slate-200 font-semibold">{p.pro_title}</td>
-                                                <td className="px-4 py-3 text-center text-slate-600 border-r border-slate-200 font-medium">{p.unit || '-'}</td>
-                                                <td className="px-4 py-3 text-center text-slate-600 border-r border-slate-200 font-medium">{p.purchase_count}</td>
-                                                <td className="px-4 py-3 text-right font-bold text-blue-700 border-r border-slate-200 tabular-nums">{fmtAmt(p.total_quantity)}</td>
-                                                <td className="px-4 py-3 text-right font-semibold text-slate-900 border-r border-slate-200 tabular-nums">{formatCurrency(p.total_amount)}</td>
-                                                <td className="px-4 py-3 text-right text-slate-600 tabular-nums font-medium">{fmtAmt(p.avg_rate)}</td>
-                                            </tr>
-                                        ))}
-
-                                        {reportData.products.length === 0 && (
-                                            <tr><td colSpan="7" className="px-6 py-12 text-center text-slate-500 font-medium">No purchase transactions found for this supplier in the selected date range.</td></tr>
-                                        )}
-                                    </tbody>
-                                    <tfoot>
-                                        <tr className="bg-slate-800 text-white font-bold">
-                                            <td colSpan="4" className="px-4 py-3 text-right uppercase text-xs tracking-wider border-r border-slate-600">Grand Total</td>
-                                            <td className="px-4 py-3 text-right border-r border-slate-600 tabular-nums text-blue-300 text-base">{fmtAmt(reportData.summary.totalQuantity)}</td>
-                                            <td className="px-4 py-3 text-right border-r border-slate-600 tabular-nums text-emerald-300 text-base">Rs. {formatCurrency(reportData.summary.totalAmount)}</td>
-                                            <td className="px-4 py-3 text-right text-slate-400">—</td>
-                                        </tr>
-                                    </tfoot>
-                                </table>
-                            </div>
-
-                            {/* PRINT TABLE */}
-                            <div className="hidden print:block bg-white border border-black">
-                                <table className="w-full text-sm">
-                                    <thead>
-                                        <tr className="bg-gray-200 text-black">
-                                            <th className="px-3 py-2 text-left text-xs font-bold uppercase tracking-wider border-r border-black w-12">S.No</th>
-                                            <th className="px-3 py-2 text-left text-xs font-bold uppercase tracking-wider border-r border-black">Product</th>
-                                            <th className="px-3 py-2 text-center text-xs font-bold uppercase tracking-wider border-r border-black w-20">Unit</th>
-                                            <th className="px-3 py-2 text-center text-xs font-bold uppercase tracking-wider border-r border-black w-24">Purchases</th>
-                                            <th className="px-3 py-2 text-right text-xs font-bold uppercase tracking-wider border-r border-black w-32">Total Qty</th>
-                                            <th className="px-3 py-2 text-right text-xs font-bold uppercase tracking-wider border-r border-black w-36">Total Amount</th>
-                                            <th className="px-3 py-2 text-right text-xs font-bold uppercase tracking-wider w-28">Avg Rate</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-black">
-                                        {reportData.products.map((p, index) => (
-                                            <tr key={p.pro_id} className="bg-white">
-                                                <td className="px-3 py-2 text-black border-r border-black">{index + 1}</td>
-                                                <td className="px-3 py-2 text-black font-semibold border-r border-black">{p.pro_title}</td>
-                                                <td className="px-3 py-2 text-center text-black border-r border-black">{p.unit || '-'}</td>
-                                                <td className="px-3 py-2 text-center text-black border-r border-black">{p.purchase_count}</td>
-                                                <td className="px-3 py-2 text-right font-bold text-black border-r border-black tabular-nums">{fmtAmt(p.total_quantity)}</td>
-                                                <td className="px-3 py-2 text-right text-black border-r border-black tabular-nums">{formatCurrency(p.total_amount)}</td>
-                                                <td className="px-3 py-2 text-right text-black tabular-nums">{fmtAmt(p.avg_rate)}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                    <tfoot>
-                                        <tr className="bg-gray-200 text-black font-bold">
-                                            <td colSpan="4" className="px-3 py-2 text-right uppercase text-xs tracking-wider border-r border-black">Grand Total</td>
-                                            <td className="px-3 py-2 text-right border-r border-black tabular-nums text-base">{fmtAmt(reportData.summary.totalQuantity)}</td>
-                                            <td className="px-3 py-2 text-right border-r border-black tabular-nums text-base">{formatCurrency(reportData.summary.totalAmount)}</td>
-                                            <td className="px-3 py-2 text-right">—</td>
-                                        </tr>
-                                    </tfoot>
-                                </table>
-                            </div>
-
-                            {/* Print Footer */}
-                            <div className="hidden print:flex justify-between items-center mt-6 pt-4 border-t-2 border-black text-xs">
-                                <span>Generated: {new Date().toLocaleString('en-GB')}</span>
-                                <span className="font-semibold">Ittefaq Management System</span>
-                                <span>Page 1 of 1</span>
-                            </div>
+                            <h3 className="text-lg font-bold text-slate-800">Select a Supplier Account</h3>
+                            <p className="text-slate-500 text-sm mt-2">Choose a supplier to view monthly purchase totals and rebate details.</p>
                         </div>
                     </div>
                 ) : (
-                    <div className="flex-1 flex items-center justify-center p-6 print:hidden">
-                        <div className="text-center bg-white border border-slate-200 rounded-2xl p-10 max-w-md shadow-sm">
-                            <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-indigo-100">
-                                <Gift className="w-10 h-10 text-indigo-500" />
-                            </div>
-                            <h3 className="text-lg font-bold text-slate-800">No Supplier Selected</h3>
-                            <p className="text-slate-500 text-sm mt-1">Select a supplier from the top dropdown and click <strong>Generate Report</strong> to calculate rebate metrics.</p>
+                    <div className="flex-1 overflow-auto p-4 md:p-5 print:p-0 print:overflow-visible">
+                        <div className={REBATE_GRID.content}>
+                            {/* Print Header */}
+                            {reportData && (
+                                <div className="hidden print:block border-b-2 border-black pb-4 mb-4">
+                                    <div className="text-center">
+                                        <h1 className="text-2xl font-bold tracking-wider">ITTEFAQ IRON STORE</h1>
+                                        <p className="text-sm text-gray-600">Parianwali, Pakistan</p>
+                                        <div className="mt-3 py-2 bg-black text-white">
+                                            <h2 className="text-lg font-bold tracking-widest">REBATE REPORT — {reportData.summary.monthLabel}</h2>
+                                        </div>
+                                        <p className="mt-2 text-sm">Supplier: <strong>{reportData.summary.supplierName}</strong></p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Current Month Header */}
+                            {selectedSupplierId && (
+                                <div className={`print:hidden ${REBATE_THEME.card} px-5 py-4 flex flex-wrap items-center justify-between gap-3`}>
+                                    <div>
+                                        <p className={REBATE_THEME.label}>Viewing Month</p>
+                                        <div className="flex items-center gap-3 mt-1">
+                                            <h2 className="text-lg font-bold text-slate-900">
+                                                {reportData?.summary?.monthLabel || selectedMonthRow?.monthLabel || selectedMonth}
+                                            </h2>
+                                            {(reportData?.summary?.rebateStatus || selectedMonthRow?.status) && (
+                                                <StatusBadge status={reportData?.summary?.rebateStatus || selectedMonthRow?.status} />
+                                            )}
+                                        </div>
+                                        <p className="text-xs text-slate-500 mt-1">
+                                            {isViewingPaidMonth
+                                                ? 'Read-only view of a paid month. Select an unpaid month above to add rebate.'
+                                                : 'Purchase & rebate detail for the selected month only.'}
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-xs flex-wrap">
+                                        {monthlyData?.summary?.paidMonthCount != null && (
+                                            <>
+                                                <span className="px-2.5 py-1 rounded-lg font-semibold border" style={{ backgroundColor: BRAND.tint.green, color: BRAND.text.green, borderColor: `${BRAND.supporting.green}40` }}>
+                                                    {monthlyData.summary.paidMonthCount} paid months
+                                                </span>
+                                                <span className="px-2.5 py-1 rounded-lg font-semibold border" style={{ backgroundColor: BRAND.tint.pink, color: BRAND.text.pink, borderColor: `${BRAND.primary.pink}35` }}>
+                                                    {monthlyData.summary.unpaidMonthCount} unpaid months
+                                                </span>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {reportData && reportData.summary.purchaseCount > 0 && (
+                                <>
+                                    <div className={`${REBATE_GRID.kpi} print:hidden`}>
+                                        <div className={REBATE_GRID.kpiSupplier + ' ' + rebateKpiCard('supplier')}>
+                                            <div className="flex items-center justify-between">
+                                                <p className={REBATE_THEME.label} style={{ color: BRAND.text.blue }}>Supplier</p>
+                                                <Tag className="w-4 h-4" style={{ color: BRAND.primary.blue }} />
+                                            </div>
+                                            <p className="text-base font-bold mt-1 truncate" style={{ color: BRAND.text.blue }}>{reportData.summary.supplierName}</p>
+                                            <p className="text-xs mt-0.5" style={{ color: BRAND.primary.blue }}>{reportData.summary.monthLabel}</p>
+                                        </div>
+                                        <div className={REBATE_GRID.kpiStat + ' ' + rebateKpiCard('default')}>
+                                            <p className={REBATE_THEME.label}>Products</p>
+                                            <p className="text-2xl font-bold text-slate-800 mt-1">{reportData.summary.productCount}</p>
+                                        </div>
+                                        <div className={REBATE_GRID.kpiStat + ' ' + rebateKpiCard('default')}>
+                                            <p className={REBATE_THEME.label}>Bills</p>
+                                            <p className="text-2xl font-bold text-slate-800 mt-1">{reportData.summary.purchaseCount}</p>
+                                        </div>
+                                        <div className={REBATE_GRID.kpiStat + ' ' + rebateKpiCard('qty')}>
+                                            <p className={REBATE_THEME.label} style={{ color: BRAND.text.blue }}>Total Qty</p>
+                                            <p className="text-2xl font-bold mt-1" style={{ color: BRAND.primary.blue }}>{fmtAmt(reportData.summary.totalQuantity)}</p>
+                                        </div>
+                                        <div className={REBATE_GRID.kpiStat + ' ' + rebateKpiCard('amount')}>
+                                            <p className={REBATE_THEME.label} style={{ color: BRAND.text.green }}>Purchase Value</p>
+                                            <p className="text-lg font-bold mt-1" style={{ color: BRAND.text.green }}>PKR {formatCurrency(reportData.summary.totalAmount)}</p>
+                                        </div>
+                                        <div className={REBATE_GRID.kpiWide + ' ' + rebateKpiCard('rebate')}>
+                                            <div className="flex items-center justify-between">
+                                                <p className={REBATE_THEME.label} style={{ color: BRAND.text.periwinkle }}>Rebate Status</p>
+                                                <Wallet className="w-4 h-4" style={{ color: BRAND.supporting.periwinkle }} />
+                                            </div>
+                                            <div className="mt-2">
+                                                <StatusBadge status={reportData.summary.rebateStatus} />
+                                            </div>
+                                            <p className="text-sm font-bold mt-2" style={{ color: BRAND.text.periwinkle }}>PKR {formatCurrency(reportData.summary.rebatePaid)}</p>
+                                            {reportData.summary.lastPaidAt && (
+                                                <p className="text-[11px] mt-0.5" style={{ color: BRAND.supporting.periwinkle }}>Paid: {formatDate(reportData.summary.lastPaidAt)}</p>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Detail Tabs */}
+                                    <div className={`${REBATE_THEME.card} overflow-hidden print:hidden p-0`}>
+                                        <div className="px-5 py-3.5 border-b border-[#e2e8f0] flex flex-wrap items-center justify-between gap-2" style={{ background: `linear-gradient(90deg, ${BRAND.tint.blue}, #ffffff)` }}>
+                                            <div>
+                                                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">
+                                                    Monthly Detail
+                                                </h3>
+                                                <p className="text-xs text-slate-500 mt-0.5">
+                                                    {reportData.summary.monthLabel} — products, bills & rebate entries
+                                                </p>
+                                            </div>
+                                            <StatusBadge status={reportData.summary.rebateStatus} size="lg" />
+                                        </div>
+
+                                        <div className="flex border-b border-[#e2e8f0] px-2 pt-2 overflow-x-auto gap-1" style={{ backgroundColor: BRAND.tint.blue }}>
+                                            {tabs.map((tab) => {
+                                                const Icon = tab.icon;
+                                                const isActive = activeTab === tab.id;
+                                                const count =
+                                                    tab.id === 'products'
+                                                        ? reportData.products.length
+                                                        : tab.id === 'purchases'
+                                                          ? reportData.purchases.length
+                                                          : reportData.rebateHistory.length;
+                                                return (
+                                                    <button
+                                                        key={tab.id}
+                                                        type="button"
+                                                        onClick={() => setActiveTab(tab.id)}
+                                                        className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold whitespace-nowrap rounded-t-xl transition-all border ${
+                                                            isActive
+                                                                ? 'bg-white border-[#e2e8f0] border-b-white -mb-px shadow-sm'
+                                                                : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-white/70'
+                                                        }`}
+                                                        style={isActive ? { color: BRAND.primary.blue } : undefined}
+                                                    >
+                                                        <Icon className="w-4 h-4" style={isActive ? { color: BRAND.primary.blue } : undefined} />
+                                                        {tab.label}
+                                                        <span
+                                                            className="min-w-[1.25rem] px-1.5 py-0.5 rounded-full text-[11px] font-bold text-center"
+                                                            style={
+                                                                isActive
+                                                                    ? { backgroundColor: BRAND.tint.blue, color: BRAND.text.blue }
+                                                                    : { backgroundColor: '#e2e8f0', color: '#64748b' }
+                                                            }
+                                                        >
+                                                            {count}
+                                                        </span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+
+                                        <div className="p-0">
+                                            {activeTab === 'products' && (
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full text-sm">
+                                                        <thead>
+                                                            <tr className={REBATE_THEME.tableHead}>
+                                                                <th className={`${REBATE_THEME.tableHeadCell} w-14 text-center`}>S.No</th>
+                                                                <th className={REBATE_THEME.tableHeadCell}>Product Title</th>
+                                                                <th className={`${REBATE_THEME.tableHeadCell} text-center w-28`}>Purchases</th>
+                                                                <th className={`${REBATE_THEME.tableHeadCell} text-right w-36`}>Total Qty</th>
+                                                                <th className={`${REBATE_THEME.tableHeadCell} text-right w-44`}>Amount (PKR)</th>
+                                                                <th className={`${REBATE_THEME.tableHeadCell} text-right w-36`}>Avg Rate (PKR)</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-[#eef1f6]">
+                                                            {reportData.products.map((p, index) => (
+                                                                <tr
+                                                                    key={p.pro_id}
+                                                                    className={`${index % 2 === 0 ? 'bg-white' : 'bg-[#fafbfd]'} hover:bg-[#e8effd]/40 transition-colors`}
+                                                                >
+                                                                    <td className="px-5 py-4 text-center text-slate-500 font-semibold">{index + 1}</td>
+                                                                    <td className="px-5 py-4">
+                                                                        <div className="flex items-center gap-3">
+                                                                            <span
+                                                                                className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold text-white"
+                                                                                style={{ background: `linear-gradient(135deg, ${BRAND.primary.blue}, ${BRAND.supporting.periwinkle})` }}
+                                                                            >
+                                                                                {p.pro_title?.[0]?.toUpperCase() || '?'}
+                                                                            </span>
+                                                                            <span className="font-bold text-slate-900">{p.pro_title}</span>
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="px-5 py-4 text-center">
+                                                                        <span className="inline-flex min-w-[2rem] px-2 py-0.5 rounded-md font-semibold text-xs" style={{ backgroundColor: BRAND.tint.blue, color: BRAND.text.blue }}>
+                                                                            {p.purchase_count}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="px-5 py-4 text-right font-bold tabular-nums text-base" style={{ color: BRAND.primary.blue }}>{fmtAmt(p.total_quantity)}</td>
+                                                                    <td className="px-5 py-4 text-right font-bold text-slate-900 tabular-nums">{formatCurrency(p.total_amount)}</td>
+                                                                    <td className="px-5 py-4 text-right text-slate-600 tabular-nums font-medium">{fmtAmt(p.avg_rate)}</td>
+                                                                </tr>
+                                                            ))}
+                                                            {reportData.products.length === 0 && (
+                                                                <tr>
+                                                                    <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
+                                                                        No purchases in {reportData.summary.monthLabel}.
+                                                                    </td>
+                                                                </tr>
+                                                            )}
+                                                        </tbody>
+                                                        {reportData.products.length > 0 && (
+                                                            <tfoot>
+                                                                <tr className={REBATE_THEME.tableFoot}>
+                                                                    <td colSpan={3} className="px-5 py-3.5 text-right uppercase text-[11px] tracking-wider">Grand Total</td>
+                                                                    <td className="px-5 py-3.5 text-right tabular-nums text-base" style={{ color: BRAND.supporting.cyan }}>{fmtAmt(reportData.summary.totalQuantity)}</td>
+                                                                    <td className="px-5 py-3.5 text-right tabular-nums text-base" style={{ color: BRAND.supporting.green }}>PKR {formatCurrency(reportData.summary.totalAmount)}</td>
+                                                                    <td className="px-5 py-3.5 text-right text-slate-400">—</td>
+                                                                </tr>
+                                                            </tfoot>
+                                                        )}
+                                                    </table>
+                                                </div>
+                                            )}
+
+                                            {activeTab === 'purchases' && (
+                                                <div className="p-3 space-y-2">
+                                                    {reportData.purchases.length === 0 ? (
+                                                        <div className="px-6 py-12 text-center text-slate-500 text-sm">
+                                                            No purchase bills in {reportData.summary.monthLabel}.
+                                                        </div>
+                                                    ) : (
+                                                        reportData.purchases.map((purchase) => {
+                                                            const isExpanded = expandedPurchaseId === purchase.pur_id;
+                                                            return (
+                                                                <div
+                                                                    key={purchase.pur_id}
+                                                                    className="border border-[#e2e8f0] rounded-xl overflow-hidden bg-white shadow-sm"
+                                                                >
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setExpandedPurchaseId(isExpanded ? null : purchase.pur_id)}
+                                                                        className="w-full px-4 py-3.5 flex items-center gap-3 transition-colors text-left"
+                                                                        style={{ backgroundColor: isExpanded ? BRAND.tint.blue : 'white' }}
+                                                                    >
+                                                                        <span
+                                                                            className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center"
+                                                                            style={
+                                                                                isExpanded
+                                                                                    ? { backgroundColor: BRAND.primary.blue, color: 'white' }
+                                                                                    : { backgroundColor: '#f1f5f9', color: '#64748b' }
+                                                                            }
+                                                                        >
+                                                                            {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                                                                        </span>
+                                                                        <div className="flex-1 min-w-0 grid grid-cols-1 md:grid-cols-5 gap-2 md:gap-4 items-center">
+                                                                            <div>
+                                                                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wide">Date</p>
+                                                                                <p className="font-semibold text-slate-800">{formatDate(purchase.created_at)}</p>
+                                                                            </div>
+                                                                            <div>
+                                                                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wide">Invoice</p>
+                                                                                <p className="font-bold" style={{ color: BRAND.primary.blue }}>{purchase.invoice_number}</p>
+                                                                            </div>
+                                                                            <div>
+                                                                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wide">Items / Qty</p>
+                                                                                <p className="font-semibold text-slate-800">{purchase.item_count} items · {fmtAmt(purchase.total_qty)}</p>
+                                                                            </div>
+                                                                            <div>
+                                                                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wide">Payment</p>
+                                                                                <p className="font-semibold text-slate-800">{purchase.payment_type}</p>
+                                                                            </div>
+                                                                            <div className="md:text-right">
+                                                                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wide">Net Total</p>
+                                                                                <p className="font-bold text-base" style={{ color: BRAND.text.green }}>PKR {formatCurrency(purchase.net_total)}</p>
+                                                                            </div>
+                                                                        </div>
+                                                                    </button>
+                                                                    {isExpanded && (
+                                                                        <div className="px-4 pb-4 border-t border-slate-100 bg-slate-50/50">
+                                                                            <div className="mt-3 border border-slate-200 rounded-xl overflow-hidden bg-white">
+                                                                                <table className="w-full text-xs">
+                                                                                    <thead>
+                                                                                        <tr className={REBATE_THEME.tableHead}>
+                                                                                            <th className={`${REBATE_THEME.tableHeadCell}`}>Product</th>
+                                                                                            <th className={`${REBATE_THEME.tableHeadCell} text-right w-24`}>Qty</th>
+                                                                                            <th className={`${REBATE_THEME.tableHeadCell} text-right w-28`}>Rate (PKR)</th>
+                                                                                            <th className={`${REBATE_THEME.tableHeadCell} text-right w-28`}>Discount</th>
+                                                                                            <th className={`${REBATE_THEME.tableHeadCell} text-right w-32`}>Net Total</th>
+                                                                                        </tr>
+                                                                                    </thead>
+                                                                                    <tbody className="divide-y divide-slate-100">
+                                                                                        {purchase.items.map((item, idx) => (
+                                                                                            <tr key={`${purchase.pur_id}-${item.pro_id}-${idx}`}>
+                                                                                                <td className="px-4 py-2.5 font-semibold text-slate-800">{item.pro_title}</td>
+                                                                                                <td className="px-4 py-2.5 text-right font-bold tabular-nums" style={{ color: BRAND.primary.blue }}>{fmtAmt(item.qnty)}</td>
+                                                                                                <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">{fmtAmt(item.unit_rate)}</td>
+                                                                                                <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">{fmtAmt(item.discount)}</td>
+                                                                                                <td className="px-4 py-2.5 text-right font-bold tabular-nums" style={{ color: BRAND.text.green }}>{formatCurrency(item.net_total)}</td>
+                                                                                            </tr>
+                                                                                        ))}
+                                                                                    </tbody>
+                                                                                </table>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {activeTab === 'rebates' && (
+                                                <div className="overflow-x-auto">
+                                                    {reportData.rebateHistory.length > 0 && (
+                                                        <div className="px-5 py-3 border-b flex items-center justify-between" style={{ backgroundColor: BRAND.tint.periwinkle, borderColor: `${BRAND.supporting.periwinkle}30` }}>
+                                                            <p className="text-sm font-semibold" style={{ color: BRAND.text.periwinkle }}>
+                                                                {reportData.rebateHistory.length} rebate {reportData.rebateHistory.length === 1 ? 'entry' : 'entries'} this month
+                                                            </p>
+                                                            <p className="text-sm font-bold" style={{ color: BRAND.text.green }}>
+                                                                Total: PKR {formatCurrency(reportData.summary.rebatePaid)}
+                                                            </p>
+                                                        </div>
+                                                    )}
+                                                    <table className="w-full text-sm">
+                                                        <thead>
+                                                            <tr className={REBATE_THEME.tableHead}>
+                                                                <th className={`${REBATE_THEME.tableHeadCell} w-14 text-center`}>S.No</th>
+                                                                <th className={`${REBATE_THEME.tableHeadCell} w-32`}>Date</th>
+                                                                <th className={`${REBATE_THEME.tableHeadCell} w-36`}>Bill No</th>
+                                                                <th className={REBATE_THEME.tableHeadCell}>Details</th>
+                                                                <th className={`${REBATE_THEME.tableHeadCell} text-right w-40`}>Amount (PKR)</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-[#eef1f6]">
+                                                            {reportData.rebateHistory.map((entry, index) => (
+                                                                <tr key={rebateEntryKey(entry, index)} className={`${index % 2 === 0 ? 'bg-white' : 'bg-[#fafbfd]'} transition-colors`} style={{ ['--hover']: BRAND.tint.periwinkle }}>
+                                                                    <td className="px-5 py-4 text-center text-slate-500 font-semibold">{index + 1}</td>
+                                                                    <td className="px-5 py-4 text-slate-800 font-medium">{formatDate(entry.created_at)}</td>
+                                                                    <td className="px-5 py-4">
+                                                                        <span className="inline-flex px-2 py-0.5 rounded-md font-bold text-xs" style={{ backgroundColor: BRAND.tint.periwinkle, color: BRAND.text.periwinkle }}>
+                                                                            {entry.bill_no}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="px-5 py-4 text-slate-600 text-xs leading-relaxed">{entry.details}</td>
+                                                                    <td className="px-5 py-4 text-right font-bold tabular-nums text-base" style={{ color: BRAND.text.green }}>{formatCurrency(entry.debit_amount)}</td>
+                                                                </tr>
+                                                            ))}
+                                                            {reportData.rebateHistory.length === 0 && (
+                                                                <tr>
+                                                                    <td colSpan={5} className="px-6 py-12 text-center">
+                                                                        <div className="max-w-xs mx-auto">
+                                                                            <StatusBadge status={reportData.summary.rebateStatus} size="lg" />
+                                                                            <p className="text-slate-500 text-sm mt-3">
+                                                                                No rebate payment recorded for {reportData.summary.monthLabel}.
+                                                                            </p>
+                                                                        </div>
+                                                                    </td>
+                                                                </tr>
+                                                            )}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Print tables */}
+                                    <div className="hidden print:block bg-white border border-black mt-4">
+                                        <h3 className="text-sm font-bold px-3 py-2 border-b border-black">Product Summary</h3>
+                                        <table className="w-full text-xs">
+                                            <thead>
+                                                <tr className="bg-gray-200">
+                                                    <th className="px-2 py-1 border border-black text-left">Product</th>
+                                                    <th className="px-2 py-1 border border-black text-right">Qty</th>
+                                                    <th className="px-2 py-1 border border-black text-right">Amount</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {reportData.products.map((p) => (
+                                                    <tr key={p.pro_id}>
+                                                        <td className="px-2 py-1 border border-black">{p.pro_title}</td>
+                                                        <td className="px-2 py-1 border border-black text-right">{fmtAmt(p.total_quantity)}</td>
+                                                        <td className="px-2 py-1 border border-black text-right">{formatCurrency(p.total_amount)}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </>
+                            )}
+
+                            {selectedSupplierId && !selectedMonth && !loadingMonthly && monthlyData && unpaidMonthOptions.length === 0 && (
+                                <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-10 text-center print:hidden">
+                                    <Calendar className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+                                    <h3 className="text-base font-bold text-slate-800">All months are paid</h3>
+                                    <p className="text-sm text-slate-500 mt-2">
+                                        Every month with activity is marked paid above. Open Rebate History to view paid month details.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={goToRebateHistory}
+                                        className={`mt-4 ${rebateBtnPrimary()}`}
+                                        style={{ background: `linear-gradient(135deg, ${BRAND.supporting.periwinkle}, ${BRAND.primary.blue})` }}
+                                    >
+                                        <History className="w-4 h-4" /> View Rebate History
+                                    </button>
+                                </div>
+                            )}
+
+                            {selectedSupplierId && selectedMonth && !reportData && isLoading && (
+                                <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center print:hidden">
+                                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 mb-3" style={{ borderColor: BRAND.primary.blue }} />
+                                    <p className="text-sm font-medium text-slate-600">Loading {selectedMonth} details...</p>
+                                </div>
+                            )}
+
+                            {selectedSupplierId && reportData && reportData.summary.purchaseCount === 0 && !isLoading && (
+                                <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-10 text-center print:hidden">
+                                    <Calendar className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+                                    <h3 className="text-base font-bold text-slate-800">No purchases in {reportData.summary.monthLabel}</h3>
+                                    <p className="text-sm text-slate-500 mt-2">Change the month or open Rebate History to see other months.</p>
+                                    <button
+                                        type="button"
+                                        onClick={goToRebateHistory}
+                                        className={`mt-4 ${rebateBtnPrimary()}`}
+                                        style={{ background: `linear-gradient(135deg, ${BRAND.supporting.periwinkle}, ${BRAND.primary.blue})` }}
+                                    >
+                                        <History className="w-4 h-4" /> View Rebate History
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}
 
-                {/* Rebate Dialog / Modal */}
+                {/* Rebate Modal */}
                 {isRebateOpen && reportData && (
-                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all border border-slate-200">
-                            {/* Modal Header */}
-                            <div className="bg-gradient-to-r from-indigo-700 to-violet-800 px-6 py-4 flex items-center justify-between text-white">
+                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:hidden">
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200">
+                            <div className="px-6 py-4 flex items-center justify-between text-white" style={{ background: REBATE_THEME.headerGradient }}>
                                 <div className="flex items-center space-x-2.5">
-                                    <Gift className="w-5 h-5 text-indigo-200" />
+                                    <Gift className="w-5 h-5" style={{ color: 'rgba(255,255,255,0.85)' }} />
                                     <h3 className="text-lg font-bold">Add Rebate to Ledger</h3>
                                 </div>
                                 <button onClick={() => setIsRebateOpen(false)} className="hover:bg-white/20 p-1.5 rounded-lg transition-colors">
                                     <X className="w-5 h-5" />
                                 </button>
                             </div>
-
-                            {/* Modal Body */}
                             <div className="p-6 space-y-5">
                                 <div>
                                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Supplier Account</label>
-                                    <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 font-bold text-base shadow-inner">
+                                    <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 font-bold">
                                         {reportData.summary.supplierName}
                                     </div>
                                 </div>
-
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Total Quantity (Aggregated)</label>
-                                    <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-blue-900 font-bold text-xl shadow-inner">
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Month</label>
+                                    <div className="rounded-xl px-4 py-3 font-bold border" style={{ backgroundColor: BRAND.tint.blue, borderColor: `${BRAND.primary.blue}30`, color: BRAND.text.blue }}>
+                                        {reportData.summary.monthLabel}
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Total Quantity (This Month)</label>
+                                    <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-blue-900 font-bold text-xl">
                                         {fmtAmt(reportData.summary.totalQuantity)} <span className="text-sm font-semibold text-blue-600">units</span>
                                     </div>
                                 </div>
-
                                 <div className="grid grid-cols-2 gap-3">
                                     <div>
                                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Rate (Per Unit)</label>
@@ -523,40 +880,33 @@ export default function RebateReport() {
                                             step="0.01"
                                             value={rebateRate}
                                             onChange={(e) => setRebateRate(e.target.value)}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter' && rebateRate && parseFloat(rebateRate) > 0) {
-                                                    handleSaveRebate();
-                                                }
-                                            }}
                                             placeholder="0.00"
-                                            className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-bold text-lg text-slate-900"
+                                            className="w-full px-3.5 py-2.5 bg-white border border-[#e2e8f0] rounded-xl outline-none font-bold text-lg focus:ring-2 focus:ring-[#1A55E3]/25 focus:border-[#1A55E3]"
                                             autoFocus
                                         />
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Total Rebate (PKR)</label>
-                                        <div className="w-full px-3.5 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 font-bold text-lg shadow-inner">
+                                        <div className="w-full px-3.5 py-2.5 rounded-xl font-bold text-lg border" style={{ backgroundColor: BRAND.tint.green, borderColor: `${BRAND.supporting.green}40`, color: BRAND.text.green }}>
                                             {formatCurrency(rebateTotalAmount)}
                                         </div>
                                     </div>
                                 </div>
-
-                                <div className="pt-2">
-                                    <button
-                                        onClick={handleSaveRebate}
-                                        disabled={savingRebate || !rebateRate || parseFloat(rebateRate) <= 0}
-                                        className="w-full bg-gradient-to-r from-indigo-600 to-violet-700 hover:from-indigo-700 hover:to-violet-800 text-white px-6 py-3.5 rounded-xl font-bold text-base shadow-lg disabled:opacity-50 flex items-center justify-center space-x-2 transition-all transform active:scale-95"
-                                    >
-                                        {savingRebate ? (
-                                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                                        ) : (
-                                            <>
-                                                <Save className="w-5 h-5" />
-                                                <span>Save to Supplier Ledger</span>
-                                            </>
-                                        )}
-                                    </button>
-                                </div>
+                                <button
+                                    onClick={handleSaveRebate}
+                                    disabled={savingRebate || !rebateRate || parseFloat(rebateRate) <= 0}
+                                    className={`w-full ${rebateBtnPrimary('py-3.5')} disabled:opacity-50`}
+                                    style={{ background: `linear-gradient(135deg, ${BRAND.primary.blue}, ${BRAND.supporting.periwinkle})` }}
+                                >
+                                    {savingRebate ? (
+                                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+                                    ) : (
+                                        <>
+                                            <Save className="w-5 h-5" />
+                                            <span>Save to Supplier Ledger</span>
+                                        </>
+                                    )}
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -566,17 +916,26 @@ export default function RebateReport() {
             <style jsx global>{`
         @media print {
           @page { size: A4 landscape; margin: 8mm; }
-          .no-print { display: none !important; }
-          body { font-size: 10px !important; background: white !important; margin: 0 !important; padding: 0 !important; }
+          body { font-size: 10px !important; background: white !important; }
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-          table { width: 100% !important; table-layout: fixed !important; border-collapse: collapse !important; font-size: 9px !important; }
-          th, td { padding: 4px 6px !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; }
-          th { position: static !important; }
-          tr { page-break-inside: avoid !important; }
-          thead { display: table-header-group !important; }
-          tfoot { display: table-footer-group !important; }
         }
       `}</style>
         </DashboardLayout>
     );
+}
+
+export default function RebateReport() {
+  return (
+    <Suspense
+      fallback={
+        <DashboardLayout>
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2" style={{ borderColor: BRAND.primary.blue }} />
+          </div>
+        </DashboardLayout>
+      }
+    >
+      <RebateReportContent />
+    </Suspense>
+  );
 }

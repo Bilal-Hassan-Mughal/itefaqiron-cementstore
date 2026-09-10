@@ -968,6 +968,7 @@ export default function StockTransferPage() {
                       openOnFocus={true}
                       selectOnFocus={true}
                       options={Array.isArray(products) ? products : []}
+                      getOptionKey={(option) => String(option?.pro_id ?? '')}
                       getOptionLabel={(option) => option?.pro_title || ''}
                       value={selectedProduct}
                       onChange={(e, newValue) => {
@@ -975,6 +976,19 @@ export default function StockTransferPage() {
                         setCurrentStock(null);
                       }}
                       isOptionEqualToValue={(option, value) => option?.pro_id === value?.pro_id}
+                      renderOption={(props, option) => (
+                        <li {...props} key={option.pro_id}>
+                          <Box>
+                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                              {option.pro_title}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              ID {option.pro_id}
+                              {option.pro_unit ? ` · ${option.pro_unit}` : ''}
+                            </Typography>
+                          </Box>
+                        </li>
+                      )}
                       renderInput={(params) => (
                         <TextField
                           {...params}
