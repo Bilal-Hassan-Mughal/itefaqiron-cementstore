@@ -226,40 +226,153 @@ function drawLedgerPdfPageFooter(doc, { marginX, pageW, pageH, pageNum, pageCoun
   doc.text(`Page ${pageNum} of ${pageCount}`, pageW - marginX, pageH - 12, { align: 'right' });
 }
 
-const getLedgerRowStyle = (isDebit, isCredit) => {
-  if (isDebit) {
-    return {
-      bg: '#e2efda',
-      hover: '#d4e6cc',
-      text: '#1e293b',
-      sub: '#475569',
-      amount: '#006100',
-      border: '#c5c5c5',
-      chipBg: '#c6efce',
-      chipText: '#006100',
-    };
+const LEDGER_VALUE_COLORS = {
+  debit: '#006100',
+  credit: '#9c0006',
+  balance: '#1347c4',
+};
+
+/** Suppliers & customers: credit = green, debit = red (opposite of cash/bank ledger). */
+const LEDGER_VALUE_COLORS_PARTY = {
+  debit: '#9c0006',
+  credit: '#006100',
+  balance: '#1347c4',
+};
+
+function isSupplierOrCustomerLedgerEntry(entry) {
+  const cat = (entry?.customer?.customer_category?.cus_cat_title || '').toLowerCase();
+  const type = (entry?.customer?.customer_type?.cus_type_title || '').toLowerCase();
+  const label = `${cat} ${type}`.trim();
+  if (!label) return false;
+  if (/cash|bank|expense|labour|delivery|transport|staff|employee|loader|cargo/.test(label)) {
+    return false;
   }
-  if (isCredit) {
-    return {
-      bg: '#fce4d6',
-      hover: '#f8d4c4',
-      text: '#1e293b',
-      sub: '#475569',
-      amount: '#9c0006',
-      border: '#c5c5c5',
-      chipBg: '#f4cccc',
-      chipText: '#9c0006',
-    };
+  return /supplier|creditor|customer|debtor|client/.test(label);
+}
+
+function getLedgerValueColors(entry) {
+  return isSupplierOrCustomerLedgerEntry(entry) ? LEDGER_VALUE_COLORS_PARTY : LEDGER_VALUE_COLORS;
+}
+
+const LEDGER_TYPE_COLORS = {
+  sale: { bg: '#dbeafe', text: '#1d4ed8', border: '#93c5fd' },
+  purchase: { bg: '#fef3c7', text: '#b45309', border: '#fcd34d' },
+  payment: { bg: '#fce7f3', text: '#be185d', border: '#f9a8d4' },
+  receiving: { bg: '#d1fae5', text: '#047857', border: '#6ee7b7' },
+  expense: { bg: '#fee2e2', text: '#b91c1c', border: '#fca5a5' },
+  order: { bg: '#e0e7ff', text: '#4338ca', border: '#a5b4fc' },
+  'sale return': { bg: '#ffedd5', text: '#c2410c', border: '#fdba74' },
+  'purchase return': { bg: '#fef9c3', text: '#a16207', border: '#fde047' },
+  journal: { bg: '#f3e8ff', text: '#7e22ce', border: '#d8b4fe' },
+  adjustment: { bg: '#f1f5f9', text: '#475569', border: '#cbd5e1' },
+  rebate: { bg: '#ecfdf5', text: '#059669', border: '#6ee7b7' },
+  transfer: { bg: '#cffafe', text: '#0e7490', border: '#67e8f9' },
+  receipt: { bg: '#dcfce7', text: '#15803d', border: '#86efac' },
+  default: { bg: '#f8fafc', text: '#64748b', border: '#e2e8f0' },
+};
+
+function getLedgerTypeStyle(ledgerType) {
+  const key = String(ledgerType || '').trim().toLowerCase();
+  return LEDGER_TYPE_COLORS[key] || LEDGER_TYPE_COLORS.default;
+}
+
+function formatLedgerParticulars(details) {
+  if (!details || !String(details).trim()) return '';
+  return String(details).replace(/\{.*?\}/g, '').replace(/\|/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function mergeParticularsBoldRanges(ranges) {
+  if (!ranges.length) return [];
+  const sorted = [...ranges].sort((a, b) => a.start - b.start);
+  const merged = [sorted[0]];
+  for (let i = 1; i < sorted.length; i += 1) {
+    const last = merged[merged.length - 1];
+    const cur = sorted[i];
+    if (cur.start <= last.end) {
+      last.end = Math.max(last.end, cur.end);
+    } else {
+      merged.push(cur);
+    }
   }
+  return merged;
+}
+
+function getParticularsBoldRanges(text, entry) {
+  if (!text) return [];
+  const ranges = [];
+  const addRange = (start, end) => {
+    if (start < 0 || end <= start || end > text.length) return;
+    ranges.push({ start, end });
+  };
+  const addMatch = (match) => {
+    if (!match?.[1]) return;
+    const label = match[1].trim();
+    if (!label) return;
+    const start = text.indexOf(label, Math.max(0, match.index || 0));
+    addRange(start, start + label.length);
+  };
+
+  addMatch(text.match(/^Payment for\s+([^-]+?)(?:\s-\s Ref:|$)/i));
+  addMatch(text.match(/^Rebate\s+(.+?)\s+MonthKey:/i));
+
+  const inlinePatterns = [
+    /\bfrom\s+([^—\-|]+?)(?:\s*[—\-|]|$)/i,
+    /\bto\s+([^—\-|]+?)(?:\s*[—\-|]|$)/i,
+    /Payment (?:to|received from)\s+([^—]+?)\s*[—\-]/i,
+    /added to\s+([^—]+?)\s*[—\-]/i,
+    /returned to\s+([^—]+?)(?:\s*[—\-]|$)/i,
+    /-\s+([^—\-(]+?)\s*\((?:Credit|Debit)\)/i,
+  ];
+  inlinePatterns.forEach((pattern) => addMatch(text.match(pattern)));
+
+  const cusName = entry?.customer?.cus_name?.trim();
+  if (cusName && cusName.toLowerCase() !== 'cash account') {
+    const lowerText = text.toLowerCase();
+    const lowerName = cusName.toLowerCase();
+    let idx = 0;
+    while ((idx = lowerText.indexOf(lowerName, idx)) !== -1) {
+      addRange(idx, idx + cusName.length);
+      idx += cusName.length;
+    }
+  }
+
+  return mergeParticularsBoldRanges(ranges);
+}
+
+function renderLedgerParticulars(details, entry) {
+  const text = formatLedgerParticulars(details);
+  if (!text) return null;
+
+  const ranges = getParticularsBoldRanges(text, entry);
+  if (!ranges.length) return text;
+
+  const parts = [];
+  let cursor = 0;
+  ranges.forEach(({ start, end }, i) => {
+    if (cursor < start) parts.push(text.slice(cursor, start));
+    parts.push(
+      <Box component="span" key={`part-bold-${i}`} sx={{ fontWeight: 800, color: '#0f172a' }}>
+        {text.slice(start, end)}
+      </Box>
+    );
+    cursor = end;
+  });
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return parts;
+}
+
+const getLedgerRowStyle = (isDebit, isCredit, entry) => {
+  const colors = getLedgerValueColors(entry);
+  const linkColor = isDebit ? colors.debit : isCredit ? colors.credit : '#334155';
   return {
     bg: '#ffffff',
-    hover: '#f2f2f2',
+    hover: '#f8fafc',
     text: '#1e293b',
-    sub: '#64748b',
-    amount: '#333333',
-    border: '#c5c5c5',
-    chipBg: '#f2f2f2',
-    chipText: '#333333',
+    sub: '#475569',
+    amount: linkColor,
+    border: '#e2e8f0',
+    chipBg: '#f8fafc',
+    chipText: '#475569',
   };
 };
 
@@ -302,13 +415,13 @@ const LEDGER_UI = {
     '& .MuiTableCell-head': {
       bgcolor: '#1A55E3',
       color: '#ffffff',
-      fontWeight: 700,
-      fontSize: '0.75rem',
+      fontWeight: 800,
+      fontSize: '0.875rem',
       letterSpacing: '0.02em',
       textTransform: 'none',
-      border: '1px solid #c5c5c5',
+      border: '1px solid #1347c4',
       borderTop: 'none',
-      py: 1.1,
+      py: 1.2,
       whiteSpace: 'nowrap',
     },
   },
@@ -333,6 +446,11 @@ const LEDGER_UI = {
       fontSize: '0.75rem',
       verticalAlign: 'middle',
       lineHeight: 1.4,
+    },
+    '& .MuiTableCell-head': {
+      fontWeight: 800,
+      fontSize: '0.875rem',
+      color: '#ffffff',
     },
   },
   tableGrid: {
@@ -408,7 +526,7 @@ const LEDGER_UI = {
     '& .MuiTableCell-root': {
       py: 1.1,
       fontWeight: 700,
-      bgcolor: '#d9e1f2',
+      bgcolor: '#ffffff',
       border: '1px solid #c5c5c5',
       fontSize: '0.8125rem',
     },
@@ -471,13 +589,13 @@ const LedgerTableHeaderRow = () => (
     <TableCell sx={{ borderTop: 'none !important' }}>
       Particulars
     </TableCell>
-    <TableCell sx={{ textAlign: 'right', bgcolor: '#006100 !important', color: '#fff !important', borderTop: 'none !important' }}>
+    <TableCell sx={{ textAlign: 'right', borderTop: 'none !important' }}>
       Debit (PKR)
     </TableCell>
-    <TableCell sx={{ textAlign: 'right', bgcolor: '#9c0006 !important', color: '#fff !important', borderTop: 'none !important' }}>
+    <TableCell sx={{ textAlign: 'right', borderTop: 'none !important' }}>
       Credit (PKR)
     </TableCell>
-    <TableCell sx={{ textAlign: 'right', bgcolor: '#1347c4 !important', color: '#fff !important', borderTop: 'none !important' }}>
+    <TableCell sx={{ textAlign: 'right', borderTop: 'none !important' }}>
       Balance (PKR)
     </TableCell>
     <TableCell sx={{ textAlign: 'center', borderTop: 'none !important' }}>
@@ -544,6 +662,13 @@ const getLocalDateString = (dateInput) => {
   return d.toLocaleDateString('en-GB', { timeZone: 'Asia/Karachi' });
 };
 
+const getKarachiDateKey = (dateInput) => {
+  if (!dateInput) return '';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
+};
+
 const getLedgerEntryDisplayAmounts = (entry) => {
   const debitAmt = parseFloat(entry.debit_amount || 0);
   const creditAmt = parseFloat(entry.credit_amount || 0);
@@ -592,6 +717,30 @@ const compareChronologically = (a, b) => {
 
   return (a.l_id || 0) - (b.l_id || 0);
 };
+
+/** All Accounts default: all of today's entries + last entry before today */
+function buildAllAccountsRecentEntryIdSet(entries) {
+  if (!entries.length) return new Set();
+  const todayKey = getKarachiDateKey(new Date());
+  const ids = new Set();
+
+  for (const entry of entries) {
+    if (getKarachiDateKey(entry.created_at) === todayKey) {
+      ids.add(entry.l_id);
+    }
+  }
+
+  const beforeToday = entries.filter((e) => {
+    const entryKey = getKarachiDateKey(e.created_at);
+    return entryKey && entryKey < todayKey;
+  });
+  if (beforeToday.length) {
+    const latestBeforeToday = [...beforeToday].sort((a, b) => compareChronologically(b, a))[0];
+    if (latestBeforeToday) ids.add(latestBeforeToday.l_id);
+  }
+
+  return ids;
+}
 
 /** Bank / Cash display amounts for a ledger row — must match the table body logic (finance ledger columns). */
 function getLedgerEntryBankCashForSummary(entry) {
@@ -858,6 +1007,8 @@ export default function FinancePage() {
   const [endDate, setEndDate] = useState('');
   const [selectedLedgerType, setSelectedLedgerType] = useState('');
   const [staticDataLoaded, setStaticDataLoaded] = useState(false);
+  /** All Accounts: default recent rows; Clear shows full ledger */
+  const [allAccountsFullLedger, setAllAccountsFullLedger] = useState(false);
 
   // Customer dropdown filter states
   const [customerSearchTerm, setCustomerSearchTerm] = useState('');
@@ -1116,6 +1267,7 @@ export default function FinancePage() {
         setActiveLedgerId(null);
         setSelectedCustomer('');
         setAccountSearchTerm('');
+        setAllAccountsFullLedger(false);
       }
       fetchLedgerData();
     };
@@ -1544,6 +1696,15 @@ export default function FinancePage() {
     }
   };
 
+  const isAllAccountsLedgerView = !selectedCustomer && !activeLedgerId;
+  const useAllAccountsRecentDefault =
+    isAllAccountsLedgerView && !allAccountsFullLedger && !startDate && !endDate;
+
+  const allAccountsRecentViewIds = useMemo(() => {
+    if (!useAllAccountsRecentDefault) return null;
+    return buildAllAccountsRecentEntryIdSet(ledgerEntries);
+  }, [ledgerEntries, useAllAccountsRecentDefault]);
+
   // Filter and sort logic
   const filteredLedgerEntries = ledgerEntries.filter(entry => {
     const displayAmts = getLedgerEntryDisplayAmounts(entry);
@@ -1614,6 +1775,8 @@ export default function FinancePage() {
       if (startDate) matchesDate = matchesDate && entryDateStr >= startDate;
       if (endDate) matchesDate = matchesDate && entryDateStr <= endDate;
     }
+
+    if (allAccountsRecentViewIds && !allAccountsRecentViewIds.has(entry.l_id)) return false;
 
     return matchesSearch && matchesCustomer && matchesCategory && matchesSubCategory && matchesLedgerType && matchesDate && matchesAmount;
   });
@@ -1721,8 +1884,17 @@ export default function FinancePage() {
     return { totalDebit, totalCredit, lastClosing };
   }, [finalLedgerEntries]);
 
+  const ledgerSummaryValueColors = useMemo(() => {
+    const viewId = selectedCustomer || activeLedgerId;
+    if (!viewId) return LEDGER_VALUE_COLORS;
+    const viewCust = customers.find((c) => Number(c.cus_id) === Number(viewId));
+    return viewCust && isSupplierOrCustomerLedgerEntry({ customer: viewCust })
+      ? LEDGER_VALUE_COLORS_PARTY
+      : LEDGER_VALUE_COLORS;
+  }, [selectedCustomer, activeLedgerId, customers]);
+
   // Stats calculations - use filtered entries for accuracy when filters are applied
-  const statsEntries = (selectedCustomer || searchTerm || selectedCategory || selectedSubCategory || startDate || endDate)
+  const statsEntries = (selectedCustomer || searchTerm || selectedCategory || selectedSubCategory || startDate || endDate || useAllAccountsRecentDefault)
     ? filteredLedgerEntries
     : ledgerEntries;
 
@@ -2308,9 +2480,7 @@ export default function FinancePage() {
         ? new Date(entry.created_at).toLocaleDateString('en-GB')
         : '—';
       const account = entry.customer?.cus_name || 'Cash Account';
-      let desc = entry.details
-        ? String(entry.details).replace(/\{.*?\}/g, '').replace(/\|/g, ' ').trim()
-        : 'General transaction';
+      let desc = formatLedgerParticulars(entry.details) || 'N/A';
       if (entry.bill_no) desc += ` (Bill #${entry.bill_no})`;
       const displayAmts = getLedgerEntryDisplayAmounts(entry);
       const debit = displayAmts.debit > 0 ? fmtAmt(displayAmts.debit) : '—';
@@ -2396,12 +2566,10 @@ export default function FinancePage() {
         const typeCol = showAccountCol ? -1 : 6;
 
         if (data.section === 'head') {
-          data.cell.styles.textColor = LEDGER_PDF.white;
+          data.cell.styles.fillColor = LEDGER_PDF.blue;
           data.cell.styles.fontStyle = 'bold';
-          if (col === debitCol) data.cell.styles.fillColor = LEDGER_PDF.debitHead;
-          else if (col === creditCol) data.cell.styles.fillColor = LEDGER_PDF.creditHead;
-          else if (col === balanceCol) data.cell.styles.fillColor = LEDGER_PDF.blueDark;
-          else data.cell.styles.fillColor = LEDGER_PDF.blue;
+          data.cell.styles.fontSize = 8.5;
+          data.cell.styles.textColor = LEDGER_PDF.white;
           return;
         }
 
@@ -2412,15 +2580,16 @@ export default function FinancePage() {
           const isDebit = displayAmts.debit > 0;
           const isCredit = displayAmts.credit > 0;
 
-          if (isDebit) data.cell.styles.fillColor = LEDGER_PDF.debitRow;
-          else if (isCredit) data.cell.styles.fillColor = LEDGER_PDF.creditRow;
-          else data.cell.styles.fillColor = LEDGER_PDF.white;
+          data.cell.styles.fillColor = LEDGER_PDF.white;
 
+          const partyLedger = isSupplierOrCustomerLedgerEntry(entry);
+          const pdfDebitColor = partyLedger ? LEDGER_PDF.creditText : LEDGER_PDF.debitText;
+          const pdfCreditColor = partyLedger ? LEDGER_PDF.debitText : LEDGER_PDF.creditText;
           if (col === debitCol && isDebit) {
-            data.cell.styles.textColor = LEDGER_PDF.debitText;
+            data.cell.styles.textColor = pdfDebitColor;
             data.cell.styles.fontStyle = 'bold';
           } else if (col === creditCol && isCredit) {
-            data.cell.styles.textColor = LEDGER_PDF.creditText;
+            data.cell.styles.textColor = pdfCreditColor;
             data.cell.styles.fontStyle = 'bold';
           } else if (col === balanceCol) {
             data.cell.styles.textColor = LEDGER_PDF.blueDark;
@@ -2432,26 +2601,30 @@ export default function FinancePage() {
             data.cell.styles.fontSize = 7;
           }
           if (col === typeCol) {
+            const typeStyle = getLedgerTypeStyle(entry.ledger_type);
             data.cell.styles.fontSize = 7;
             data.cell.styles.fontStyle = 'bold';
-            data.cell.styles.textColor = isDebit ? LEDGER_PDF.debitText : isCredit ? LEDGER_PDF.creditText : LEDGER_PDF.slate;
+            data.cell.styles.textColor = typeStyle.text;
           }
           return;
         }
 
         if (data.section === 'foot') {
+          const partyPdfView = customer && isSupplierOrCustomerLedgerEntry({ customer });
+          const footDebitColor = partyPdfView ? LEDGER_PDF.creditText : LEDGER_PDF.debitText;
+          const footCreditColor = partyPdfView ? LEDGER_PDF.debitText : LEDGER_PDF.creditText;
           if (col === footLabelCol) {
             data.cell.styles.halign = 'left';
             data.cell.styles.fontStyle = 'bold';
           }
           if (col === footDebitCol) {
             data.cell.styles.fillColor = LEDGER_PDF.summaryDebit;
-            data.cell.styles.textColor = LEDGER_PDF.debitText;
+            data.cell.styles.textColor = footDebitColor;
             data.cell.styles.halign = 'right';
           }
           if (col === footCreditCol) {
             data.cell.styles.fillColor = LEDGER_PDF.summaryCredit;
-            data.cell.styles.textColor = LEDGER_PDF.creditText;
+            data.cell.styles.textColor = footCreditColor;
             data.cell.styles.halign = 'right';
           }
           if (col === footBalanceCol) {
@@ -2742,6 +2915,7 @@ export default function FinancePage() {
     setActiveLedgerId(null);
     setSelectedCustomer('');
     setAccountSearchTerm('');
+    setAllAccountsFullLedger(false);
   };
 
   const activeLedgerTab = openLedgers.find((l) => l.id === Number(activeLedgerId));
@@ -2758,6 +2932,9 @@ export default function FinancePage() {
     setStartDate('');
     setEndDate('');
     setSelectedLedgerType('');
+    if (!activeLedgerId) {
+      setAllAccountsFullLedger(true);
+    }
     // Open ledger tabs stay until you click X — not cleared here
     if (!activeLedgerId) {
       setSelectedCustomer('');
@@ -2829,6 +3006,10 @@ export default function FinancePage() {
 
     const fromFormatted = new Date(fromStr).toLocaleDateString('en-GB');
     const toFormatted = new Date(toStr).toLocaleDateString('en-GB');
+    const printSummaryColors =
+      customer && isSupplierOrCustomerLedgerEntry({ customer })
+        ? LEDGER_VALUE_COLORS_PARTY
+        : LEDGER_VALUE_COLORS;
 
     // Build table rows
     const tableRows = chronologicalPrintEntries.map((entry, i) => {
@@ -2844,17 +3025,15 @@ export default function FinancePage() {
       const credit = displayAmts.credit;
       const debit = displayAmts.debit;
       const bal = parseFloat(entry.closing_balance || 0);
-      const isDebitRow = debit > 0;
-      const rowBg = isDebitRow ? '#f0fdf4' : '#fef2f2';
-
-      return `<tr style="background:${rowBg}">
+      const valueColors = getLedgerValueColors(entry);
+      return `<tr>
         <td style="padding:6px 8px;border:1px solid #d1d5db;text-align:center;font-weight:600">${i + 1}</td>
         <td style="padding:6px 8px;border:1px solid #d1d5db;font-size:11px">${date}</td>
         <td style="padding:6px 8px;border:1px solid #d1d5db;font-weight:600">${account}</td>
         <td style="padding:6px 8px;border:1px solid #d1d5db;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${desc}${entry.bill_no ? '<br/><span style="color:#6b7280;font-size:10px">Bill: ' + bill + '</span>' : ''}</td>
-        <td style="padding:6px 8px;border:1px solid #d1d5db;text-align:right;color:#16a34a;font-weight:600">${debit > 0 ? fmtAmt(debit) : '-'}</td>
-        <td style="padding:6px 8px;border:1px solid #d1d5db;text-align:right;color:#dc2626;font-weight:600">${credit > 0 ? fmtAmt(credit) : '-'}</td>
-        <td style="padding:6px 8px;border:1px solid #d1d5db;text-align:right;font-weight:700;color:#1d4ed8">${fmtAmt(bal)}</td>
+        <td style="padding:6px 8px;border:1px solid #d1d5db;text-align:right;color:${valueColors.debit};font-weight:600">${debit > 0 ? fmtAmt(debit) : '-'}</td>
+        <td style="padding:6px 8px;border:1px solid #d1d5db;text-align:right;color:${valueColors.credit};font-weight:600">${credit > 0 ? fmtAmt(credit) : '-'}</td>
+        <td style="padding:6px 8px;border:1px solid #d1d5db;text-align:right;font-weight:700;color:${valueColors.balance}">${fmtAmt(bal)}</td>
       </tr>`;
     }).join('');
 
@@ -2917,9 +3096,9 @@ export default function FinancePage() {
     ${tableRows}
     <tr class="footer-row">
       <td colspan="4" style="text-align:center;font-size:13px">TOTAL SUMMARY</td>
-      <td class="debit-total" style="text-align:right">${fmtAmt(printTotalDebit)}</td>
-      <td class="credit-total" style="text-align:right">${fmtAmt(printTotalCredit)}</td>
-      <td class="balance-total" style="text-align:right">${fmtAmt(balance)}</td>
+      <td style="text-align:right;color:${printSummaryColors.debit}">${fmtAmt(printTotalDebit)}</td>
+      <td style="text-align:right;color:${printSummaryColors.credit}">${fmtAmt(printTotalCredit)}</td>
+      <td class="balance-total" style="text-align:right;color:${printSummaryColors.balance}">${fmtAmt(balance)}</td>
     </tr>
   </tbody>
 </table>
@@ -3223,6 +3402,12 @@ export default function FinancePage() {
           )}
         </Card>
 
+        {useAllAccountsRecentDefault && (
+          <Alert severity="info" sx={{ borderRadius: '12px', py: 0.75, alignItems: 'center' }}>
+            Showing <strong>today&apos;s entries</strong> plus the <strong>last entry before today</strong>. Click <strong>Clear</strong> for the full ledger.
+          </Alert>
+        )}
+
         {/* Ledger Table */}
         <Box sx={{ width: '100%' }}>
           <Card sx={LEDGER_UI.tableCard}>
@@ -3352,11 +3537,11 @@ export default function FinancePage() {
                     <LedgerTableColGroup />
                     <TableBody>
                       {finalLedgerEntries.map((entry, index) => {
-                        // Determine if this is a debit (green) or credit (red) entry using display amounts helper
                         const displayAmts = getLedgerEntryDisplayAmounts(entry);
                         const isDebit = displayAmts.debit > 0;
                         const isCredit = displayAmts.credit > 0;
                         const entryAmount = isDebit ? displayAmts.debit : displayAmts.credit;
+                        const valueColors = getLedgerValueColors(entry);
 
                         // Parse split payment info if present in details
                         let splitCashAmount = 0;
@@ -3400,7 +3585,7 @@ export default function FinancePage() {
                           }
                         }
 
-                        const rowStyle = getLedgerRowStyle(isDebit, isCredit);
+                        const rowStyle = getLedgerRowStyle(isDebit, isCredit, entry);
 
                         return (
                           <TableRow
@@ -3443,7 +3628,7 @@ export default function FinancePage() {
                                 if (entry.customer?.cus_id) openCustomerLedger(entry.customer.cus_id, entry.customer.cus_name);
                               }}
                             >
-                              <Typography variant="body2" sx={{ fontWeight: 700, color: rowStyle.text }}>
+                              <Typography variant="body2" sx={{ fontWeight: 800, fontSize: '0.9375rem', color: '#0f172a', lineHeight: 1.35 }}>
                                 {entry.customer?.cus_name || 'Cash Account'}
                               </Typography>
                               {entry.customer?.customer_type?.cus_type_title && (
@@ -3455,9 +3640,15 @@ export default function FinancePage() {
                             </TableCell>
 
                             <TableCell sx={{ maxWidth: 300, bgcolor: rowStyle.bg }}>
-                              <Typography variant="body2" sx={{ lineHeight: 1.5, fontWeight: 500, color: rowStyle.text }}>
-                                {entry.details || 'General transaction'}
-                              </Typography>
+                              {formatLedgerParticulars(entry.details) ? (
+                                <Typography variant="body2" component="div" sx={{ lineHeight: 1.5, fontWeight: 500, color: rowStyle.text }}>
+                                  {renderLedgerParticulars(entry.details, entry)}
+                                </Typography>
+                              ) : (
+                                <Typography variant="body2" sx={{ lineHeight: 1.5, fontWeight: 600, color: '#94a3b8', fontStyle: 'italic' }}>
+                                  N/A
+                                </Typography>
+                              )}
                               {entry.bill_no && (
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.35 }}>
                                   <Typography variant="caption" onClick={(e) => { e.stopPropagation(); openDocumentFromLedgerEntry(entry); }}
@@ -3474,7 +3665,7 @@ export default function FinancePage() {
 
                              <TableCell sx={{ textAlign: 'right', bgcolor: rowStyle.bg }}>
                                {displayAmts.debit > 0 ? (
-                                 <Typography variant="body2" sx={{ fontWeight: 700, color: rowStyle.amount, fontFamily: 'monospace', fontSize: '0.875rem' }}>
+                                 <Typography variant="body2" sx={{ fontWeight: 800, color: valueColors.debit, fontFamily: 'monospace', fontSize: '0.9375rem' }}>
                                    {fmtAmt(displayAmts.debit)}
                                  </Typography>
                                ) : (
@@ -3484,7 +3675,7 @@ export default function FinancePage() {
 
                              <TableCell sx={{ textAlign: 'right', bgcolor: rowStyle.bg }}>
                                {displayAmts.credit > 0 ? (
-                                 <Typography variant="body2" sx={{ fontWeight: 700, color: rowStyle.amount, fontFamily: 'monospace', fontSize: '0.875rem' }}>
+                                 <Typography variant="body2" sx={{ fontWeight: 800, color: valueColors.credit, fontFamily: 'monospace', fontSize: '0.9375rem' }}>
                                    {fmtAmt(displayAmts.credit)}
                                  </Typography>
                                ) : (
@@ -3493,24 +3684,29 @@ export default function FinancePage() {
                              </TableCell>
 
                              <TableCell sx={{ textAlign: 'right', bgcolor: rowStyle.bg }}>
-                               <Typography variant="body2" sx={{ fontWeight: 700, fontFamily: 'monospace', color: BRAND.text.blue, fontSize: '0.8125rem' }}>
+                               <Typography variant="body2" sx={{ fontWeight: 800, fontFamily: 'monospace', color: valueColors.balance, fontSize: '0.9375rem' }}>
                                  {fmtAmt(entry.closing_balance)}
                                </Typography>
                              </TableCell>
 
                             <TableCell sx={{ bgcolor: rowStyle.bg, textAlign: 'center' }}>
-                              <Chip
-                                label={entry.ledger_type || '—'}
-                                size="small"
-                                sx={{
-                                  fontWeight: 600,
-                                  fontSize: '0.65rem',
-                                  height: 22,
-                                  bgcolor: rowStyle.chipBg,
-                                  color: rowStyle.chipText,
-                                  border: `1px solid ${rowStyle.border}`,
-                                }}
-                              />
+                              {(() => {
+                                const typeStyle = getLedgerTypeStyle(entry.ledger_type);
+                                return (
+                                  <Chip
+                                    label={entry.ledger_type || '—'}
+                                    size="small"
+                                    sx={{
+                                      fontWeight: 700,
+                                      fontSize: '0.6875rem',
+                                      height: 24,
+                                      bgcolor: typeStyle.bg,
+                                      color: typeStyle.text,
+                                      border: `1px solid ${typeStyle.border}`,
+                                    }}
+                                  />
+                                );
+                              })()}
                             </TableCell>
                           </TableRow>
                         );
@@ -3521,22 +3717,22 @@ export default function FinancePage() {
                             Period Total
                           </Typography>
                         </TableCell>
-                         <TableCell sx={{ textAlign: 'right', bgcolor: '#c6efce !important' }}>
-                           <Typography variant="body2" sx={{ fontWeight: 700, color: '#006100', fontFamily: 'monospace' }}>
+                         <TableCell sx={{ textAlign: 'right' }}>
+                           <Typography variant="body2" sx={{ fontWeight: 800, fontSize: '0.9375rem', color: ledgerSummaryValueColors.debit, fontFamily: 'monospace' }}>
                              {finalLedgerEntries.length > 0 ? fmtAmt(ledgerViewSummary.totalDebit) : '—'}
                            </Typography>
                          </TableCell>
-                         <TableCell sx={{ textAlign: 'right', bgcolor: '#f4cccc !important' }}>
-                           <Typography variant="body2" sx={{ fontWeight: 700, color: '#9c0006', fontFamily: 'monospace' }}>
+                         <TableCell sx={{ textAlign: 'right' }}>
+                           <Typography variant="body2" sx={{ fontWeight: 800, fontSize: '0.9375rem', color: ledgerSummaryValueColors.credit, fontFamily: 'monospace' }}>
                              {finalLedgerEntries.length > 0 ? fmtAmt(ledgerViewSummary.totalCredit) : '—'}
                            </Typography>
                          </TableCell>
-                         <TableCell sx={{ textAlign: 'right', bgcolor: '#bdd7ee !important' }}>
-                           <Typography variant="body2" sx={{ fontWeight: 700, fontFamily: 'monospace', color: '#1347c4' }}>
+                         <TableCell sx={{ textAlign: 'right' }}>
+                           <Typography variant="body2" sx={{ fontWeight: 800, fontSize: '0.9375rem', fontFamily: 'monospace', color: ledgerSummaryValueColors.balance }}>
                              {finalLedgerEntries.length > 0 ? fmtAmt(ledgerViewSummary.lastClosing) : '—'}
                            </Typography>
                          </TableCell>
-                         <TableCell sx={{ bgcolor: '#d9e1f2 !important' }} />
+                         <TableCell />
                       </TableRow>
                     </TableBody>
                   </Table>

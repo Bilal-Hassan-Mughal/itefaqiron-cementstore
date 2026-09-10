@@ -180,6 +180,7 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id') ? parseInt(searchParams.get('id')) : null;
+    const listMode = searchParams.get('list') === 'true';
 
     if (id) {
       // Fetch single sale return
@@ -267,6 +268,52 @@ export async function GET(request) {
       return NextResponse.json(enhancedSaleReturn);
     } else {
       // Fetch all sale returns
+      if (listMode) {
+        const saleReturns = await prisma.saleReturn.findMany({
+          select: {
+            return_id: true,
+            sale_id: true,
+            total_amount: true,
+            discount: true,
+            payment: true,
+            payment_type: true,
+            shipping_amount: true,
+            labour_charges: true,
+            reference: true,
+            created_at: true,
+            updated_at: true,
+            cus_id: true,
+            customer: {
+              select: {
+                cus_id: true,
+                cus_name: true,
+                cus_phone_no: true,
+                cus_address: true,
+                cus_balance: true,
+                name_urdu: true,
+              },
+            },
+            return_details: {
+              select: {
+                return_detail_id: true,
+                qnty: true,
+                unit_rate: true,
+                total_amount: true,
+                store_id: true,
+                product: {
+                  select: { pro_id: true, pro_title: true },
+                },
+              },
+            },
+            updated_by_user: {
+              select: { full_name: true, role: true },
+            },
+          },
+          orderBy: { created_at: 'desc' },
+        });
+        return NextResponse.json(saleReturns);
+      }
+
       const saleReturns = await prisma.saleReturn.findMany({
         include: {
           sale: true,

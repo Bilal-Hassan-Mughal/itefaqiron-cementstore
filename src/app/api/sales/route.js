@@ -6,8 +6,28 @@ export const dynamic = 'force-dynamic';
 import { Prisma } from '@prisma/client';
 import { updateStoreStock, getStoreStock, checkStockAvailability } from '@/lib/storeStock';
 import { calculateClosingBalance, createLedgerEntry } from '@/lib/ledger-helper';
-import { reportSaleCreation } from '@/lib/ledger-reporter';
 import { initBranchScope } from '@/lib/branch-server';
+
+const SPECIAL_ACCOUNTS_CACHE_TTL_MS = 60_000;
+const saleLog = () => {};
+let specialAccountsCache = { data: null, expiresAt: 0 };
+
+/** Set customer balances from freshly computed ledger closing amounts (POST fast path). */
+async function syncAccountBalancesFromEntries(tx, ledgerEntries) {
+  if (!ledgerEntries?.length) return;
+  const closingByCusId = new Map();
+  for (const entry of ledgerEntries) {
+    closingByCusId.set(entry.cus_id, parseFloat(entry.closing_balance || 0));
+  }
+  await Promise.all(
+    [...closingByCusId.entries()].map(([accountId, closingBal]) =>
+      tx.customer.update({
+        where: { cus_id: accountId },
+        data: { cus_balance: Number(closingBal.toFixed(2)) }
+      })
+    )
+  );
+}
 
 // Helper function to get special accounts (moved outside transaction for better performance)
 async function getSpecialAccounts() {
@@ -15,11 +35,8 @@ async function getSpecialAccounts() {
   // Get all categories first
   const allCategories = await prisma.customerCategory.findMany();
 
-  console.log('🔍 All categories:', allCategories.map(c => ({ id: c.cus_cat_id, title: c.cus_cat_title })));
-
   // Find matching categories (case-insensitive)
   const categoryMap = {};
-  const searchTerms = ['cash account', 'bank account', 'sundry creditors', 'sundry debtors'];
 
   allCategories.forEach(cat => {
     const lowerTitle = cat.cus_cat_title.toLowerCase();
@@ -34,38 +51,50 @@ async function getSpecialAccounts() {
     }
   });
 
-  console.log('🔍 Category map:', categoryMap);
-
-  // Now find accounts using these category IDs
-  const categoryIds = Object.values(categoryMap);
-  const specialAccounts =
-    categoryIds.length > 0
-      ? await prisma.customer.findMany({
-          where: { cus_category: { in: categoryIds } }
-        })
-      : [];
-
-  console.log('🔍 Found special accounts:', specialAccounts.map(a => ({ id: a.cus_id, name: a.cus_name, category: a.cus_category })));
-
   const accounts = {};
-  specialAccounts.forEach(account => {
-    const categoryTitle = account.cus_category === categoryMap['Cash Account'] ? 'Cash Account' :
-      account.cus_category === categoryMap['Bank Account'] ? 'Bank Account' :
-        account.cus_category === categoryMap['Sundry Creditors'] ? 'Sundry Creditors' :
-          account.cus_category === categoryMap['Sundry Debtors'] ? 'Sundry Debtors' : null;
+  const lookups = [];
 
-    if (categoryTitle === 'Cash Account') accounts.cash = account;
-    if (categoryTitle === 'Bank Account') accounts.bank = account;
-    if (categoryTitle === 'Sundry Creditors') accounts.sundryCreditors = account;
-    if (categoryTitle === 'Sundry Debtors') accounts.sundryDebtors = account;
-  });
+  if (categoryMap['Cash Account']) {
+    lookups.push(
+      prisma.customer.findFirst({
+        where: { cus_category: categoryMap['Cash Account'], cus_name: 'Cash Account' }
+      }).then((row) => { if (row) accounts.cash = row; })
+    );
+    lookups.push(
+      prisma.customer.findFirst({
+        where: { cus_category: categoryMap['Cash Account'] }
+      }).then((row) => { if (row && !accounts.cash) accounts.cash = row; })
+    );
+  }
+  if (categoryMap['Bank Account']) {
+    lookups.push(
+      prisma.customer.findMany({
+        where: {
+          cus_category: categoryMap['Bank Account'],
+          NOT: { cus_name: { in: ['Bank Account', 'Bank', 'Bank Accounts'] } }
+        },
+        orderBy: { cus_id: 'asc' }
+      }).then((rows) => {
+        if (rows.length) accounts.bank = rows[rows.length - 1];
+      })
+    );
+  }
+  if (categoryMap['Sundry Creditors']) {
+    lookups.push(
+      prisma.customer.findFirst({
+        where: { cus_category: categoryMap['Sundry Creditors'] }
+      }).then((row) => { if (row) accounts.sundryCreditors = row; })
+    );
+  }
+  if (categoryMap['Sundry Debtors']) {
+    lookups.push(
+      prisma.customer.findFirst({
+        where: { cus_category: categoryMap['Sundry Debtors'] }
+      }).then((row) => { if (row) accounts.sundryDebtors = row; })
+    );
+  }
 
-  console.log('✅ Special accounts found:', {
-    cash: accounts.cash ? `${accounts.cash.cus_name} (ID: ${accounts.cash.cus_id})` : 'Not found',
-    bank: accounts.bank ? `${accounts.bank.cus_name} (ID: ${accounts.bank.cus_id})` : 'Not found',
-    sundryCreditors: accounts.sundryCreditors ? `${accounts.sundryCreditors.cus_name} (ID: ${accounts.sundryCreditors.cus_id})` : 'Not found',
-    sundryDebtors: accounts.sundryDebtors ? `${accounts.sundryDebtors.cus_name} (ID: ${accounts.sundryDebtors.cus_id})` : 'Not found'
-  });
+  await Promise.all(lookups);
 
   return accounts;
 }
@@ -115,19 +144,26 @@ async function findOrCreateCashAccount() {
       city_id: aCity ? aCity.city_id : null
     }
   });
-  console.log('✅ Created default Cash Account customer:', {
-    cus_id: created.cus_id,
-    cus_name: created.cus_name
-  });
   return created;
 }
 
 /** Resolves getSpecialAccounts() and ensures a cash account customer exists for ledger / balance updates. */
 async function getSpecialAccountsForSale() {
-  const accounts = await getSpecialAccounts();
+  const now = Date.now();
+  let accounts = specialAccountsCache.data && now < specialAccountsCache.expiresAt
+    ? specialAccountsCache.data
+    : null;
+
+  if (!accounts) {
+    accounts = await getSpecialAccounts();
+    specialAccountsCache = { data: accounts, expiresAt: now + SPECIAL_ACCOUNTS_CACHE_TTL_MS };
+  }
+
   if (accounts.cash) return accounts;
   const cash = await findOrCreateCashAccount();
-  return cash ? { ...accounts, cash } : accounts;
+  const merged = cash ? { ...accounts, cash } : accounts;
+  specialAccountsCache = { data: merged, expiresAt: now + SPECIAL_ACCOUNTS_CACHE_TTL_MS };
+  return merged;
 }
 
 /** Resolves the correct opening balance for any customer/account at a target created_at timestamp. */
@@ -215,7 +251,7 @@ async function prepareLedgerDeletion(tx, bill_no) {
         where: { l_id: nextEntry.l_id },
         data: { opening_balance: earliestDeleted.opening_balance }
       });
-      console.log(`🔗 Re-linked next ledger entry for customer ${cus_id}: updated entry ${nextEntry.l_id} opening balance to ${earliestDeleted.opening_balance}`);
+      saleLog(`🔗 Re-linked next ledger entry for customer ${cus_id}: updated entry ${nextEntry.l_id} opening balance to ${earliestDeleted.opening_balance}`);
     }
   }
 }
@@ -297,7 +333,7 @@ async function recalculateLedgerBalances(tx, cus_id) {
     where: { cus_id },
     data: { cus_balance: Number(runningBalance.toFixed(2)) }
   });
-  console.log(`   📊 Recalculated ledger for ${customer.cus_name} (ID: ${cus_id}). Final balance: ${runningBalance.toFixed(2)} (${updates.length} entries updated in batch)`);
+  saleLog(`   📊 Recalculated ledger for ${customer.cus_name} (ID: ${cus_id}). Final balance: ${runningBalance.toFixed(2)} (${updates.length} entries updated in batch)`);
 }
 
 // GET - Fetch all sales with related data
@@ -310,6 +346,7 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id') ? parseInt(searchParams.get('id')) : searchParams.get('sale_id') ? parseInt(searchParams.get('sale_id')) : null;
     const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')) : null;
+    const listMode = searchParams.get('list') === 'true';
 
     if (id) {
       // Fetch single sale
@@ -609,65 +646,115 @@ export async function GET(request) {
     } else {
       // Fetch all sales
       try {
-        const findOptions = {
-          include: {
-            customer: {
+        const findOptions = listMode
+          ? {
+              select: {
+                sale_id: true,
+                total_amount: true,
+                discount: true,
+                payment: true,
+                payment_type: true,
+                shipping_amount: true,
+                labour_charges: true,
+                bill_type: true,
+                reference: true,
+                created_at: true,
+                updated_at: true,
+                cus_id: true,
+                cash_payment: true,
+                bank_payment: true,
+                advance_payment: true,
+                customer: {
+                  select: {
+                    cus_id: true,
+                    cus_name: true,
+                    cus_phone_no: true,
+                    cus_address: true,
+                    cus_balance: true,
+                    name_urdu: true,
+                  },
+                },
+                sale_details: {
+                  select: {
+                    sale_detail_id: true,
+                    qnty: true,
+                    unit_rate: true,
+                    total_amount: true,
+                    store_id: true,
+                    product: {
+                      select: { pro_id: true, pro_title: true },
+                    },
+                  },
+                },
+                updated_by_user: {
+                  select: { full_name: true, role: true },
+                },
+              },
+              where: { branch_id: branchId },
+              orderBy: { created_at: 'desc' },
+            }
+          : {
+              where: { branch_id: branchId },
               include: {
-                customer_category: true
-              }
-            },
-            sale_details: {
-              include: {
-                product: {
+                customer: {
                   include: {
-                    category: true,
-                    sub_category: true
+                    customer_category: true
+                  }
+                },
+                sale_details: {
+                  include: {
+                    product: {
+                      include: {
+                        category: true,
+                        sub_category: true
+                      }
+                    }
+                  }
+                },
+                debit_account: {
+                  select: {
+                    cus_id: true,
+                    cus_name: true,
+                    cus_phone_no: true
+                  }
+                },
+                credit_account: {
+                  select: {
+                    cus_id: true,
+                    cus_name: true,
+                    cus_phone_no: true
+                  }
+                },
+                loader: {
+                  select: {
+                    loader_id: true,
+                    loader_name: true,
+                    loader_number: true,
+                    loader_phone: true
+                  }
+                },
+                split_payments: {
+                  include: {
+                    debit_account: true,
+                    credit_account: true
+                  }
+                },
+                updated_by_user: {
+                  select: {
+                    full_name: true,
+                    role: true
                   }
                 }
+              },
+              orderBy: {
+                created_at: 'desc'
               }
-            },
-            debit_account: {
-              select: {
-                cus_id: true,
-                cus_name: true,
-                cus_phone_no: true
-              }
-            },
-            credit_account: {
-              select: {
-                cus_id: true,
-                cus_name: true,
-                cus_phone_no: true
-              }
-            },
-            loader: {
-              select: {
-                loader_id: true,
-                loader_name: true,
-                loader_number: true,
-                loader_phone: true
-              }
-            },
-            split_payments: {
-              include: {
-                debit_account: true,
-                credit_account: true
-              }
-            },
-            updated_by_user: {
-              select: {
-                full_name: true,
-                role: true
-              }
-            }
-          },
-          orderBy: {
-            created_at: 'desc'
-          }
-        };
+            };
 
         if (limit && limit > 0) {
           findOptions.take = limit;
+        } else if (listMode) {
+          findOptions.take = 500;
         }
 
         const sales = await prisma.sale.findMany(findOptions);
@@ -680,11 +767,11 @@ export async function GET(request) {
         const bnMap = Object.fromEntries(billNumbers.map(r => [r.sale_id, r.bill_number]));
         const salesWithBillNumber = sales.map(s => ({
           ...s,
-          notes: s.notes || s.reference || null,
+          notes: s.reference || null,
           bill_number: bnMap[s.sale_id] ?? null
         }));
 
-        console.log('✅ Sales fetched via Prisma:', sales.length);
+        saleLog('✅ Sales fetched via Prisma:', sales.length);
         return NextResponse.json(salesWithBillNumber);
       } catch (prismaError) {
         console.error('❌ Prisma error:', prismaError.code, prismaError.message);
@@ -720,8 +807,8 @@ export async function GET(request) {
               ORDER BY s.created_at DESC
             `;
 
-            console.log('📊 Raw SQL sales count:', sales?.length || 0);
-            console.log('📊 Raw SQL sales data:', JSON.stringify(sales?.slice(0, 2), null, 2));
+            saleLog('📊 Raw SQL sales count:', sales?.length || 0);
+            saleLog('📊 Raw SQL sales data:', JSON.stringify(sales?.slice(0, 2), null, 2));
 
             if (!sales || sales.length === 0) {
               console.warn('⚠️ No sales found in database');
@@ -730,7 +817,7 @@ export async function GET(request) {
 
             // Fetch sale_details for all sales
             const saleIds = sales.map(s => Number(s.sale_id)).filter(id => id != null && !isNaN(id));
-            console.log('📊 Sale IDs to fetch details for:', saleIds);
+            saleLog('📊 Sale IDs to fetch details for:', saleIds);
             let saleDetails = [];
             if (saleIds.length > 0) {
               try {
@@ -749,7 +836,7 @@ export async function GET(request) {
                   WHERE sd.sale_id IN (${Prisma.join(saleIds)})
                   ORDER BY sd.sale_id ASC, sd.sale_detail_id ASC
                 `;
-                console.log('📊 Sale details fetched:', saleDetails?.length || 0);
+                saleLog('📊 Sale details fetched:', saleDetails?.length || 0);
               } catch (subcatError) {
                 // If subcategories table doesn't exist, try without it
                 if (subcatError.message?.includes('subcategories') || subcatError.message?.includes("doesn't exist") || subcatError.code === '1146') {
@@ -767,7 +854,7 @@ export async function GET(request) {
                     WHERE sd.sale_id IN (${Prisma.join(saleIds)})
                   ORDER BY sd.sale_id ASC, sd.sale_detail_id ASC
                   `;
-                  console.log('📊 Sale details fetched (without subcategories):', saleDetails?.length || 0);
+                  saleLog('📊 Sale details fetched (without subcategories):', saleDetails?.length || 0);
                 } else {
                   console.error('❌ Error fetching sale details:', subcatError);
                   throw subcatError;
@@ -790,7 +877,7 @@ export async function GET(request) {
                   WHERE branch_id = ${branchId}
                     AND cus_cat_id IN (${Prisma.join(numericCatIds)})
                 `;
-                console.log('📊 Customer categories fetched:', customerCategories?.length || 0);
+                saleLog('📊 Customer categories fetched:', customerCategories?.length || 0);
 
                 // Map categories
                 customerCategories.forEach(cat => {
@@ -858,7 +945,7 @@ export async function GET(request) {
                   LEFT JOIN customers credit ON sp.credit_account_id = credit.cus_id
                   WHERE sp.sale_id IN (${Prisma.join(saleIds)})
                 `;
-                console.log('📊 Split payments fetched:', splitPayments?.length || 0);
+                saleLog('📊 Split payments fetched:', splitPayments?.length || 0);
 
                 // Group split_payments by sale_id
                 splitPayments.forEach(sp => {
@@ -940,13 +1027,13 @@ export async function GET(request) {
             });
 
             if (result.length > 0) {
-              console.log('📊 Sample formatted sale:', JSON.stringify(result[0], null, 2));
-              console.log('📊 Sample sale keys:', Object.keys(result[0]));
-              console.log('📊 Sample sale customer:', result[0].customer);
+              saleLog('📊 Sample formatted sale:', JSON.stringify(result[0], null, 2));
+              saleLog('📊 Sample sale keys:', Object.keys(result[0]));
+              saleLog('📊 Sample sale customer:', result[0].customer);
             }
 
-            console.log('✅ Formatted sales result count:', result.length);
-            console.log('✅ Response ready to send');
+            saleLog('✅ Formatted sales result count:', result.length);
+            saleLog('✅ Response ready to send');
             return NextResponse.json(result);
           } catch (rawSqlError) {
             console.error('❌ Raw SQL error:', rawSqlError);
@@ -983,7 +1070,7 @@ export async function POST(request) {
 
   try {
     const body = await request.json();
-    console.log('🔍 Sales API - Received data:', body);
+    saleLog('🔍 Sales API - Received data:', body);
 
     const {
       cus_id,
@@ -1014,29 +1101,29 @@ export async function POST(request) {
     } = body;
 
     // Debug: Log received labour_charges
-    console.log('🔍 API RECEIVED labour_charges:', labour_charges, '(type:', typeof labour_charges, ')');
-    console.log('🔍 API RECEIVED advance_payment:', advance_payment, '(type:', typeof advance_payment, ')');
+    saleLog('🔍 API RECEIVED labour_charges:', labour_charges, '(type:', typeof labour_charges, ')');
+    saleLog('🔍 API RECEIVED advance_payment:', advance_payment, '(type:', typeof advance_payment, ')');
 
     // Validate required fields
-    console.log('🔍 Sales API - Validating fields:', { cus_id, store_id, total_amount, payment, sale_details });
-    console.log('💰💰💰 SPLIT PAYMENTS IN REQUEST:', split_payments);
-    console.log('💰💰💰 SPLIT PAYMENTS TYPE:', typeof split_payments);
-    console.log('💰💰💰 SPLIT PAYMENTS IS ARRAY:', Array.isArray(split_payments));
-    console.log('💰💰💰 SPLIT PAYMENTS LENGTH:', split_payments?.length);
+    saleLog('🔍 Sales API - Validating fields:', { cus_id, store_id, total_amount, payment, sale_details });
+    saleLog('💰💰💰 SPLIT PAYMENTS IN REQUEST:', split_payments);
+    saleLog('💰💰💰 SPLIT PAYMENTS TYPE:', typeof split_payments);
+    saleLog('💰💰💰 SPLIT PAYMENTS IS ARRAY:', Array.isArray(split_payments));
+    saleLog('💰💰💰 SPLIT PAYMENTS LENGTH:', split_payments?.length);
 
     if (!cus_id || !store_id || total_amount === undefined || total_amount === null || payment === undefined || payment === null || !sale_details || sale_details.length === 0) {
-      console.log('❌ Sales API - Missing required fields:', { cus_id, store_id, total_amount, payment, sale_details });
+      saleLog('❌ Sales API - Missing required fields:', { cus_id, store_id, total_amount, payment, sale_details });
       return NextResponse.json({ error: 'Missing required fields including store_id' }, { status: 400 });
     }
 
     // Additional validation for numeric values (allow zero-total sales if discount matches subtotal)
     if (isNaN(parseFloat(total_amount)) || parseFloat(total_amount) < 0) {
-      console.log('❌ Sales API - Invalid total_amount:', total_amount);
+      saleLog('❌ Sales API - Invalid total_amount:', total_amount);
       return NextResponse.json({ error: 'Invalid total amount' }, { status: 400 });
     }
 
     if (isNaN(parseFloat(payment)) || parseFloat(payment) < 0) {
-      console.log('❌ Sales API - Invalid payment:', payment);
+      saleLog('❌ Sales API - Invalid payment:', payment);
       return NextResponse.json({ error: 'Invalid payment amount' }, { status: 400 });
     }
 
@@ -1083,12 +1170,12 @@ export async function POST(request) {
     // Check: (1) explicit flag, or (2) reference contains "Converted from Order"
     const actualIsLoadedOrder = is_loaded_order || (reference && reference.includes('Converted from Order'));
 
-    console.log(`\n🔍 SALE/ORDER CREATION DEBUG:`);
-    console.log(`   is_loaded_order flag: ${is_loaded_order}`);
-    console.log(`   reference: ${reference}`);
-    console.log(`   actualIsLoadedOrder: ${actualIsLoadedOrder}`);
-    console.log(`   bill_type: ${bill_type}`);
-    console.log(`   Customer ID: ${cus_id}`);
+    saleLog(`\n🔍 SALE/ORDER CREATION DEBUG:`);
+    saleLog(`   is_loaded_order flag: ${is_loaded_order}`);
+    saleLog(`   reference: ${reference}`);
+    saleLog(`   actualIsLoadedOrder: ${actualIsLoadedOrder}`);
+    saleLog(`   bill_type: ${bill_type}`);
+    saleLog(`   Customer ID: ${cus_id}`);
 
     // Use transaction to ensure data consistency with increased timeout (30 seconds)
     const result = await prisma.$transaction(async (tx) => {
@@ -1102,7 +1189,7 @@ export async function POST(request) {
         throw new Error('Customer not found');
       }
 
-      console.log(`   Customer name: ${customer.cus_name}`);
+      saleLog(`   Customer name: ${customer.cus_name}`);
 
       // Validate updated_by user exists (if provided)
       let validatedUpdatedBy = null;
@@ -1285,14 +1372,14 @@ export async function POST(request) {
       await Promise.all(saleDetailPromises);
 
       // Create split payments if provided
-      console.log('💰 Split payments received:', split_payments);
-      console.log('💰 Split payments length:', split_payments?.length);
+      saleLog('💰 Split payments received:', split_payments);
+      saleLog('💰 Split payments length:', split_payments?.length);
 
       if (split_payments && split_payments.length > 0) {
-        console.log('✅ Creating split payments for sale:', sale.sale_id);
+        saleLog('✅ Creating split payments for sale:', sale.sale_id);
 
         const splitPaymentPromises = split_payments.map((splitPayment, index) => {
-          console.log(`   Split payment ${index + 1}:`, {
+          saleLog(`   Split payment ${index + 1}:`, {
             amount: splitPayment.amount,
             type: splitPayment.payment_type,
             debit_account_id: splitPayment.debit_account_id
@@ -1311,9 +1398,9 @@ export async function POST(request) {
         });
 
         const createdSplitPayments = await Promise.all(splitPaymentPromises);
-        console.log('✅ Split payments created:', createdSplitPayments.length);
+        saleLog('✅ Split payments created:', createdSplitPayments.length);
       } else {
-        console.log('⚠️ No split payments to create - array is', split_payments === null ? 'NULL' : split_payments === undefined ? 'UNDEFINED' : 'EMPTY');
+        saleLog('⚠️ No split payments to create - array is', split_payments === null ? 'NULL' : split_payments === undefined ? 'UNDEFINED' : 'EMPTY');
       }
 
       // isQuotation and isOrder are already defined above (before transaction)
@@ -1335,17 +1422,17 @@ export async function POST(request) {
         // Create bill/order entry for both BILL and ORDER types
         // Only skip for quotations (which are just estimates)
         // IMPORTANT: For loaded orders, SKIP the bill entry because it was already created when the order was made
-        console.log(`\n${'='.repeat(60)}`);
-        console.log(`📝 ${actualIsLoadedOrder ? 'SKIPPING BILL ENTRY (Already exists from order)' : 'CREATING BILL ENTRY'}`);
-        console.log(`${'='.repeat(60)}`);
-        console.log(`Customer Previous Balance: ${runningBalance}`);
-        console.log(`Bill Amount (final after discount): ${total_amount}`);
-        console.log(`Discount Already Applied: ${discount}`);
-        console.log(`Bill Type: ${bill_type} (${isOrder ? 'ORDER' : 'REGULAR BILL'})`);
-        console.log(`Is Loaded Order: ${actualIsLoadedOrder}`);
-        console.log(`Today's Payments: Cash=${eff_cash}, Bank=${eff_bank}, Advance=${parseFloat(advance_payment || 0)}`);
-        console.log(`Expected Final Balance: ${runningBalance + parseFloat(total_amount) - (eff_cash + eff_bank)}`);
-        console.log(`${'='.repeat(60)}\n`);
+        saleLog(`\n${'='.repeat(60)}`);
+        saleLog(`📝 ${actualIsLoadedOrder ? 'SKIPPING BILL ENTRY (Already exists from order)' : 'CREATING BILL ENTRY'}`);
+        saleLog(`${'='.repeat(60)}`);
+        saleLog(`Customer Previous Balance: ${runningBalance}`);
+        saleLog(`Bill Amount (final after discount): ${total_amount}`);
+        saleLog(`Discount Already Applied: ${discount}`);
+        saleLog(`Bill Type: ${bill_type} (${isOrder ? 'ORDER' : 'REGULAR BILL'})`);
+        saleLog(`Is Loaded Order: ${actualIsLoadedOrder}`);
+        saleLog(`Today's Payments: Cash=${eff_cash}, Bank=${eff_bank}, Advance=${parseFloat(advance_payment || 0)}`);
+        saleLog(`Expected Final Balance: ${runningBalance + parseFloat(total_amount) - (eff_cash + eff_bank)}`);
+        saleLog(`${'='.repeat(60)}\n`);
 
         // ORDER: no full SALE debit (only payment credits). Regular BILL: full amount debit.
         // Order → sale conversion: full total_amount debited, then advance re-credited + combined cash/bank credit.
@@ -1371,13 +1458,13 @@ export async function POST(request) {
               payments: 0,
               updated_by: validatedUpdatedBy
             });
-            console.log(`📝 Bill Entry Created: Opening=${billEntry.opening_balance}, Debit=${billEntry.debit_amount}, Closing=${billEntry.closing_balance}`);
-            console.log(`   Details: ${billDetails}`);
+            saleLog(`📝 Bill Entry Created: Opening=${billEntry.opening_balance}, Debit=${billEntry.debit_amount}, Closing=${billEntry.closing_balance}`);
+            saleLog(`   Details: ${billDetails}`);
             ledgerEntries.push(billEntry);
             runningBalance = billEntry.closing_balance;  // Update running balance
           }
         } else if (isOrder) {
-          console.log(`⏭️ SKIPPED: Debit entry for ORDER — only advance payment ledger will be created`);
+          saleLog(`⏭️ SKIPPED: Debit entry for ORDER — only advance payment ledger will be created`);
         } else if (actualIsLoadedOrder) {
           const orderTotal = parseFloat(total_amount) || 0;
           if (orderTotal > 0) {
@@ -1396,7 +1483,7 @@ export async function POST(request) {
               payments: 0,
               updated_by: validatedUpdatedBy
             });
-            console.log(`📝 Bill Entry (order conversion, full amount): Opening=${billEntry.opening_balance}, Credit=${billEntry.credit_amount}, Closing=${billEntry.closing_balance}`);
+            saleLog(`📝 Bill Entry (order conversion, full amount): Opening=${billEntry.opening_balance}, Credit=${billEntry.credit_amount}, Closing=${billEntry.closing_balance}`);
             ledgerEntries.push(billEntry);
             runningBalance = billEntry.closing_balance;
           }
@@ -1436,7 +1523,7 @@ export async function POST(request) {
               bank_payment: bankAmount,
               updated_by: validatedUpdatedBy
             });
-            console.log(`💳 Combined payment credit: ${totalNewPayment}, remaining=${remaining}, Closing=${combinedPayEntry.closing_balance}`);
+            saleLog(`💳 Combined payment credit: ${totalNewPayment}, remaining=${remaining}, Closing=${combinedPayEntry.closing_balance}`);
             ledgerEntries.push(combinedPayEntry);
             runningBalance = combinedPayEntry.closing_balance;
           }
@@ -1463,7 +1550,7 @@ export async function POST(request) {
             bank_payment: bankAmount,
             updated_by: validatedUpdatedBy
           });
-          console.log(`💳 Payment Entry: Opening=${paymentEntry.opening_balance}, Credit=${paymentEntry.credit_amount}, Closing=${paymentEntry.closing_balance}`);
+          saleLog(`💳 Payment Entry: Opening=${paymentEntry.opening_balance}, Credit=${paymentEntry.credit_amount}, Closing=${paymentEntry.closing_balance}`);
           ledgerEntries.push(paymentEntry);
           runningBalance = paymentEntry.closing_balance;
         } else if (isOrder && (cashAmount > 0 || bankAmount > 0)) {
@@ -1487,7 +1574,7 @@ export async function POST(request) {
             updated_by: validatedUpdatedBy,
             ledger_type: 'Order'
           });
-          console.log(`💳 ORDER advance: Credit=${orderAdvanceEntry.credit_amount}, Closing=${orderAdvanceEntry.closing_balance}, Desc="${orderAdvanceEntry.details}"`);
+          saleLog(`💳 ORDER advance: Credit=${orderAdvanceEntry.credit_amount}, Closing=${orderAdvanceEntry.closing_balance}, Desc="${orderAdvanceEntry.details}"`);
           ledgerEntries.push(orderAdvanceEntry);
           runningBalance = orderAdvanceEntry.closing_balance;
         }
@@ -1507,13 +1594,13 @@ export async function POST(request) {
             });
             if (specificBank) {
               bankAccountToUse = specificBank;
-              console.log(`🏦 Found bank by debit_account_id: ${specificBank.cus_name} (ID: ${specificBank.cus_id})`);
+              saleLog(`🏦 Found bank by debit_account_id: ${specificBank.cus_name} (ID: ${specificBank.cus_id})`);
             }
           }
 
           // 2. Try to resolve by bank_title
           if (!bankAccountToUse && bank_title && bank_title.trim()) {
-            console.log(`🏦 BANK PAYMENT DETECTED with specific bank title: ${bank_title}`);
+            saleLog(`🏦 BANK PAYMENT DETECTED with specific bank title: ${bank_title}`);
 
             // Find the specific bank account by name
             const specificBank = await tx.customer.findFirst({
@@ -1527,9 +1614,9 @@ export async function POST(request) {
 
             if (specificBank) {
               bankAccountToUse = specificBank;
-              console.log(`🏦 Found specific bank by title: ${specificBank.cus_name} (ID: ${specificBank.cus_id})`);
+              saleLog(`🏦 Found specific bank by title: ${specificBank.cus_name} (ID: ${specificBank.cus_id})`);
             } else {
-              console.log(`⚠️ Bank "${bank_title}" not found, using generic Bank Account`);
+              saleLog(`⚠️ Bank "${bank_title}" not found, using generic Bank Account`);
             }
           }
 
@@ -1537,13 +1624,13 @@ export async function POST(request) {
           if (!bankAccountToUse) {
             bankAccountToUse = specialAccounts?.bank;
             if (bankAccountToUse) {
-              console.log(`🏦 Using generic bank account: ${bankAccountToUse.cus_name} (ID: ${bankAccountToUse.cus_id})`);
+              saleLog(`🏦 Using generic bank account: ${bankAccountToUse.cus_name} (ID: ${bankAccountToUse.cus_id})`);
             }
           }
 
           if (bankAccountToUse) {
             usedBankAccountId = bankAccountToUse.cus_id;  // Store the bank ID we're using
-            console.log(`🏦 Bank Account Before: ID=${bankAccountToUse.cus_id}, Name=${bankAccountToUse.cus_name}, Balance=${bankAccountToUse.cus_balance}`);
+            saleLog(`🏦 Bank Account Before: ID=${bankAccountToUse.cus_id}, Name=${bankAccountToUse.cus_name}, Balance=${bankAccountToUse.cus_balance}`);
 
             const bankEntry = createLedgerEntry({
               cus_id: bankAccountToUse.cus_id,
@@ -1559,7 +1646,7 @@ export async function POST(request) {
               updated_by: validatedUpdatedBy,
               ledger_type: isOrder ? 'Order' : 'Sale'
             });
-            console.log(`🏦 Bank Ledger Entry: Opening=${bankEntry.opening_balance}, Debit=${bankEntry.debit_amount}, Closing=${bankEntry.closing_balance}`);
+            saleLog(`🏦 Bank Ledger Entry: Opening=${bankEntry.opening_balance}, Debit=${bankEntry.debit_amount}, Closing=${bankEntry.closing_balance}`);
             ledgerEntries.push(bankEntry);
           }
         }
@@ -1568,8 +1655,8 @@ export async function POST(request) {
         // When cash payment is received, cash account balance INCREASES (debit increases asset)
         // Always create ledger entry for cash payments
         if (eff_cash > 0 && specialAccounts.cash) {
-          console.log(`💵 CASH PAYMENT DETECTED: ${eff_cash}`);
-          console.log(`💵 Cash Account Before: ID=${specialAccounts.cash.cus_id}, Name=${specialAccounts.cash.cus_name}, Balance=${specialAccounts.cash.cus_balance}`);
+          saleLog(`💵 CASH PAYMENT DETECTED: ${eff_cash}`);
+          saleLog(`💵 Cash Account Before: ID=${specialAccounts.cash.cus_id}, Name=${specialAccounts.cash.cus_name}, Balance=${specialAccounts.cash.cus_balance}`);
 
           const cashEntry = createLedgerEntry({
             cus_id: specialAccounts.cash.cus_id,
@@ -1585,7 +1672,7 @@ export async function POST(request) {
             updated_by: validatedUpdatedBy,
             ledger_type: isOrder ? 'Order' : 'Sale'
           });
-          console.log(`💵 Cash Ledger Entry: Opening=${cashEntry.opening_balance}, Debit=${cashEntry.debit_amount}, Closing=${cashEntry.closing_balance}`);
+          saleLog(`💵 Cash Ledger Entry: Opening=${cashEntry.opening_balance}, Debit=${cashEntry.debit_amount}, Closing=${cashEntry.closing_balance}`);
           ledgerEntries.push(cashEntry);
         } else if (eff_cash > 0) {
           console.error(
@@ -1622,7 +1709,7 @@ export async function POST(request) {
 
             ledgerEntries.push(transportEntry);
 
-            console.log(`🚚 Transport Entry: Account=${transportAccount.cus_name}, Credit=${transportAmount}, Closing=${transportEntry.closing_balance}`);
+            saleLog(`🚚 Transport Entry: Account=${transportAccount.cus_name}, Credit=${transportAmount}, Closing=${transportEntry.closing_balance}`);
           }
         }
 
@@ -1634,22 +1721,22 @@ export async function POST(request) {
 
             // Skip ledger entry if this is the bank account that was actually used (already created separately)
             if (usedBankAccountId && splitPayment.debit_account_id === usedBankAccountId) {
-              console.log(`⏭️ SKIPPING split payment ledger entry for bank account (ID: ${splitPayment.debit_account_id}) - already created separately`);
+              saleLog(`⏭️ SKIPPING split payment ledger entry for bank account (ID: ${splitPayment.debit_account_id}) - already created separately`);
               continue;
             }
 
             // Skip ledger entry if this is the cash account (already created above)
             if (splitPayment.debit_account_id === specialAccounts.cash?.cus_id) {
-              console.log(`⏭️ SKIPPING split payment ledger entry for cash account (ID: ${splitPayment.debit_account_id}) - already created separately`);
+              saleLog(`⏭️ SKIPPING split payment ledger entry for cash account (ID: ${splitPayment.debit_account_id}) - already created separately`);
               continue;
             }
 
             if (isOrder && splitPayment.debit_account_id === cus_id) {
-              console.log('⏭️ ORDER: Skipping split debit on sale customer — customer balance not affected');
+              saleLog('⏭️ ORDER: Skipping split debit on sale customer — customer balance not affected');
               continue;
             }
             if (isOrder && splitPayment.credit_account_id === cus_id) {
-              console.log('⏭️ ORDER: Skipping split credit on sale customer — customer balance not affected');
+              saleLog('⏭️ ORDER: Skipping split credit on sale customer — customer balance not affected');
               continue;
             }
 
@@ -1701,35 +1788,31 @@ export async function POST(request) {
 
         // Create all ledger entries (skip for quotations)
         if (!isQuotation) {
-          console.log(`\n📊 CREATING LEDGER ENTRIES IN DATABASE`);
-          console.log(`   Total entries to create: ${ledgerEntries.length}`);
+          const startLId = await getNextId('ledger', 'l_id', tx);
+          await Promise.all(
+            ledgerEntries.map((entry, i) =>
+              tx.ledger.create({
+                data: {
+                  l_id: startLId + i,
+                  cus_id: entry.cus_id,
+                  opening_balance: entry.opening_balance,
+                  debit_amount: entry.debit_amount,
+                  credit_amount: entry.credit_amount,
+                  closing_balance: entry.closing_balance,
+                  bill_no: entry.bill_no,
+                  trnx_type: entry.trnx_type,
+                  details: entry.details,
+                  payments: entry.payments,
+                  cash_payment: entry.cash_payment || 0,
+                  bank_payment: entry.bank_payment || 0,
+                  updated_by: entry.updated_by,
+                  ledger_type: entry.ledger_type
+                }
+              })
+            )
+          );
 
-          for (let i = 0; i < ledgerEntries.length; i++) {
-            const entry = ledgerEntries[i];
-            console.log(`   Entry ${i + 1}: Customer=${entry.cus_id}, Debit=${entry.debit_amount}, Credit=${entry.credit_amount}, Details=${entry.details.substring(0, 50)}...`);
-
-            const nextLId = await getNextId('ledger', 'l_id', tx);
-            await tx.ledger.create({
-              data: {
-                l_id: nextLId,
-                cus_id: entry.cus_id,
-                opening_balance: entry.opening_balance,
-                debit_amount: entry.debit_amount,
-                credit_amount: entry.credit_amount,
-                closing_balance: entry.closing_balance,
-                bill_no: entry.bill_no,
-                trnx_type: entry.trnx_type,
-                details: entry.details,
-                payments: entry.payments,
-                cash_payment: entry.cash_payment || 0,
-                bank_payment: entry.bank_payment || 0,
-                updated_by: entry.updated_by,
-                ledger_type: entry.ledger_type
-              }
-            });
-            console.log(`   ✅ Entry ${i + 1} created in database`);
-          }
-          console.log(`📊 All ${ledgerEntries.length} ledger entries created successfully\n`);
+          await syncAccountBalancesFromEntries(tx, ledgerEntries);
 
           // Update customer balance from ledger lines for this sale
           const customerLedgerEntries = ledgerEntries.filter(e => e.cus_id === cus_id);
@@ -1737,25 +1820,25 @@ export async function POST(request) {
             const lastCustomerEntry = customerLedgerEntries[customerLedgerEntries.length - 1];
             const ledgerClosingBalance = parseFloat(lastCustomerEntry.closing_balance);
 
-            console.log(`\n========== CUSTOMER BALANCE UPDATE START ==========`);
-            console.log(`Customer: ${customer.cus_name} (ID: ${cus_id})`);
-            console.log(`Customer Previous Balance: ${customer.cus_balance}`);
-            console.log(`Bill Type: ${bill_type}`);
-            console.log(`Bill Amount (netTotal): ${netTotal}`);
-            console.log(`Payment Received - Cash: ${eff_cash}, Bank: ${eff_bank}, Advance: ${advance_payment}`);
-            console.log(`Found ${customerLedgerEntries.length} ledger entries for customer`);
+            saleLog(`\n========== CUSTOMER BALANCE UPDATE START ==========`);
+            saleLog(`Customer: ${customer.cus_name} (ID: ${cus_id})`);
+            saleLog(`Customer Previous Balance: ${customer.cus_balance}`);
+            saleLog(`Bill Type: ${bill_type}`);
+            saleLog(`Bill Amount (netTotal): ${netTotal}`);
+            saleLog(`Payment Received - Cash: ${eff_cash}, Bank: ${eff_bank}, Advance: ${advance_payment}`);
+            saleLog(`Found ${customerLedgerEntries.length} ledger entries for customer`);
 
             // Show all customer ledger entries
             customerLedgerEntries.forEach((entry, idx) => {
-              console.log(`\n  Ledger Entry ${idx + 1}:`);
-              console.log(`    Opening: ${entry.opening_balance}`);
-              console.log(`    Debit: ${entry.debit_amount}, Credit: ${entry.credit_amount}`);
-              console.log(`    Closing: ${entry.closing_balance}`);
-              console.log(`    Details: ${entry.details.substring(0, 60)}`);
+              saleLog(`\n  Ledger Entry ${idx + 1}:`);
+              saleLog(`    Opening: ${entry.opening_balance}`);
+              saleLog(`    Debit: ${entry.debit_amount}, Credit: ${entry.credit_amount}`);
+              saleLog(`    Closing: ${entry.closing_balance}`);
+              saleLog(`    Details: ${entry.details.substring(0, 60)}`);
             });
 
-            console.log(`\nCustomer ledger closing balance: ${ledgerClosingBalance}`);
-            console.log(`========== CUSTOMER BALANCE UPDATE END ==========\n`);
+            saleLog(`\nCustomer ledger closing balance: ${ledgerClosingBalance}`);
+            saleLog(`========== CUSTOMER BALANCE UPDATE END ==========\n`);
           }
         }
 
@@ -1770,10 +1853,10 @@ export async function POST(request) {
           // Find the cash account ledger entry to get its closing balance
           const cashLedgerEntry = ledgerEntries.find(e => e.cus_id === specialAccounts.cash.cus_id);
           if (cashLedgerEntry) {
-            console.log(`💵 CASH ACCOUNT: Ledger closing balance = ${cashLedgerEntry.closing_balance}`);
+            saleLog(`💵 CASH ACCOUNT: Ledger closing balance = ${cashLedgerEntry.closing_balance}`);
           }
         } else if (eff_cash > 0 && cashHandledBysSplitPayment) {
-          console.log(`💵 SKIPPING CASH BALANCE UPDATE: Split payments will handle it`);
+          saleLog(`💵 SKIPPING CASH BALANCE UPDATE: Split payments will handle it`);
         }
 
         // Update bank account balance - SET directly to closing balance
@@ -1788,10 +1871,10 @@ export async function POST(request) {
           );
 
           if (bankLedgerEntry) {
-            console.log(`🏦 BANK ACCOUNT: Ledger closing balance = ${bankLedgerEntry.closing_balance}`);
+            saleLog(`🏦 BANK ACCOUNT: Ledger closing balance = ${bankLedgerEntry.closing_balance}`);
           }
         } else if (eff_bank > 0 && bankHandledBySplitPayment) {
-          console.log(`🏦 SKIPPING BANK BALANCE UPDATE: Split payments will handle it`);
+          saleLog(`🏦 SKIPPING BANK BALANCE UPDATE: Split payments will handle it`);
         }
 
         // Update transporter balance (skip for quotations)
@@ -1829,7 +1912,7 @@ export async function POST(request) {
               // Find the ledger entry for this account to get closing balance
               const splitLedgerEntry = ledgerEntries.find(e => e.cus_id === splitPayment.debit_account_id);
               if (splitLedgerEntry) {
-                console.log(`💳 Debit account ${splitPayment.debit_account_id} balance to ledger closing: ${splitLedgerEntry.closing_balance}`);
+                saleLog(`💳 Debit account ${splitPayment.debit_account_id} balance to ledger closing: ${splitLedgerEntry.closing_balance}`);
               }
             }
 
@@ -1837,7 +1920,7 @@ export async function POST(request) {
               // Find the ledger entry for this account to get closing balance
               const splitLedgerEntry = ledgerEntries.find(e => e.cus_id === splitPayment.credit_account_id);
               if (splitLedgerEntry) {
-                console.log(`💳 Credit account ${splitPayment.credit_account_id} balance to ledger closing: ${splitLedgerEntry.closing_balance}`);
+                saleLog(`💳 Credit account ${splitPayment.credit_account_id} balance to ledger closing: ${splitLedgerEntry.closing_balance}`);
               }
             }
           }
@@ -1853,7 +1936,7 @@ export async function POST(request) {
           await tx.$executeRaw`
             UPDATE sales SET bill_type = 'ORDER_TRASH', updated_at = NOW() WHERE sale_id = ${ordId}
           `;
-          console.log(`✅ Backend POST: Order #${ordId} automatically moved to ORDER_TRASH upon conversion to sale`);
+          saleLog(`✅ Backend POST: Order #${ordId} automatically moved to ORDER_TRASH upon conversion to sale`);
         }
       }
 
@@ -1875,42 +1958,6 @@ export async function POST(request) {
       };
     }, {
       timeout: 120000 // 120 seconds (2 minutes) timeout for complex transactions with ledger entries
-    });
-
-    // Recalculate balances chronologically for all affected accounts (outside transaction)
-    if (result.affectedCusIds) {
-      for (const cid of result.affectedCusIds) {
-        await recalculateLedgerBalances(prisma, cid);
-      }
-    }
-
-    // Generate comprehensive ledger report for this sale
-    const updatedCustomer = await prisma.customer.findUnique({
-      where: { cus_id }
-    });
-
-    const ledgerEntriesForReport = await prisma.ledger.findMany({
-      where: { bill_no: result.sale_id.toString() }
-    });
-
-    reportSaleCreation({
-      transactionType: 'SALE',
-      saleId: result.sale_id,
-      customerId: cus_id,
-      customerName: updatedCustomer?.cus_name,
-      previousBalance: parseFloat(updatedCustomer?.cus_balance || 0) - parseFloat(netTotal) + parseFloat(payment),
-      netTotal: netTotal,
-      totalAmount: parseFloat(total_amount),
-      discount: parseFloat(discount || 0),
-      shippingAmount: parseFloat(shipping_amount || 0),
-      paymentReceived: parseFloat(payment),
-      cashPayment: eff_cash,
-      bankPayment: eff_bank,
-      advancePayment: parseFloat(advance_payment || 0),
-      newBalance: parseFloat(updatedCustomer?.cus_balance || 0),
-      ledgerEntries: ledgerEntriesForReport,
-      billType: bill_type || 'BILL',
-      specialAccounts: specialAccounts || {}
     });
 
     return NextResponse.json(result, { status: 201 });
@@ -2090,11 +2137,11 @@ export async function PUT(request) {
           }
         }
 
-        console.log(`\n${'='.repeat(60)}`);
-        console.log(`🔄 BILL EDIT: REVERSING OLD LEDGER ENTRIES`);
-        console.log(`   Sale ID: ${id}`);
-        console.log(`   Old ledger entries found: ${oldLedgerEntries.length}`);
-        console.log(`${'='.repeat(60)}`);
+        saleLog(`\n${'='.repeat(60)}`);
+        saleLog(`🔄 BILL EDIT: REVERSING OLD LEDGER ENTRIES`);
+        saleLog(`   Sale ID: ${id}`);
+        saleLog(`   Old ledger entries found: ${oldLedgerEntries.length}`);
+        saleLog(`${'='.repeat(60)}`);
 
         // Extract old advance payment breakdown if any
         // Handle both legacy types (CASH, BANK_TRANSFER) and new types (DEBIT, CREDIT)
@@ -2140,7 +2187,7 @@ export async function PUT(request) {
               where: { cus_id: specialAccounts.sundryDebtors.cus_id },
               data: { cus_balance: { increment: oldShippingAmt } }
             });
-            console.log(`   🔄 Reversed sundry debtors balance: +${oldShippingAmt}`);
+            saleLog(`   🔄 Reversed sundry debtors balance: +${oldShippingAmt}`);
           }
         }
 
@@ -2148,7 +2195,7 @@ export async function PUT(request) {
         await tx.ledger.deleteMany({
           where: { bill_no: String(id) }
         });
-        console.log(`   🗑️ Deleted ${oldLedgerEntries.length} old ledger entries`);
+        saleLog(`   🗑️ Deleted ${oldLedgerEntries.length} old ledger entries`);
       }
 
       // ═══════════════════════════════════════════
@@ -2273,14 +2320,14 @@ export async function PUT(request) {
         });
         let runningBalance = await getRunningBalanceForAccount(cus_id);
 
-        console.log(`\n${'='.repeat(60)}`);
-        console.log(`📝 BILL EDIT: RECREATING LEDGER ENTRIES`);
-        console.log(`   Customer: ${freshCustomer.cus_name} (ID: ${cus_id})`);
-        console.log(`   Pre-sale Balance: ${runningBalance}`);
-        console.log(`   New Bill Amount: ${total_amount}`);
-        console.log(`   New Payment: Cash=${eff_cash}, Bank=${eff_bank}`);
-        console.log(`   Advance Payment: ${advance_payment}`);
-        console.log(`${'='.repeat(60)}`);
+        saleLog(`\n${'='.repeat(60)}`);
+        saleLog(`📝 BILL EDIT: RECREATING LEDGER ENTRIES`);
+        saleLog(`   Customer: ${freshCustomer.cus_name} (ID: ${cus_id})`);
+        saleLog(`   Pre-sale Balance: ${runningBalance}`);
+        saleLog(`   New Bill Amount: ${total_amount}`);
+        saleLog(`   New Payment: Cash=${eff_cash}, Bank=${eff_bank}`);
+        saleLog(`   Advance Payment: ${advance_payment}`);
+        saleLog(`${'='.repeat(60)}`);
 
         // ── 4a. Customer SALE credit (bill amount) — FIRST: add amount to customer ledger ──
         const debitAmount = parseFloat(total_amount);
@@ -2301,7 +2348,7 @@ export async function PUT(request) {
             payments: 0,
             updated_by: validatedUpdatedBy
           });
-          console.log(`   📝 Bill Debit: ${debitAmount}, Closing=${billEntry.closing_balance}`);
+          saleLog(`   📝 Bill Debit: ${debitAmount}, Closing=${billEntry.closing_balance}`);
           ledgerEntries.push(billEntry);
           runningBalance = billEntry.closing_balance;
         }
@@ -2338,7 +2385,7 @@ export async function PUT(request) {
             updated_by: validatedUpdatedBy,
             ledger_type: 'Order'
           });
-          console.log(`   💳 Advance Credit: ${advPaymentAmt}, Closing=${orderAdvanceEntry.closing_balance}`);
+          saleLog(`   💳 Advance Credit: ${advPaymentAmt}, Closing=${orderAdvanceEntry.closing_balance}`);
           ledgerEntries.push(orderAdvanceEntry);
           runningBalance = orderAdvanceEntry.closing_balance;
 
@@ -2384,7 +2431,7 @@ export async function PUT(request) {
                 updated_by: validatedUpdatedBy,
                 ledger_type: 'Order'
               });
-              console.log(`   🏦 Advance Bank Debit: ${advBank}, Closing=${bankEntry.closing_balance}`);
+              saleLog(`   🏦 Advance Bank Debit: ${advBank}, Closing=${bankEntry.closing_balance}`);
               ledgerEntries.push(bankEntry);
             }
           }
@@ -2406,7 +2453,7 @@ export async function PUT(request) {
               updated_by: validatedUpdatedBy,
               ledger_type: 'Order'
             });
-            console.log(`   💵 Advance Cash Debit: ${advCash}, Closing=${cashEntry.closing_balance}`);
+            saleLog(`   💵 Advance Cash Debit: ${advCash}, Closing=${cashEntry.closing_balance}`);
             ledgerEntries.push(cashEntry);
           }
         }
@@ -2446,7 +2493,7 @@ export async function PUT(request) {
             updated_by: validatedUpdatedBy,
             ledger_type: isOrder ? 'Order' : 'Sale'
           });
-          console.log(`   💳 Payment Credit: ${totalPaymentForCustomer}, Closing=${paymentEntry.closing_balance}`);
+          saleLog(`   💳 Payment Credit: ${totalPaymentForCustomer}, Closing=${paymentEntry.closing_balance}`);
           ledgerEntries.push(paymentEntry);
           runningBalance = paymentEntry.closing_balance;
         }
@@ -2504,7 +2551,7 @@ export async function PUT(request) {
               updated_by: validatedUpdatedBy,
               ledger_type: isOrder ? 'Order' : 'Sale'
             });
-            console.log(`   🏦 Bank Debit: ${eff_bank}, Closing=${bankEntry.closing_balance}`);
+            saleLog(`   🏦 Bank Debit: ${eff_bank}, Closing=${bankEntry.closing_balance}`);
             ledgerEntries.push(bankEntry);
           }
         }
@@ -2527,7 +2574,7 @@ export async function PUT(request) {
             updated_by: validatedUpdatedBy,
             ledger_type: isOrder ? 'Order' : 'Sale'
           });
-          console.log(`   💵 Cash Debit: ${eff_cash}, Closing=${cashEntry.closing_balance}`);
+          saleLog(`   💵 Cash Debit: ${eff_cash}, Closing=${cashEntry.closing_balance}`);
           ledgerEntries.push(cashEntry);
         }
 
@@ -2558,7 +2605,7 @@ export async function PUT(request) {
             });
             ledgerEntries.push(transportEntry);
 
-            console.log(`   🚚 Transport Credit: Account=${transportAccount.cus_name}, Amount=${transportAmount}`);
+            saleLog(`   🚚 Transport Credit: Account=${transportAccount.cus_name}, Amount=${transportAmount}`);
           }
         }
 
@@ -2610,7 +2657,7 @@ export async function PUT(request) {
         // ═══════════════════════════════════════════
         // 5. PERSIST LEDGER ENTRIES & UPDATE BALANCES
         // ═══════════════════════════════════════════
-        console.log(`\n   📊 PERSISTING ${ledgerEntries.length} LEDGER ENTRIES`);
+        saleLog(`\n   📊 PERSISTING ${ledgerEntries.length} LEDGER ENTRIES`);
 
         for (let i = 0; i < ledgerEntries.length; i++) {
           const entry = ledgerEntries[i];
@@ -2634,7 +2681,7 @@ export async function PUT(request) {
               created_at: existingSale.created_at // PRESERVE TIMESTAMP!
             }
           });
-          console.log(`   ✅ Entry ${i + 1}/${ledgerEntries.length}: ${entry.trnx_type} on account ${entry.cus_id}`);
+          saleLog(`   ✅ Entry ${i + 1}/${ledgerEntries.length}: ${entry.trnx_type} on account ${entry.cus_id}`);
         }
 
         // Add new ledger entries accounts to affected set
@@ -2650,7 +2697,7 @@ export async function PUT(request) {
               }
             }
           });
-          console.log(`   🚚 Sundry debtors balance updated: -${parseFloat(shipping_amount || 0)}`);
+          saleLog(`   🚚 Sundry debtors balance updated: -${parseFloat(shipping_amount || 0)}`);
         }
 
         // ── 5c. Update loader balance ──
@@ -2688,9 +2735,9 @@ export async function PUT(request) {
           });
         }
 
-        console.log(`\n${'='.repeat(60)}`);
-        console.log(`✅ BILL EDIT COMPLETE: ${ledgerEntries.length} ledger entries created and balances recalculated`);
-        console.log(`${'='.repeat(60)}\n`);
+        saleLog(`\n${'='.repeat(60)}`);
+        saleLog(`✅ BILL EDIT COMPLETE: ${ledgerEntries.length} ledger entries created and balances recalculated`);
+        saleLog(`${'='.repeat(60)}\n`);
 
       } // End of if (!isSkipLedger)
 
@@ -2807,7 +2854,7 @@ export async function DELETE(request) {
 
       oldLedgerEntries.forEach(entry => affectedCusIds.add(entry.cus_id));
 
-      console.log(`🗑️ DELETING SALE/ORDER: Reversing balances for ${oldLedgerEntries.length} ledger entries`);
+      saleLog(`🗑️ DELETING SALE/ORDER: Reversing balances for ${oldLedgerEntries.length} ledger entries`);
 
       // Call prepareLedgerDeletion to re-link subsequent entries
       await prepareLedgerDeletion(tx, id);

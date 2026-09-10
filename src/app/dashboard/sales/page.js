@@ -34,6 +34,7 @@ import {
   Alert,
   Snackbar,
   CircularProgress,
+  LinearProgress,
   Tooltip,
   Popper,
   Fade,
@@ -269,6 +270,7 @@ function SalesPageContent() {
   const [productSubcategories, setProductSubcategories] = useState([]);
   const [stores, setStores] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [formRefLoading, setFormRefLoading] = useState(false);
   const [listLoading, setListLoading] = useState(true);
   const [savingBill, setSavingBill] = useState(false);
   const [saveStatusMessage, setSaveStatusMessage] = useState('');
@@ -319,6 +321,7 @@ function SalesPageContent() {
 
   // Track which data bundles have been loaded (avoid duplicate API calls)
   const dataLoadedRef = useRef({ list: false, form: false, listFilters: false, dialogLookups: false });
+  const formFetchInFlightRef = useRef(null);
   const lastBootIdRef = useRef(salesPageBootId);
 
   // Offline Auto-Sync Helpers & Event Listeners
@@ -709,7 +712,6 @@ function SalesPageContent() {
   // Auto-filter bank accounts when customers, categories, or types change
   useEffect(() => {
     if (customers.length > 0 && customerCategories.length > 0 && customerTypes.length > 0) {
-      console.log('🔍 Auto-filtering bank accounts for sales...');
       fetchBankAccounts(customers);
     }
   }, [customers, customerCategories, customerTypes]);
@@ -2219,17 +2221,18 @@ function SalesPageContent() {
     }
     const isCreate = viewParam === 'create' || typeParam === 'return' || saleReturnFlag;
 
+    // Prefetch create-form data in background so "New Sale" opens instantly
+    fetchFormReferenceData(true);
+
     if (isCreate) {
       setListLoading(false);
-      fetchFormReferenceData();
       return;
     }
 
     let cancelled = false;
     (async () => {
       try {
-        await fetchSalesList(false);
-        if (!cancelled) await fetchListFilterData();
+        await Promise.all([fetchSalesList(false), fetchListFilterData()]);
       } catch (e) {
         console.error('Initial sales list load failed:', e);
         if (!cancelled) setListLoading(false);
@@ -2250,7 +2253,7 @@ function SalesPageContent() {
     }
 
     if (currentView === 'create' && !dataLoadedRef.current.form) {
-      fetchFormReferenceData();
+      fetchFormReferenceData(true);
     } else if (currentView === 'list') {
       if (!dataLoadedRef.current.list || sales.length === 0) {
         fetchSalesList();
@@ -2787,8 +2790,8 @@ function SalesPageContent() {
       if (!silent) setListLoading(true);
 
       const [salesRes, returnsRes] = await Promise.all([
-        fetch('/api/sales', { cache: 'no-store' }),
-        fetch('/api/sale-returns', { cache: 'no-store' })
+        fetch('/api/sales?list=true', { cache: 'no-store' }),
+        fetch('/api/sale-returns?list=true', { cache: 'no-store' })
       ]);
 
       let salesList = [];
@@ -2847,74 +2850,103 @@ function SalesPageContent() {
 
   const fetchFormReferenceData = async (silent = false) => {
     if (dataLoadedRef.current.form) return;
+    if (formFetchInFlightRef.current) {
+      await formFetchInFlightRef.current;
+      return;
+    }
 
+    const runFetch = async () => {
+      try {
+        if (!silent) setFormRefLoading(true);
+
+        const needCustomers = customers.length === 0;
+        const needProducts = products.length === 0;
+        const needCustomerTypes = customerTypes.length === 0;
+        const needStores = stores.length === 0;
+        const needCustomerCategories = customerCategories.length === 0;
+
+        const [customersRes, productsRes, customerTypesRes, storesRes, customerCategoriesRes] = await Promise.all([
+          needCustomers ? fetch('/api/customers?dropdown=true') : Promise.resolve(null),
+          needProducts ? fetch('/api/products?dropdown=true&noStoreStock=true') : Promise.resolve(null),
+          needCustomerTypes ? fetch('/api/customer-types') : Promise.resolve(null),
+          needStores ? fetch('/api/stores') : Promise.resolve(null),
+          needCustomerCategories ? fetch('/api/customer-category') : Promise.resolve(null)
+        ]);
+
+        let customersArrayForRefetch = customers.length > 0 ? customers : null;
+        let parsedCustomerCategories = customerCategories.length > 0 ? customerCategories : null;
+        let parsedCustomerTypes = customerTypes.length > 0 ? customerTypes : null;
+
+        if (customersRes) {
+          if (customersRes.ok) {
+            const customersResponse = await customersRes.json();
+            const customersData = customersResponse.value || customersResponse;
+            const customersArray = Array.isArray(customersData) ? customersData : [];
+            customersArrayForRefetch = customersArray;
+            setCustomers(customersArray);
+          } else {
+            setCustomers([]);
+          }
+        }
+
+        if (productsRes) {
+          if (productsRes.ok) {
+            const productsData = await productsRes.json();
+            setProducts(productsData || []);
+          } else {
+            setProducts([]);
+          }
+        }
+
+        if (customerTypesRes) {
+          if (customerTypesRes.ok) {
+            const customerTypesResponse = await customerTypesRes.json();
+            const customerTypesData = customerTypesResponse.value || customerTypesResponse;
+            parsedCustomerTypes = Array.isArray(customerTypesData) ? customerTypesData : (customerTypesData || []);
+            setCustomerTypes(parsedCustomerTypes);
+          }
+        }
+
+        if (storesRes) {
+          if (storesRes.ok) {
+            const storesResponse = await storesRes.json();
+            const storesData = storesResponse.data || storesResponse;
+            setStores(Array.isArray(storesData) ? storesData : []);
+          } else {
+            setStores([]);
+          }
+        }
+
+        if (customerCategoriesRes) {
+          if (customerCategoriesRes.ok) {
+            const customerCategoriesData = await customerCategoriesRes.json();
+            parsedCustomerCategories = Array.isArray(customerCategoriesData) ? customerCategoriesData : (customerCategoriesData || []);
+            setCustomerCategories(parsedCustomerCategories);
+          } else {
+            setCustomerCategories([]);
+          }
+        }
+
+        if (customersArrayForRefetch && customersArrayForRefetch.length > 0) {
+          fetchBankAccounts(customersArrayForRefetch);
+          fetchTransportAccounts(customersArrayForRefetch, parsedCustomerCategories, parsedCustomerTypes);
+        }
+
+        dataLoadedRef.current.form = true;
+        dataLoadedRef.current.listFilters = true;
+      } catch (error) {
+        console.error('Error fetching form reference data:', error);
+        if (!silent) showSnackbar('Error fetching data', 'error');
+      } finally {
+        if (!silent) setFormRefLoading(false);
+      }
+    };
+
+    formFetchInFlightRef.current = runFetch();
     try {
-      if (!silent) setLoading(true);
-
-      const [customersRes, productsRes, customerTypesRes, storesRes, customerCategoriesRes] = await Promise.all([
-        fetch('/api/customers?dropdown=true'),
-        fetch('/api/products?dropdown=true'),
-        fetch('/api/customer-types'),
-        fetch('/api/stores'),
-        fetch('/api/customer-category')
-      ]);
-
-      let customersArrayForRefetch = null;
-      let parsedCustomerCategories = null;
-      let parsedCustomerTypes = null;
-
-      if (customersRes.ok) {
-        const customersResponse = await customersRes.json();
-        const customersData = customersResponse.value || customersResponse;
-        const customersArray = Array.isArray(customersData) ? customersData : [];
-        customersArrayForRefetch = customersArray;
-        setCustomers(customersArray);
-        fetchBankAccounts(customersArray);
-      } else {
-        setCustomers([]);
-      }
-
-      if (productsRes.ok) {
-        const productsData = await productsRes.json();
-        setProducts(productsData || []);
-      } else {
-        setProducts([]);
-      }
-
-      if (customerTypesRes.ok) {
-        const customerTypesResponse = await customerTypesRes.json();
-        const customerTypesData = customerTypesResponse.value || customerTypesResponse;
-        parsedCustomerTypes = Array.isArray(customerTypesData) ? customerTypesData : (customerTypesData || []);
-        setCustomerTypes(parsedCustomerTypes);
-      }
-
-      if (storesRes.ok) {
-        const storesResponse = await storesRes.json();
-        const storesData = storesResponse.data || storesResponse;
-        setStores(Array.isArray(storesData) ? storesData : []);
-      } else {
-        setStores([]);
-      }
-
-      if (customerCategoriesRes.ok) {
-        const customerCategoriesData = await customerCategoriesRes.json();
-        parsedCustomerCategories = Array.isArray(customerCategoriesData) ? customerCategoriesData : (customerCategoriesData || []);
-        setCustomerCategories(parsedCustomerCategories);
-      } else {
-        setCustomerCategories([]);
-      }
-
-      if (customersArrayForRefetch && customersArrayForRefetch.length > 0) {
-        fetchTransportAccounts(customersArrayForRefetch, parsedCustomerCategories, parsedCustomerTypes);
-      }
-
-      dataLoadedRef.current.form = true;
-      dataLoadedRef.current.listFilters = true;
-    } catch (error) {
-      console.error('Error fetching form reference data:', error);
-      showSnackbar('Error fetching data', 'error');
+      await formFetchInFlightRef.current;
     } finally {
-      if (!silent) setLoading(false);
+      formFetchInFlightRef.current = null;
     }
   };
 
@@ -2967,8 +2999,7 @@ function SalesPageContent() {
     const { mode = 'all', silent = false } = typeof options === 'object' ? options : { silent: !!options };
 
     if (mode === 'list') {
-      await fetchSalesList(silent);
-      await fetchListFilterData();
+      await Promise.all([fetchSalesList(silent), fetchListFilterData()]);
     } else if (mode === 'create') {
       await fetchFormReferenceData(silent);
     } else {
@@ -2986,11 +3017,10 @@ function SalesPageContent() {
     dataLoadedRef.current = { list: false, form: false, listFilters: false, dialogLookups: false };
     setSales([]);
 
+    fetchFormReferenceData(true);
     if (currentView === 'list') {
       fetchSalesList();
       fetchListFilterData();
-    } else {
-      fetchFormReferenceData();
     }
   }, [salesPageBootId, currentView]);
 
@@ -4222,8 +4252,39 @@ function SalesPageContent() {
   const [currentBillData, setCurrentBillData] = useState(null);
   const [receiptDialogOpen, setReceiptDialogOpen] = useState(false);
 
+  const resolveBillForActions = async (bill) => {
+    if (!bill) return null;
+    const isReturn = bill.is_return || bill.bill_type === 'SALE_RETURN';
+    const returnId = bill.return_id
+      || (typeof bill.sale_id === 'string' && bill.sale_id.startsWith('SR-')
+        ? parseInt(bill.sale_id.replace('SR-', ''), 10)
+        : bill.sale_id);
+    const endpoint = isReturn ? `/api/sale-returns?id=${returnId}` : `/api/sales?id=${bill.sale_id}`;
+    const response = await fetch(endpoint);
+    if (!response.ok) return bill;
+    const data = await response.json();
+    if (isReturn) {
+      return {
+        ...data,
+        is_return: true,
+        bill_type: 'SALE_RETURN',
+        sale_id: `SR-${data.return_id}`,
+        actual_sale_id: data.sale_id,
+        sale_details: (data.return_details || []).map((d) => ({
+          ...d,
+          product: d.product,
+          product_name: d.product?.pro_title,
+          qnty: Number(d.qnty || d.return_quantity || 0),
+          unit_rate: Number(d.unit_rate || 0),
+          total_amount: Number(d.total_amount || d.return_amount || 0),
+        })),
+      };
+    }
+    return { ...data, notes: data.notes || data.reference || null };
+  };
+
   // Handle print bill with mode (A4 or Thermal or Existing)
-  const handlePrintBill = (mode = 'A4', fromDialog = false, targetBill = null) => {
+  const handlePrintBill = async (mode = 'A4', fromDialog = false, targetBill = null) => {
     try {
       const actualMode = typeof mode === 'string' ? mode : 'A4';
       const className = actualMode === 'THERMAL' 
@@ -4231,8 +4292,10 @@ function SalesPageContent() {
         : (actualMode === 'EXISTING' ? 'print-existing' : 'print-a4');
       const isThermal = actualMode === 'THERMAL';
 
-      // Ensure active bill is set for printing
-      const activeBill = targetBill || currentBillData || selectedBill;
+      let activeBill = targetBill || currentBillData || selectedBill;
+      if (targetBill && !fromDialog) {
+        activeBill = await resolveBillForActions(targetBill);
+      }
       if (activeBill) {
         setCurrentBillData(activeBill);
       }
@@ -4320,17 +4383,10 @@ function SalesPageContent() {
 
   // Filter sales based on search criteria
   const filteredSales = useMemo(() => {
-    console.log('🔍 Starting filter with sales count:', sales.length);
-    console.log('🔍 Sales is array?', Array.isArray(sales));
-    console.log('🔍 Filter criteria:', { searchTerm, filterCustomer, filterBillType, filterStore, filterPaymentType, filterAmount, filterMinAmount, filterMaxAmount, filterBalanceStatus, dateFrom, dateTo });
-
-    // Check if sales array has data
     if (!Array.isArray(sales) || sales.length === 0) {
-      console.log('🔍 No sales to filter - returning empty array');
       return [];
     }
 
-    console.log('🔍 Filtering', sales.length, 'sales...');
     const filtered = sales.filter(sale => {
       // Filter to only show BILL and SALE_RETURN type (exclude QUOTATION and other types)
       const isBillType = sale.bill_type === 'BILL' || sale.bill_type === 'SALE_RETURN' || !sale.bill_type;
@@ -4399,28 +4455,9 @@ function SalesPageContent() {
         (sale.reference && sale.reference.toLowerCase().includes(filterNotes.toLowerCase())) ||
         (sale.notes && sale.notes.toLowerCase().includes(filterNotes.toLowerCase()));
 
-      const result = matchesSearch && matchesCustomer && matchesBillType && matchesStore &&
+      return matchesSearch && matchesCustomer && matchesBillType && matchesStore &&
         matchesPaymentType && matchesAmount && matchesMinAmount && matchesMaxAmount &&
         matchesBalanceStatus && matchesDateFrom && matchesDateTo && matchesItem && matchesNotes;
-
-      if (!result) {
-        console.log('🔍 Sale', sale.sale_id, 'filtered out:', {
-          matchesSearch,
-          matchesCustomer,
-          matchesBillType,
-          matchesStore,
-          matchesPaymentType,
-          matchesMinAmount,
-          matchesMaxAmount,
-          matchesBalanceStatus,
-          matchesDateFrom,
-          matchesDateTo,
-          hasCustomer: !!sale.customer,
-          saleData: { sale_id: sale.sale_id, total_amount: sale.total_amount }
-        });
-      }
-
-      return result;
     });
 
     // Apply sorting
@@ -4448,71 +4485,8 @@ function SalesPageContent() {
       return 0;
     });
 
-    console.log('🔍 Filtered and sorted sales count:', filtered.length, 'out of', sales.length);
-    if (filtered.length > 0) {
-      console.log('🔍 First filtered sale:', filtered[0]);
-    }
     return filtered;
   }, [sales, searchTerm, filterItem, filterNotes, filterCustomer, filterBillType, filterStore, filterPaymentType, filterAmount, filterMinAmount, filterMaxAmount, filterBalanceStatus, dateFrom, dateTo, sortBy, sortOrder]);
-
-  console.log('🔍 Filtered sales count:', filteredSales.length);
-  console.log('🔍 Sales state:', sales);
-  console.log('🔍 Sales state length:', sales.length);
-
-  // Debug sales state changes
-  useEffect(() => {
-    console.log('🔍 Sales state changed:', sales);
-    console.log('🔍 Sales length:', sales.length);
-    if (sales.length > 0) {
-      console.log('🔍 First sale:', sales[0]);
-    }
-  }, [sales]);
-
-  // Debug stores state changes
-  useEffect(() => {
-    console.log('🏪 Stores state changed:', stores);
-    console.log('🏪 Stores length:', stores.length);
-    console.log('🏪 Stores type:', typeof stores);
-    console.log('🏪 Is stores array:', Array.isArray(stores));
-  }, [stores]);
-
-  // Debug customers state changes for sales list
-  useEffect(() => {
-    console.log('👥 Sales List - Customers state changed:', customers);
-    console.log('👥 Sales List - Customers length:', customers.length);
-    if (customers.length > 0) {
-      console.log('👥 Sales List - First customer:', customers[0]);
-      console.log('👥 Sales List - All customer types:', customers.map(c => ({
-        name: c.cus_name,
-        type: c.customer_type?.cus_type_title,
-        cus_type: c.cus_type
-      })));
-    }
-  }, [customers]);
-
-  // Debug products state changes for new sale page
-  useEffect(() => {
-    console.log('📦 New Sale - Products state changed:', products);
-    console.log('📦 New Sale - Products length:', products.length);
-    if (products.length > 0) {
-      console.log('📦 New Sale - First product:', products[0]);
-    }
-  }, [products]);
-
-  // Debug customers state changes for new sale page
-  useEffect(() => {
-    console.log('👥 New Sale - Customers state changed:', customers);
-    console.log('👥 New Sale - Customers length:', customers.length);
-    if (customers.length > 0) {
-      console.log('👥 New Sale - First customer:', customers[0]);
-      console.log('👥 New Sale - Customer types:', customers.map(c => ({
-        name: c.cus_name,
-        type: c.customer_type?.cus_type_title
-      })));
-    }
-  }, [customers]);
-
-
 
 
 
@@ -4699,9 +4673,7 @@ function SalesPageContent() {
     setSortOrder('desc');
   };
 
-  const showPageLoader =
-    (currentView === 'list' && listLoading) ||
-    (currentView === 'create' && loading);
+  const showPageLoader = currentView === 'list' && listLoading;
 
   if (showPageLoader) {
     return (
@@ -4731,6 +4703,9 @@ function SalesPageContent() {
       />
       <Container maxWidth={false} sx={{ py: 1 }}>
         <Stack spacing={2} className="no-print">
+          {(formRefLoading || (!dataLoadedRef.current.form && products.length === 0)) && (
+            <LinearProgress sx={{ borderRadius: 1 }} />
+          )}
           {/* Header */}
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -7897,7 +7872,10 @@ function SalesPageContent() {
             <Button
               variant="contained"
               startIcon={<AddIcon />}
-              onClick={() => setCurrentView('create')}
+              onClick={() => {
+                setCurrentView('create');
+                if (!dataLoadedRef.current.form) fetchFormReferenceData(true);
+              }}
               size="large"
               sx={{
                 background: 'linear-gradient(45deg, #2e7d32 30%, #4caf50 90%)',
@@ -8671,8 +8649,9 @@ function SalesPageContent() {
                                   size="small"
                                   color="primary"
                                   sx={{ p: 0.4 }}
-                                  onClick={() => {
-                                    setCurrentBillData(sale);
+                                  onClick={async () => {
+                                    const fullBill = await resolveBillForActions(sale);
+                                    setCurrentBillData(fullBill || sale);
                                     setReceiptDialogOpen(true);
                                   }}
                                 >
