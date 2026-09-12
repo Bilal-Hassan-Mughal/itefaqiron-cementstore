@@ -41,6 +41,12 @@ export const UM = {
     'inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-slate-600 border border-slate-300 bg-white hover:bg-slate-50 transition-colors',
 };
 
+function formatSectionCount(count) {
+  if (count == null) return null;
+  if (typeof count === 'object') return `${count.granted}/${count.total}`;
+  return String(count);
+}
+
 /** Horizontal section tabs — Dashboard, Quick Access, Reports, etc. */
 export function UmSectionTabs({ sections, active, onChange, counts = {} }) {
   return (
@@ -56,7 +62,7 @@ export function UmSectionTabs({ sections, active, onChange, counts = {} }) {
       >
         All sections
         {counts.all != null && (
-          <span className="ml-1 opacity-80 tabular-nums">({counts.all})</span>
+          <span className="ml-1 opacity-80 tabular-nums">({formatSectionCount(counts.all)})</span>
         )}
       </button>
       {sections.map((section) => {
