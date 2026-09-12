@@ -7,7 +7,7 @@ import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
 import SaveProgressBackdrop from '../components/save-progress-backdrop';
-import { openAccountLedgerTab, FINANCE_LEDGER_PATH } from '@/lib/ledger-tabs';
+import { openAccountLedgerTab, FINANCE_LEDGER_PATH, notifyLedgerDataChanged } from '@/lib/ledger-tabs';
 
 // Material-UI imports
 import {
@@ -95,6 +95,31 @@ const getProductCostPrice = (product) => {
   if (crateVal > 0) return crateVal;
   return costPriceVal;
 };
+
+/** Sale entry screen only — limit Customer Type filter to these categories (display order) */
+const SALE_PAGE_CUSTOMER_TYPE_RULES = [
+  { label: 'Walk in Customer', match: /walk\s*in?\s*cust/i },
+  { label: 'Factories', match: /^factories?$/i },
+  { label: 'Sarya Shop', match: /sarya\s*shops?/i },
+  { label: 'Bloak', match: /^bloak$|^block$/i },
+  { label: 'Solar', match: /^solar$/i },
+  { label: 'Cement', match: /^cement$/i },
+  { label: 'Welders', match: /^welders?$/i },
+  { label: 'Homes', match: /^homes?$/i },
+];
+
+function filterSalePageCustomerTypes(allTypes) {
+  if (!Array.isArray(allTypes)) return [];
+  const picked = [];
+  for (let order = 0; order < SALE_PAGE_CUSTOMER_TYPE_RULES.length; order += 1) {
+    const rule = SALE_PAGE_CUSTOMER_TYPE_RULES[order];
+    const found = allTypes.find((t) => rule.match.test(String(t.cus_type_title || '').trim()));
+    if (found && !picked.some((p) => p.cus_type_id === found.cus_type_id)) {
+      picked.push(found);
+    }
+  }
+  return picked;
+}
 
 const EMPTY_PAYMENT_DATA = {
   cash: '',
@@ -615,6 +640,11 @@ function SalesPageContent() {
   const [isSearchingOrder, setIsSearchingOrder] = useState(false);
   const [loadedOrderId, setLoadedOrderId] = useState(null); // Track the order being converted to bill
   const [selectedCustomerTypeFilter, setSelectedCustomerTypeFilter] = useState(null); // Filter customers by type
+
+  const salePageCustomerTypeOptions = useMemo(
+    () => filterSalePageCustomerTypes(customerTypes),
+    [customerTypes]
+  );
 
   const isWalkinCustomer = (customer) => {
     if (!customer) return true;
@@ -1770,6 +1800,7 @@ function SalesPageContent() {
 
         if (response.ok) {
           const saleReturnData = await response.json();
+          notifyLedgerDataChanged('sale-return');
 
           let fullReturn = saleReturnData;
           try {
@@ -2071,6 +2102,7 @@ function SalesPageContent() {
       if (response && response.ok) {
         updateSaveStatus('Updating ledger & stock...');
         const result = await response.json();
+        notifyLedgerDataChanged('sale');
         showSnackbar('Bill saved successfully!', 'success');
 
         // If this bill was converted from an order, move the order to ORDER_TRASH
@@ -4985,7 +5017,7 @@ function SalesPageContent() {
                   <Autocomplete
                     size="small"
                     sx={{ minWidth: 450 }}
-                    options={customerTypes || []}
+                    options={salePageCustomerTypeOptions}
                     getOptionLabel={(option) => option.cus_type_title || ''}
                     value={selectedCustomerTypeFilter}
                     onChange={(event, newValue) => {

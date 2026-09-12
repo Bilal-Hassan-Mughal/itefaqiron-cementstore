@@ -7,7 +7,7 @@ import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
 import SaveProgressBackdrop from '../components/save-progress-backdrop';
-import { openAccountLedgerTab, FINANCE_LEDGER_PATH } from '@/lib/ledger-tabs';
+import { openAccountLedgerTab, FINANCE_LEDGER_PATH, notifyLedgerDataChanged } from '@/lib/ledger-tabs';
 
 // Material-UI imports
 import {
@@ -1643,6 +1643,7 @@ function PurchasesPageContent() {
 
       if (response.ok) {
         const result = await response.json();
+        notifyLedgerDataChanged('purchase');
 
         updateSaveStatus('Updating stock & ledger...');
         // Fetch fresh purchase data to ensure accurate balance info

@@ -166,15 +166,48 @@ export const QUICK_ENTRY_TONES = {
 
 /** Chart & analytics accent colors */
 export const CHART_COLORS = {
-  credit:  { primary: BRAND.supporting.green, gradient: '#7ef0c4', tint: BRAND.tint.green, text: BRAND.text.green },
-  debit:   { primary: BRAND.primary.pink, gradient: '#ff8cb3', tint: BRAND.tint.pink, text: BRAND.text.pink },
-  profit:  { primary: BRAND.supporting.periwinkle, gradient: '#a5aff5', tint: BRAND.tint.periwinkle, text: BRAND.text.periwinkle },
-  sales:   { primary: BRAND.primary.blue, gradient: '#7ba3f0', tint: BRAND.tint.blue, text: BRAND.text.blue },
-  customer:{ primary: BRAND.supporting.periwinkle, gradient: '#a5aff5', tint: BRAND.tint.periwinkle, text: BRAND.text.periwinkle },
-  supplier:{ primary: BRAND.primary.blue, gradient: '#7ba3f0', tint: BRAND.tint.blue, text: BRAND.text.blue },
-  bills:   { primary: BRAND.supporting.green, gradient: '#7ef0c4' },
-  orders:  { primary: BRAND.supporting.cyan, gradient: '#8ee9fa' },
+  credit:  { primary: BRAND.supporting.green, gradient: '#7ef0c4', tint: BRAND.tint.green, text: BRAND.text.green, neon: '#00ffaa' },
+  debit:   { primary: BRAND.primary.pink, gradient: '#ff8cb3', tint: BRAND.tint.pink, text: BRAND.text.pink, neon: '#ff4d8d' },
+  profit:  { primary: BRAND.supporting.periwinkle, gradient: '#a5aff5', tint: BRAND.tint.periwinkle, text: BRAND.text.periwinkle, neon: '#7b8cff' },
+  sales:   { primary: BRAND.primary.blue, gradient: '#7ba3f0', tint: BRAND.tint.blue, text: BRAND.text.blue, neon: '#4d8bff' },
+  customer:{ primary: BRAND.supporting.periwinkle, gradient: '#a5aff5', tint: BRAND.tint.periwinkle, text: BRAND.text.periwinkle, neon: '#9aa8ff' },
+  supplier:{ primary: BRAND.primary.blue, gradient: '#7ba3f0', tint: BRAND.tint.blue, text: BRAND.text.blue, neon: '#5b9aff' },
+  bills:   { primary: BRAND.supporting.green, gradient: '#7ef0c4', tint: BRAND.tint.green, text: BRAND.text.green, neon: '#00e896' },
+  orders:  { primary: BRAND.supporting.cyan, gradient: '#8ee9fa', tint: BRAND.tint.cyan, text: BRAND.text.cyan, neon: '#3de8ff' },
+  activity:{ primary: BRAND.primary.blue, gradient: '#7ba3f0', tint: BRAND.tint.blue, text: BRAND.text.blue, neon: '#4d8bff' },
+  kpi:     { primary: BRAND.supporting.periwinkle, gradient: '#a5aff5', tint: BRAND.tint.periwinkle, text: BRAND.text.periwinkle, neon: '#8b98ff' },
 };
+
+/** KPI card theme → neon accent */
+export const KPI_NEON = {
+  green: CHART_COLORS.credit,
+  blue: CHART_COLORS.sales,
+  periwinkle: CHART_COLORS.profit,
+  cyan: CHART_COLORS.orders,
+  pink: CHART_COLORS.debit,
+};
+
+/** Solid accent borders per report (no glow / transparency) */
+export function getReportNeonStyles(accent) {
+  const primary = accent?.primary || BRAND.primary.blue;
+  const tint = accent?.tint || BRAND.tint.blue;
+  const text = accent?.text || primary;
+  return {
+    primary,
+    text,
+    card: {
+      border: `1px solid ${primary}`,
+      boxShadow: 'none',
+    },
+    divider: primary,
+    filterBg: tint,
+    chartBg: '#ffffff',
+    chartBorder: primary,
+    iconBorder: primary,
+    badgeBorder: primary,
+    totalColor: text,
+  };
+}
 
 /** Head Office portal — executive navy/indigo + gold accent (Branch uses blue/pink) */
 export const HQ_BRAND = {
@@ -307,17 +340,45 @@ export const HQ_REPORT = {
   filterHeader: 'px-5 md:px-6 py-4 bg-gradient-to-r from-[#4338ca] to-[#6366f1] flex flex-wrap items-center justify-between gap-3',
 };
 
-/** Plusadmin-style report cards — smooth, soft shadows */
+/** Dashboard analytics / report widgets — thin neon borders, smooth Plusadmin-style */
 export const REPORT = {
-  section: 'rounded-[1.35rem] bg-[#f4f6f9] border border-[#e8ecf3] p-4 md:p-5 space-y-5',
-  card: 'bg-white rounded-2xl border border-[#eef1f6] shadow-[0_2px_20px_rgba(26,85,227,0.05)] overflow-hidden',
-  cardInner: 'p-5 md:p-6',
-  filterBar: 'bg-white rounded-2xl border border-[#eef1f6] shadow-[0_2px_16px_rgba(15,23,42,0.04)] overflow-hidden',
-  filterHeader: 'px-5 md:px-6 py-4 bg-gradient-to-r from-[#1A55E3] to-[#5E6EED] flex flex-wrap items-center justify-between gap-3',
-  filterBody: 'px-5 md:px-6 py-4 flex flex-wrap items-center gap-3 bg-white',
-  input: 'text-xs font-medium text-slate-700 bg-[#f4f6f9] border border-[#e8ecf3] rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#1A55E3]/15 focus:border-[#1A55E3]/40 transition-all',
-  datePill: 'flex items-center gap-2 bg-[#f4f6f9] border border-[#e8ecf3] rounded-xl px-3 py-2',
-  presetWrap: 'flex items-center gap-1 bg-[#f4f6f9] p-1 rounded-xl border border-[#e8ecf3]',
-  presetBtn: 'px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-600 hover:bg-white hover:text-[#1A55E3] hover:shadow-sm transition-all',
-  chartArea: 'px-2 pb-2 pt-1 rounded-xl bg-gradient-to-b from-[#fafbfd] to-white',
+  section:
+    'rounded-2xl bg-white p-5 md:p-6 space-y-6',
+  sectionHeader:
+    'flex items-center gap-3 pb-5 mb-1',
+  sectionIcon:
+    'w-10 h-10 rounded-xl bg-gradient-to-br from-[#1A55E3] to-[#5E6EED] flex items-center justify-center shrink-0 border border-[#1A55E3]',
+  cardBase:
+    'bg-white rounded-xl overflow-hidden transition-all duration-300',
+  cardInner: 'px-5 py-4 md:px-5 md:py-4',
+  kpiWrap: 'overflow-hidden',
+  kpiGrid: 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5 p-4 md:p-5',
+  kpiCardBase:
+    'bg-white rounded-xl p-4 md:p-5 transition-all duration-300',
+  filterBar:
+    'bg-white rounded-xl border border-[#e5e7eb] shadow-[0_1px_2px_rgba(15,23,42,0.03)] overflow-hidden',
+  filterHeader:
+    'px-5 md:px-6 py-3.5 bg-gradient-to-r from-[#1A55E3] to-[#5E6EED] flex flex-wrap items-center justify-between gap-3',
+  filterBody:
+    'px-4 py-2.5 flex flex-wrap items-center gap-2 border-b',
+  input:
+    'text-xs font-medium text-slate-700 bg-white border border-[#e5e7eb] rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#1A55E3]/12 focus:border-[#1A55E3]/35 transition-all',
+  datePill:
+    'flex items-center gap-1.5 bg-white border border-[#e5e7eb] rounded-lg px-2.5 py-1.5',
+  presetWrap:
+    'flex items-center gap-0.5 bg-[#f3f4f6] p-0.5 rounded-lg border border-[#e5e7eb]',
+  presetBtn:
+    'px-2.5 py-1.5 text-[11px] font-semibold rounded-md text-slate-600 hover:bg-white hover:text-[#1A55E3] transition-all duration-150',
+  presetBtnActive: 'bg-white text-[#1A55E3] shadow-[0_1px_2px_rgba(15,23,42,0.06)]',
+  chartArea:
+    'mx-4 mb-3 rounded-lg border p-3 min-h-[260px]',
+  legendRow:
+    'px-5 pb-3 flex flex-wrap items-center gap-4 border-b',
+  footer:
+    'mx-4 mb-4 px-3 py-2 border-t flex flex-wrap items-center justify-between gap-x-3 gap-y-1',
+  badge:
+    'text-[10px] font-semibold px-2.5 py-1 rounded-md border bg-white/80 text-slate-600',
+  trendUp: 'text-[10px] font-semibold text-[#00a868] tabular-nums',
+  trendDown: 'text-[10px] font-semibold text-[#FF0854] tabular-nums',
+  trendMuted: 'text-[10px] text-slate-400',
 };

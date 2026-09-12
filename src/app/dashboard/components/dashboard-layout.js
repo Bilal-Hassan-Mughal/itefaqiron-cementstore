@@ -108,6 +108,40 @@ export default function DashboardLayout({ children }) {
     }
   }, []);
 
+  useEffect(() => {
+    const refreshUserFromStorage = () => {
+      try {
+        const raw = localStorage.getItem('user');
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (parsed?.user_id) {
+          setUser(parsed);
+          userRef.current = parsed;
+        }
+      } catch {
+        /* ignore parse errors */
+      }
+    };
+    const onPermissionsUpdated = (e) => {
+      if (e?.detail?.user_id) {
+        setUser(e.detail);
+        userRef.current = e.detail;
+        return;
+      }
+      refreshUserFromStorage();
+    };
+    const onRoleMapUpdated = () => refreshUserFromStorage();
+    window.addEventListener('user-permissions-updated', onPermissionsUpdated);
+    window.addEventListener('role-permissions-updated', onRoleMapUpdated);
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'user' || e.key === 'pos_custom_role_permissions') refreshUserFromStorage();
+    });
+    return () => {
+      window.removeEventListener('user-permissions-updated', onPermissionsUpdated);
+      window.removeEventListener('role-permissions-updated', onRoleMapUpdated);
+    };
+  }, []);
+
   const toggleSidebarCollapsed = () => {
     setCollapsed((prev) => {
       const next = !prev;
@@ -170,6 +204,11 @@ export default function DashboardLayout({ children }) {
         .no-print { display: none !important; }
         body { overflow: visible !important; background: white !important; }
         * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+      }
+      body.report-fullscreen-open .dashboard-layout-root .MuiDrawer-root,
+      body.report-fullscreen-open .dashboard-layout-root .MuiAppBar-root {
+        visibility: hidden !important;
+        pointer-events: none !important;
       }
     `}</style>
     <ClientOnly fallback={

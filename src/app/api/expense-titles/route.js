@@ -11,6 +11,15 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id') ? parseInt(searchParams.get('id')) : null;
+    const listOnly = searchParams.get('list') === 'true';
+
+    if (listOnly) {
+      const expenseTitles = await prisma.expenseTitle.findMany({
+        select: { id: true, title: true },
+        orderBy: { title: 'asc' },
+      });
+      return NextResponse.json(expenseTitles);
+    }
 
     if (id) {
       // Fetch single expense title

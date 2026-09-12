@@ -8,6 +8,7 @@ import {
   assertRoleAssignable,
   toDbRole,
   loadBranchMeta,
+  normalizeUserForClient,
 } from '@/lib/user-management-access';
 
 function errorResponse(message, status = 400) {
@@ -26,7 +27,7 @@ const userInclude = {
 function sanitizeUser(user) {
   if (!user) return user;
   const { password, ...rest } = user;
-  return rest;
+  return normalizeUserForClient(rest);
 }
 
 /** GET — branch-scoped user list */

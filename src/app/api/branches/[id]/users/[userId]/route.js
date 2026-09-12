@@ -4,7 +4,14 @@ import { prisma } from '@/lib/prisma';
 import { isHqUser } from '@/lib/branch-roles';
 import { parseUserFromRequest } from '@/lib/branch-server';
 
-const BRANCH_ROLES = new Set(['BRANCH_SUPER_ADMIN', 'ADMIN', 'SALESMAN']);
+const BRANCH_ROLES = new Set([
+  'BRANCH_SUPER_ADMIN',
+  'ADMIN',
+  'MANAGER',
+  'ACCOUNTANT',
+  'STOCK_MANAGER',
+  'SALESMAN',
+]);
 
 function errorResponse(message, status = 400) {
   return NextResponse.json({ error: message }, { status });

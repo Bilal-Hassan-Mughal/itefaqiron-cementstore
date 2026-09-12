@@ -588,7 +588,7 @@ export default function SettingsPage() {
                   ) : (
                     users.map((u) => {
                       const isSuperAdmin = u.role === 'SUPER_ADMIN';
-                      const isAdmin = u.role === 'ADMIN';
+                      const isAdmin = u.role === 'ADMIN' || u.role === 'BRANCH_SUPER_ADMIN' || u.role === 'SUPER_ADMIN';
                       return (
                         <TableRow key={u.user_id} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
                           {/* User Avatar & Name */}

@@ -5,6 +5,7 @@ import { formatDatePKWithMonthName, getCreatedByName } from '@/lib/date-helper';
 import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
+import { notifyLedgerDataChanged } from '@/lib/ledger-tabs';
 
 // Material-UI imports
 import {
@@ -681,6 +682,7 @@ export default function SaleReturnsPage() {
       });
 
       if (response.ok) {
+        notifyLedgerDataChanged('sale-return');
         await fetchData();
         setCurrentView('list');
         setEditingReturn(null);

@@ -2,7 +2,14 @@
  * Every sidebar page is its own module — single source of truth for permissions.
  */
 
+import {
+  DASHBOARD_ANALYTICS_WIDGETS,
+  DASHBOARD_ANALYTICS_CHILD_WIDGET_IDS,
+} from './dashboard-analytics-widgets';
+
 export const PAGE_SECTIONS = [
+  'Dashboard',
+  'Monthly Analytics',
   'Quick Access',
   'Accounts',
   'Products',
@@ -17,7 +24,17 @@ export const PAGE_SECTIONS = [
 
 /** @type {{ id: string, name: string, section: string, path: string, adminOnly?: boolean, hqOnly?: boolean }[]} */
 export const SYSTEM_PAGES = [
-  { id: 'dashboard', name: 'Dashboard', section: 'Quick Access', path: '/dashboard' },
+  { id: 'dashboard', name: 'Dashboard Home', section: 'Dashboard', path: '/dashboard', description: 'Main dashboard page with shortcuts' },
+  { id: 'dashboard-low-stock', name: 'Dashboard Low Stock Alerts', section: 'Dashboard', path: '/dashboard', description: 'Low stock grid on dashboard home' },
+
+  ...DASHBOARD_ANALYTICS_WIDGETS.map((w) => ({
+    id: w.id,
+    name: w.name,
+    section: 'Monthly Analytics',
+    path: '/dashboard',
+    description: w.description,
+  })),
+
   { id: 'orders', name: 'Order List', section: 'Quick Access', path: '/dashboard/orders' },
   { id: 'new-sale', name: 'New Sale', section: 'Quick Access', path: '/dashboard/sales' },
   { id: 'purchases', name: 'New Purchase', section: 'Quick Access', path: '/dashboard/purchases' },
@@ -74,6 +91,8 @@ export const SYSTEM_PAGES = [
   { id: 'profit-report', name: 'Profit Report', section: 'Reports', path: '/dashboard/reports/profit-report' },
   { id: 'purchase-report', name: 'Purchase Report', section: 'Reports', path: '/dashboard/reports/purchase-report' },
   { id: 'rebate-report', name: 'Rebate Report', section: 'Reports', path: '/dashboard/reports/rebate' },
+  { id: 'rebate-history', name: 'Rebate History', section: 'Reports', path: '/dashboard/reports/rebate/history' },
+  { id: 'supplier-ledger', name: 'Supplier Ledger', section: 'Reports', path: '/dashboard/reports/supplier-ledger' },
   { id: 'balance-sheet', name: 'Balance Sheet', section: 'Reports', path: '/dashboard/reports/balance-sheet' },
 
   { id: 'hr', name: 'HR Management', section: 'HR Management', path: '/dashboard/hr' },
@@ -97,6 +116,8 @@ export const SYSTEM_PAGE_BY_ID = Object.fromEntries(SYSTEM_PAGES.map((p) => [p.i
 /** Legacy coarse modules → page ids (backward compatibility) */
 export const LEGACY_MODULE_TO_PAGES = {
   dashboard: ['dashboard'],
+  dashboard_analytics: [...DASHBOARD_ANALYTICS_CHILD_WIDGET_IDS],
+  dashboard_low_stock: ['dashboard-low-stock'],
   user_management: ['usermanagement'],
   store_management: ['stores'],
   store_stock: ['store-stock'],
@@ -114,7 +135,7 @@ export const LEGACY_MODULE_TO_PAGES = {
     'reports-dashboard', 'sales-by-date', 'sales-by-customer', 'customer-balance-report',
     'customers-balance', 'customer-ledger', 'purchases-by-date', 'purchases-by-supplier',
     'expenses-by-date', 'order-report', 'stock-report', 'sale-report', 'item-sale-report',
-    'purchase-report', 'rebate-report', 'balance-sheet',
+    'purchase-report', 'rebate-report', 'rebate-history', 'supplier-ledger', 'balance-sheet',
   ],
   profit_report: ['profit-report'],
   biometrics: ['settings'],
@@ -146,7 +167,9 @@ const PATH_PAGE_RULES = [
   { prefix: '/dashboard/reports/item-sale-report', pageIds: ['item-sale-report'] },
   { prefix: '/dashboard/reports/profit-report', pageIds: ['profit-report'] },
   { prefix: '/dashboard/reports/purchase-report', pageIds: ['purchase-report'] },
+  { prefix: '/dashboard/reports/rebate/history', pageIds: ['rebate-history', 'rebate-report'] },
   { prefix: '/dashboard/reports/rebate', pageIds: ['rebate-report'] },
+  { prefix: '/dashboard/reports/supplier-ledger', pageIds: ['supplier-ledger'] },
   { prefix: '/dashboard/reports/balance-sheet', pageIds: ['balance-sheet'] },
   { prefix: '/dashboard/reports', pageIds: ['reports-dashboard'] },
   { prefix: '/dashboard/usermanagement', pageIds: ['usermanagement'] },
@@ -211,7 +234,8 @@ export function expandLegacyModules(allowed) {
 }
 
 export function normalizeAllowedModules(raw) {
-  return expandLegacyModules(parseAllowedModules(raw));
+  const expanded = expandLegacyModules(parseAllowedModules(raw));
+  return expanded.filter((id) => id !== 'dashboard-analytics');
 }
 
 export function hasPageAccess(allowed, pageId) {

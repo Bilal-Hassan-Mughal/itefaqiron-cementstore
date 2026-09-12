@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Fragment, useMemo, useRef } from 'react';
+import { useState, useEffect, Fragment, useMemo, useRef, useCallback } from 'react';
 import { getCreatedByName } from '@/lib/date-helper';
 import {
   Plus,
@@ -31,6 +31,22 @@ import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
 import SaveProgressBackdrop from '../components/save-progress-backdrop';
 import { BRAND, COMPANY } from '@/lib/brand-theme';
+import {
+  notifyLedgerDataChanged,
+  subscribeLedgerDataChanged,
+} from '@/lib/ledger-tabs';
+import PaymentFormDialog from './components/payment-form-dialog';
+import {
+  canEditLedgerEntry,
+  getLedgerTransactionKey,
+  groupLedgerEntriesByTransaction,
+  getTransactionMaxLId,
+  pickTransactionRepresentativeEntry,
+  findLatestEditableTransactionGroup,
+  getTransactionGroupForEntry,
+  getTransactionEditCaption,
+  buildLiveEditParticulars,
+} from './payment-form-utils';
 
 // Material-UI imports
 import {
@@ -718,25 +734,35 @@ const compareChronologically = (a, b) => {
   return (a.l_id || 0) - (b.l_id || 0);
 };
 
-/** All Accounts default: all of today's entries + last entry before today */
+/** All Accounts default: all of today's transactions + latest transaction before today (linked rows) */
 function buildAllAccountsRecentEntryIdSet(entries) {
   if (!entries.length) return new Set();
   const todayKey = getKarachiDateKey(new Date());
   const ids = new Set();
+  const groups = groupLedgerEntriesByTransaction(entries);
 
-  for (const entry of entries) {
-    if (getKarachiDateKey(entry.created_at) === todayKey) {
-      ids.add(entry.l_id);
+  for (const groupEntries of groups.values()) {
+    const rep = pickTransactionRepresentativeEntry(groupEntries) || groupEntries[0];
+    if (getKarachiDateKey(rep.created_at) === todayKey) {
+      groupEntries.forEach((e) => ids.add(e.l_id));
     }
   }
 
-  const beforeToday = entries.filter((e) => {
-    const entryKey = getKarachiDateKey(e.created_at);
-    return entryKey && entryKey < todayKey;
-  });
-  if (beforeToday.length) {
-    const latestBeforeToday = [...beforeToday].sort((a, b) => compareChronologically(b, a))[0];
-    if (latestBeforeToday) ids.add(latestBeforeToday.l_id);
+  let latestBeforeTodayGroup = null;
+  let latestMaxId = 0;
+  for (const groupEntries of groups.values()) {
+    const rep = pickTransactionRepresentativeEntry(groupEntries) || groupEntries[0];
+    const entryKey = getKarachiDateKey(rep.created_at);
+    if (entryKey && entryKey < todayKey) {
+      const maxId = getTransactionMaxLId(groupEntries);
+      if (maxId > latestMaxId) {
+        latestMaxId = maxId;
+        latestBeforeTodayGroup = groupEntries;
+      }
+    }
+  }
+  if (latestBeforeTodayGroup) {
+    latestBeforeTodayGroup.forEach((e) => ids.add(e.l_id));
   }
 
   return ids;
@@ -795,28 +821,6 @@ function isOrderCustomerMemoLedgerEntry(entry) {
   return d > 0 && c > 0 && Math.abs(d - c) < 0.02;
 }
 
-const buildFinancePaymentDescription = (mode, accountName, cashAmount, bankAmount, bankAccountId, bankAccountsList, discountAmount) => {
-  const bits = [];
-  const cash = parseFloat(cashAmount || 0);
-  const bank = parseFloat(bankAmount || 0);
-  const disc = parseFloat(discountAmount || 0);
-  if (cash > 0) bits.push(`Cash PKR ${fmtAmt(cash)}`);
-  if (bank > 0 && bankAccountId) {
-    const bankName = bankAccountsList.find((b) => String(b.cus_id) === String(bankAccountId))?.cus_name || 'Bank';
-    bits.push(`${bankName} PKR ${fmtAmt(bank)}`);
-  } else if (bank > 0) {
-    bits.push(`Bank PKR ${fmtAmt(bank)}`);
-  }
-  if (disc > 0) bits.push(`Discount PKR ${fmtAmt(disc)}`);
-  
-  const prefix = mode === 'PAY' ? 'Payment ' : mode === 'RECEIVE' ? 'Receiving ' : '';
-  const content = bits.join(' | ');
-  if (accountName && content) {
-    return `${prefix}${accountName} - ${content}`;
-  }
-  return prefix ? `${prefix}${content}` : content;
-};
-
 const getInvoiceNet = (bill) => {
   if (!bill) return 0;
   if (bill.display_net_total != null) return parseFloat(bill.display_net_total);
@@ -832,129 +836,6 @@ const getInvoiceRemainingDue = (bill) => {
 const getSupplierBalanceAfterBill = (bill) => {
   const prev = parseFloat(bill?.previous_customer_balance ?? bill?.customer?.cus_balance ?? 0);
   return Number((prev - getInvoiceRemainingDue(bill)).toFixed(2));
-};
-
-const numberToUrduWords = (amount) => {
-  const num = Math.round(parseFloat(amount));
-  if (isNaN(num) || num <= 0) return '';
-
-  const urduNumbers = [
-    '', 'ایک', 'دو', 'تین', 'چار', 'پانچ', 'چھ', 'سات', 'آٹھ', 'نو', 'دس',
-    'گیارہ', 'بارہ', 'تیرہ', 'چودہ', 'پندرہ', 'سولہ', 'سترہ', 'اٹھارہ', 'انیس', 'بیس',
-    'اکیس', 'بائیس', 'تیئیس', 'چوبیس', 'پچیس', 'چھبیس', 'ستائیس', 'اٹھائیس', 'انتیس', 'تیس',
-    'اکتیس', 'بتیس', 'تینتیس', 'چونتیس', 'پینتیس', 'چھتیس', 'سینتیس', 'اٹھتیس', 'انتالیس', 'چالیس',
-    'اکتالیس', 'بیالیس', 'تینتالیس', 'چوالیس', 'پینتالیس', 'چھیالیس', 'سینتالیس', 'اٹھتالیس', 'انچاس', 'پچاس',
-    'اکیاون', 'باون', 'تریپن', 'چون', 'پچپن', 'چھپن', 'ستاون', 'اٹھاون', 'انسٹھ', 'ساٹھ',
-    'اکسٹھ', 'باسٹھ', 'تریسٹھ', 'چونسٹھ', 'پینسٹھ', 'چھیاسٹھ', 'سڑسٹھ', 'اٹھسٹھ', 'انہتر', 'ستر',
-    'اکہتر', 'بہتر', 'تہتر', 'چوہتر', 'پچہتر', 'چھیہتر', 'ستتر', 'اٹھہتر', 'انیاسی', 'اسی',
-    'اکیاسی', 'بیاسی', 'تیاسی', 'چوراسی', 'پچاسی', 'چھیاسی', 'ستاسی', 'اٹھاسی', 'نواسی', 'نوے',
-    'اکیانوے', 'بانوے', 'ترانوے', 'چورانوے', 'پچانوے', 'چھیانوے', 'ستانوے', 'اٹھانوے', 'ننانوے'
-  ];
-
-  const convert = (n) => {
-    if (n < 100) return urduNumbers[n];
-    
-    let parts = [];
-    
-    // Crore (1,00,00,000)
-    if (n >= 10000000) {
-      parts.push(convert(Math.floor(n / 10000000)) + ' کروڑ');
-      n %= 10000000;
-    }
-    
-    // Lakh (1,00,000)
-    if (n >= 100000) {
-      parts.push(convert(Math.floor(n / 100000)) + ' لاکھ');
-      n %= 100000;
-    }
-    
-    // Thousand (1,000)
-    if (n >= 1000) {
-      parts.push(convert(Math.floor(n / 1000)) + ' ہزار');
-      n %= 1000;
-    }
-    
-    // Hundred (100)
-    if (n >= 100) {
-      parts.push(urduNumbers[Math.floor(n / 100)] + ' سو');
-      n %= 100;
-    }
-    
-    // Remaining below 100
-    if (n > 0) {
-      parts.push(urduNumbers[n]);
-    }
-    
-    return parts.filter(Boolean).join(' ');
-  };
-
-  const words = convert(num);
-  return words ? words + ' روپے فقط' : '';
-};
-
-const numberToWords = (amount) => {
-  const num = parseFloat(amount);
-  if (isNaN(num) || num <= 0) return '';
-  
-  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 
-                'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
-  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
-  const scales = ['', 'Thousand', 'Million', 'Billion'];
-
-  const convertChunk = (n) => {
-    let parts = [];
-    if (n >= 100) {
-      parts.push(ones[Math.floor(n / 100)] + ' Hundred');
-      n %= 100;
-    }
-    if (n >= 20) {
-      parts.push(tens[Math.floor(n / 10)]);
-      n %= 10;
-    }
-    if (n > 0) {
-      parts.push(ones[n]);
-    }
-    return parts.filter(Boolean).join(' ');
-  };
-
-  let numInt = Math.floor(num);
-  let numDec = Math.round((num - numInt) * 100);
-
-  if (numInt === 0 && numDec === 0) return 'Zero Rupees Only';
-
-  let chunks = [];
-  let scaleIndex = 0;
-
-  while (numInt > 0) {
-    let chunk = numInt % 1000;
-    if (chunk > 0) {
-      let chunkStr = convertChunk(chunk);
-      if (scales[scaleIndex]) {
-        chunkStr += ' ' + scales[scaleIndex];
-      }
-      chunks.unshift(chunkStr);
-    }
-    numInt = Math.floor(numInt / 1000);
-    scaleIndex++;
-  }
-
-  let words = chunks.filter(Boolean).join(', ');
-  if (words) {
-    words = words.trim() + ' Rupees';
-  }
-
-  if (numDec > 0) {
-    const decWords = convertChunk(numDec);
-    if (decWords) {
-      if (words) {
-        words += ' and ' + decWords + ' Paisa';
-      } else {
-        words = decWords + ' Paisa';
-      }
-    }
-  }
-
-  return words ? words + ' Only' : '';
 };
 
 export default function FinancePage() {
@@ -1031,6 +912,7 @@ export default function FinancePage() {
     details: '',
     cash_amount: '',
     bank_amount: '',
+    discount_amount: '',
   });
 
   // Purchase viewer state (opened when clicking the eye / Bill)
@@ -1060,26 +942,11 @@ export default function FinancePage() {
   // Payment Form States
   const [showReceivePaymentForm, setShowReceivePaymentForm] = useState(false);
   const [showPayPaymentForm, setShowPayPaymentForm] = useState(false);
+  const [editingPaymentId, setEditingPaymentId] = useState(null);
+  const [paymentEditAccount, setPaymentEditAccount] = useState(null);
+  const [paymentFormInitialValues, setPaymentFormInitialValues] = useState(null);
   const [paymentReceiptData, setPaymentReceiptData] = useState(null);
   const [showPaymentReceipt, setShowPaymentReceipt] = useState(false);
-  const [receivePaymentData, setReceivePaymentData] = useState({
-    total_payment: '',
-    discount: '',
-    cash_account: '',
-    cash_amount: '',
-    bank_account: '',
-    bank_amount: '',
-    description: ''
-  });
-  const [payPaymentData, setPayPaymentData] = useState({
-    total_payment: '',
-    discount: '',
-    cash_account: '',
-    cash_amount: '',
-    bank_account: '',
-    bank_amount: '',
-    description: ''
-  });
   const [cashAccounts, setCashAccounts] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
   const [paymentStatus, setPaymentStatus] = useState({ loading: false, error: null });
@@ -1108,6 +975,9 @@ export default function FinancePage() {
   // Inline Cell Editing States & Handlers
   const [inlineEditing, setInlineEditing] = useState(null); // { l_id, field, value }
   const [savingInline, setSavingInline] = useState(false);
+  /** Latest-transaction inline edit: blur other rows, edit debit/credit in place */
+  const [ledgerTransactionEdit, setLedgerTransactionEdit] = useState(null);
+  const [savingTransactionEdit, setSavingTransactionEdit] = useState(false);
 
   const handleInlineSave = async (entry, field, newValue) => {
     if (savingInline) return;
@@ -1135,8 +1005,8 @@ export default function FinancePage() {
       });
 
       if (res.ok) {
-        // Refresh the ledger data to recalculate running balances
         await fetchData();
+        notifyLedgerDataChanged('ledger-inline-edit');
       } else {
         const errData = await res.json();
         alert('❌ Error: ' + (errData.message || 'Failed to update entry'));
@@ -1150,10 +1020,159 @@ export default function FinancePage() {
     }
   };
 
+  const buildLedgerEntryDraft = (entry) => ({
+    debit: parseFloat(entry.debit_amount || 0) > 0 ? String(entry.debit_amount) : '',
+    credit: parseFloat(entry.credit_amount || 0) > 0 ? String(entry.credit_amount) : '',
+  });
+
+  const startLedgerTransactionEdit = (entry) => {
+    if (!canEditLedgerEntry(entry)) {
+      alert('Sale, purchase and order ledger entries cannot be edited here. Edit the source document instead.');
+      return;
+    }
+    const group = getTransactionGroupForEntry(entry, ledgerEntries).filter(canEditLedgerEntry);
+    if (!group.length) return;
+
+    const drafts = {};
+    const original = {};
+    for (const e of group) {
+      const draft = buildLedgerEntryDraft(e);
+      drafts[e.l_id] = draft;
+      original[e.l_id] = { ...draft };
+    }
+
+    setLedgerTransactionEdit({
+      transactionKey: getLedgerTransactionKey(entry),
+      entryIds: group.map((e) => e.l_id),
+      entries: group,
+      drafts,
+      original,
+    });
+  };
+
+  const cancelLedgerTransactionEdit = () => {
+    setLedgerTransactionEdit(null);
+  };
+
+  const updateTransactionDraft = (entryId, field, value) => {
+    setLedgerTransactionEdit((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        drafts: {
+          ...prev.drafts,
+          [entryId]: { ...prev.drafts[entryId], [field]: value },
+        },
+      };
+    });
+  };
+
+  const isTransactionEditDirty = useMemo(() => {
+    if (!ledgerTransactionEdit) return false;
+    for (const id of ledgerTransactionEdit.entryIds) {
+      const d = ledgerTransactionEdit.drafts[id];
+      const o = ledgerTransactionEdit.original[id];
+      if (
+        String(d?.debit ?? '') !== String(o?.debit ?? '') ||
+        String(d?.credit ?? '') !== String(o?.credit ?? '')
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }, [ledgerTransactionEdit]);
+
+  const handleSaveTransactionEdit = async () => {
+    if (!ledgerTransactionEdit || !isTransactionEditDirty || savingTransactionEdit) return;
+
+    const authOk = await requireAuth();
+    if (!authOk) return;
+
+    setSavingTransactionEdit(true);
+    try {
+      const { entries, drafts, original } = ledgerTransactionEdit;
+
+      for (const entry of entries) {
+        const d = drafts[entry.l_id];
+        const o = original[entry.l_id];
+        if (String(d.debit) === String(o.debit) && String(d.credit) === String(o.credit)) continue;
+
+        const liveDetails = buildLiveEditParticulars(entry, d);
+        const res = await fetch('/api/ledger', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: entry.l_id,
+            cus_id: entry.cus_id,
+            direct_edit: true,
+            debit_amount: parseFloat(d.debit || 0),
+            credit_amount: parseFloat(d.credit || 0),
+            details: liveDetails || entry.details,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `Failed to update entry #${entry.l_id}`);
+        }
+      }
+
+      setLedgerTransactionEdit(null);
+      await fetchData();
+      notifyLedgerDataChanged('ledger-transaction-edit');
+    } catch (err) {
+      console.error('Error saving transaction edit:', err);
+      alert(err.message || 'Failed to save transaction');
+    } finally {
+      setSavingTransactionEdit(false);
+    }
+  };
+
   // Print Ledger Dialog states
   const [showPrintLedgerDialog, setShowPrintLedgerDialog] = useState(false);
   const [printFromDate, setPrintFromDate] = useState('');
   const [printToDate, setPrintToDate] = useState('');
+
+  const deriveCashBankAccounts = useCallback((allCustomers) => {
+    const cashAccs = allCustomers.filter((c) => {
+      const title = (c.customer_category?.cus_cat_title || '').toLowerCase();
+      return title.includes('cash');
+    });
+    const bankAccs = allCustomers.filter((c) => {
+      const title = (c.customer_category?.cus_cat_title || '').toLowerCase();
+      return title.includes('bank');
+    });
+    setCashAccounts(cashAccs);
+    setBankAccounts(bankAccs);
+  }, []);
+
+  const paymentRefreshSkipRef = useRef(false);
+
+  const applyPaymentResultToState = useCallback((result) => {
+    if (result.updated_balances) {
+      setCustomers((prev) =>
+        prev.map((c) => {
+          const bal = result.updated_balances[c.cus_id];
+          return bal !== undefined ? { ...c, cus_balance: bal } : c;
+        })
+      );
+    } else if (result.customer_closing_balance !== undefined && result.account_id) {
+      setCustomers((prev) =>
+        prev.map((c) =>
+          Number(c.cus_id) === Number(result.account_id)
+            ? { ...c, cus_balance: result.customer_closing_balance }
+            : c
+        )
+      );
+    }
+
+    if (Array.isArray(result.ledger_entries) && result.ledger_entries.length > 0) {
+      setLedgerEntries((prev) => {
+        const newIds = new Set(result.ledger_entries.map((e) => e.l_id));
+        const rest = prev.filter((e) => !newIds.has(e.l_id));
+        return [...result.ledger_entries, ...rest];
+      });
+    }
+  }, []);
 
   const fetchStaticData = async () => {
     try {
@@ -1166,6 +1185,7 @@ export default function FinancePage() {
       if (customersRes.ok) {
         const customersData = await customersRes.json();
         setCustomers(customersData);
+        deriveCashBankAccounts(customersData);
       }
       if (categoriesRes.ok) {
         const categoriesData = await categoriesRes.json();
@@ -1176,16 +1196,15 @@ export default function FinancePage() {
         setCustomerTypes(typesData);
       }
 
-      await fetchCashBankAccounts();
       setStaticDataLoaded(true);
     } catch (error) {
       console.error('Error fetching static data:', error);
     }
   };
 
-  const fetchLedgerData = async () => {
+  const fetchLedgerData = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const params = new URLSearchParams();
       if (selectedCustomer) params.append('customerId', selectedCustomer);
       if (selectedCategory) params.append('categoryId', selectedCategory);
@@ -1194,7 +1213,7 @@ export default function FinancePage() {
       if (endDate) params.append('endDate', endDate);
       if (searchTerm) params.append('search', searchTerm);
 
-      const res = await fetch(`/api/ledger?${params.toString()}`);
+      const res = await fetch(`/api/ledger?${params.toString()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         setLedgerEntries(Array.isArray(data) ? data : []);
@@ -1202,9 +1221,22 @@ export default function FinancePage() {
     } catch (error) {
       console.error('Error fetching ledger entries:', error);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
+  }, [selectedCustomer, selectedCategory, selectedSubCategory, startDate, endDate, searchTerm]);
+
+  const refreshLedgerView = useCallback(async (silent = true) => {
+    await fetchLedgerData(silent);
+    try {
+      const customersRes = await fetch('/api/customers?dropdown=true', { cache: 'no-store' });
+      if (customersRes.ok) {
+        const customersData = await customersRes.json();
+        setCustomers(customersData);
+      }
+    } catch (error) {
+      console.error('Error refreshing customer balances:', error);
+    }
+  }, [fetchLedgerData]);
 
   // Fetch data on mount — restore persisted ledger tabs first
   useEffect(() => {
@@ -1279,11 +1311,46 @@ export default function FinancePage() {
   useEffect(() => {
     if (staticDataLoaded) {
       const timer = setTimeout(() => {
-        fetchLedgerData();
+        fetchLedgerData(false);
       }, 300); // 300ms debounce
       return () => clearTimeout(timer);
     }
-  }, [selectedCustomer, selectedCategory, selectedSubCategory, startDate, endDate, searchTerm, staticDataLoaded]);
+  }, [selectedCustomer, selectedCategory, selectedSubCategory, startDate, endDate, searchTerm, staticDataLoaded, fetchLedgerData]);
+
+  // Auto-refresh when ledger changes elsewhere (sales, payments, other tabs)
+  useEffect(() => {
+    if (!staticDataLoaded) return;
+
+    let refreshTimer = null;
+    const scheduleRefresh = () => {
+      if (paymentRefreshSkipRef.current) {
+        paymentRefreshSkipRef.current = false;
+        return;
+      }
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => refreshLedgerView(true), 400);
+    };
+
+    const unsubscribe = subscribeLedgerDataChanged(scheduleRefresh);
+
+    const pollInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') scheduleRefresh();
+    }, 12000);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') scheduleRefresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+
+    return () => {
+      unsubscribe();
+      clearInterval(pollInterval);
+      if (refreshTimer) clearTimeout(refreshTimer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [staticDataLoaded, refreshLedgerView]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -1706,7 +1773,7 @@ export default function FinancePage() {
   }, [ledgerEntries, useAllAccountsRecentDefault]);
 
   // Filter and sort logic
-  const filteredLedgerEntries = ledgerEntries.filter(entry => {
+  const filteredLedgerEntries = useMemo(() => ledgerEntries.filter(entry => {
     const displayAmts = getLedgerEntryDisplayAmounts(entry);
     const searchLower = searchTerm.trim().toLowerCase();
     const searchNum = parseFloat(searchTerm.trim());
@@ -1779,7 +1846,18 @@ export default function FinancePage() {
     if (allAccountsRecentViewIds && !allAccountsRecentViewIds.has(entry.l_id)) return false;
 
     return matchesSearch && matchesCustomer && matchesCategory && matchesSubCategory && matchesLedgerType && matchesDate && matchesAmount;
-  });
+  }), [
+    ledgerEntries,
+    searchTerm,
+    filterAmount,
+    selectedCustomer,
+    selectedCategory,
+    selectedSubCategory,
+    selectedLedgerType,
+    startDate,
+    endDate,
+    allAccountsRecentViewIds,
+  ]);
 
   // Customer filtering logic
   const filteredCustomers = customers.filter(customer => {
@@ -1815,39 +1893,71 @@ export default function FinancePage() {
     );
   });
 
-  const sortedLedgerEntries = filteredLedgerEntries.sort((a, b) => {
-    if (sortBy === 'created_at') {
-      return sortOrder === 'asc' ? compareChronologically(a, b) : compareChronologically(b, a);
-    }
+  const sortedLedgerEntries = useMemo(() => {
+    const list = [...filteredLedgerEntries];
+    list.sort((a, b) => {
+      if (sortBy === 'created_at') {
+        return sortOrder === 'asc' ? compareChronologically(a, b) : compareChronologically(b, a);
+      }
 
-    let aValue, bValue;
-    if (sortBy === 'debit_amount') {
-      aValue = parseFloat(a.debit_amount);
-      bValue = parseFloat(b.debit_amount);
-    } else if (sortBy === 'credit_amount') {
-      aValue = parseFloat(a.credit_amount);
-      bValue = parseFloat(b.credit_amount);
-    } else if (sortBy === 'closing_balance') {
-      aValue = parseFloat(a.closing_balance);
-      bValue = parseFloat(b.closing_balance);
-    } else if (sortBy === 'customer') {
-      aValue = a.customer?.cus_name.toLowerCase();
-      bValue = b.customer?.cus_name.toLowerCase();
-    } else {
-      aValue = a[sortBy];
-      bValue = b[sortBy];
-    }
+      let aValue, bValue;
+      if (sortBy === 'debit_amount') {
+        aValue = parseFloat(a.debit_amount);
+        bValue = parseFloat(b.debit_amount);
+      } else if (sortBy === 'credit_amount') {
+        aValue = parseFloat(a.credit_amount);
+        bValue = parseFloat(b.credit_amount);
+      } else if (sortBy === 'closing_balance') {
+        aValue = parseFloat(a.closing_balance);
+        bValue = parseFloat(b.closing_balance);
+      } else if (sortBy === 'customer') {
+        aValue = a.customer?.cus_name.toLowerCase();
+        bValue = b.customer?.cus_name.toLowerCase();
+      } else {
+        aValue = a[sortBy];
+        bValue = b[sortBy];
+      }
 
-    if (aValue === bValue) {
-      return sortOrder === 'asc' ? compareChronologically(a, b) : compareChronologically(b, a);
-    }
+      if (aValue === bValue) {
+        return sortOrder === 'asc' ? compareChronologically(a, b) : compareChronologically(b, a);
+      }
 
-    if (sortOrder === 'asc') {
-      return aValue > bValue ? 1 : -1;
-    } else {
+      if (sortOrder === 'asc') {
+        return aValue > bValue ? 1 : -1;
+      }
       return aValue < bValue ? 1 : -1;
+    });
+    return list;
+  }, [filteredLedgerEntries, sortBy, sortOrder]);
+
+  const editableLatestLedgerIds = useMemo(() => {
+    const ids = new Set();
+    const editable = filteredLedgerEntries.filter(canEditLedgerEntry);
+    if (!editable.length) return ids;
+
+    if (useAllAccountsRecentDefault && allAccountsRecentViewIds) {
+      editable.forEach((e) => {
+        if (allAccountsRecentViewIds.has(e.l_id)) ids.add(e.l_id);
+      });
+      return ids;
     }
-  });
+
+    const latestGroup = findLatestEditableTransactionGroup(editable);
+    if (latestGroup) {
+      latestGroup.forEach((e) => ids.add(e.l_id));
+    }
+    return ids;
+  }, [filteredLedgerEntries, useAllAccountsRecentDefault, allAccountsRecentViewIds]);
+
+  const globalLatestEditableEntry = useMemo(() => {
+    const latestGroup = findLatestEditableTransactionGroup(ledgerEntries);
+    return pickTransactionRepresentativeEntry(latestGroup);
+  }, [ledgerEntries]);
+
+  const latestEditableInView = useMemo(() => {
+    const latestGroup = findLatestEditableTransactionGroup(filteredLedgerEntries);
+    return pickTransactionRepresentativeEntry(latestGroup);
+  }, [filteredLedgerEntries]);
 
   const finalLedgerEntries = sortedLedgerEntries.map((entry, index) => ({
     ...entry,
@@ -1928,17 +2038,10 @@ export default function FinancePage() {
     return parseFloat(sorted[0].opening_balance || 0);
   }, [selectedCustomer, ledgerEntries, customers]);
 
-  const receiveTotalPreview =
-    parseFloat(receivePaymentData.cash_amount || 0) +
-    parseFloat(receivePaymentData.bank_amount || 0) +
-    parseFloat(receivePaymentData.discount || 0);
-  const receiveBalanceAfter = currentBalance - receiveTotalPreview;
-
-  const payTotalPreview =
-    parseFloat(payPaymentData.cash_amount || 0) +
-    parseFloat(payPaymentData.bank_amount || 0) +
-    parseFloat(payPaymentData.discount || 0);
-  const payBalanceAfter = currentBalance + payTotalPreview;
+  const selectedCustomerRecord = useMemo(
+    () => customers.find((c) => Number(c.cus_id) === Number(selectedCustomer)),
+    [customers, selectedCustomer]
+  );
 
   const handleNewJournalEntry = () => {
     if (selectedCustomer) {
@@ -2018,7 +2121,8 @@ export default function FinancePage() {
 
       if (response.ok) {
         setShowJournalForm(false);
-        fetchData();
+        await fetchData();
+        notifyLedgerDataChanged('journal');
         alert('Journal Entry saved as DRAFT successfully.');
       } else {
         const error = await response.json();
@@ -2036,7 +2140,7 @@ export default function FinancePage() {
   const createDiscountExpense = async (discountAmount, description) => {
     try {
       // First, check if "Discount" expense title exists
-      const expenseTitlesResponse = await fetch('/api/expense-titles');
+      const expenseTitlesResponse = await fetch('/api/expense-titles?list=true');
       const expenseTitles = await expenseTitlesResponse.json();
 
       let discountTitleId = expenseTitles.find(title => title.title.toLowerCase() === 'discount')?.id;
@@ -2085,71 +2189,23 @@ export default function FinancePage() {
 
   // Payment Functions
   const handleReceivePayment = () => {
-    if (selectedCustomer) {
-      const customer = customers.find(c => Number(c.cus_id) === Number(selectedCustomer));
-      if (customer) {
-        setReceivePaymentData({
-          total_payment: '',
-          discount: '',
-          cash_account: cashAccounts.length > 0 ? cashAccounts[0].cus_id : '',
-          cash_amount: '',
-          bank_account: '',
-          bank_amount: '',
-          description: buildFinancePaymentDescription('RECEIVE', customer.cus_name, '', '', '', bankAccounts, ''),
-        });
-        setShowReceivePaymentForm(true);
-      }
+    if (selectedCustomer && selectedCustomerRecord) {
+      setShowReceivePaymentForm(true);
     }
   };
 
   const handlePayPayment = () => {
-    if (selectedCustomer) {
-      const customer = customers.find(c => Number(c.cus_id) === Number(selectedCustomer));
-      if (customer) {
-        setPayPaymentData({
-          total_payment: '',
-          discount: '',
-          cash_account: cashAccounts.length > 0 ? cashAccounts[0].cus_id : '',
-          cash_amount: '',
-          bank_account: '',
-          bank_amount: '',
-          description: buildFinancePaymentDescription('PAY', customer.cus_name, '', '', '', bankAccounts, ''),
-        });
-        setShowPayPaymentForm(true);
-      }
+    if (selectedCustomer && selectedCustomerRecord) {
+      setShowPayPaymentForm(true);
     }
   };
 
-  const fetchCashBankAccounts = async () => {
+  const handleReceivePaymentSubmit = async (formData) => {
+    const isPaymentEdit = Boolean(editingPaymentId);
     try {
-      // Fetch customers with their categories and types
-      const response = await fetch('/api/customers?dropdown=true');
-      const allCustomers = await response.json();
-
-      // Filter for cash accounts: category includes "cash"
-      const cashAccs = allCustomers.filter(c => {
-        const title = (c.customer_category?.cus_cat_title || '').toLowerCase();
-        return title.includes('cash');
-      });
-
-      // Filter for bank accounts: category includes "bank"
-      const bankAccs = allCustomers.filter(c => {
-        const title = (c.customer_category?.cus_cat_title || '').toLowerCase();
-        return title.includes('bank');
-      });
-
-      setCashAccounts(cashAccs);
-      setBankAccounts(bankAccs);
-    } catch (error) {
-      console.error('Error fetching cash/bank accounts:', error);
-    }
-  };
-
-  const handleReceivePaymentSubmit = async () => {
-    try {
-      const cashAmount = parseFloat(receivePaymentData.cash_amount || 0);
-      const bankAmount = parseFloat(receivePaymentData.bank_amount || 0);
-      const discountAmount = parseFloat(receivePaymentData.discount || 0);
+      const cashAmount = parseFloat(formData.cash_amount || 0);
+      const bankAmount = parseFloat(formData.bank_amount || 0);
+      const discountAmount = parseFloat(formData.discount || 0);
       const totalAmount = cashAmount + bankAmount + discountAmount;
 
       if (totalAmount <= 0) {
@@ -2166,42 +2222,51 @@ export default function FinancePage() {
         return;
       }
 
-      beginSavingPayment('Processing amount received...');
+      beginSavingPayment(isPaymentEdit ? 'Updating receipt transaction...' : 'Processing amount received...');
 
+      const accountId = paymentEditAccount?.cus_id || selectedCustomer;
       const paymentData = {
+        ...(isPaymentEdit ? { id: editingPaymentId } : {}),
         payment_date: new Date().toISOString().split('T')[0],
         payment_type: 'RECEIVE',
-        account_id: selectedCustomer,
+        account_id: accountId,
         total_amount: totalAmount,
         discount_amount: discountAmount,
-        cash_account_id: receivePaymentData.cash_account || null,
+        cash_account_id: formData.cash_account || null,
         cash_amount: cashAmount,
-        bank_account_id: receivePaymentData.bank_account || null,
+        bank_account_id: formData.bank_account || null,
         bank_amount: bankAmount,
-        description: receivePaymentData.description,
+        description: formData.description,
         created_by: actorUserId
       };
 
-      const customer = customers.find(c => Number(c.cus_id) === Number(selectedCustomer));
+      const customer = paymentEditAccount || selectedCustomerRecord;
       const previousBalance = parseFloat(customer?.cus_balance || 0);
 
-      updateSaveStatus('Saving payment to server...');
+      updateSaveStatus(isPaymentEdit ? 'Updating transaction on server...' : 'Saving payment to server...');
       const response = await fetch('/api/payments', {
-        method: 'POST',
+        method: isPaymentEdit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(paymentData)
       });
 
       if (response.ok) {
         const result = await response.json();
-        if (parseFloat(receivePaymentData.discount || 0) > 0) {
-          updateSaveStatus('Recording discount...');
-          await createDiscountExpense(-parseFloat(receivePaymentData.discount), receivePaymentData.description || 'Payment discount');
+        if (!isPaymentEdit) {
+          const discountVal = parseFloat(formData.discount || 0);
+          if (discountVal > 0) {
+            createDiscountExpense(-discountVal, formData.description || 'Payment discount').catch((err) => {
+              console.error('Discount expense error:', err);
+            });
+          }
         }
 
-        updateSaveStatus('Updating ledger...');
-        const bankAcc = bankAccounts.find(b => b.cus_id === parseInt(receivePaymentData.bank_account));
-        const cashAcc = cashAccounts.find(c => c.cus_id === parseInt(receivePaymentData.cash_account));
+        applyPaymentResultToState(result);
+        paymentRefreshSkipRef.current = true;
+        notifyLedgerDataChanged(isPaymentEdit ? 'payment-receive-edit' : 'payment-receive');
+
+        const bankAcc = bankAccounts.find(b => b.cus_id === parseInt(formData.bank_account));
+        const cashAcc = cashAccounts.find(c => c.cus_id === parseInt(formData.cash_account));
         
         const displayPrevBal = result.customer_opening_balance !== undefined ? result.customer_opening_balance : previousBalance;
         const displayRemBal = result.customer_closing_balance !== undefined ? result.customer_closing_balance : (previousBalance - totalAmount);
@@ -2223,15 +2288,17 @@ export default function FinancePage() {
           totalAmount,
           bankAcc,
           cashAcc,
-          description: receivePaymentData.description
+          description: formData.description
         });
 
         setShowReceivePaymentForm(false);
-        setReceivePaymentData({ total_payment: '', discount: '', cash_account: '', cash_amount: '', bank_account: '', bank_amount: '', description: '' });
-        updateSaveStatus('Refreshing ledger...');
-        fetchData();
-        updateSaveStatus('Generating receipt...');
-        setShowPaymentReceipt(true);
+        clearPaymentEditState();
+        if (isPaymentEdit) {
+          await fetchData();
+          alert('Receipt transaction updated successfully.');
+        } else {
+          setShowPaymentReceipt(true);
+        }
       } else {
         const error = await response.json();
         alert(`Error: ${error.error}`);
@@ -2244,11 +2311,12 @@ export default function FinancePage() {
     }
   };
 
-  const handlePayPaymentSubmit = async () => {
+  const handlePayPaymentSubmit = async (formData) => {
+    const isPaymentEdit = Boolean(editingPaymentId);
     try {
-      const cashAmount = parseFloat(payPaymentData.cash_amount || 0);
-      const bankAmount = parseFloat(payPaymentData.bank_amount || 0);
-      const discountAmount = parseFloat(payPaymentData.discount || 0);
+      const cashAmount = parseFloat(formData.cash_amount || 0);
+      const bankAmount = parseFloat(formData.bank_amount || 0);
+      const discountAmount = parseFloat(formData.discount || 0);
       const totalAmount = cashAmount + bankAmount + discountAmount;
 
       if (totalAmount <= 0) {
@@ -2265,42 +2333,51 @@ export default function FinancePage() {
         return;
       }
 
-      beginSavingPayment('Processing payout...');
+      beginSavingPayment(isPaymentEdit ? 'Updating payment transaction...' : 'Processing payout...');
 
+      const accountId = paymentEditAccount?.cus_id || selectedCustomer;
       const paymentData = {
+        ...(isPaymentEdit ? { id: editingPaymentId } : {}),
         payment_date: new Date().toISOString().split('T')[0],
         payment_type: 'PAY',
-        account_id: selectedCustomer,
+        account_id: accountId,
         total_amount: totalAmount,
         discount_amount: discountAmount,
-        cash_account_id: payPaymentData.cash_account || null,
+        cash_account_id: formData.cash_account || null,
         cash_amount: cashAmount,
-        bank_account_id: payPaymentData.bank_account || null,
+        bank_account_id: formData.bank_account || null,
         bank_amount: bankAmount,
-        description: payPaymentData.description,
+        description: formData.description,
         created_by: actorUserId
       };
 
-      const customer = customers.find(c => Number(c.cus_id) === Number(selectedCustomer));
+      const customer = paymentEditAccount || selectedCustomerRecord;
       const previousBalance = parseFloat(customer?.cus_balance || 0);
 
-      updateSaveStatus('Saving payment to server...');
+      updateSaveStatus(isPaymentEdit ? 'Updating transaction on server...' : 'Saving payment to server...');
       const response = await fetch('/api/payments', {
-        method: 'POST',
+        method: isPaymentEdit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(paymentData)
       });
 
       if (response.ok) {
         const result = await response.json();
-        if (parseFloat(payPaymentData.discount || 0) > 0) {
-          updateSaveStatus('Recording discount...');
-          await createDiscountExpense(parseFloat(payPaymentData.discount), payPaymentData.description || 'Payment discount');
+        if (!isPaymentEdit) {
+          const discountVal = parseFloat(formData.discount || 0);
+          if (discountVal > 0) {
+            createDiscountExpense(discountVal, formData.description || 'Payment discount').catch((err) => {
+              console.error('Discount expense error:', err);
+            });
+          }
         }
 
-        updateSaveStatus('Updating ledger...');
-        const bankAcc = bankAccounts.find(b => b.cus_id === parseInt(payPaymentData.bank_account));
-        const cashAcc = cashAccounts.find(c => c.cus_id === parseInt(payPaymentData.cash_account));
+        applyPaymentResultToState(result);
+        paymentRefreshSkipRef.current = true;
+        notifyLedgerDataChanged(isPaymentEdit ? 'payment-pay-edit' : 'payment-pay');
+
+        const bankAcc = bankAccounts.find(b => b.cus_id === parseInt(formData.bank_account));
+        const cashAcc = cashAccounts.find(c => c.cus_id === parseInt(formData.cash_account));
         
         const displayPrevBal = result.customer_opening_balance !== undefined ? result.customer_opening_balance : previousBalance;
         const displayRemBal = result.customer_closing_balance !== undefined ? result.customer_closing_balance : (previousBalance + totalAmount);
@@ -2322,15 +2399,17 @@ export default function FinancePage() {
           totalAmount,
           bankAcc,
           cashAcc,
-          description: payPaymentData.description
+          description: formData.description
         });
 
         setShowPayPaymentForm(false);
-        setPayPaymentData({ total_payment: '', discount: '', cash_account: '', cash_amount: '', bank_account: '', bank_amount: '', description: '' });
-        updateSaveStatus('Refreshing ledger...');
-        fetchData();
-        updateSaveStatus('Generating receipt...');
-        setShowPaymentReceipt(true);
+        clearPaymentEditState();
+        if (isPaymentEdit) {
+          await fetchData();
+          alert('Payment transaction updated successfully.');
+        } else {
+          setShowPaymentReceipt(true);
+        }
       } else {
         const error = await response.json();
         alert(`Error: ${error.error}`);
@@ -2720,7 +2799,7 @@ export default function FinancePage() {
       };
 
       const body = editingLedger
-        ? { id: editingLedger.l_id, ...submitData }
+        ? { id: editingLedger.l_id, direct_edit: true, ...submitData }
         : { ...submitData };
 
       const response = await fetch(url, {
@@ -2740,6 +2819,7 @@ export default function FinancePage() {
         }
 
         await fetchData();
+        notifyLedgerDataChanged('ledger-entry');
         setShowLedgerForm(false);
         setEditingLedger(null);
         setSelectedLedgerBankAccount(null);
@@ -2754,28 +2834,102 @@ export default function FinancePage() {
           bank_amount: '',
           discount_amount: '',
         });
+      } else {
+        const err = await response.json().catch(() => ({}));
+        alert(err.error || 'Failed to save ledger entry');
       }
     } catch (error) {
       console.error('Error saving ledger entry:', error);
+      alert(`Error saving ledger entry: ${error.message}`);
     } finally {
       setIsSubmittingLedger(false);
     }
   };
 
-  const handleEdit = (entry) => {
+  const clearPaymentEditState = () => {
+    setEditingPaymentId(null);
+    setPaymentEditAccount(null);
+    setPaymentFormInitialValues(null);
+  };
+
+  const openPaymentEditForm = async (paymentId) => {
+    try {
+      const res = await fetch(`/api/payments?id=${paymentId}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Payment transaction not found');
+        return;
+      }
+      const p = await res.json();
+      const accountId = Number(p.account_id);
+      const accountRecord =
+        p.account ||
+        customers.find((c) => Number(c.cus_id) === accountId) ||
+        null;
+
+      if (accountId && !selectedCustomer) {
+        activateLedger(accountId, accountRecord?.cus_name);
+      }
+
+      setEditingPaymentId(paymentId);
+      setPaymentEditAccount(accountRecord);
+      setPaymentFormInitialValues({
+        cash_account: p.cash_account_id ? String(p.cash_account_id) : '',
+        cash_amount: String(parseFloat(p.cash_amount || 0) || ''),
+        bank_account: p.bank_account_id ? String(p.bank_account_id) : '',
+        bank_amount: String(parseFloat(p.bank_amount || 0) || ''),
+        discount: String(parseFloat(p.discount_amount || 0) || ''),
+        description: p.description || '',
+      });
+
+      if (p.payment_type === 'PAY') {
+        setShowPayPaymentForm(true);
+      } else {
+        setShowReceivePaymentForm(true);
+      }
+    } catch (err) {
+      console.error('Error loading payment for edit:', err);
+      alert('Failed to load payment transaction');
+    }
+  };
+
+  const handleEdit = async (entry) => {
+    if (!canEditLedgerEntry(entry)) {
+      alert('Sale, purchase and order ledger entries cannot be edited here. Edit the source document instead.');
+      return;
+    }
+
+    const ref = String(entry.bill_no || '').trim();
+    const payMatch = ref.match(/^PAY-(\d+)$/i);
+    if (payMatch) {
+      await openPaymentEditForm(parseInt(payMatch[1], 10));
+      return;
+    }
+
+    const jrnMatch = ref.match(/^JRN-(\d+)$/i);
+    if (jrnMatch) {
+      alert(`Journal entry JRN-${jrnMatch[1]} is linked across accounts. Edit it from General Journal.`);
+      return;
+    }
+
     setEditingLedger(entry);
-    const cashAmt = entry.trnx_type === 'BANK_TRANSFER' ? '' : entry.payments?.toString() || '';
-    const bankAmt = entry.trnx_type === 'BANK_TRANSFER' ? entry.payments?.toString() || '' : '';
+    const cashAmt = entry.trnx_type === 'BANK_TRANSFER' ? '' : String(entry.payments ?? entry.cash_payment ?? '');
+    const bankAmt = entry.trnx_type === 'BANK_TRANSFER' ? String(entry.payments ?? entry.bank_payment ?? '') : '';
+    let discountAmt = '';
+    const discountMatch = String(entry.details || '').match(/Discount:\s*PKR\s*([\d,.]+)/i);
+    if (discountMatch) {
+      discountAmt = discountMatch[1].replace(/,/g, '');
+    }
     setFormData({
       cus_id: entry.cus_id,
-      debit_amount: entry.debit_amount.toString(),
-      credit_amount: entry.credit_amount.toString(),
+      debit_amount: String(entry.debit_amount ?? ''),
+      credit_amount: String(entry.credit_amount ?? ''),
       bill_no: entry.bill_no || '',
       trnx_type: entry.trnx_type,
       details: entry.details || '',
       cash_amount: cashAmt,
       bank_amount: bankAmt,
-      discount_amount: '',
+      discount_amount: discountAmt,
     });
     setSelectedLedgerBankAccount(null);
     setCustomerSearchTerm(entry.customer?.cus_name || '');
@@ -2803,6 +2957,7 @@ export default function FinancePage() {
           const data = await response.json();
           alert(`✅ ${data.message}\n\nDetails:\n${Object.entries(data.details).map(([k, v]) => `${k}: ${v}`).join('\n')}`);
           await fetchData();
+          notifyLedgerDataChanged('ledger-delete-all');
         } else {
           alert('❌ Failed to delete ledger entries');
         }
@@ -2821,6 +2976,7 @@ export default function FinancePage() {
         });
         if (response.ok) {
           await fetchData();
+          notifyLedgerDataChanged('ledger-delete');
         }
       } catch (error) {
         console.error('Error deleting ledger entry:', error);
@@ -3452,6 +3608,26 @@ export default function FinancePage() {
                   sx={{ ...LEDGER_UI.toolbarBtn, color: BRAND.text.blue, borderColor: BRAND.primary.blue, bgcolor: '#fff', '&:hover': { bgcolor: BRAND.tint.blue, borderColor: BRAND.text.blue } }}>
                   {isDownloadingLedgerPdf ? 'Downloading…' : 'Download PDF'}
                 </Button>
+                {ledgerTransactionEdit ? (
+                  <>
+                    <Button size="small" variant="outlined" onClick={cancelLedgerTransactionEdit}
+                      sx={{ ...LEDGER_UI.toolbarBtn, color: '#64748b', borderColor: '#cbd5e1', bgcolor: '#fff' }}>
+                      Cancel
+                    </Button>
+                    <Button size="small" variant="contained" startIcon={savingTransactionEdit ? <CircularProgress size={14} color="inherit" /> : <Check size={15} />}
+                      disabled={!isTransactionEditDirty || savingTransactionEdit}
+                      onClick={handleSaveTransactionEdit}
+                      sx={{ ...LEDGER_UI.toolbarBtn, bgcolor: BRAND.supporting.green, color: '#fff', boxShadow: 'none', '&:hover': { bgcolor: '#00b872' }, '&.Mui-disabled': { bgcolor: '#94a3b8', color: '#fff' } }}>
+                      {savingTransactionEdit ? 'Saving…' : 'Save Changes'}
+                    </Button>
+                  </>
+                ) : latestEditableInView && (
+                  <Button size="small" variant="contained" startIcon={<Edit size={15} />}
+                    onClick={() => startLedgerTransactionEdit(latestEditableInView)}
+                    sx={{ ...LEDGER_UI.toolbarBtn, bgcolor: BRAND.primary.blue, color: '#fff', boxShadow: 'none', '&:hover': { bgcolor: BRAND.text.blue } }}>
+                    Edit Latest Transaction
+                  </Button>
+                )}
               </Box>
             )}
 
@@ -3468,6 +3644,26 @@ export default function FinancePage() {
                   sx={{ ...LEDGER_UI.toolbarBtn, color: BRAND.text.blue, borderColor: BRAND.primary.blue, bgcolor: '#fff', '&:hover': { bgcolor: BRAND.tint.blue, borderColor: BRAND.text.blue } }}>
                   {isDownloadingLedgerPdf ? 'Downloading…' : 'Download PDF'}
                 </Button>
+                {ledgerTransactionEdit ? (
+                  <>
+                    <Button size="small" variant="outlined" onClick={cancelLedgerTransactionEdit}
+                      sx={{ ...LEDGER_UI.toolbarBtn, color: '#64748b', borderColor: '#cbd5e1', bgcolor: '#fff' }}>
+                      Cancel
+                    </Button>
+                    <Button size="small" variant="contained" startIcon={savingTransactionEdit ? <CircularProgress size={14} color="inherit" /> : <Check size={15} />}
+                      disabled={!isTransactionEditDirty || savingTransactionEdit}
+                      onClick={handleSaveTransactionEdit}
+                      sx={{ ...LEDGER_UI.toolbarBtn, bgcolor: BRAND.supporting.green, color: '#fff', boxShadow: 'none', '&:hover': { bgcolor: '#00b872' }, '&.Mui-disabled': { bgcolor: '#94a3b8', color: '#fff' } }}>
+                      {savingTransactionEdit ? 'Saving…' : 'Save Changes'}
+                    </Button>
+                  </>
+                ) : globalLatestEditableEntry && (
+                  <Button size="small" variant="contained" startIcon={<Edit size={15} />}
+                    onClick={() => startLedgerTransactionEdit(globalLatestEditableEntry)}
+                    sx={{ ...LEDGER_UI.toolbarBtn, bgcolor: BRAND.primary.blue, color: '#fff', boxShadow: 'none', '&:hover': { bgcolor: BRAND.text.blue } }}>
+                    Edit Latest Transaction {getLedgerTransactionKey(globalLatestEditableEntry)}
+                  </Button>
+                )}
               </Box>
             )}
 
@@ -3586,36 +3782,46 @@ export default function FinancePage() {
                         }
 
                         const rowStyle = getLedgerRowStyle(isDebit, isCredit, entry);
+                        const isLatestEditable = editableLatestLedgerIds.has(entry.l_id);
+                        const inTransactionEdit = Boolean(ledgerTransactionEdit);
+                        const isEditingRow = ledgerTransactionEdit?.entryIds.includes(entry.l_id);
+                        const isBlurredRow = inTransactionEdit && !isEditingRow;
+                        const rowDraft = ledgerTransactionEdit?.drafts?.[entry.l_id];
+                        const showDebitEdit = isEditingRow && parseFloat(entry.debit_amount || 0) > 0;
+                        const showCreditEdit = isEditingRow && parseFloat(entry.credit_amount || 0) > 0;
 
                         return (
                           <TableRow
                             key={entry.l_id}
                             sx={{
                               bgcolor: rowStyle.bg,
+                              transition: 'filter 0.2s ease, opacity 0.2s ease',
+                              ...(isLatestEditable && canEditLedgerEntry(entry) && !inTransactionEdit
+                                ? { boxShadow: 'inset 3px 0 0 #1A55E3' }
+                                : {}),
+                              ...(isEditingRow
+                                ? {
+                                    position: 'relative',
+                                    zIndex: 3,
+                                    boxShadow: '0 0 0 2px #1A55E3, 0 8px 24px rgba(26,85,227,0.18)',
+                                    bgcolor: '#fff !important',
+                                  }
+                                : {}),
+                              ...(isBlurredRow
+                                ? {
+                                    filter: 'blur(2.5px)',
+                                    opacity: 0.28,
+                                    pointerEvents: 'none',
+                                    userSelect: 'none',
+                                  }
+                                : {}),
                               '&:hover': {
-                                bgcolor: `${rowStyle.hover} !important`,
-                                cursor: 'pointer',
-                                '& .edit-icon': { opacity: 1 },
+                                bgcolor: isBlurredRow ? rowStyle.bg : `${rowStyle.hover} !important`,
                               },
                             }}
-                            onDoubleClick={() => handleEdit(entry)}
                           >
-                            <TableCell sx={{ textAlign: 'center', fontWeight: 600, color: '#595959', fontSize: '0.75rem', position: 'relative', bgcolor: rowStyle.bg }}>
+                            <TableCell sx={{ textAlign: 'center', fontWeight: 600, color: '#595959', fontSize: '0.75rem', bgcolor: rowStyle.bg }}>
                               {entry.l_id}
-                              <IconButton
-                                size="small"
-                                className="edit-icon"
-                                onClick={(e) => { e.stopPropagation(); handleEdit(entry); }}
-                                sx={{
-                                  position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)',
-                                  opacity: 0, transition: 'opacity 0.2s',
-                                  bgcolor: rowStyle.amount, color: '#fff',
-                                  width: 22, height: 22,
-                                  '&:hover': { bgcolor: rowStyle.amount },
-                                }}
-                              >
-                                <Edit size={11} />
-                              </IconButton>
                             </TableCell>
 
                             <TableCell sx={{ fontFamily: 'monospace', color: rowStyle.text, fontWeight: 500, fontSize: '0.8125rem', bgcolor: rowStyle.bg }}>
@@ -3639,16 +3845,47 @@ export default function FinancePage() {
                               )}
                             </TableCell>
 
-                            <TableCell sx={{ maxWidth: 300, bgcolor: rowStyle.bg }}>
-                              {formatLedgerParticulars(entry.details) ? (
-                                <Typography variant="body2" component="div" sx={{ lineHeight: 1.5, fontWeight: 500, color: rowStyle.text }}>
-                                  {renderLedgerParticulars(entry.details, entry)}
-                                </Typography>
-                              ) : (
-                                <Typography variant="body2" sx={{ lineHeight: 1.5, fontWeight: 600, color: '#94a3b8', fontStyle: 'italic' }}>
-                                  N/A
+                            <TableCell sx={{ maxWidth: 300, bgcolor: isEditingRow ? '#fff' : rowStyle.bg }}>
+                              {isEditingRow && (
+                                <Typography
+                                  variant="caption"
+                                  sx={{
+                                    display: 'block',
+                                    mb: 0.5,
+                                    fontWeight: 700,
+                                    color: '#1A55E3',
+                                    letterSpacing: 0.2,
+                                  }}
+                                >
+                                  {getTransactionEditCaption(entry, rowDraft)}
                                 </Typography>
                               )}
+                              {(() => {
+                                const particularsSource = isEditingRow
+                                  ? buildLiveEditParticulars(entry, rowDraft)
+                                  : entry.details;
+                                const particularsText = formatLedgerParticulars(particularsSource);
+                                if (!particularsText) {
+                                  return (
+                                    <Typography variant="body2" sx={{ lineHeight: 1.5, fontWeight: 600, color: '#94a3b8', fontStyle: 'italic' }}>
+                                      N/A
+                                    </Typography>
+                                  );
+                                }
+                                return (
+                                  <Typography
+                                    variant="body2"
+                                    component="div"
+                                    sx={{
+                                      lineHeight: 1.5,
+                                      fontWeight: isEditingRow ? 600 : 500,
+                                      color: isEditingRow ? '#0f172a' : rowStyle.text,
+                                    }}
+                                  >
+                                    {renderLedgerParticulars(particularsSource, entry)}
+                                  </Typography>
+                                );
+                              })()}
                               {entry.bill_no && (
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.35 }}>
                                   <Typography variant="caption" onClick={(e) => { e.stopPropagation(); openDocumentFromLedgerEntry(entry); }}
@@ -3663,8 +3900,28 @@ export default function FinancePage() {
                               )}
                             </TableCell>
 
-                             <TableCell sx={{ textAlign: 'right', bgcolor: rowStyle.bg }}>
-                               {displayAmts.debit > 0 ? (
+                             <TableCell sx={{ textAlign: 'right', bgcolor: isEditingRow ? '#fff' : rowStyle.bg }}>
+                               {showDebitEdit ? (
+                                 <TextField
+                                   size="small"
+                                   type="number"
+                                   autoFocus={isEditingRow && showDebitEdit && !showCreditEdit}
+                                   value={rowDraft?.debit ?? ''}
+                                   onChange={(e) => updateTransactionDraft(entry.l_id, 'debit', e.target.value)}
+                                   placeholder="0"
+                                   inputProps={{ step: 0.01, min: 0, style: { textAlign: 'right', fontWeight: 700 } }}
+                                   sx={{
+                                     maxWidth: 130,
+                                     ml: 'auto',
+                                     '& .MuiOutlinedInput-root': {
+                                       bgcolor: '#f0fdf4',
+                                       '& fieldset': { borderColor: '#86efac' },
+                                       '&:hover fieldset': { borderColor: '#22c55e' },
+                                       '&.Mui-focused fieldset': { borderColor: '#16a34a', borderWidth: 2 },
+                                     },
+                                   }}
+                                 />
+                               ) : displayAmts.debit > 0 ? (
                                  <Typography variant="body2" sx={{ fontWeight: 800, color: valueColors.debit, fontFamily: 'monospace', fontSize: '0.9375rem' }}>
                                    {fmtAmt(displayAmts.debit)}
                                  </Typography>
@@ -3673,8 +3930,28 @@ export default function FinancePage() {
                                )}
                              </TableCell>
 
-                             <TableCell sx={{ textAlign: 'right', bgcolor: rowStyle.bg }}>
-                               {displayAmts.credit > 0 ? (
+                             <TableCell sx={{ textAlign: 'right', bgcolor: isEditingRow ? '#fff' : rowStyle.bg }}>
+                               {showCreditEdit ? (
+                                 <TextField
+                                   size="small"
+                                   type="number"
+                                   autoFocus={isEditingRow && showCreditEdit && !showDebitEdit}
+                                   value={rowDraft?.credit ?? ''}
+                                   onChange={(e) => updateTransactionDraft(entry.l_id, 'credit', e.target.value)}
+                                   placeholder="0"
+                                   inputProps={{ step: 0.01, min: 0, style: { textAlign: 'right', fontWeight: 700 } }}
+                                   sx={{
+                                     maxWidth: 130,
+                                     ml: 'auto',
+                                     '& .MuiOutlinedInput-root': {
+                                       bgcolor: '#fef2f2',
+                                       '& fieldset': { borderColor: '#fecaca' },
+                                       '&:hover fieldset': { borderColor: '#ef4444' },
+                                       '&.Mui-focused fieldset': { borderColor: '#dc2626', borderWidth: 2 },
+                                     },
+                                   }}
+                                 />
+                               ) : displayAmts.credit > 0 ? (
                                  <Typography variant="body2" sx={{ fontWeight: 800, color: valueColors.credit, fontFamily: 'monospace', fontSize: '0.9375rem' }}>
                                    {fmtAmt(displayAmts.credit)}
                                  </Typography>
@@ -3711,7 +3988,10 @@ export default function FinancePage() {
                           </TableRow>
                         );
                       })}
-                      <TableRow sx={LEDGER_UI.summaryRow}>
+                      <TableRow sx={{
+                        ...LEDGER_UI.summaryRow,
+                        ...(ledgerTransactionEdit ? { filter: 'blur(2.5px)', opacity: 0.28, pointerEvents: 'none' } : {}),
+                      }}>
                         <TableCell colSpan={4} sx={{ textAlign: 'left' }}>
                           <Typography sx={{ fontWeight: 700, color: '#1e293b', fontSize: '0.8125rem' }}>
                             Period Total
@@ -3738,19 +4018,14 @@ export default function FinancePage() {
                   </Table>
                 </TableContainer>
 
-                <Box sx={{ px: 2, py: 1.25, borderTop: '1px solid #c5c5c5', bgcolor: '#f2f2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 1 }}>
-                  <Typography variant="caption" sx={{ color: '#595959', fontWeight: 500, textAlign: 'center' }}>
-                    {COMPANY.name} · {COMPANY.address} · Double-click row to edit
-                  </Typography>
-                </Box>
               </Box>
             )}
           </Card>
         </Box>
       </Container>
 
-      {/* Add/Edit Ledger Entry Dialog - REMOVED */}
-      {false && <Dialog
+      {/* Add/Edit Ledger Entry Dialog */}
+      <Dialog
         open={showLedgerForm}
         onClose={() => {
           setShowLedgerForm(false);
@@ -3817,6 +4092,7 @@ export default function FinancePage() {
                   details: '',
                   cash_amount: '',
                   bank_amount: '',
+                  discount_amount: '',
                 });
                 setCustomerSearchTerm('');
               }}
@@ -3848,7 +4124,7 @@ export default function FinancePage() {
                 getOptionLabel={(option) => option.cus_name}
                 getOptionKey={customerOptionKey}
                 isOptionEqualToValue={isSameCustomerOption}
-                value={formData.cus_id ? customers.find(c => c.cus_id === formData.cus_id) : null}
+                value={formData.cus_id ? customers.find(c => Number(c.cus_id) === Number(formData.cus_id)) : null}
                 onChange={(event, newValue) => {
                   if (newValue) {
                     setFormData(prev => ({ ...prev, cus_id: newValue.cus_id }));
@@ -4126,7 +4402,7 @@ export default function FinancePage() {
                         size="small"
                         name="discount_amount"
                         type="number"
-                        value={formData.discount_amount}
+                        value={formData.discount_amount ?? ''}
                         onChange={handleInputChange}
                         inputProps={{ step: 0.01, min: 0 }}
                         placeholder="0.00"
@@ -4230,7 +4506,7 @@ export default function FinancePage() {
             )}
           </Button>
         </DialogActions>
-      </Dialog>}
+      </Dialog>
 
       {/* Full General Journal Form Dialog */}
       <Dialog
@@ -4493,489 +4769,45 @@ export default function FinancePage() {
         </DialogActions>
       </Dialog>
 
-      {/* Receive Payment Dialog */}
-      <Dialog
+      <PaymentFormDialog
         open={showReceivePaymentForm}
-        onClose={() => setShowReceivePaymentForm(false)}
-        maxWidth="sm"
-        fullWidth
-        PaperProps={{ sx: { borderRadius: 2 } }}
-      >
-        <DialogTitle component="div" sx={{
-          bgcolor: '#10b981',
-          color: 'white',
-          fontWeight: 700,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          px: 3,
-          py: 2
-        }}>
-          <Typography variant="h6" sx={{ fontWeight: 800 }}>Receive Amount Form</Typography>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, bgcolor: 'rgba(255,255,255,0.2)', px: 1.5, py: 0.5, borderRadius: 1 }}>
-            Serial: #{ledgerEntries.length + 1}
-          </Typography>
-        </DialogTitle>
+        onClose={() => {
+          setShowReceivePaymentForm(false);
+          clearPaymentEditState();
+        }}
+        mode="RECEIVE"
+        customer={paymentEditAccount || selectedCustomerRecord}
+        currentBalance={parseFloat((paymentEditAccount || selectedCustomerRecord)?.cus_balance || 0)}
+        cashAccounts={cashAccounts}
+        bankAccounts={bankAccounts}
+        defaultCashAccountId={cashAccounts[0]?.cus_id || ''}
+        onSubmit={handleReceivePaymentSubmit}
+        loading={paymentStatus.loading}
+        saveStatusMessage={saveStatusMessage}
+        ledgerSerial={ledgerEntries.length + 1}
+        initialValues={paymentFormInitialValues}
+        editPaymentId={editingPaymentId}
+      />
 
-        <DialogContent sx={{ p: 3 }}>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            {/* Account Info */}
-            <Box sx={{ p: 2, bgcolor: '#f0fdf4', borderRadius: 2, border: '1px solid #bbf7d0' }}>
-              <Grid container spacing={2}>
-                <Grid item xs={12}>
-                  <Typography variant="caption" sx={{ color: '#166534', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                    Selected Account
-                  </Typography>
-                  <Typography variant="h6" sx={{ fontWeight: 700, color: '#14532d' }}>
-                    {customers.find(c => Number(c.cus_id) === Number(selectedCustomer))?.cus_name || 'Individual Account'}
-                  </Typography>
-                </Grid>
-                <Grid item xs={12}>
-                  <Typography variant="caption" sx={{ color: '#166534', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                    Current Balance
-                  </Typography>
-                  <Typography variant="h5" sx={{ fontWeight: 800, color: '#16a34a' }}>
-                    PKR {fmtAmt(currentBalance)}
-                  </Typography>
-                </Grid>
-              </Grid>
-            </Box>
-          {receiveTotalPreview > 0 && (
-            <Alert severity="info" sx={{ py: 0.5 }}>
-              <strong>After Receive Amount:</strong> account balance → PKR{' '}
-              {fmtAmt(receiveBalanceAfter)}{' '}
-                <Typography component="span" variant="caption" display="block" color="text.secondary">
-                  Receive Amount credits the selected account (balance decreases by the entered amount).
-                </Typography>
-              </Alert>
-            )}
-
-            <Divider sx={{ my: 1 }} />
-
-            {/* Cash Amount Section */}
-            <Box>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#334155', mb: 0.5 }}>
-                Cash Amount
-              </Typography>
-              <TextField
-                fullWidth
-                type="number"
-                value={receivePaymentData.cash_amount}
-                onChange={(e) => setReceivePaymentData((prev) => {
-                  const updated = { ...prev, cash_amount: e.target.value };
-                  const accName = customers.find((c) => Number(c.cus_id) === Number(selectedCustomer))?.cus_name || '';
-                  updated.description = buildFinancePaymentDescription(
-                    'RECEIVE',
-                    accName,
-                    updated.cash_amount,
-                    updated.bank_amount,
-                    updated.bank_account,
-                    bankAccounts,
-                    updated.discount
-                  );
-                  return updated;
-                })}
-                placeholder="0.00"
-                InputProps={{
-                  startAdornment: <InputAdornment position="start">PKR</InputAdornment>,
-                }}
-              />
-            </Box>
-
-            {/* Bank Account and Amount in Words Row */}
-            <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-end' }}>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#334155', mb: 0.5 }}>
-                  Bank Account
-                </Typography>
-                <FormControl fullWidth>
-                  <Select
-                    value={receivePaymentData.bank_account}
-                    onChange={(e) => setReceivePaymentData((prev) => {
-                      const updated = { ...prev, bank_account: e.target.value };
-                      const accName = customers.find((c) => Number(c.cus_id) === Number(selectedCustomer))?.cus_name || '';
-                      updated.description = buildFinancePaymentDescription(
-                        'RECEIVE',
-                        accName,
-                        updated.cash_amount,
-                        updated.bank_amount,
-                        updated.bank_account,
-                        bankAccounts,
-                        updated.discount
-                      );
-                      return updated;
-                    })}
-                    displayEmpty
-                    sx={{ bgcolor: '#f8fafc' }}
-                  >
-                    <MenuItem value="">Select Bank Account</MenuItem>
-                    {bankAccounts.map(account => (
-                      <MenuItem key={account.cus_id} value={account.cus_id}>{account.cus_name}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Box>
-              <Box sx={{ flex: 1, minHeight: '56px', display: 'flex', alignItems: 'stretch' }}>
-                {receiveTotalPreview > 0 ? (
-                  <Box sx={{ p: 1.5, bgcolor: '#f0fdf4', borderRadius: 2, border: '1px solid #bbf7d0', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Typography variant="body1" sx={{ fontWeight: 800, color: '#16a34a', fontSize: '1rem', textAlign: 'center' }}>
-                      {numberToUrduWords(receiveTotalPreview)}
-                    </Typography>
-                  </Box>
-                ) : (
-                  <Box sx={{ p: 1.5, bgcolor: '#f8fafc', borderRadius: 2, border: '1px dashed #cbd5e1', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Typography variant="caption" sx={{ color: '#94a3b8' }}>
-                      Enter amount to see words
-                    </Typography>
-                  </Box>
-                )}
-              </Box>
-            </Box>
-
-            {/* Bank Amount & Discount Row */}
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#334155', mb: 0.5 }}>
-                  Bank Amount
-                </Typography>
-                <TextField
-                  fullWidth
-                  type="number"
-                  value={receivePaymentData.bank_amount}
-                  onChange={(e) => setReceivePaymentData((prev) => {
-                    const updated = { ...prev, bank_amount: e.target.value };
-                    const accName = customers.find((c) => Number(c.cus_id) === Number(selectedCustomer))?.cus_name || '';
-                    updated.description = buildFinancePaymentDescription(
-                      'RECEIVE',
-                      accName,
-                      updated.cash_amount,
-                      updated.bank_amount,
-                      updated.bank_account,
-                      bankAccounts,
-                      updated.discount
-                    );
-                    return updated;
-                  })}
-                  disabled={!receivePaymentData.bank_account}
-                  placeholder="0.00"
-                  InputProps={{
-                    startAdornment: <InputAdornment position="start">PKR</InputAdornment>,
-                  }}
-                />
-              </Box>
-
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#334155', mb: 0.5 }}>
-                  Discount
-                </Typography>
-                <TextField
-                  fullWidth
-                  placeholder="0.00"
-                  type="number"
-                  value={receivePaymentData.discount}
-                  onChange={(e) => setReceivePaymentData((prev) => {
-                    const updated = { ...prev, discount: e.target.value };
-                    const accName = customers.find((c) => Number(c.cus_id) === Number(selectedCustomer))?.cus_name || '';
-                    updated.description = buildFinancePaymentDescription(
-                      'RECEIVE',
-                      accName,
-                      updated.cash_amount,
-                      updated.bank_amount,
-                      updated.bank_account,
-                      bankAccounts,
-                      updated.discount
-                    );
-                    return updated;
-                  })}
-                  InputProps={{
-                    startAdornment: <InputAdornment position="start">PKR</InputAdornment>,
-                  }}
-                />
-              </Box>
-            </Box>
-
-            <Divider sx={{ borderStyle: 'dotted', my: 1 }} />
-
-            {/* Description */}
-            <Box>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#334155', mb: 0.5 }}>
-                Description
-              </Typography>
-              <TextField
-                fullWidth
-                multiline
-                rows={3}
-                value={receivePaymentData.description}
-                onChange={(e) => setReceivePaymentData(prev => ({ ...prev, description: e.target.value }))}
-                placeholder="Auto-filled from amounts; you can edit."
-                sx={{ bgcolor: '#f8fafc' }}
-              />
-            </Box>
-          </Stack>
-        </DialogContent>
-
-        <DialogActions sx={{ p: 3, borderTop: '1px solid #e2e8f0', bgcolor: '#f8fafc' }}>
-          <Button onClick={() => setShowReceivePaymentForm(false)} sx={{ color: '#64748b' }}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleReceivePaymentSubmit}
-            variant="contained"
-            disabled={paymentStatus.loading}
-            startIcon={paymentStatus.loading ? <CircularProgress size={20} color="inherit" /> : null}
-            sx={{
-              bgcolor: '#10b981',
-              '&:hover': { bgcolor: '#059669' },
-              px: 4,
-              fontWeight: 700
-            }}
-          >
-            {paymentStatus.loading ? (saveStatusMessage || 'Processing...') : 'Confirm Receipt'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Pay Payment Dialog */}
-      <Dialog
+      <PaymentFormDialog
         open={showPayPaymentForm}
-        onClose={() => setShowPayPaymentForm(false)}
-        maxWidth="sm"
-        fullWidth
-        PaperProps={{ sx: { borderRadius: 2 } }}
-      >
-        <DialogTitle component="div" sx={{
-          bgcolor: '#ef4444',
-          color: 'white',
-          fontWeight: 700,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          px: 3,
-          py: 2
-        }}>
-          <Typography variant="h6" sx={{ fontWeight: 800 }}>Pay Amount Form</Typography>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, bgcolor: 'rgba(255,255,255,0.2)', px: 1.5, py: 0.5, borderRadius: 1 }}>
-            Serial: #{ledgerEntries.length + 1}
-          </Typography>
-        </DialogTitle>
-
-        <DialogContent sx={{ p: 3 }}>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            {/* Account Info */}
-            <Box sx={{ p: 2, bgcolor: '#fef2f2', borderRadius: 2, border: '1px solid #fecaca' }}>
-              <Grid container spacing={2}>
-                <Grid item xs={12}>
-                  <Typography variant="caption" sx={{ color: '#991b1b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                    Selected Account
-                  </Typography>
-                  <Typography variant="h6" sx={{ fontWeight: 700, color: '#7f1d1d' }}>
-                    {customers.find(c => Number(c.cus_id) === Number(selectedCustomer))?.cus_name || 'Individual Account'}
-                  </Typography>
-                </Grid>
-                <Grid item xs={12}>
-                  <Typography variant="caption" sx={{ color: '#991b1b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                    Current Balance
-                  </Typography>
-                  <Typography variant="h5" sx={{ fontWeight: 800, color: '#dc2626' }}>
-                    PKR {fmtAmt(currentBalance)}
-                  </Typography>
-                </Grid>
-              </Grid>
-            </Box>
-            {payTotalPreview > 0 && (
-              <Alert severity="info" sx={{ py: 0.5 }}>
-                <strong>After Pay Amount:</strong> account balance → PKR{' '}
-                {fmtAmt(payBalanceAfter)}{' '}
-                <Typography component="span" variant="caption" display="block" color="text.secondary">
-                  Pay Amount debits the selected account (balance increases by the entered amount).
-                </Typography>
-              </Alert>
-            )}
-
-            <Divider sx={{ my: 1 }} />
-
-            {/* Cash Amount Section */}
-            <Box>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#334155', mb: 0.5 }}>
-                Cash Amount
-              </Typography>
-              <TextField
-                fullWidth
-                type="number"
-                value={payPaymentData.cash_amount}
-                onChange={(e) => setPayPaymentData((prev) => {
-                  const updated = { ...prev, cash_amount: e.target.value };
-                  const accName = customers.find((c) => Number(c.cus_id) === Number(selectedCustomer))?.cus_name || '';
-                  updated.description = buildFinancePaymentDescription(
-                    'PAY',
-                    accName,
-                    updated.cash_amount,
-                    updated.bank_amount,
-                    updated.bank_account,
-                    bankAccounts,
-                    updated.discount
-                  );
-                  return updated;
-                })}
-                placeholder="0.00"
-                InputProps={{
-                  startAdornment: <InputAdornment position="start">PKR</InputAdornment>,
-                }}
-              />
-            </Box>
-
-            {/* Bank Account and Amount in Words Row */}
-            <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-end' }}>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#334155', mb: 0.5 }}>
-                  Bank Account
-                </Typography>
-                <FormControl fullWidth>
-                  <Select
-                    value={payPaymentData.bank_account}
-                    onChange={(e) => setPayPaymentData((prev) => {
-                      const updated = { ...prev, bank_account: e.target.value };
-                      const accName = customers.find((c) => Number(c.cus_id) === Number(selectedCustomer))?.cus_name || '';
-                      updated.description = buildFinancePaymentDescription(
-                        'PAY',
-                        accName,
-                        updated.cash_amount,
-                        updated.bank_amount,
-                        updated.bank_account,
-                        bankAccounts,
-                        updated.discount
-                      );
-                      return updated;
-                    })}
-                    displayEmpty
-                    sx={{ bgcolor: '#f8fafc' }}
-                  >
-                    <MenuItem value="">Select Bank Account</MenuItem>
-                    {bankAccounts.map(account => (
-                      <MenuItem key={account.cus_id} value={account.cus_id}>{account.cus_name}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Box>
-              <Box sx={{ flex: 1, minHeight: '56px', display: 'flex', alignItems: 'stretch' }}>
-                {payTotalPreview > 0 ? (
-                  <Box sx={{ p: 1.5, bgcolor: '#fef2f2', borderRadius: 2, border: '1px solid #fecaca', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Typography variant="body1" sx={{ fontWeight: 800, color: '#dc2626', fontSize: '1rem', textAlign: 'center' }}>
-                      {numberToUrduWords(payTotalPreview)}
-                    </Typography>
-                  </Box>
-                ) : (
-                  <Box sx={{ p: 1.5, bgcolor: '#f8fafc', borderRadius: 2, border: '1px dashed #cbd5e1', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Typography variant="caption" sx={{ color: '#94a3b8' }}>
-                      Enter amount to see words
-                    </Typography>
-                  </Box>
-                )}
-              </Box>
-            </Box>
-
-            {/* Bank Amount & Discount Row */}
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#334155', mb: 0.5 }}>
-                  Bank Amount
-                </Typography>
-                <TextField
-                  fullWidth
-                  type="number"
-                  value={payPaymentData.bank_amount}
-                  onChange={(e) => setPayPaymentData((prev) => {
-                    const updated = { ...prev, bank_amount: e.target.value };
-                    const accName = customers.find((c) => Number(c.cus_id) === Number(selectedCustomer))?.cus_name || '';
-                    updated.description = buildFinancePaymentDescription(
-                      'PAY',
-                      accName,
-                      updated.cash_amount,
-                      updated.bank_amount,
-                      updated.bank_account,
-                      bankAccounts,
-                      updated.discount
-                    );
-                    return updated;
-                  })}
-                  disabled={!payPaymentData.bank_account}
-                  placeholder="0.00"
-                  InputProps={{
-                    startAdornment: <InputAdornment position="start">PKR</InputAdornment>,
-                  }}
-                />
-              </Box>
-
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#334155', mb: 0.5 }}>
-                  Discount
-                </Typography>
-                <TextField
-                  fullWidth
-                  placeholder="0.00"
-                  type="number"
-                  value={payPaymentData.discount}
-                  onChange={(e) => setPayPaymentData((prev) => {
-                    const updated = { ...prev, discount: e.target.value };
-                    const accName = customers.find((c) => Number(c.cus_id) === Number(selectedCustomer))?.cus_name || '';
-                    updated.description = buildFinancePaymentDescription(
-                      'PAY',
-                      accName,
-                      updated.cash_amount,
-                      updated.bank_amount,
-                      updated.bank_account,
-                      bankAccounts,
-                      updated.discount
-                    );
-                    return updated;
-                  })}
-                  InputProps={{
-                    startAdornment: <InputAdornment position="start">PKR</InputAdornment>,
-                  }}
-                />
-              </Box>
-            </Box>
-
-            <Divider sx={{ borderStyle: 'dotted', my: 1 }} />
-
-            {/* Description */}
-            <Box>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#334155', mb: 0.5 }}>
-                Description
-              </Typography>
-              <TextField
-                fullWidth
-                multiline
-                rows={3}
-                value={payPaymentData.description}
-                onChange={(e) => setPayPaymentData(prev => ({ ...prev, description: e.target.value }))}
-                placeholder="Auto-filled from amounts; you can edit."
-                sx={{ bgcolor: '#f8fafc' }}
-              />
-            </Box>
-          </Stack>
-        </DialogContent>
-
-        <DialogActions sx={{ p: 3, borderTop: '1px solid #e2e8f0', bgcolor: '#f8fafc' }}>
-          <Button onClick={() => setShowPayPaymentForm(false)} sx={{ color: '#64748b' }}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handlePayPaymentSubmit}
-            variant="contained"
-            disabled={paymentStatus.loading}
-            startIcon={paymentStatus.loading ? <CircularProgress size={20} color="inherit" /> : null}
-            sx={{
-              bgcolor: '#ef4444',
-              '&:hover': { bgcolor: '#dc2626' },
-              px: 4,
-              fontWeight: 700
-            }}
-          >
-            {paymentStatus.loading ? (saveStatusMessage || 'Processing...') : 'Confirm Payment'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        onClose={() => {
+          setShowPayPaymentForm(false);
+          clearPaymentEditState();
+        }}
+        mode="PAY"
+        customer={paymentEditAccount || selectedCustomerRecord}
+        currentBalance={parseFloat((paymentEditAccount || selectedCustomerRecord)?.cus_balance || 0)}
+        cashAccounts={cashAccounts}
+        bankAccounts={bankAccounts}
+        defaultCashAccountId={cashAccounts[0]?.cus_id || ''}
+        onSubmit={handlePayPaymentSubmit}
+        loading={paymentStatus.loading}
+        saveStatusMessage={saveStatusMessage}
+        ledgerSerial={ledgerEntries.length + 1}
+        initialValues={paymentFormInitialValues}
+        editPaymentId={editingPaymentId}
+      />
 
       {/* Payment Receipt Dialog */}
       <Dialog

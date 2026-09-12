@@ -2,18 +2,16 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { 
-  ArrowLeft, 
   SwapHoriz as SwapIcon, 
   Send as SendIcon,
-  AttachMoney as MoneyIcon,
-  CalendarToday as CalendarIcon,
-  Description as DescIcon,
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
-  Search as SearchIcon
+  Search as SearchIcon,
+  Edit as EditIcon,
+  Close as CloseIcon
 } from '@mui/icons-material';
+import { notifyLedgerDataChanged } from '@/lib/ledger-tabs';
 import { Autocomplete, TextField } from '@mui/material';
-import { useRouter } from 'next/navigation';
 import DashboardLayout from '../components/dashboard-layout';
 
 const fmtAmt = (val) => {
@@ -23,8 +21,6 @@ const fmtAmt = (val) => {
 };
 
 export default function InternalTransferPage() {
-  const router = useRouter();
-  
   // State variables
   const [accounts, setAccounts] = useState([]);
   const [recentTransfers, setRecentTransfers] = useState([]);
@@ -38,9 +34,19 @@ export default function InternalTransferPage() {
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [description, setDescription] = useState('');
+  const [editingBillNo, setEditingBillNo] = useState(null);
 
   // Notification states
   const [alert, setAlert] = useState(null); // { type: 'success' | 'error', message: '' }
+
+  const resetForm = () => {
+    setEditingBillNo(null);
+    setSourceId('');
+    setDestinationId('');
+    setAmount('');
+    setDate(new Date().toISOString().split('T')[0]);
+    setDescription('');
+  };
 
   useEffect(() => {
     fetchData();
@@ -95,29 +101,33 @@ export default function InternalTransferPage() {
       setSubmitting(true);
       setAlert(null);
 
+      const isEditing = !!editingBillNo;
+      const payload = {
+        source_id: sourceId,
+        destination_id: destinationId,
+        amount: transferAmount,
+        date,
+        description,
+        updated_by: 6,
+      };
+      if (isEditing) payload.bill_no = editingBillNo;
+
       const res = await fetch('/api/internal-transfer', {
-        method: 'POST',
+        method: isEditing ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source_id: sourceId,
-          destination_id: destinationId,
-          amount: transferAmount,
-          date,
-          description,
-          updated_by: 6 // Standard admin user ID or system update
-        })
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
 
       if (res.ok) {
-        showNotification('success', `Successfully transferred PKR ${fmtAmt(transferAmount)} from ${data.source.name} to ${data.destination.name}`);
-        // Reset form
-        setSourceId('');
-        setDestinationId('');
-        setAmount('');
-        setDescription('');
-        // Refresh account balances and transfers list
+        const actionLabel = isEditing ? 'updated' : 'transferred';
+        showNotification(
+          'success',
+          `Successfully ${actionLabel} PKR ${fmtAmt(transferAmount)} from ${data.source.name} to ${data.destination.name}`
+        );
+        resetForm();
+        notifyLedgerDataChanged('internal-transfer');
         await fetchData();
       } else {
         showNotification('error', data.error || 'Failed to complete transfer');
@@ -125,6 +135,30 @@ export default function InternalTransferPage() {
     } catch (err) {
       console.error('Error submitting transfer:', err);
       showNotification('error', 'An error occurred while executing transfer');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleEditTransfer = async (transfer) => {
+    try {
+      setSubmitting(true);
+      const res = await fetch(`/api/internal-transfer?bill_no=${encodeURIComponent(transfer.bill_no)}`);
+      if (!res.ok) {
+        showNotification('error', 'Could not load transfer for editing');
+        return;
+      }
+      const data = await res.json();
+      setEditingBillNo(data.bill_no);
+      setSourceId(String(data.source_id));
+      setDestinationId(String(data.destination_id));
+      setAmount(String(data.amount));
+      setDate(data.date || new Date().toISOString().split('T')[0]);
+      setDescription(data.description || '');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      console.error('Error loading transfer for edit:', err);
+      showNotification('error', 'Failed to load transfer');
     } finally {
       setSubmitting(false);
     }
@@ -205,9 +239,27 @@ export default function InternalTransferPage() {
           {/* Left Column: Transfer Form */}
           <div className="lg:col-span-5">
             <div className="bg-white rounded-2xl border border-gray-100 shadow-md p-6">
-              <h2 className="text-lg font-bold text-gray-900 mb-5 pb-3 border-b border-gray-100">
-                Create Transfer
-              </h2>
+              <div className="flex items-center justify-between mb-5 pb-3 border-b border-gray-100">
+                <h2 className="text-lg font-bold text-gray-900">
+                  {editingBillNo ? 'Edit Transfer' : 'Create Transfer'}
+                </h2>
+                {editingBillNo && (
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-gray-800"
+                  >
+                    <CloseIcon sx={{ fontSize: 16 }} />
+                    Cancel edit
+                  </button>
+                )}
+              </div>
+
+              {editingBillNo && (
+                <div className="mb-4 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold">
+                  Editing {editingBillNo} — ledger balances will be recalculated after save.
+                </div>
+              )}
               
               <form onSubmit={handleTransfer} className="space-y-4">
                 {/* Source Account Dropdown */}
@@ -323,10 +375,14 @@ export default function InternalTransferPage() {
                 <button
                   type="submit"
                   disabled={loading || submitting}
-                  className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition duration-200"
+                  className={`w-full py-3 px-4 text-white font-bold rounded-xl shadow-md focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition duration-200 ${
+                    editingBillNo
+                      ? 'bg-amber-600 hover:bg-amber-700 focus:ring-amber-500'
+                      : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'
+                  }`}
                 >
-                  <SendIcon className="w-5 h-5" />
-                  {submitting ? 'Processing...' : 'Submit Transfer'}
+                  {editingBillNo ? <EditIcon className="w-5 h-5" /> : <SendIcon className="w-5 h-5" />}
+                  {submitting ? 'Processing...' : editingBillNo ? 'Update Transfer' : 'Submit Transfer'}
                 </button>
               </form>
             </div>
@@ -398,10 +454,20 @@ export default function InternalTransferPage() {
                             )}
                           </div>
 
-                          <div className="text-right">
+                          <div className="text-right flex flex-col items-end gap-2 shrink-0">
                             <span className="text-base font-extrabold text-blue-600 block">
                               PKR {fmtAmt(transfer.amount)}
                             </span>
+                            <button
+                              type="button"
+                              onClick={() => handleEditTransfer(transfer)}
+                              disabled={submitting}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 disabled:opacity-50"
+                              title="Edit transfer"
+                            >
+                              <EditIcon sx={{ fontSize: 14 }} />
+                              Edit
+                            </button>
                           </div>
                         </div>
                       </div>

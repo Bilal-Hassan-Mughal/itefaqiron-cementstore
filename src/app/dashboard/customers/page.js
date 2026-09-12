@@ -81,6 +81,23 @@ const fmtAmt = (val) => {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
+const EMPTY_CUSTOMER_FORM = {
+  cus_name: '',
+  cus_phone_no: '',
+  cus_phone_no2: '',
+  cus_address: '',
+  cus_reference: '',
+  cus_account_info: '',
+  other: '',
+  cus_type: '',
+  cus_category: '',
+  cus_balance: 0,
+  CNIC: '',
+  NTN_NO: '',
+  name_urdu: '',
+  city_id: '',
+};
+
 export default function CustomersPage() {
   const router = useRouter();
   const [customers, setCustomers] = useState([]);
@@ -103,22 +120,7 @@ export default function CustomersPage() {
 
   const [showCustomerForm, setShowCustomerForm] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(null);
-  const [formData, setFormData] = useState({
-    cus_name: '',
-    cus_phone_no: '',
-    cus_phone_no2: '',
-    cus_address: '',
-    cus_reference: '',
-    cus_account_info: '',
-    other: '',
-    cus_type: '',
-    cus_category: '',
-    cus_balance: 0,
-    CNIC: '',
-    NTN_NO: '',
-    name_urdu: '',
-    city_id: ''
-  });
+  const [formData, setFormData] = useState({ ...EMPTY_CUSTOMER_FORM });
 
   // Popup states
   const [showCustomerTypePopup, setShowCustomerTypePopup] = useState(false);
@@ -155,9 +157,37 @@ export default function CustomersPage() {
     severity: 'success'
   });
 
+  const openNewCustomerForm = () => {
+    setEditingCustomer(null);
+    setFormData({ ...EMPTY_CUSTOMER_FORM });
+    setShowCustomerForm(true);
+  };
+
   // Load configuration details from API on mount
   useEffect(() => {
     fetchStaticData();
+  }, []);
+
+  // Header "Add Customer" → ?action=add or open-customer-form event
+  useEffect(() => {
+    const openFromHeader = () => openNewCustomerForm();
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('action') === 'add') {
+        openFromHeader();
+        params.delete('action');
+        const qs = params.toString();
+        window.history.replaceState(
+          null,
+          '',
+          qs ? `/dashboard/customers?${qs}` : '/dashboard/customers'
+        );
+      }
+    }
+
+    window.addEventListener('open-customer-form', openFromHeader);
+    return () => window.removeEventListener('open-customer-form', openFromHeader);
   }, []);
 
   // Debounce search and minAmount input
@@ -785,7 +815,7 @@ export default function CustomersPage() {
           <div className="flex items-center justify-between gap-4">
             <Button
               variant="contained"
-              onClick={() => setShowCustomerForm(true)}
+              onClick={openNewCustomerForm}
               startIcon={<AddIcon />}
               className="blink-button-strong"
               sx={{

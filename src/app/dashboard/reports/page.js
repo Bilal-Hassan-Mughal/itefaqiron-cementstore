@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { canAccessReportPage, hasFullReportsAccess, getReportsLandingPath } from '@/lib/staff-access';
 import {
   Calendar,
   Users,
@@ -19,10 +21,7 @@ import {
 } from 'lucide-react';
 import DashboardLayout from '../components/dashboard-layout';
 
-export default function ReportsPage() {
-  const router = useRouter();
-
-  const reports = [
+const ALL_REPORTS = [
     {
       id: 'cash-report',
       title: 'Cash Report',
@@ -158,8 +157,83 @@ export default function ReportsPage() {
       icon: PieChart,
       color: 'from-teal-500 to-cyan-500',
       path: '/dashboard/reports/rebate'
+    },
+    {
+      id: 'rebate-history',
+      title: 'Rebate History',
+      description: 'Historical rebate records by supplier',
+      icon: PieChart,
+      color: 'from-teal-600 to-emerald-600',
+      path: '/dashboard/reports/rebate/history'
+    },
+    {
+      id: 'supplier-ledger',
+      title: 'Supplier Ledger',
+      description: 'View ledger for a specific supplier',
+      icon: FileText,
+      color: 'from-violet-500 to-purple-600',
+      path: '/dashboard/reports/supplier-ledger'
+    },
+    {
+      id: 'item-sale-report',
+      title: 'Item Sale Report',
+      description: 'Sales breakdown by product/item',
+      icon: ShoppingCart,
+      color: 'from-sky-500 to-blue-600',
+      path: '/dashboard/reports/item-sale-report'
     }
-  ];
+];
+
+function readReportsUser() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem('user');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export default function ReportsPage() {
+  const router = useRouter();
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    setUser(readReportsUser());
+  }, []);
+
+  useEffect(() => {
+    if (!user || hasFullReportsAccess(user)) return;
+    const landing = getReportsLandingPath(user);
+    if (landing !== '/dashboard/reports') {
+      router.replace(landing);
+    }
+  }, [user, router]);
+
+  const reports = useMemo(() => {
+    if (!user) return [];
+    return ALL_REPORTS.filter((report) => canAccessReportPage(user, report.id));
+  }, [user]);
+
+  if (!user) {
+    return (
+      <DashboardLayout>
+        <div className="h-full flex items-center justify-center text-sm text-gray-500">
+          Loading reports…
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (reports.length === 0) {
+    return (
+      <DashboardLayout>
+        <div className="h-full flex items-center justify-center text-sm text-gray-500">
+          No reports assigned to your account. Contact your administrator.
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>

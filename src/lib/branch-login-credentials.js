@@ -2,9 +2,10 @@
 
 export const BRANCH_LOGIN_PORTAL = '/login/branch';
 
+import { getRoleDisplayName } from './user-role';
+
 export function formatRoleLabel(role) {
-  if (!role) return 'Staff';
-  return String(role).replace(/_/g, ' ');
+  return getRoleDisplayName(role);
 }
 
 /**

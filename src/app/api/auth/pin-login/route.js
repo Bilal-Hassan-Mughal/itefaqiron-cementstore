@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 import { isHqUser } from '@/lib/branch-roles';
+import { normalizeUserForClient, resolveStaffRole, toDbRole } from '@/lib/user-role';
 
 export async function POST(request) {
   try {
@@ -78,14 +79,34 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Incorrect PIN. Please try again.' }, { status: 401 });
     }
 
-    await prisma.users.update({
-      where: { user_id: userId },
-      data: { last_logged_in: new Date() },
-    });
+    const resolvedRole = resolveStaffRole(user);
+    const roleNeedsSync =
+      user.role === 'ADMIN' &&
+      resolvedRole !== 'ADMIN' &&
+      ['MANAGER', 'ACCOUNTANT', 'STOCK_MANAGER', 'SALESMAN'].includes(resolvedRole);
+
+    const pinUpdate = { last_logged_in: new Date() };
+    if (roleNeedsSync) pinUpdate.role = toDbRole(resolvedRole);
+
+    try {
+      await prisma.users.update({
+        where: { user_id: userId },
+        data: pinUpdate,
+      });
+    } catch (syncErr) {
+      console.warn('PIN login role sync skipped (run DB migration for new roles):', syncErr?.message);
+      await prisma.users.update({
+        where: { user_id: userId },
+        data: { last_logged_in: new Date() },
+      });
+    }
 
     const { pin_code, ...safeUser } = user;
+    const clientUser = normalizeUserForClient(
+      roleNeedsSync ? { ...safeUser, role: resolvedRole } : safeUser
+    );
     return NextResponse.json({
-      user: safeUser,
+      user: clientUser,
       is_hq: userIsHq,
       login_mode: loginMode || null,
     });

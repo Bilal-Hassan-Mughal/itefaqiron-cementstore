@@ -51,7 +51,7 @@ import {
   EventNote as EventNoteIcon,
   Payments as PaymentsIcon,
 } from '@mui/icons-material';
-import { isAdminRole as isAdminRoleName, getStaffRoleName, getRoleDefaultModules, SALESMAN_ALLOWED_MENU_IDS, hasPageAccess, parseAllowedModules, expandLegacyModules } from '@/lib/staff-access';
+import { canAccessMenuItem } from '@/lib/staff-access';
 import { isHqUser } from '@/lib/branch-roles';
 import { exitHqPosMode } from '@/lib/branch-client';
 import { NAV_FN, SIDEBAR, SIDEBAR_WIDTH, SIDEBAR_SECTION_LABELS, COMPANY, POWERED_BY } from '@/lib/brand-theme';
@@ -255,6 +255,8 @@ export default function Sidebar({
     { id: 'profit-report', name: 'Profit Report', icon: TrendingUpIcon, category: 'reports', parent: 'Reports' },
     { id: 'purchase-report', name: 'Purchase Report', icon: ShoppingBagIcon, category: 'reports', parent: 'Reports' },
     { id: 'rebate-report', name: 'Rebate Report', icon: PieChartIcon, category: 'reports', parent: 'Reports' },
+    { id: 'rebate-history', name: 'Rebate History', icon: PieChartIcon, category: 'reports', parent: 'Reports' },
+    { id: 'supplier-ledger', name: 'Supplier Ledger', icon: DescriptionIcon, category: 'reports', parent: 'Reports' },
     { id: 'balance-sheet', name: 'Balance Sheet', icon: TableChartIcon, category: 'reports', parent: 'Reports' },
 
     { id: 'hr', name: 'HR Management', icon: BadgeIcon, category: 'hr-management', parent: 'HR Management' },
@@ -267,31 +269,7 @@ export default function Sidebar({
     { id: 'import', name: 'Excel Data Import', icon: TableChartIcon, category: 'system', parent: 'System', adminOnly: true },
   ];
 
-  const getRequiredModule = (item) => item.id;
-
-  const roleName = getStaffRoleName(user);
-  const isAdmin = isAdminRoleName(roleName);
-
-  let allowed = expandLegacyModules(parseAllowedModules(user?.allowed_modules));
-
-  if (!Array.isArray(allowed) || allowed.length === 0) {
-    allowed = getRoleDefaultModules(roleName);
-  }
-
-  const visibleMenuItems = menuItems.filter((item) => {
-    if (item.hqOnly && !isHqUser(user)) return false;
-    if (item.adminOnly && !isAdmin) return false;
-    if (roleName === 'SUPER_ADMIN' || roleName === 'HQ_SUPER_ADMIN' || roleName === 'BRANCH_SUPER_ADMIN') return true;
-
-    const pageId = getRequiredModule(item);
-    if (pageId === 'hr') {
-      const hrPages = ['hr', 'employees', 'attendance', 'payroll', 'salary-management'];
-      if (hrPages.some((id) => hasPageAccess(allowed, id))) return true;
-    } else if (pageId && hasPageAccess(allowed, pageId)) return true;
-
-    if (isAdmin) return true;
-    return SALESMAN_ALLOWED_MENU_IDS.has(item.id);
-  });
+  const visibleMenuItems = menuItems.filter((item) => canAccessMenuItem(user, item));
 
   // Derive activeTab from pathname + query (view=create, type=return, etc.)
   const detectActiveFromPath = useCallback((currentPath, params) => {
@@ -364,7 +342,9 @@ export default function Sidebar({
       { path: '/dashboard/reports/item-sale-report', id: 'item-sale-report', category: 'reports' },
       { path: '/dashboard/reports/profit-report', id: 'profit-report', category: 'reports' },
       { path: '/dashboard/reports/purchase-report', id: 'purchase-report', category: 'reports' },
+      { path: '/dashboard/reports/rebate/history', id: 'rebate-history', category: 'reports' },
       { path: '/dashboard/reports/rebate', id: 'rebate-report', category: 'reports' },
+      { path: '/dashboard/reports/supplier-ledger', id: 'supplier-ledger', category: 'reports' },
       { path: '/dashboard/reports/balance-sheet', id: 'balance-sheet', category: 'reports' },
       { path: '/dashboard/reports', id: 'reports-dashboard', category: 'reports' },
       { path: '/dashboard/stores', id: 'stores', category: 'system' },

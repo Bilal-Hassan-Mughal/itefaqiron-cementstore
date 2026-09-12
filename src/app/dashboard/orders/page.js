@@ -8,6 +8,7 @@ import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
 import SaveProgressBackdrop from '../components/save-progress-backdrop';
+import { notifyLedgerDataChanged } from '@/lib/ledger-tabs';
 
 // Material-UI imports
 import {
@@ -1289,6 +1290,7 @@ function OrdersPageContent() {
 
       if (response.ok) {
         const result = await response.json();
+        notifyLedgerDataChanged('order');
         updateSaveStatus('Updating ledger & stock...');
         const successMessage = editSaleId ? 'Order updated successfully!' : 'Order saved successfully!';
         showSnackbar(successMessage, 'success');

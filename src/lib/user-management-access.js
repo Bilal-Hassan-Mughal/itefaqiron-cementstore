@@ -1,24 +1,18 @@
-import { isHqUser, HQ_ROLES, canManageUsers, BRANCH_ASSIGNABLE_ROLES } from './branch-roles';
+import { isHqUser, HQ_ROLES, BRANCH_ASSIGNABLE_ROLES } from './branch-roles';
+import { canManageUsers } from './staff-access';
 import { parseUserFromRequest } from './branch-server';
 import { centralPrisma } from './prisma';
 import { NextResponse } from 'next/server';
+import { toDbRole } from './user-role';
 
 export { BRANCH_ASSIGNABLE_ROLES };
-
-/** Map UI role keys to Prisma UserRole enum */
-export function toDbRole(role) {
-  const map = {
-    HQ_SUPER_ADMIN: 'HQ_SUPER_ADMIN',
-    SUPER_ADMIN: 'SUPER_ADMIN',
-    BRANCH_SUPER_ADMIN: 'BRANCH_SUPER_ADMIN',
-    ADMIN: 'ADMIN',
-    SALESMAN: 'SALESMAN',
-    MANAGER: 'ADMIN',
-    ACCOUNTANT: 'ADMIN',
-    STOCK_MANAGER: 'ADMIN',
-  };
-  return map[role] || 'SALESMAN';
-}
+export {
+  toDbRole,
+  resolveStaffRole,
+  normalizeUserForClient,
+  getRoleDisplayName,
+  isBranchUserManager,
+} from './user-role';
 
 export function resolveUserManagementScope(request) {
   const actor = parseUserFromRequest(request);

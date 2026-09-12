@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { centralPrisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 import { isHqUser } from '@/lib/branch-roles';
+import { normalizeUserForClient, resolveStaffRole, toDbRole } from '@/lib/user-role';
 
 // Helper for JSON errors
 function errorResponse(message, status = 400) {
@@ -115,21 +116,40 @@ export async function POST(request) {
 
     console.log('✅ Password verified for user:', user.email);
 
-    // Update last logged in time
-    await centralPrisma.users.update({
-      where: { user_id: user.user_id },
-      data: { last_logged_in: new Date() },
-    });
+    const resolvedRole = resolveStaffRole(user);
+    const roleNeedsSync =
+      user.role === 'ADMIN' &&
+      resolvedRole !== 'ADMIN' &&
+      ['MANAGER', 'ACCOUNTANT', 'STOCK_MANAGER', 'SALESMAN'].includes(resolvedRole);
+
+    const loginUpdate = { last_logged_in: new Date() };
+    if (roleNeedsSync) loginUpdate.role = toDbRole(resolvedRole);
+
+    try {
+      await centralPrisma.users.update({
+        where: { user_id: user.user_id },
+        data: loginUpdate,
+      });
+    } catch (syncErr) {
+      console.warn('Login role sync skipped (run DB migration for new roles):', syncErr?.message);
+      await centralPrisma.users.update({
+        where: { user_id: user.user_id },
+        data: { last_logged_in: new Date() },
+      });
+    }
 
     // Remove password from response
     const { password: _, ...userWithoutPassword } = user;
+    const clientUser = normalizeUserForClient(
+      roleNeedsSync ? { ...userWithoutPassword, role: resolvedRole } : userWithoutPassword
+    );
     const is_hq = userIsHq;
 
     console.log('✅ User logged in successfully:', user.email);
     
     return NextResponse.json({
       message: 'Login successful',
-      user: userWithoutPassword,
+      user: clientUser,
       is_hq,
       login_mode: mode,
     });

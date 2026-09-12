@@ -4,7 +4,9 @@ export const BRANCH_ASSIGNABLE_ROLES = ['ADMIN', 'SALESMAN', 'MANAGER', 'ACCOUNT
 /** HQ roles — no branch_id on user; can access all branches. */
 export const HQ_ROLES = new Set(['SUPER_ADMIN', 'HQ_SUPER_ADMIN']);
 
-/** Full branch access roles. */
+import { resolveStaffRole } from './user-role';
+
+/** Full branch access roles (coarse DB enum — prefer resolveStaffRole for checks). */
 export const BRANCH_ADMIN_ROLES = new Set(['BRANCH_SUPER_ADMIN', 'ADMIN', 'SUPER_ADMIN']);
 
 export function isHqUser(user) {
@@ -23,8 +25,7 @@ export function canAccessBranch(user, branchId) {
   return Number(user.branch_id) === Number(branchId);
 }
 
-export function canManageUsers(user) {
-  if (!user) return false;
-  if (isHqUser(user)) return true;
-  return BRANCH_ADMIN_ROLES.has(user.role);
+/** Resolved role key for display and client-side access (not raw DB enum). */
+export function getEffectiveStaffRole(user) {
+  return resolveStaffRole(user);
 }

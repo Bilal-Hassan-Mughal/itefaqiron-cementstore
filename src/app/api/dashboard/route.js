@@ -10,15 +10,33 @@ export async function GET(request) {
   const branchId = __branchScope.branchId;
 
   try {
+    const { searchParams } = new URL(request.url);
+    const fromDateParam = searchParams.get('fromDate');
+    const toDateParam = searchParams.get('toDate');
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
-    const lastMonth = new Date();
-    lastMonth.setMonth(lastMonth.getMonth() - 1);
-    lastMonth.setHours(0, 0, 0, 0);
 
-    const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-    const lastMonthStart = new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 1);
+    let currentMonthStart;
+    let currentMonthEnd;
+    let lastMonthStart;
+    let lastMonthEnd;
+
+    if (fromDateParam && toDateParam) {
+      currentMonthStart = new Date(`${fromDateParam}T00:00:00`);
+      currentMonthEnd = new Date(`${toDateParam}T23:59:59.999`);
+      const spanMs = currentMonthEnd.getTime() - currentMonthStart.getTime();
+      lastMonthEnd = new Date(currentMonthStart.getTime() - 1);
+      lastMonthStart = new Date(lastMonthEnd.getTime() - spanMs);
+    } else {
+      const lastMonth = new Date();
+      lastMonth.setMonth(lastMonth.getMonth() - 1);
+      lastMonth.setHours(0, 0, 0, 0);
+      currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      currentMonthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+      lastMonthStart = new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 1);
+      lastMonthEnd = currentMonthStart;
+    }
 
     // Use raw SQL to avoid datetime parsing issues
     // Get current month sales
@@ -27,7 +45,7 @@ export async function GET(request) {
       FROM sales
       WHERE branch_id = ${branchId}
         AND created_at >= ${currentMonthStart}
-        AND created_at < ${new Date(today.getFullYear(), today.getMonth() + 1, 1)}
+        AND created_at < ${currentMonthEnd}
         AND bill_type != 'QUOTATION'
     `;
 
@@ -37,7 +55,7 @@ export async function GET(request) {
       FROM sales
       WHERE branch_id = ${branchId}
         AND created_at >= ${lastMonthStart}
-        AND created_at < ${currentMonthStart}
+        AND created_at < ${lastMonthEnd}
         AND bill_type != 'QUOTATION'
     `;
 
@@ -72,7 +90,7 @@ export async function GET(request) {
       FROM sales
       WHERE branch_id = ${branchId}
         AND created_at >= ${currentMonthStart}
-        AND created_at < ${new Date(today.getFullYear(), today.getMonth() + 1, 1)}
+        AND created_at < ${currentMonthEnd}
         AND bill_type != 'QUOTATION'
     `;
 
@@ -81,7 +99,7 @@ export async function GET(request) {
       FROM sales
       WHERE branch_id = ${branchId}
         AND created_at >= ${lastMonthStart}
-        AND created_at < ${currentMonthStart}
+        AND created_at < ${lastMonthEnd}
         AND bill_type != 'QUOTATION'
     `;
 

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { calculateClosingBalance, createLedgerEntry, createPayableLedgerEntry } from '@/lib/ledger-helper';
 import { getNextId } from '@/lib/id-helper';
 import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
+import { persistPaymentLedger, recalculateLedgerBalances } from '@/lib/payment-ledger-writer';
 
 // GET - Fetch all payments with related data
 export async function GET(request) {
@@ -540,10 +541,43 @@ export async function POST(request) {
 
       await Promise.all(balanceUpdates);
 
+      const ledgerIds = ledgerEntriesWithIds.map((e) => e.l_id);
+      const createdLedgerEntries = await tx.ledger.findMany({
+        where: { l_id: { in: ledgerIds } },
+        include: {
+          customer: {
+            select: {
+              cus_id: true,
+              cus_name: true,
+              cus_phone_no: true,
+              cus_category: true,
+              cus_type: true,
+              customer_category: { select: { cus_cat_title: true } },
+              customer_type: { select: { cus_type_title: true } },
+            },
+          },
+          updated_by_user: {
+            select: { user_id: true, full_name: true, role: true },
+          },
+        },
+      });
+
+      const updated_balances = { [parseInt(account_id)]: mainClosing };
+      if (cash_account_id && parseFloat(cash_amount) > 0) {
+        const cashEntry = ledgerEntries.find((e) => e.cus_id === parseInt(cash_account_id));
+        if (cashEntry) updated_balances[parseInt(cash_account_id)] = cashEntry.closing_balance;
+      }
+      if (bank_account_id && parseFloat(bank_amount) > 0) {
+        const bankEntry = ledgerEntries.find((e) => e.cus_id === parseInt(bank_account_id));
+        if (bankEntry) updated_balances[parseInt(bank_account_id)] = bankEntry.closing_balance;
+      }
+
       return {
         ...payment,
         customer_opening_balance: mainAccountEntry.opening_balance,
-        customer_closing_balance: mainAccountEntry.closing_balance
+        customer_closing_balance: mainAccountEntry.closing_balance,
+        ledger_entries: createdLedgerEntries,
+        updated_balances,
       };
     }, { timeout: 15000 });
 
@@ -554,28 +588,168 @@ export async function POST(request) {
   }
 }
 
-// PUT - Update payment status
+// PUT - Update payment transaction (full edit) or status-only
 export async function PUT(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
 
   try {
     const body = await request.json();
-    const { id, status } = body;
+    const {
+      id,
+      status,
+      payment_date,
+      payment_type,
+      account_id,
+      total_amount,
+      discount_amount = 0,
+      cash_account_id,
+      cash_amount = 0,
+      bank_account_id,
+      bank_amount = 0,
+      description,
+      created_by,
+    } = body;
 
-    if (!id || !status) {
-      return NextResponse.json({ error: 'Payment ID and status are required' }, { status: 400 });
+    if (!id) {
+      return NextResponse.json({ error: 'Payment ID is required' }, { status: 400 });
     }
 
-    const payment = await prisma.payment.update({
-      where: { payment_id: parseInt(id) },
-      data: { status }
-    });
+    const paymentId = parseInt(id, 10);
+    const isFullUpdate = payment_type && account_id != null && total_amount != null;
 
-    return NextResponse.json(payment);
+    if (!isFullUpdate) {
+      if (!status) {
+        return NextResponse.json({ error: 'Payment ID and status are required' }, { status: 400 });
+      }
+      const payment = await prisma.payment.update({
+        where: { payment_id: paymentId },
+        data: { status },
+      });
+      return NextResponse.json(payment);
+    }
+
+    if (!payment_date) {
+      return NextResponse.json({ error: 'Payment date is required' }, { status: 400 });
+    }
+
+    const validatedCreatedBy = await resolveUpdatedByUserId(request, created_by, prisma);
+    if (!validatedCreatedBy) {
+      return NextResponse.json(
+        { error: 'Invalid user session. Please log in again and retry.' },
+        { status: 400 }
+      );
+    }
+
+    const netAmount = parseFloat(total_amount) - parseFloat(discount_amount);
+    const totalPaymentAmount = parseFloat(cash_amount) + parseFloat(bank_amount);
+    if (Math.abs(netAmount - totalPaymentAmount) > 0.01) {
+      return NextResponse.json({ error: 'Payment amounts do not match net amount' }, { status: 400 });
+    }
+
+    const existing = await prisma.payment.findUnique({ where: { payment_id: paymentId } });
+    if (!existing) {
+      return NextResponse.json({ error: 'Payment not found' }, { status: 404 });
+    }
+
+    const affectedAccountIds = new Set([
+      existing.account_id,
+      existing.cash_account_id,
+      existing.bank_account_id,
+      parseInt(account_id),
+      cash_account_id ? parseInt(cash_account_id) : null,
+      bank_account_id ? parseInt(bank_account_id) : null,
+    ].filter(Boolean));
+
+    const result = await prisma.$transaction(async (tx) => {
+      const billRef = `PAY-${paymentId}`;
+
+      await tx.ledger.deleteMany({ where: { bill_no: billRef } });
+      await tx.paymentDetail.deleteMany({ where: { payment_id: paymentId } });
+
+      for (const cusId of affectedAccountIds) {
+        await recalculateLedgerBalances(tx, cusId);
+      }
+
+      const payment = await tx.payment.update({
+        where: { payment_id: paymentId },
+        data: {
+          payment_date: new Date(payment_date),
+          payment_type,
+          account_id: parseInt(account_id),
+          total_amount: parseFloat(total_amount),
+          discount_amount: parseFloat(discount_amount),
+          net_amount: netAmount,
+          cash_account_id: cash_account_id ? parseInt(cash_account_id) : null,
+          cash_amount: parseFloat(cash_amount),
+          bank_account_id: bank_account_id ? parseInt(bank_account_id) : null,
+          bank_amount: parseFloat(bank_amount),
+          description,
+        },
+      });
+
+      const accountBalances = await tx.customer.findMany({
+        where: { cus_id: { in: [...affectedAccountIds] } },
+        select: {
+          cus_id: true,
+          cus_name: true,
+          cus_balance: true,
+          cus_category: true,
+          customer_category: { select: { cus_cat_title: true } },
+        },
+      });
+
+      const balanceMap = {};
+      const categoryMap = {};
+      const supplierAccountIds = new Set();
+      const bankCashCategoryIds = new Set();
+      accountBalances.forEach((acc) => {
+        balanceMap[acc.cus_id] = parseFloat(acc.cus_balance || 0);
+        categoryMap[acc.cus_id] = acc.cus_category;
+        const catTitle = (acc.customer_category?.cus_cat_title || '').toLowerCase();
+        if (catTitle.includes('supplier')) supplierAccountIds.add(acc.cus_id);
+        if (catTitle.includes('cash') || catTitle.includes('bank')) {
+          if (acc.cus_category) bankCashCategoryIds.add(acc.cus_category);
+        }
+      });
+
+      const mainCustomer = accountBalances.find((acc) => acc.cus_id === parseInt(account_id));
+      const mainCustomerName = mainCustomer?.cus_name || '';
+      const mainAccountIsBankOrCash = bankCashCategoryIds.has(categoryMap[parseInt(account_id)]);
+
+      const ledgerResult = await persistPaymentLedger(tx, {
+        payment,
+        payment_type,
+        account_id,
+        total_amount,
+        discount_amount,
+        netAmount,
+        cash_account_id,
+        cash_amount,
+        bank_account_id,
+        bank_amount,
+        description,
+        validatedCreatedBy,
+        balanceMap,
+        categoryMap,
+        bankCashCategoryIds,
+        mainCustomerName,
+        mainAccountIsBankOrCash,
+      });
+
+      return {
+        ...payment,
+        customer_opening_balance: ledgerResult.mainAccountEntry.opening_balance,
+        customer_closing_balance: ledgerResult.mainAccountEntry.closing_balance,
+        ledger_entries: ledgerResult.createdLedgerEntries,
+        updated_balances: ledgerResult.updated_balances,
+      };
+    }, { timeout: 20000 });
+
+    return NextResponse.json(result);
   } catch (error) {
     console.error('Error updating payment:', error);
-    return NextResponse.json({ error: 'Failed to update payment' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Failed to update payment' }, { status: 500 });
   }
 }
 

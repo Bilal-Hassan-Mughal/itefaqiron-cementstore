@@ -64,3 +64,38 @@ export function openAccountLedgerTab(cusId, cusName) {
 }
 
 export const FINANCE_LEDGER_PATH = '/dashboard/finance';
+
+export const LEDGER_DATA_CHANGED_EVENT = 'ledger-data-changed';
+const LEDGER_CHANGED_STORAGE_KEY = 'ledger_data_changed_at';
+
+/** Notify open Finance/ledger views to reload (same tab, other tabs, or after sales/payments). */
+export function notifyLedgerDataChanged(source = 'unknown') {
+  if (typeof window === 'undefined') return;
+  const at = Date.now();
+  window.dispatchEvent(
+    new CustomEvent(LEDGER_DATA_CHANGED_EVENT, { detail: { source, at } })
+  );
+  try {
+    localStorage.setItem(LEDGER_CHANGED_STORAGE_KEY, String(at));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+/** Subscribe to ledger refresh signals. Returns unsubscribe function. */
+export function subscribeLedgerDataChanged(callback) {
+  if (typeof window === 'undefined') return () => {};
+
+  const onEvent = () => callback();
+  const onStorage = (e) => {
+    if (e.key === LEDGER_CHANGED_STORAGE_KEY) callback();
+  };
+
+  window.addEventListener(LEDGER_DATA_CHANGED_EVENT, onEvent);
+  window.addEventListener('storage', onStorage);
+
+  return () => {
+    window.removeEventListener(LEDGER_DATA_CHANGED_EVENT, onEvent);
+    window.removeEventListener('storage', onStorage);
+  };
+}

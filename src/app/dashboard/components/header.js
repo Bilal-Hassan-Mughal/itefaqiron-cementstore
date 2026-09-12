@@ -1,10 +1,9 @@
 'use client';
 
-import { Menu, Mail, Bell, Home, Plus, LogOut } from 'lucide-react';
+import { Menu, Mail, Bell, Home, Plus, LogOut, UserPlus } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
-import { getStaffRoleName } from '@/lib/staff-access';
-import { formatRoleLabel } from '@/lib/branch-login-credentials';
+import { getStaffRoleName, canStaffAccessPath, getRoleDisplayName } from '@/lib/staff-access';
 
 function getUserDisplayName(user) {
   const name = (user?.full_name || '').trim();
@@ -16,10 +15,7 @@ function getUserDisplayName(user) {
 
 function getUserRoleLabel(user) {
   const role = getStaffRoleName(user) || user?.role;
-  if (!role) return 'Staff';
-  return formatRoleLabel(role)
-    .toLowerCase()
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return getRoleDisplayName(role);
 }
 
 export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, branchLabel, onLogout }) {
@@ -39,6 +35,7 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
 
   const viewParam = searchParams?.get('view');
   const typeParam = searchParams?.get('type');
+  const actionParam = searchParams?.get('action');
 
   const isNewSaleActive =
     pathname === '/dashboard/sales' &&
@@ -53,6 +50,18 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
     pathname === '/dashboard/orders' &&
     viewParam === 'create';
 
+  const isAddCustomerActive =
+    pathname === '/dashboard/customers' &&
+    actionParam === 'add';
+
+  const handleAddCustomer = () => {
+    if (pathname === '/dashboard/customers') {
+      window.dispatchEvent(new CustomEvent('open-customer-form'));
+      return;
+    }
+    router.push('/dashboard/customers?action=add');
+  };
+
   const pageTitle = activeTab === 'dashboard'
     ? 'Dashboard'
     : activeTab === 'new-sale'
@@ -65,6 +74,13 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
   const userDisplayName = getUserDisplayName(user);
   const userRoleLabel = getUserRoleLabel(user);
   const userInitial = userDisplayName.charAt(0).toUpperCase();
+
+  const canNewSale = user && canStaffAccessPath(user, '/dashboard/sales');
+  const canNewPurchase = user && canStaffAccessPath(user, '/dashboard/purchases');
+  const canOrders = user && canStaffAccessPath(user, '/dashboard/orders');
+  const canAddCustomerBtn = user && canStaffAccessPath(user, '/dashboard/customers');
+  const canAddProduct = user && canStaffAccessPath(user, '/dashboard/products');
+  const hasHeaderActions = canNewSale || canNewPurchase || canOrders || canAddCustomerBtn || canAddProduct;
 
   return (
     <header className="sticky top-0 z-30">
@@ -115,7 +131,9 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
             >
               <Menu className="w-5 h-5" />
             </button>
+            {hasHeaderActions && (
             <div className="flex items-center gap-2 flex-wrap">
+              {canNewSale && (
               <button
                 type="button"
                 onClick={() => router.push('/dashboard/sales')}
@@ -127,6 +145,8 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
               >
                 New Sale
               </button>
+              )}
+              {canNewPurchase && (
               <button
                 type="button"
                 onClick={() => router.push('/dashboard/purchases?view=create')}
@@ -138,6 +158,8 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
               >
                 New Purchase
               </button>
+              )}
+              {canOrders && (
               <button
                 type="button"
                 onClick={() => router.push('/dashboard/orders?view=create&type=ORDER')}
@@ -149,7 +171,9 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
               >
                 Orders
               </button>
+              )}
             </div>
+            )}
           </div>
 
           <div className="hidden md:flex items-center gap-2 text-sm text-slate-500 font-medium">
@@ -159,6 +183,21 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
           </div>
 
           <div className="flex items-center gap-2 ml-auto">
+            {canAddCustomerBtn && (
+            <button
+              type="button"
+              onClick={handleAddCustomer}
+              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200 ${
+                isAddCustomerActive
+                  ? 'text-white bg-[#1347c4] border border-[#1A55E3]/40 shadow-[0_4px_12px_rgba(26,85,227,0.28)] ring-2 ring-[#1A55E3]/25 ring-offset-1'
+                  : 'text-white bg-[#1A55E3] border border-[#1A55E3]/30 shadow-[0_1px_2px_rgba(26,85,227,0.2)] hover:bg-[#1347c4] hover:shadow-[0_4px_12px_rgba(26,85,227,0.28)] active:bg-[#103da8]'
+              }`}
+            >
+              <UserPlus className="w-4 h-4" strokeWidth={2.25} />
+              <span className="hidden sm:inline">Add Customer</span>
+            </button>
+            )}
+            {canAddProduct && (
             <button
               type="button"
               onClick={() => router.push('/dashboard/products')}
@@ -167,6 +206,7 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
               <Plus className="w-4 h-4" strokeWidth={2.25} />
               <span className="hidden sm:inline">Add Product</span>
             </button>
+            )}
             <div className="hidden md:flex items-center gap-2.5 pl-3 ml-1 border-l border-slate-200">
               <div className="text-right min-w-0">
                 <p className="text-sm font-semibold text-slate-900 truncate max-w-[140px]" title={userDisplayName}>
