@@ -19,10 +19,20 @@ function mapTransactionTypeToPaymentType(transactionType) {
   return mapping[transactionType] || 'CASH';
 }
 
+function dayEndUniqueWhere(branchId, businessDate) {
+  return {
+    branch_id_business_date: {
+      branch_id: branchId,
+      business_date: businessDate,
+    },
+  };
+}
+
 // GET - Fetch day end data for a specific date or current day
 export async function GET(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const branchId = __branchScope.branchId;
 
   try {
     const { searchParams } = new URL(request.url);
@@ -37,7 +47,7 @@ export async function GET(request) {
 
     // Get or find existing day end record
     let dayEnd = await prisma.dayEnd.findUnique({
-      where: { business_date: businessDate },
+      where: dayEndUniqueWhere(branchId, businessDate),
       include: {
         day_end_details: true,
         closed_by_user: {
@@ -98,9 +108,10 @@ export async function GET(request) {
     if (!dayEnd) {
       const prevDayEnd = await prisma.dayEnd.findFirst({
         where: {
-          business_date: { lt: businessDate }
+          branch_id: branchId,
+          business_date: { lt: businessDate },
         },
-        orderBy: { business_date: 'desc' }
+        orderBy: { business_date: 'desc' },
       });
 
       if (prevDayEnd) {
@@ -111,9 +122,10 @@ export async function GET(request) {
 
       dayEnd = await prisma.dayEnd.create({
         data: {
+          branch_id: branchId,
           business_date: businessDate,
           opening_cash: defaultOpeningCash,
-          status: 'OPEN'
+          status: 'OPEN',
         },
         include: {
           day_end_details: true,
@@ -528,6 +540,7 @@ export async function GET(request) {
 export async function POST(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const branchId = __branchScope.branchId;
 
   try {
     const body = await request.json();
@@ -551,7 +564,7 @@ export async function POST(request) {
 
     // Check existing record
     const existingDayEnd = await prisma.dayEnd.findUnique({
-      where: { business_date: businessDate }
+      where: dayEndUniqueWhere(branchId, businessDate),
     });
 
     if (action === 'REOPEN_DAY') {
@@ -726,9 +739,10 @@ export async function POST(request) {
       } else {
         dayEnd = await tx.dayEnd.create({
           data: {
+            branch_id: branchId,
             business_date: businessDate,
-            ...dayData
-          }
+            ...dayData,
+          },
         });
       }
 

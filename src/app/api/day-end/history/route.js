@@ -7,6 +7,7 @@ import { initBranchScope } from '@/lib/branch-server';
 export async function GET(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const branchId = __branchScope.branchId;
 
   try {
     const { searchParams } = new URL(request.url);
@@ -19,7 +20,7 @@ export async function GET(request) {
     const skip = (page - 1) * limit;
 
     // Build where clause
-    const whereClause = {};
+    const whereClause = { branch_id: branchId };
     
     if (startDate && endDate) {
       whereClause.business_date = {

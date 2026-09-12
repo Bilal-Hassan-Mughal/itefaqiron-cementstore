@@ -21,6 +21,10 @@ import {
   DASHBOARD_ANALYTICS_CHILD_WIDGET_IDS,
   DASHBOARD_ANALYTICS_WIDGET_ID_SET,
 } from './dashboard-analytics-widgets';
+import {
+  DAY_END_WIDGET_IDS,
+  DAY_END_WIDGET_ID_SET,
+} from './day-end-widgets';
 import { getRoleTemplateModules, loadCustomRolePermissions } from './role-permissions-store';
 
 export { resolveStaffRole, getRoleDisplayName } from './user-role';
@@ -77,7 +81,7 @@ export const SYSTEM_ROLES = [
     description: 'Administrative access to manage operations, users, stores, inventory, and financial modules.',
     color: 'bg-blue-100 text-blue-800 border-blue-200',
     badgeGradient: 'from-blue-500 to-indigo-600',
-    defaultModules: ['dashboard', 'dashboard_analytics', 'dashboard_low_stock', 'user_management', 'store_management', 'store_stock', 'stock_transfer', 'customers', 'products', 'sales', 'sale_returns', 'purchases', 'cargo', 'finance', 'cash_bank_day_end', 'hr', 'reports', 'profit_report', 'biometrics', 'import']
+    defaultModules: ['dashboard', 'dashboard_analytics', 'dashboard_low_stock', 'user_management', 'store_management', 'store_stock', 'stock_transfer', 'customers', 'products', 'sales', 'sale_returns', 'purchases', 'cargo', 'finance', 'cash_bank_day_end', 'day_end_profit_summary', 'hr', 'reports', 'profit_report', 'biometrics', 'import']
   },
   {
     key: 'MANAGER',
@@ -85,7 +89,7 @@ export const SYSTEM_ROLES = [
     description: 'Oversees daily sales, purchases, store stock, transfers, staff HR, and operational reports.',
     color: 'bg-purple-100 text-purple-800 border-purple-200',
     badgeGradient: 'from-purple-500 to-violet-600',
-    defaultModules: ['dashboard', 'dashboard_analytics', 'dashboard_low_stock', 'store_management', 'store_stock', 'stock_transfer', 'customers', 'products', 'sales', 'sale_returns', 'purchases', 'cargo', 'finance', 'cash_bank_day_end', 'hr', 'reports']
+    defaultModules: ['dashboard', 'dashboard_analytics', 'dashboard_low_stock', 'store_management', 'store_stock', 'stock_transfer', 'customers', 'products', 'sales', 'sale_returns', 'purchases', 'cargo', 'finance', 'cash_bank_day_end', 'day_end_profit_summary', 'hr', 'reports']
   },
   {
     key: 'ACCOUNTANT',
@@ -93,7 +97,7 @@ export const SYSTEM_ROLES = [
     description: 'Focuses on financial ledgers, customer accounts, cash/bank, day-end, and profit reports.',
     color: 'bg-emerald-100 text-emerald-800 border-emerald-200',
     badgeGradient: 'from-emerald-500 to-teal-600',
-    defaultModules: ['dashboard', 'customers', 'finance', 'cash_bank_day_end', 'reports', 'profit_report']
+    defaultModules: ['dashboard', 'customers', 'finance', 'cash_bank_day_end', 'day_end_profit_summary', 'reports', 'profit_report']
   },
   {
     key: 'SALESMAN',
@@ -265,6 +269,17 @@ export function hasDashboardWidgetAccess(user, widgetId) {
   if (!user || !widgetId) return false;
   if (!DASHBOARD_ANALYTICS_WIDGET_ID_SET.has(widgetId)) return false;
   return hasPageAccess(getStaffAllowedModules(user), widgetId);
+}
+
+/** Day End Closing widget — e.g. Profit Summary on day-end page. */
+export function hasDayEndWidgetAccess(user, widgetId) {
+  if (!user || !widgetId) return false;
+  if (!DAY_END_WIDGET_ID_SET.has(widgetId)) return false;
+  return hasPageAccess(getStaffAllowedModules(user), widgetId);
+}
+
+export function hasDayEndProfitSummaryAccess(user) {
+  return hasDayEndWidgetAccess(user, 'day-end-profit-summary');
 }
 
 /** Any Monthly Analytics widget visible on dashboard. */

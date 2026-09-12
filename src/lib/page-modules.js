@@ -6,10 +6,12 @@ import {
   DASHBOARD_ANALYTICS_WIDGETS,
   DASHBOARD_ANALYTICS_CHILD_WIDGET_IDS,
 } from './dashboard-analytics-widgets';
+import { DAY_END_WIDGETS } from './day-end-widgets';
 
 export const PAGE_SECTIONS = [
   'Dashboard',
   'Monthly Analytics',
+  'Day End Closing',
   'Quick Access',
   'Accounts',
   'Products',
@@ -32,6 +34,14 @@ export const SYSTEM_PAGES = [
     name: w.name,
     section: 'Monthly Analytics',
     path: '/dashboard',
+    description: w.description,
+  })),
+
+  ...DAY_END_WIDGETS.map((w) => ({
+    id: w.id,
+    name: w.name,
+    section: 'Day End Closing',
+    path: '/dashboard/day-end',
     description: w.description,
   })),
 
@@ -138,6 +148,7 @@ export const LEGACY_MODULE_TO_PAGES = {
     'purchase-report', 'rebate-report', 'rebate-history', 'supplier-ledger', 'balance-sheet',
   ],
   profit_report: ['profit-report'],
+  day_end_profit_summary: ['day-end-profit-summary'],
   biometrics: ['settings'],
   import: ['import'],
   system: ['usermanagement', 'stores', 'store-stock', 'stock-transfer', 'settings', 'import'],

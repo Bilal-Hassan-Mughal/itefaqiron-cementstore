@@ -39,6 +39,17 @@ import {
   Layers
 } from 'lucide-react';
 import DashboardLayout from '../components/dashboard-layout';
+import { hasDayEndProfitSummaryAccess } from '@/lib/staff-access';
+
+function readDayEndUser() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem('user');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
 
 const formatCurrency = (val) => {
   const n = parseFloat(val || 0);
@@ -67,6 +78,8 @@ export default function DayEndPage() {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [showHistory, setShowHistory] = useState(false);
   const [showDenominations, setShowDenominations] = useState(false);
+  const [dayEndUser, setDayEndUser] = useState(null);
+  const [permVersion, setPermVersion] = useState(0);
 
   // Form states
   const [openingCash, setOpeningCash] = useState('');
@@ -155,6 +168,35 @@ export default function DayEndPage() {
       setLoading(false);
     }
   };
+
+  const showProfitSummary = useMemo(
+    () => hasDayEndProfitSummaryAccess(dayEndUser),
+    [dayEndUser, permVersion]
+  );
+
+  useEffect(() => {
+    setDayEndUser(readDayEndUser());
+    const onUserUpdated = () => setDayEndUser(readDayEndUser());
+    const onPermissionsUpdated = (e) => {
+      const next = e?.detail || readDayEndUser();
+      if (next?.user_id) setDayEndUser(next);
+      setPermVersion((v) => v + 1);
+    };
+    const onRoleMapUpdated = () => {
+      setDayEndUser(readDayEndUser());
+      setPermVersion((v) => v + 1);
+    };
+    window.addEventListener('storage', onUserUpdated);
+    window.addEventListener('branch-changed', onUserUpdated);
+    window.addEventListener('user-permissions-updated', onPermissionsUpdated);
+    window.addEventListener('role-permissions-updated', onRoleMapUpdated);
+    return () => {
+      window.removeEventListener('storage', onUserUpdated);
+      window.removeEventListener('branch-changed', onUserUpdated);
+      window.removeEventListener('user-permissions-updated', onPermissionsUpdated);
+      window.removeEventListener('role-permissions-updated', onRoleMapUpdated);
+    };
+  }, []);
 
   useEffect(() => {
     fetchDayEndData(selectedDate);
@@ -423,57 +465,56 @@ export default function DayEndPage() {
         {/* ---------------------------------------------------- */}
         {/* ROW 2: PROFIT SUMMARY & CASH SUMMARY CARDS */}
         {/* ---------------------------------------------------- */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className={`grid grid-cols-1 gap-6 ${showProfitSummary ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
 
-          {/* Profit Summary Card (2 Cols) */}
-          <div className="lg:col-span-2 bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs flex flex-col justify-between">
-            <div className="flex items-center space-x-2 border-b border-slate-100 pb-3 mb-4">
-              <BarChart3 className="w-5 h-5 text-blue-600" />
-              <h2 className="text-base font-bold text-slate-900">Profit Summary</h2>
-            </div>
-
-            <div className="space-y-6">
-              {/* Row 1: Sales - Purchases = Gross Profit */}
-              <div className="grid grid-cols-5 items-center text-center gap-2 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/50">
-                <div>
-                  <p className="text-xs font-semibold text-slate-500">Total Sales</p>
-                  <p className="text-sm font-black text-slate-900 mt-1">Rs. {formatCurrency(summary?.totalSales)}</p>
-                </div>
-                <div className="text-slate-400 font-bold text-lg">-</div>
-                <div>
-                  <p className="text-xs font-semibold text-amber-600">Total Purchases</p>
-                  <p className="text-sm font-black text-slate-900 mt-1">Rs. {formatCurrency(summary?.totalPurchases)}</p>
-                </div>
-                <div className="text-slate-400 font-bold text-lg">=</div>
-                <div>
-                  <p className="text-xs font-semibold text-emerald-600">Gross Profit</p>
-                  <p className="text-base font-black text-emerald-700 mt-1">Rs. {formatCurrency(summary?.grossProfit)}</p>
-                </div>
+          {showProfitSummary && (
+            <div className="lg:col-span-2 bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs flex flex-col justify-between">
+              <div className="flex items-center space-x-2 border-b border-slate-100 pb-3 mb-4">
+                <BarChart3 className="w-5 h-5 text-blue-600" />
+                <h2 className="text-base font-bold text-slate-900">Profit Summary</h2>
               </div>
 
-              {/* Row 2: Other Income - Other Expenses = Net Profit */}
-              <div className="grid grid-cols-5 items-center text-center gap-2 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/50">
-                <div>
-                  <p className="text-xs font-semibold text-slate-500">Other Income</p>
-                  <p className="text-sm font-black text-slate-900 mt-1">Rs. 0.00</p>
+              <div className="space-y-6">
+                <div className="grid grid-cols-5 items-center text-center gap-2 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/50">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500">Total Sales</p>
+                    <p className="text-sm font-black text-slate-900 mt-1">Rs. {formatCurrency(summary?.totalSales)}</p>
+                  </div>
+                  <div className="text-slate-400 font-bold text-lg">-</div>
+                  <div>
+                    <p className="text-xs font-semibold text-amber-600">Total Purchases</p>
+                    <p className="text-sm font-black text-slate-900 mt-1">Rs. {formatCurrency(summary?.totalPurchases)}</p>
+                  </div>
+                  <div className="text-slate-400 font-bold text-lg">=</div>
+                  <div>
+                    <p className="text-xs font-semibold text-emerald-600">Gross Profit</p>
+                    <p className="text-base font-black text-emerald-700 mt-1">Rs. {formatCurrency(summary?.grossProfit)}</p>
+                  </div>
                 </div>
-                <div className="text-slate-400 font-bold text-lg">-</div>
-                <div>
-                  <p className="text-xs font-semibold text-rose-600">Other Expenses</p>
-                  <p className="text-sm font-black text-slate-900 mt-1">Rs. {formatCurrency(summary?.totalExpenses)}</p>
-                </div>
-                <div className="text-slate-400 font-bold text-lg">=</div>
-                <div>
-                  <p className="text-xs font-semibold text-emerald-600">Net Profit</p>
-                  <p className="text-base font-black text-emerald-700 mt-1">Rs. {formatCurrency(summary?.netProfit)}</p>
-                  <p className="text-[10px] font-bold text-slate-500 mt-0.5">Profit Margin: {summary?.profitMargin || 0}%</p>
+
+                <div className="grid grid-cols-5 items-center text-center gap-2 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/50">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500">Other Income</p>
+                    <p className="text-sm font-black text-slate-900 mt-1">Rs. 0.00</p>
+                  </div>
+                  <div className="text-slate-400 font-bold text-lg">-</div>
+                  <div>
+                    <p className="text-xs font-semibold text-rose-600">Other Expenses</p>
+                    <p className="text-sm font-black text-slate-900 mt-1">Rs. {formatCurrency(summary?.totalExpenses)}</p>
+                  </div>
+                  <div className="text-slate-400 font-bold text-lg">=</div>
+                  <div>
+                    <p className="text-xs font-semibold text-emerald-600">Net Profit</p>
+                    <p className="text-base font-black text-emerald-700 mt-1">Rs. {formatCurrency(summary?.netProfit)}</p>
+                    <p className="text-[10px] font-bold text-slate-500 mt-0.5">Profit Margin: {summary?.profitMargin || 0}%</p>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
 
-          {/* Cash Summary Card (1 Col) */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs flex flex-col justify-between">
+          {/* Cash Summary Card */}
+          <div className={`bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs flex flex-col justify-between ${showProfitSummary ? '' : 'lg:col-span-1'}`}>
             <div className="flex items-center space-x-2 border-b border-slate-100 pb-3 mb-4">
               <Wallet className="w-5 h-5 text-emerald-600" />
               <h2 className="text-base font-bold text-slate-900">Cash Summary</h2>
@@ -751,21 +792,25 @@ export default function DayEndPage() {
               <span className="text-xs font-semibold">Total Purchases:</span>
               <span className="text-xs font-black">Rs. {formatCurrency(summary?.totalPurchases)}</span>
             </div>
-            <div className="flex items-center space-x-2 bg-emerald-50 text-emerald-900 px-3.5 py-2 rounded-xl border border-emerald-200/60">
-              <TrendingUp className="w-4 h-4 text-emerald-600" />
-              <span className="text-xs font-semibold">Gross Profit:</span>
-              <span className="text-xs font-black">Rs. {formatCurrency(summary?.grossProfit)}</span>
-            </div>
-            <div className="flex items-center space-x-2 bg-teal-50 text-teal-900 px-3.5 py-2 rounded-xl border border-teal-200/60">
-              <DollarSign className="w-4 h-4 text-teal-600" />
-              <span className="text-xs font-semibold">Net Profit:</span>
-              <span className="text-xs font-black">Rs. {formatCurrency(summary?.netProfit)}</span>
-            </div>
-            <div className="flex items-center space-x-2 bg-purple-50 text-purple-900 px-3.5 py-2 rounded-xl border border-purple-200/60">
-              <PieChart className="w-4 h-4 text-purple-600" />
-              <span className="text-xs font-semibold">Profit Margin:</span>
-              <span className="text-xs font-black">{summary?.profitMargin || 0}%</span>
-            </div>
+            {showProfitSummary && (
+              <>
+                <div className="flex items-center space-x-2 bg-emerald-50 text-emerald-900 px-3.5 py-2 rounded-xl border border-emerald-200/60">
+                  <TrendingUp className="w-4 h-4 text-emerald-600" />
+                  <span className="text-xs font-semibold">Gross Profit:</span>
+                  <span className="text-xs font-black">Rs. {formatCurrency(summary?.grossProfit)}</span>
+                </div>
+                <div className="flex items-center space-x-2 bg-teal-50 text-teal-900 px-3.5 py-2 rounded-xl border border-teal-200/60">
+                  <DollarSign className="w-4 h-4 text-teal-600" />
+                  <span className="text-xs font-semibold">Net Profit:</span>
+                  <span className="text-xs font-black">Rs. {formatCurrency(summary?.netProfit)}</span>
+                </div>
+                <div className="flex items-center space-x-2 bg-purple-50 text-purple-900 px-3.5 py-2 rounded-xl border border-purple-200/60">
+                  <PieChart className="w-4 h-4 text-purple-600" />
+                  <span className="text-xs font-semibold">Profit Margin:</span>
+                  <span className="text-xs font-black">{summary?.profitMargin || 0}%</span>
+                </div>
+              </>
+            )}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
