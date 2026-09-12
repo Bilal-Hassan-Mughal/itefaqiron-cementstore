@@ -1,18 +1,11 @@
 import { NextResponse } from 'next/server';
 import { centralPrisma, parseUserFromRequest } from '@/lib/branch-server';
 import { isHqUser } from '@/lib/branch-roles';
+import { getHqReport } from '@/lib/hq-report-catalog';
+import { getHqTypedReport, loadBranchOptions, parseDateRange } from '@/lib/hq-report-data';
 
 function errorResponse(message, status = 400) {
   return NextResponse.json({ error: message }, { status });
-}
-
-function parseDateRange(fromDate, toDate) {
-  if (!fromDate && !toDate) return null;
-  const tz = '+05:00';
-  const range = {};
-  if (fromDate) range.gte = new Date(`${fromDate}T00:00:00.000${tz}`);
-  if (toDate) range.lte = new Date(`${toDate}T23:59:59.999${tz}`);
-  return range;
 }
 
 function num(v) {
@@ -92,10 +85,50 @@ export async function GET(request) {
     const branchIdParam = searchParams.get('branch_id');
     const fromDate = searchParams.get('fromDate') || '';
     const toDate = searchParams.get('toDate') || '';
+    const type = searchParams.get('type') || '';
     const branchId =
       branchIdParam && branchIdParam !== 'ALL' ? parseInt(branchIdParam, 10) : null;
 
     const dateRange = parseDateRange(fromDate, toDate);
+
+    if (type) {
+      const reportIds = type === 'dashboard'
+        ? ['sales', 'payments', 'profit', 'customers-balance', 'suppliers-balance', 'customers-activity', 'suppliers-activity', 'expenses']
+        : [type];
+
+      if (type !== 'dashboard' && !getHqReport(type)) {
+        return errorResponse('Invalid HQ report type', 400);
+      }
+
+      const params = {
+        branchId,
+        dateRange,
+        fromDate,
+        toDate,
+        billType: type === 'sales' ? 'BILL' : (searchParams.get('bill_type') || 'ALL'),
+        paymentType: searchParams.get('payment_type') || 'ALL',
+        metric: searchParams.get('metric') || 'qty',
+        limit: searchParams.get('limit') || (type === 'dashboard' ? 8 : 20),
+        detailed: type !== 'dashboard' && searchParams.get('detail') !== '0',
+      };
+
+      const [branchOptions, ...reports] = await Promise.all([
+        loadBranchOptions(null),
+        ...reportIds.map((id) => getHqTypedReport(id, params)),
+      ]);
+
+      if (type === 'dashboard') {
+        const payload = { branch_options: branchOptions, filters: { branch_id: branchId, fromDate, toDate } };
+        reportIds.forEach((id, i) => { payload[id] = reports[i]; });
+        return NextResponse.json(payload);
+      }
+
+      return NextResponse.json({
+        ...reports[0],
+        branch_options: branchOptions,
+        filters: { branch_id: branchId, fromDate, toDate, type },
+      });
+    }
 
     const branchWhere = branchId ? { branch_id: branchId } : {};
     const saleWhere = { ...branchWhere };

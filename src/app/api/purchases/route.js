@@ -759,7 +759,7 @@ export async function POST(request) {
             unit: detail.unit || 'pcs',
             unit_rate: Number(safeParseFloat(detail.unit_rate || detail.rate).toFixed(2)),
             prate: Number(safeParseFloat(detail.prate || detail.unit_rate || detail.rate).toFixed(2)),
-            crate: Number(safeParseFloat(detail.crate || detail.unit_rate || detail.rate).toFixed(2)),
+            crate: Number(safeParseFloat(detail.crate != null && detail.crate !== '' ? detail.crate : 0).toFixed(2)),
             total_amount: Number(safeParseFloat(detail.total_amount).toFixed(2)),
             net_total: Number(safeParseFloat(detail.total_amount).toFixed(2)), // Use total_amount as net_total for now
             updated_by: updated_by ? safeParseInt(updated_by) : null
@@ -786,7 +786,7 @@ export async function POST(request) {
           const proId = safeParseInt(detail.pro_id, 0);
           const saleRate = safeParseFloat(detail.unit_rate || detail.sale_rate || detail.pro_sale_price || detail.rate, 0);
           const costRate = safeParseFloat(detail.cost_rate || detail.original_cost_rate, 0);
-          const purchaseRate = safeParseFloat(detail.crate || detail.prate, 0);
+          const purchaseRate = safeParseFloat(detail.crate != null && detail.crate !== '' ? detail.crate : 0, 0);
 
           if (proId > 0) {
             const updateData = {};
@@ -1427,7 +1427,7 @@ export async function PUT(request) {
           unit: detail.unit || 'pcs',
           unit_rate: parseFloat(detail.unit_rate || detail.rate),
           prate: parseFloat(detail.prate || detail.unit_rate || detail.rate),
-          crate: parseFloat(detail.crate || detail.unit_rate || detail.rate),
+          crate: parseFloat(detail.crate != null && detail.crate !== '' ? detail.crate : 0),
           total_amount: parseFloat(detail.total_amount),
           net_total: parseFloat(detail.total_amount),
           updated_by: updated_by || existingPurchase.updated_by
@@ -1448,7 +1448,7 @@ export async function PUT(request) {
           const proId = safeParseInt(detail.pro_id, 0);
           const saleRate = safeParseFloat(detail.unit_rate || detail.sale_rate || detail.pro_sale_price || detail.rate, 0);
           const costRate = safeParseFloat(detail.cost_rate || detail.original_cost_rate, 0);
-          const purchaseRate = safeParseFloat(detail.crate || detail.prate, 0);
+          const purchaseRate = safeParseFloat(detail.crate != null && detail.crate !== '' ? detail.crate : 0, 0);
 
           if (proId > 0) {
             const updateData = {};

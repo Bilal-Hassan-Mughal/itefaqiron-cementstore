@@ -5,7 +5,27 @@ import {
   BarChart3,
   Settings,
   Plus,
+  FileBarChart,
+  ShoppingCart,
+  Wallet,
+  TrendingUp,
+  Truck,
+  Package,
+  Receipt,
 } from 'lucide-react';
+import { HQ_REPORTS } from '@/lib/hq-report-catalog';
+
+const REPORT_ICONS = {
+  sales: ShoppingCart,
+  purchases: Package,
+  payments: Wallet,
+  profit: TrendingUp,
+  'customers-balance': Users,
+  'suppliers-balance': Truck,
+  'customers-activity': Users,
+  'suppliers-activity': Truck,
+  expenses: Receipt,
+};
 
 export const HQ_NAV = [
   {
@@ -13,7 +33,7 @@ export const HQ_NAV = [
     label: 'Dashboard',
     href: '/dashboard/hq',
     icon: LayoutDashboard,
-    description: 'Overview & quick stats',
+    description: 'Overview & reports',
   },
   {
     id: 'branches',
@@ -28,6 +48,20 @@ export const HQ_NAV = [
     href: '/dashboard/hq/users',
     icon: Users,
     description: 'All branch staff accounts',
+  },
+  {
+    id: 'reports',
+    label: 'Reports',
+    href: '/dashboard/hq/reports',
+    icon: FileBarChart,
+    description: 'Sales, profit & more',
+    children: HQ_REPORTS.map((r) => ({
+      id: r.id,
+      label: r.title,
+      href: r.href,
+      icon: REPORT_ICONS[r.id] || FileBarChart,
+      description: r.short,
+    })),
   },
   {
     id: 'monitoring',

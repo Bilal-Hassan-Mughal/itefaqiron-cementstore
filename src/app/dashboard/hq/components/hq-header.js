@@ -1,6 +1,6 @@
 'use client';
 
-import { Menu, Mail, Bell, Home, Plus, LogOut, Building2, Users, BarChart3 } from 'lucide-react';
+import { Menu, Mail, Bell, Home, Plus, LogOut, Building2, Users, BarChart3, FileBarChart } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { HQ_BRAND, HQ_GRADIENTS, HQ_SIDEBAR } from '@/lib/brand-theme';
@@ -17,6 +17,17 @@ const PAGE_TITLES = {
   '/dashboard/hq': 'Dashboard',
   '/dashboard/hq/branches': 'Branches',
   '/dashboard/hq/users': 'Branch Users',
+  '/dashboard/hq/reports': 'Reports',
+  '/dashboard/hq/reports/sales': 'Sale Report',
+  '/dashboard/hq/reports/purchases': 'Purchase Report',
+  '/dashboard/hq/reports/payments': 'Payment Report',
+  '/dashboard/hq/reports/profit': 'Profit Report',
+  '/dashboard/hq/reports/customers-balance': 'Top Customers — Pending Balance',
+  '/dashboard/hq/reports/suppliers-balance': 'Top Suppliers — To Pay',
+  '/dashboard/hq/reports/customers-activity': 'Top Customers — Purchased vs Received',
+  '/dashboard/hq/reports/customers-supplies': 'Top Customers — Purchased vs Received',
+  '/dashboard/hq/reports/suppliers-activity': 'Top Suppliers — Purchased vs Paid',
+  '/dashboard/hq/reports/expenses': 'Expense Report — Booked vs Settled',
   '/dashboard/hq/monitoring': 'Monitoring',
   '/dashboard/hq/settings': 'Settings',
 };
@@ -38,6 +49,7 @@ export default function HqHeader({ setSidebarOpen, user, onLogout }) {
   const pageTitle = useMemo(() => {
     if (PAGE_TITLES[pathname]) return PAGE_TITLES[pathname];
     if (pathname.startsWith('/dashboard/hq/branches/')) return 'Branch Details';
+    if (pathname.startsWith('/dashboard/hq/reports/')) return 'Reports';
     return 'Head Office';
   }, [pathname]);
 
@@ -46,6 +58,7 @@ export default function HqHeader({ setSidebarOpen, user, onLogout }) {
 
   const isBranchesActive = pathname.startsWith('/dashboard/hq/branches');
   const isUsersActive = pathname.startsWith('/dashboard/hq/users');
+  const isReportsActive = pathname.startsWith('/dashboard/hq/reports');
   const isMonitoringActive = pathname.startsWith('/dashboard/hq/monitoring');
 
   return (
@@ -129,6 +142,21 @@ export default function HqHeader({ setSidebarOpen, user, onLogout }) {
               >
                 <Users className="w-4 h-4" />
                 Branch Users
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push('/dashboard/hq/reports')}
+                className={`hidden sm:inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border-2 text-sm font-semibold transition-colors ${
+                  isReportsActive ? 'ring-2 ring-[#4338ca]/20 ring-offset-1' : ''
+                }`}
+                style={{
+                  borderColor: HQ_BRAND.primary,
+                  color: HQ_BRAND.primaryDark,
+                  background: isReportsActive ? HQ_BRAND.tint : 'transparent',
+                }}
+              >
+                <FileBarChart className="w-4 h-4" />
+                Reports
               </button>
               <button
                 type="button"

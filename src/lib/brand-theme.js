@@ -301,6 +301,7 @@ export const HQ_NAV_FN = {
   overview:  nav(HQ_BRAND.accent, HQ_BRAND.text, HQ_BRAND.tint, HQ_BRAND.tintSoft),
   branches:  nav(HQ_BRAND.primary, HQ_BRAND.textDark, HQ_BRAND.tint, '#ddd6fe'),
   users:     nav('#0891b2', '#0e7490', '#ecfeff', '#cffafe'),
+  reports:   nav(HQ_BRAND.primary, HQ_BRAND.textDark, HQ_BRAND.tint, '#ddd6fe'),
   monitoring:nav('#059669', '#047857', '#ecfdf5', '#d1fae5'),
   settings:  nav('#64748b', '#475569', '#f8fafc', '#f1f5f9'),
 };

@@ -1,12 +1,13 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { Building2, Users, BarChart3, Settings, Plus } from 'lucide-react';
+import { Building2, Users, BarChart3, Settings, Plus, FileBarChart } from 'lucide-react';
 import { HQ_SHORTCUT_PALETTE, HQ_UI } from '@/lib/brand-theme';
 
 const ACTIONS = [
   { title: 'Manage Branches', palette: 'indigo', path: '/dashboard/hq/branches', icon: Building2 },
   { title: 'Branch Users', palette: 'cyan', path: '/dashboard/hq/users', icon: Users },
+  { title: 'Reports', palette: 'violet', path: '/dashboard/hq/reports', icon: FileBarChart },
   { title: 'Monitoring', palette: 'green', path: '/dashboard/hq/monitoring', icon: BarChart3 },
   { title: 'HQ Settings', palette: 'slate', path: '/dashboard/hq/settings', icon: Settings },
   { title: 'Create Branch', palette: 'gold', path: '/dashboard/hq/branches?create=1', icon: Plus },

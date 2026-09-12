@@ -9,6 +9,7 @@ import {
   Typography,
   IconButton,
   Tooltip,
+  Collapse,
   useTheme,
   useMediaQuery,
 } from '@mui/material';
@@ -17,6 +18,7 @@ import {
   Close as CloseIcon,
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
+  ExpandMore as ExpandMoreIcon,
 } from '@mui/icons-material';
 import {
   COMPANY,
@@ -37,6 +39,7 @@ const NAV_FN_MAP = {
   dashboard: HQ_NAV_FN.overview,
   branches: HQ_NAV_FN.branches,
   users: HQ_NAV_FN.users,
+  reports: HQ_NAV_FN.reports,
   monitoring: HQ_NAV_FN.monitoring,
   settings: HQ_NAV_FN.settings,
 };
@@ -44,6 +47,7 @@ const NAV_FN_MAP = {
 export default function HqSidebar({ sidebarOpen, setSidebarOpen, collapsed, onToggleCollapse }) {
   const pathname = usePathname();
   const [searchQuery, setSearchQuery] = useState('');
+  const [reportsOpen, setReportsOpen] = useState(() => pathname?.startsWith('/dashboard/hq/reports'));
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('lg'), { noSsr: true, defaultMatches: false });
@@ -55,13 +59,26 @@ export default function HqSidebar({ sidebarOpen, setSidebarOpen, collapsed, onTo
     setSidebarOpen(false);
   }, [pathname, setSidebarOpen]);
 
+  useEffect(() => {
+    if (pathname?.startsWith('/dashboard/hq/reports')) setReportsOpen(true);
+  }, [pathname]);
+
   const isSearching = searchQuery.trim().length > 0;
+  const q = searchQuery.toLowerCase();
   const filteredNav = isSearching
-    ? HQ_NAV.filter(
-        (item) =>
-          item.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          item.description.toLowerCase().includes(searchQuery.toLowerCase())
-      )
+    ? HQ_NAV.flatMap((item) => {
+        const parentMatch =
+          item.label.toLowerCase().includes(q) ||
+          item.description.toLowerCase().includes(q);
+        const childHits = (item.children || []).filter(
+          (child) =>
+            child.label.toLowerCase().includes(q) ||
+            (child.description || '').toLowerCase().includes(q)
+        );
+        if (parentMatch && item.children) return [item, ...item.children];
+        if (parentMatch) return [item];
+        return childHits;
+      })
     : HQ_NAV;
 
   const handleToggleCollapse = (e) => {
@@ -75,9 +92,9 @@ export default function HqSidebar({ sidebarOpen, setSidebarOpen, collapsed, onTo
     duration: theme.transitions.duration.standard,
   });
 
-  const renderNavLink = (item) => {
+  const renderNavLink = (item, { indent = false } = {}) => {
     const isActive = isHqNavActive(pathname, item.href);
-    const fn = NAV_FN_MAP[item.id] || HQ_NAV_FN.overview;
+    const fn = NAV_FN_MAP[item.id] || HQ_NAV_FN.reports;
     const Icon = item.icon;
 
     const linkInner = (
@@ -86,9 +103,9 @@ export default function HqSidebar({ sidebarOpen, setSidebarOpen, collapsed, onTo
           display: 'flex',
           alignItems: 'center',
           gap: 1.25,
-          pl: 1,
+          pl: indent ? 2.25 : 1,
           pr: 1.25,
-          py: 0.75,
+          py: indent ? 0.6 : 0.75,
           borderRadius: 2,
           cursor: 'pointer',
           color: isActive ? HQ_SIDEBAR.textOnActive : HQ_SIDEBAR.textActive,
@@ -120,12 +137,14 @@ export default function HqSidebar({ sidebarOpen, setSidebarOpen, collapsed, onTo
         </Box>
         {!isCollapsed && (
           <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography sx={{ fontSize: '0.8375rem', fontWeight: isActive ? 700 : 600, lineHeight: 1.3 }}>
+            <Typography sx={{ fontSize: indent ? '0.78rem' : '0.8375rem', fontWeight: isActive ? 700 : 600, lineHeight: 1.3 }}>
               {item.label}
             </Typography>
-            <Typography sx={{ fontSize: '0.68rem', color: isActive ? 'rgba(255,255,255,0.72)' : HQ_SIDEBAR.textMuted, lineHeight: 1.2 }}>
-              {item.description}
-            </Typography>
+            {!indent && (
+              <Typography sx={{ fontSize: '0.68rem', color: isActive ? 'rgba(255,255,255,0.72)' : HQ_SIDEBAR.textMuted, lineHeight: 1.2 }}>
+                {item.description}
+              </Typography>
+            )}
           </Box>
         )}
       </Box>
@@ -144,7 +163,7 @@ export default function HqSidebar({ sidebarOpen, setSidebarOpen, collapsed, onTo
     }
 
     return (
-      <Box key={item.id} sx={{ px: 1.5, mb: 0.4 }}>
+      <Box key={item.id} sx={{ px: indent ? 0 : 1.5, mb: 0.4 }}>
         <Link href={item.href} style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
           {linkInner}
         </Link>
@@ -297,7 +316,86 @@ export default function HqSidebar({ sidebarOpen, setSidebarOpen, collapsed, onTo
             </Box>
           </Box>
         )}
-        {filteredNav.map(renderNavLink)}
+        {filteredNav.map((item) => {
+          if (item.children && !isSearching && !isCollapsed) {
+            const childActive = item.children.some((child) => isHqNavActive(pathname, child.href));
+            const parentActive = isHqNavActive(pathname, item.href) || childActive;
+            const fn = NAV_FN_MAP[item.id] || HQ_NAV_FN.reports;
+            const Icon = item.icon;
+            return (
+              <Box key={item.id} sx={{ px: 1.5, mb: 0.4 }}>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    borderRadius: 2,
+                    color: parentActive ? HQ_SIDEBAR.textOnActive : HQ_SIDEBAR.textActive,
+                    background: parentActive ? HQ_SIDEBAR.bgActiveGradient : 'transparent',
+                    boxShadow: parentActive ? '0 4px 14px rgba(67, 56, 202, 0.28)' : 'none',
+                    border: parentActive ? '1px solid rgba(255,255,255,0.12)' : '1px solid transparent',
+                    transition: 'all 0.22s ease',
+                    '&:hover': {
+                      background: parentActive ? HQ_SIDEBAR.bgActiveGradient : HQ_SIDEBAR.bgHover,
+                    },
+                  }}
+                >
+                  <Link href={item.href} style={{ textDecoration: 'none', color: 'inherit', flex: 1, minWidth: 0 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, pl: 1, py: 0.75 }}>
+                      <Box
+                        sx={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 1.5,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                          bgcolor: parentActive ? 'rgba(255,255,255,0.2)' : 'transparent',
+                          color: parentActive ? HQ_SIDEBAR.textOnActive : fn.main,
+                        }}
+                      >
+                        <Icon size={18} strokeWidth={parentActive ? 2.25 : 2} />
+                      </Box>
+                      <Box sx={{ minWidth: 0, flex: 1 }}>
+                        <Typography sx={{ fontSize: '0.8375rem', fontWeight: parentActive ? 700 : 600, lineHeight: 1.3 }}>
+                          {item.label}
+                        </Typography>
+                        <Typography sx={{ fontSize: '0.68rem', color: parentActive ? 'rgba(255,255,255,0.72)' : HQ_SIDEBAR.textMuted, lineHeight: 1.2 }}>
+                          {item.description}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Link>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setReportsOpen((open) => !open);
+                    }}
+                    sx={{ color: 'inherit', mr: 0.5 }}
+                    aria-label="Toggle reports"
+                  >
+                    <ExpandMoreIcon
+                      sx={{
+                        fontSize: 18,
+                        opacity: 0.8,
+                        transform: reportsOpen || childActive ? 'rotate(180deg)' : 'none',
+                        transition: 'transform 0.2s ease',
+                      }}
+                    />
+                  </IconButton>
+                </Box>
+                <Collapse in={reportsOpen} timeout={220}>
+                  <Box sx={{ pt: 0.4 }}>
+                    {item.children.map((child) => renderNavLink(child, { indent: true }))}
+                  </Box>
+                </Collapse>
+              </Box>
+            );
+          }
+          return renderNavLink(item);
+        })}
         {isSearching && filteredNav.length === 0 && (
           <Box sx={{ px: 2, py: 4, textAlign: 'center' }}>
             <Typography variant="body2" sx={{ color: HQ_SIDEBAR.textMuted }}>
