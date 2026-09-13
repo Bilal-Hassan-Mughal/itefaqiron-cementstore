@@ -52,6 +52,7 @@ export default function HqBarChart({
         unit={unit}
         height={height}
         emptyText={emptyText}
+        preserveOrder={preserveOrder}
       />
     );
   }
@@ -148,14 +149,15 @@ export default function HqBarChart({
   );
 }
 
-function GroupedBarChart({ data, series, getLabel, unit, height, emptyText }) {
-  const rows = (data || [])
-    .map((item) => ({
-      item,
-      label: String(getLabel(item) || '—'),
-      values: series.map((s) => Number(item[s.key] || 0)),
-    }))
-    .filter((r) => r.values.some((v) => v !== 0));
+function GroupedBarChart({ data, series, getLabel, unit, height, emptyText, preserveOrder = false }) {
+  let rows = (data || []).map((item) => ({
+    item,
+    label: String(getLabel(item) || '—'),
+    values: series.map((s) => Number(item[s.key] || 0)),
+  }));
+  if (!preserveOrder) {
+    rows = rows.filter((r) => r.values.some((v) => v !== 0));
+  }
 
   if (!rows.length) {
     return (
@@ -176,7 +178,7 @@ function GroupedBarChart({ data, series, getLabel, unit, height, emptyText }) {
   const cH = H - pT - pB;
   const n = rows.length;
   const grpW = cW / n;
-  const barW = Math.min(Math.max((grpW * 0.62) / series.length, 14), 34);
+  const barW = Math.min(Math.max((grpW * 0.7) / series.length, 16), 48);
   const gap = 4;
   const maxV = Math.max(...rows.flatMap((r) => r.values.map((v) => Math.abs(v))), 1);
   const rotateLabels = n > 5 || rows.some((r) => r.label.length > 10);

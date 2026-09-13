@@ -85,18 +85,16 @@ function HqDashboardChartCard({ report, user, branchOptions }) {
   const periodLabel = HQ_REPORT_PERIODS.find((p) => p.id === period)?.label || 'This Month';
   const chartRows = useMemo(() => {
     const rows = data?.chart || [];
+    if (report.id === 'sales' || report.id === 'purchases' || report.id === 'profit' || report.id === 'payments') {
+      return rows;
+    }
     if (grouped) {
       return rows.filter((d) => series.some((s) => Number(d[s.key]) !== 0));
-    }
-    if (report.id === 'sales' || report.id === 'purchases' || report.id === 'profit') {
-      return rows;
     }
     return rows
       .filter((d) => Number(d.value) !== 0)
       .sort((a, b) => Math.abs(Number(b.value)) - Math.abs(Number(a.value)));
   }, [data, grouped, series, report.id]);
-  const breakdownRows = chartRows;
-  const chartTotal = breakdownRows.reduce((sum, row) => sum + Math.abs(Number(row.value || 0)), 0);
 
   return (
     <section className="bg-white border border-slate-200 overflow-hidden">
@@ -148,15 +146,39 @@ function HqDashboardChartCard({ report, user, branchOptions }) {
       )}
       {grouped && summary && (
         <div className="px-5 py-2.5 border-b border-slate-200 flex flex-wrap gap-4 bg-slate-50">
-          {summary.received != null && report.id === 'customers-activity' && (
+          {summary.received != null && (report.id === 'customers-activity' || report.id === 'payments') && (
             <p className="text-[12px] font-semibold text-emerald-700">
               Received {formatValue(summary.received, unit)}
             </p>
           )}
-          {summary.paid != null && report.id === 'suppliers-activity' && (
+          {summary.paid != null && (report.id === 'suppliers-activity' || report.id === 'payments') && (
             <p className="text-[12px] font-semibold text-amber-700">
               Paid {formatValue(summary.paid, unit)}
             </p>
+          )}
+          {summary.pending != null && report.id === 'suppliers-activity' && (
+            <p className="text-[12px] font-semibold text-slate-600">
+              Still to pay {formatValue(summary.pending, unit)}
+            </p>
+          )}
+          {report.id === 'profit' && (
+            <>
+              <p className="text-[12px] font-semibold text-indigo-700">
+                Sales {formatValue(summary.sales, unit)}
+              </p>
+              <p className="text-[12px] font-semibold text-amber-800">
+                Cost {formatValue(summary.cost, unit)}
+              </p>
+              <p className="text-[12px] font-semibold text-slate-600">
+                Discount {formatValue(summary.discount, unit)}
+              </p>
+              <p className="text-[12px] font-semibold text-emerald-700">
+                Gross {formatValue(summary.gross, unit)}
+              </p>
+              <p className="text-[12px] font-semibold text-rose-700">
+                Ledger expenses {formatValue(summary.expenses, unit)}
+              </p>
+            </>
           )}
           {summary.settled != null && (
             <p className="text-[12px] font-semibold text-emerald-700">
@@ -195,123 +217,54 @@ function HqDashboardChartCard({ report, user, branchOptions }) {
             <CircularProgress size={28} sx={{ color: report.accent }} />
           </div>
         ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_260px] gap-5">
-            <div className="space-y-4">
-              {(data?.charts || []).length > 0 ? (
-                <div className="grid grid-cols-1 gap-4">
-                  {data.charts.map((c) => (
-                    <div key={c.id} className="border border-slate-200 px-2 pt-3 pb-1">
-                      <div className="px-3 flex items-start justify-between gap-2">
-                        <div>
-                          <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: c.color || report.accent }}>
-                            {c.title}
-                          </p>
-                          {c.subtitle && (
-                            <p className="text-[11px] font-semibold text-slate-500 mt-0.5">{c.subtitle}</p>
-                          )}
-                        </div>
-                        {c.total != null && (
-                          <p className="text-[13px] font-extrabold tabular-nums shrink-0" style={{ color: c.color || report.accent }}>
-                            {formatValue(c.total, unit)}
-                          </p>
+          <div className="space-y-4">
+            {(data?.charts || []).length > 0 ? (
+              <div className="grid grid-cols-1 gap-4">
+                {data.charts.map((c) => (
+                  <div key={c.id} className="border border-slate-200 px-2 pt-3 pb-1">
+                    <div className="px-3 flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: c.color || report.accent }}>
+                          {c.title}
+                        </p>
+                        {c.subtitle && (
+                          <p className="text-[11px] font-semibold text-slate-500 mt-0.5">{c.subtitle}</p>
                         )}
                       </div>
-                      <HqBarChart
-                        data={c.data || []}
-                        color={c.color || report.accent}
-                        preserveOrder
-                        unit={unit}
-                        height={260}
-                      />
+                      {c.total != null && (
+                        <p className="text-[13px] font-extrabold tabular-nums shrink-0" style={{ color: c.color || report.accent }}>
+                          {formatValue(c.total, unit)}
+                        </p>
+                      )}
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="border border-slate-200 px-2 pt-3 pb-1">
-                  <HqBarChart
-                    data={chartRows}
-                    color={report.accent}
-                    series={grouped ? series : undefined}
-                    preserveOrder={report.id === 'sales' || report.id === 'profit'}
-                    unit={unit}
-                    height={280}
-                  />
-                </div>
-              )}
-            </div>
-            <div className="border border-slate-200">
-              <div className="px-3 py-2 border-b border-slate-200 bg-slate-50">
-                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-600">
-                  {report.id === 'sales' || report.id === 'purchases' ? 'Time totals' : 'Breakdown'}
-                </p>
+                    <HqBarChart
+                      data={c.data || []}
+                      color={c.color || report.accent}
+                      preserveOrder
+                      unit={unit}
+                      height={260}
+                    />
+                  </div>
+                ))}
               </div>
-              <div className="max-h-[280px] overflow-auto">
-                {breakdownRows.length === 0 ? (
-                  <p className="px-4 py-10 text-center text-xs font-semibold text-slate-400">No data</p>
-                ) : (
-                  (report.id === 'sales' || report.id === 'purchases' ? breakdownRows : breakdownRows.slice(0, 8)).map((row, i) => {
-                    const share = chartTotal > 0 ? (Math.abs(Number(row.value)) / chartTotal) * 100 : 0;
-                    return (
-                      <div key={`${row.label}-${i}`} className="px-3 py-2.5 border-b border-slate-100 last:border-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="min-w-0 flex items-center gap-2">
-                            <span
-                              className="w-5 h-5 text-[10px] font-bold flex items-center justify-center shrink-0 text-white"
-                              style={{ background: report.accent }}
-                            >
-                              {i + 1}
-                            </span>
-                            <span className="text-[13px] font-semibold text-slate-800 truncate">{row.label}</span>
-                          </div>
-                          {!grouped && (
-                            <span className="text-[12px] font-bold tabular-nums text-slate-900 shrink-0">
-                              {formatValue(row.value, unit)}
-                            </span>
-                          )}
-                        </div>
-                        {(report.id === 'sales' || report.id === 'purchases') && (
-                          <p className="text-[11px] font-semibold text-slate-500 mt-1">
-                            {row.count != null ? `${row.count} invoices` : ''}
-                            {row.qty != null ? ` · Qty ${fmtMoney(row.qty)}` : ''}
-                          </p>
-                        )}
-                        {report.id === 'purchases' && !grouped && (row.purchase != null || row.cost != null) && (
-                          <div className="mt-1 space-y-0.5">
-                            <p className="text-[11px] font-semibold tabular-nums text-teal-800">
-                              Purchase: {formatValue(row.purchase ?? row.value, unit)}
-                            </p>
-                            <p className="text-[11px] font-semibold tabular-nums text-orange-800">
-                              Cost: {formatValue(row.cost, unit)}
-                            </p>
-                          </div>
-                        )}
-                        {grouped ? (
-                          <div className="mt-1.5 space-y-1">
-                            {series.map((s) => (
-                              <p key={s.key} className="text-[11px] font-semibold tabular-nums" style={{ color: s.color }}>
-                                {s.label}: {formatValue(row[s.key], unit)}
-                              </p>
-                            ))}
-                            {row.pending != null && (
-                              <p className="text-[11px] font-semibold text-slate-500">
-                                Pending: {formatValue(row.pending, unit)}
-                              </p>
-                            )}
-                          </div>
-                        ) : (
-                          <>
-                            <div className="mt-1.5 h-1.5 bg-slate-100">
-                              <div className="h-full" style={{ width: `${Math.max(share, 2)}%`, background: report.accent }} />
-                            </div>
-                            <p className="text-[10px] font-semibold text-slate-400 mt-1">{share.toFixed(1)}%</p>
-                          </>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
+            ) : (
+              <div className="border border-slate-200 px-2 pt-3 pb-1">
+                <HqBarChart
+                  data={chartRows}
+                  color={report.accent}
+                  series={grouped ? series : undefined}
+                  preserveOrder={
+                    report.id === 'sales'
+                    || report.id === 'profit'
+                    || report.id === 'payments'
+                    || report.id === 'suppliers-activity'
+                    || report.id === 'customers-activity'
+                  }
+                  unit={unit}
+                  height={280}
+                />
               </div>
-            </div>
+            )}
           </div>
         )}
       </div>
@@ -319,8 +272,9 @@ function HqDashboardChartCard({ report, user, branchOptions }) {
       <div className="px-5 py-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
         <p className="text-[11px] text-slate-500">
           {branchId === 'ALL' ? 'All branches' : 'Selected branch'}
-          {report.id === 'sales' ? ' · Each invoice item total, then all invoices added by day' : ''}
-          {report.id === 'purchases' ? ' · One bar per invoice on the purchase graph, one bar per invoice on the cost graph' : ''}
+          {report.id === 'sales' || report.id === 'purchases' || report.id === 'profit' || report.id === 'payments'
+            ? ' · One bar per branch for the whole period'
+            : ''}
           {report.filters.includes('period') ? ` · ${periodLabel} · ${range.from} to ${range.to}` : ' · current balances'}
         </p>
         <button
@@ -332,9 +286,6 @@ function HqDashboardChartCard({ report, user, branchOptions }) {
           <ChevronRight size={14} />
         </button>
       </div>
-      <p className="px-5 py-2.5 border-t border-red-100 bg-red-50 text-[12px] font-semibold leading-relaxed text-red-600">
-        How calculated: {report.formula}
-      </p>
     </section>
   );
 }

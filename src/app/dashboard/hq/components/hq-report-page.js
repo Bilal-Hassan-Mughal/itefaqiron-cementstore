@@ -52,7 +52,8 @@ const COLUMNS = {
     { key: 'customer', label: 'Customer' },
     { key: 'sales', label: 'Item sales', format: fmtMoney, money: true },
     { key: 'cost', label: 'Cost', format: fmtMoney, money: true },
-    { key: 'profit', label: 'Profit', format: fmtMoney, money: true },
+    { key: 'discount', label: 'Discount', format: fmtMoney, money: true },
+    { key: 'profit', label: 'Gross profit', format: fmtMoney, money: true },
   ],
   expenses: [
     { key: 'branch_code', label: 'Branch' },
@@ -185,6 +186,7 @@ export default function HqReportPage({ slug }) {
     { label: 'Settled', value: summary?.settled, show: summary?.settled != null },
     { label: 'Pending', value: summary?.pending, show: summary?.pending != null },
     { label: 'Gross profit', value: summary?.gross, show: summary?.gross != null },
+    { label: 'Discount', value: summary?.discount, show: summary?.discount != null && report.id === 'profit' },
     { label: 'Expenses', value: summary?.expenses, show: summary?.expenses != null },
     { label: 'Sales', value: summary?.sales, show: summary?.sales != null },
     { label: 'Item amount', value: summary?.items, show: summary?.items != null && report.id !== 'sales' },
@@ -299,8 +301,10 @@ export default function HqReportPage({ slug }) {
                 <h4 className="text-base font-extrabold text-slate-900 mt-0.5">
                   {series.length
                     ? 'Ledger comparison by account'
-                    : report.id === 'sales'
-                      ? 'All invoice item totals by day'
+                    : report.id === 'payments'
+                      ? 'Received and Paid — one pair of bars per branch'
+                    : report.id === 'sales' || report.id === 'profit'
+                      ? 'One bar per branch for the whole selected period'
                       : `Performance by ${branchId === 'ALL' ? 'branch' : 'period'}`}
                 </h4>
               </div>
@@ -309,7 +313,13 @@ export default function HqReportPage({ slug }) {
                   data={data?.chart || []}
                   color={report.accent}
                   series={series.length ? series : undefined}
-                  preserveOrder={report.id === 'sales' || report.id === 'profit'}
+                  preserveOrder={
+                    report.id === 'sales'
+                    || report.id === 'profit'
+                    || report.id === 'payments'
+                    || report.id === 'suppliers-activity'
+                    || report.id === 'customers-activity'
+                  }
                   unit={unit}
                   height={300}
                 />
@@ -391,9 +401,6 @@ export default function HqReportPage({ slug }) {
               </Table>
             </div>
           </div>
-          <p className="px-5 py-2.5 border border-red-100 bg-red-50 text-[12px] font-semibold leading-relaxed text-red-600">
-            How calculated: {report.formula}
-          </p>
         </>
       )}
     </div>

@@ -185,6 +185,37 @@ function mapByBranch(branches, getValue) {
     .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
 }
 
+/** One bar per branch for the whole selected period — not days or months. */
+function chartByBranch(branches, rows, pick) {
+  const map = new Map();
+  (rows || []).forEach((row) => {
+    const id = row.branch_id;
+    if (id == null) return;
+    const add = pick(row) || {};
+    const prev = map.get(id) || { value: 0, qty: 0, count: 0, purchase: 0, cost: 0 };
+    prev.value += num(add.value);
+    prev.qty += num(add.qty);
+    prev.count += add.count != null ? add.count : 1;
+    prev.purchase += num(add.purchase);
+    prev.cost += num(add.cost);
+    map.set(id, prev);
+  });
+  return (branches || []).map((b) => {
+    const hit = map.get(b.branch_id) || { value: 0, qty: 0, count: 0, purchase: 0, cost: 0 };
+    return {
+      label: branchLabel(b),
+      value: Math.round(hit.value * 100) / 100,
+      qty: Math.round(hit.qty * 100) / 100,
+      count: hit.count,
+      purchase: Math.round(hit.purchase * 100) / 100,
+      cost: Math.round(hit.cost * 100) / 100,
+      branch_id: b.branch_id,
+      branch_code: b.branch_code,
+      branch_name: b.branch_name,
+    };
+  });
+}
+
 function ledgerBaseWhere(branchId, dateRange) {
   const where = {};
   if (branchId) where.branch_id = branchId;
@@ -213,6 +244,12 @@ function customerAccountFilter(skipIds) {
       NOT: SUPPLIER_NAME_OR,
     },
   };
+}
+
+function isSystemParty(account) {
+  const cat = String(account?.customer_category?.cus_cat_title || '').toLowerCase();
+  const name = String(account?.cus_name || '').toLowerCase();
+  return /cash|bank/.test(cat) || /cash|bank/.test(name);
 }
 
 function supplierAccountFilter(skipIds) {
@@ -286,6 +323,13 @@ function itemQtyTimesRate(detail) {
   return Math.round(num(detail.total_amount || detail.net_total) * 100) / 100;
 }
 
+/** Same cost rate the branch profit report uses: cost price, else crate, else base. */
+function itemCostRate(detail) {
+  return num(detail.product?.pro_cost_price)
+    || num(detail.product?.pro_crate)
+    || num(detail.product?.pro_baser_price);
+}
+
 /** Invoice 1: item1 qty×rate + item2 qty×rate + … then invoice 2 the same way. */
 function saleInvoiceTotals(sale) {
   let items = 0;
@@ -296,12 +340,13 @@ function saleInvoiceTotals(sale) {
     const line = itemQtyTimesRate(d);
     items += line;
     qty += num(d.qnty);
-    cost += num(d.qnty) * num(d.product?.pro_cost_price);
+    cost += roundMoney(num(d.qnty) * itemCostRate(d));
   });
   return {
     items: Math.round(items * 100) / 100,
     qty: Math.round(qty * 100) / 100,
     cost: Math.round(cost * 100) / 100,
+    discount: roundMoney(num(sale.discount)),
     extras: invoiceExtras(sale),
   };
 }
@@ -387,7 +432,7 @@ const saleInvoiceInclude = {
       unit_rate: true,
       total_amount: true,
       net_total: true,
-      product: { select: { pro_title: true, pro_cost_price: true } },
+      product: { select: { pro_title: true, pro_cost_price: true, pro_crate: true, pro_baser_price: true } },
     },
   },
 };
@@ -447,7 +492,10 @@ async function loadLedger(where, { take = 2500, order = 'desc' } = {}) {
 }
 
 export async function getSalesAnalytics({ branchId, dateRange, fromDate, toDate, detailed = false }) {
-  const invoices = await loadSaleInvoices({ branchId, dateRange });
+  const [invoices, branches] = await Promise.all([
+    loadSaleInvoices({ branchId, dateRange }),
+    loadBranchOptions(branchId),
+  ]);
   const productMap = new Map();
   let running = 0;
   let extras = 0;
@@ -470,6 +518,7 @@ export async function getSalesAnalytics({ branchId, dateRange, fromDate, toDate,
     return {
       id: sale.sale_id,
       bill_no: String(billNo),
+      branch_id: sale.branch_id,
       branch_code: sale.branch?.branch_code || '—',
       branch_name: sale.branch?.branch_name || '—',
       date: sale.created_at,
@@ -485,17 +534,10 @@ export async function getSalesAnalytics({ branchId, dateRange, fromDate, toDate,
   });
 
   const total = running;
-  const grain = timeGrain(fromDate, toDate);
-  const dayMap = new Map();
-  rows.forEach((row) => {
-    const key = bucketKey(row.date, grain);
-    const prev = dayMap.get(key) || { value: 0, qty: 0, count: 0 };
-    prev.value += row.amount;
-    prev.qty += row.qty;
-    prev.count += 1;
-    dayMap.set(key, prev);
-  });
-  const chart = fillTimeChart(fromDate, toDate, grain, dayMap);
+  const chart = chartByBranch(branches, rows, (row) => ({
+    value: row.amount,
+    qty: row.qty,
+  }));
 
   const products = [...productMap.entries()]
     .map(([label, v]) => ({ label, value: v.amount, qty: Math.round(v.qty * 100) / 100 }))
@@ -518,7 +560,10 @@ export async function getSalesAnalytics({ branchId, dateRange, fromDate, toDate,
 }
 
 export async function getPurchaseAnalytics({ branchId, dateRange, fromDate, toDate, detailed = false }) {
-  const invoices = await loadPurchaseInvoices({ branchId, dateRange });
+  const [invoices, branches] = await Promise.all([
+    loadPurchaseInvoices({ branchId, dateRange }),
+    loadBranchOptions(branchId),
+  ]);
   let runningPurchase = 0;
   let runningCost = 0;
   let runningSale = 0;
@@ -535,6 +580,7 @@ export async function getPurchaseAnalytics({ branchId, dateRange, fromDate, toDa
     return {
       id: purchase.pur_id,
       bill_no: purchase.invoice_number || String(purchase.pur_id),
+      branch_id: purchase.branch_id,
       branch_code: purchase.branch?.branch_code || '—',
       branch_name: purchase.branch?.branch_name || '—',
       date: purchase.created_at,
@@ -550,34 +596,9 @@ export async function getPurchaseAnalytics({ branchId, dateRange, fromDate, toDa
     };
   });
 
-  const grain = timeGrain(fromDate, toDate);
-  const purchaseMap = new Map();
-  const costMap = new Map();
-  rows.forEach((row) => {
-    const key = bucketKey(row.date, grain);
-    const p = purchaseMap.get(key) || { value: 0, qty: 0, count: 0 };
-    p.value += row.purchase;
-    p.qty += row.qty;
-    p.count += 1;
-    purchaseMap.set(key, p);
-    const c = costMap.get(key) || { value: 0, qty: 0, count: 0 };
-    c.value += row.cost;
-    c.qty += row.qty;
-    c.count += 1;
-    costMap.set(key, c);
-  });
-
-  const purchaseTime = fillTimeChart(fromDate, toDate, grain, purchaseMap);
-  const costTime = fillTimeChart(fromDate, toDate, grain, costMap);
-  const chart = purchaseTime.map((d, i) => ({
-    ...d,
-    purchase: d.value,
-    cost: costTime[i]?.value || 0,
-  }));
-  const invoiceRows = rows.map((row) => ({
-    label: `#${row.bill_no}`,
+  const chart = chartByBranch(branches, rows, (row) => ({
+    value: row.purchase,
     qty: row.qty,
-    count: 1,
     purchase: row.purchase,
     cost: row.cost,
   }));
@@ -598,18 +619,18 @@ export async function getPurchaseAnalytics({ branchId, dateRange, fromDate, toDa
       {
         id: 'purchase',
         title: 'Purchase Rate',
-        subtitle: 'Each invoice separately — qty × purchase rate (crate)',
+        subtitle: 'One bar per branch for the whole selected period',
         color: '#0f766e',
         total: Math.round(runningPurchase * 100) / 100,
-        data: invoiceRows.map((d) => ({ ...d, value: d.purchase })),
+        data: chart.map((d) => ({ ...d, value: d.purchase })),
       },
       {
         id: 'cost',
         title: 'Cost Rate',
-        subtitle: 'Each invoice separately — qty × this invoice cost rate',
+        subtitle: 'One bar per branch for the whole selected period',
         color: '#c2410c',
         total: Math.round(runningCost * 100) / 100,
-        data: invoiceRows.map((d) => ({ ...d, value: d.cost })),
+        data: chart.map((d) => ({ ...d, value: d.cost })),
       },
     ],
     rows: detailed ? rows : [],
@@ -620,65 +641,61 @@ export async function getPaymentAnalytics({
   branchId, dateRange, fromDate, toDate, paymentType = 'ALL', detailed = false,
 }) {
   const skipIds = await skipCategoryIds();
-  const typeWhere =
-    paymentType === 'PAY' ? PAY_LEDGER_WHERE
-      : paymentType === 'RECEIVE' ? RECEIVE_LEDGER_WHERE
-        : { OR: [RECEIVE_LEDGER_WHERE, PAY_LEDGER_WHERE] };
-
   const where = {
     ...ledgerBaseWhere(branchId, dateRange),
     ...partyCustomerFilter(skipIds),
-    ...typeWhere,
+    OR: [RECEIVE_LEDGER_WHERE, PAY_LEDGER_WHERE],
   };
 
   const [branches, entries] = await Promise.all([
     loadBranchOptions(branchId),
-    loadLedger(where, { take: detailed ? 400 : 2000 }),
+    loadLedger(where, { take: detailed ? 800 : 2500 }),
   ]);
 
-  const received = entries
-    .filter((e) => num(e.credit_amount) > 0)
-    .reduce((s, e) => s + num(e.credit_amount), 0);
-  const paid = entries
-    .filter((e) => num(e.debit_amount) > 0 && num(e.credit_amount) <= 0)
-    .reduce((s, e) => s + num(e.debit_amount), 0);
+  const isReceived = (e) => num(e.credit_amount) > 0;
+  const isPaid = (e) => num(e.debit_amount) > 0 && num(e.credit_amount) <= 0;
+  const receivedRows = entries.filter(isReceived);
+  const paidRows = entries.filter(isPaid);
+  const received = receivedRows.reduce((s, e) => s + num(e.credit_amount), 0);
+  const paid = paidRows.reduce((s, e) => s + num(e.debit_amount), 0);
 
-  const byBranch = new Map();
-  entries.forEach((e) => {
-    const amt = num(e.credit_amount) > 0 ? num(e.credit_amount) : num(e.debit_amount);
-    byBranch.set(e.branch_id, num(byBranch.get(e.branch_id)) + amt);
-  });
+  const receivedChart = chartByBranch(branches, receivedRows, (e) => ({ value: num(e.credit_amount) }));
+  const paidChart = chartByBranch(branches, paidRows, (e) => ({ value: num(e.debit_amount) }));
+  const chart = receivedChart.map((row, i) => ({
+    ...row,
+    received: row.value,
+    paid: paidChart[i]?.value || 0,
+    value: Math.round((row.value + (paidChart[i]?.value || 0)) * 100) / 100,
+  }));
 
-  const chart = branchId
-    ? bucketRows(
-        entries.map((e) => ({
-          date: e.created_at,
-          value: num(e.credit_amount) > 0 ? num(e.credit_amount) : num(e.debit_amount),
-        })),
-        timeGrain(fromDate, toDate),
-        fromDate,
-        toDate
-      )
-    : mapByBranch(branches, (id) => num(byBranch.get(id)));
+  const tableEntries = paymentType === 'PAY'
+    ? paidRows
+    : paymentType === 'RECEIVE'
+      ? receivedRows
+      : entries;
 
   return {
     summary: {
       total: received + paid,
       received,
       paid,
-      count: entries.length,
+      count: tableEntries.length,
       label: 'Ledger Payments',
     },
+    series: [
+      { key: 'received', label: 'Received', color: '#0f766e' },
+      { key: 'paid', label: 'Paid', color: '#c2410c' },
+    ],
     chart,
     rows: detailed
-      ? entries.map((e) => ({
+      ? tableEntries.map((e) => ({
           id: e.l_id,
           branch_code: e.branch?.branch_code || '—',
           branch_name: e.branch?.branch_name || '—',
           date: e.created_at,
           account: e.customer?.cus_name || '—',
-          payment_type: num(e.credit_amount) > 0 ? 'RECEIVE' : 'PAY',
-          amount: num(e.credit_amount) > 0 ? num(e.credit_amount) : num(e.debit_amount),
+          payment_type: isReceived(e) ? 'RECEIVE' : 'PAY',
+          amount: isReceived(e) ? num(e.credit_amount) : num(e.debit_amount),
           description: e.details || '—',
         }))
       : [],
@@ -691,51 +708,86 @@ export async function getProfitAnalytics({ branchId, dateRange, fromDate, toDate
     ...EXPENSE_LEDGER_WHERE,
   };
 
-  const [invoices, expEntries] = await Promise.all([
+  const [invoices, expEntries, branches] = await Promise.all([
     loadSaleInvoices({ branchId, dateRange }),
-    loadLedger(expWhere, { take: 2000 }),
+    loadLedger(expWhere, { take: 2500 }),
+    loadBranchOptions(branchId),
   ]);
 
   let totalSales = 0;
   let totalCost = 0;
+  let totalDiscount = 0;
   const rows = invoices.map((sale) => {
     const t = saleInvoiceTotals(sale);
-    totalSales += t.items;
-    totalCost += t.cost;
+    const sales = t.items;
+    const cost = t.cost;
+    const discount = t.discount;
+    const gross = roundMoney(sales - cost - discount);
+    totalSales = roundMoney(totalSales + sales);
+    totalCost = roundMoney(totalCost + cost);
+    totalDiscount = roundMoney(totalDiscount + discount);
     return {
       id: sale.sale_id,
       bill_no: String(sale.bill_number || sale.sale_id),
+      branch_id: sale.branch_id,
       branch_code: sale.branch?.branch_code || '—',
       branch_name: sale.branch?.branch_name || '—',
       date: sale.created_at,
       customer: sale.customer?.cus_name || '—',
-      sales: t.items,
-      cost: t.cost,
-      profit: t.items - t.cost,
+      sales,
+      cost,
+      discount,
+      profit: gross,
     };
   });
 
-  const totalExpenses = expEntries.reduce((s, e) => s + expenseAmount(e), 0);
-  const totalGross = totalSales - totalCost;
-  const totalNet = totalGross - totalExpenses;
-
-  const chart = bucketRows(
-    rows.map((r) => ({ date: r.date, value: r.profit })),
-    timeGrain(fromDate, toDate),
-    fromDate,
-    toDate
+  const expensesByBranch = chartByBranch(
+    branches,
+    expEntries.map((e) => ({ branch_id: e.branch_id, value: expenseAmount(e) })),
+    (row) => ({ value: row.value })
   );
+  const totalExpenses = roundMoney(expensesByBranch.reduce((s, r) => s + r.value, 0));
+  const salesChart = chartByBranch(branches, rows, (row) => ({ value: row.sales, qty: 1 }));
+  const costChart = chartByBranch(branches, rows, (row) => ({ value: row.cost }));
+  const discountChart = chartByBranch(branches, rows, (row) => ({ value: row.discount }));
+  const chart = salesChart.map((row, i) => {
+    const sales = row.value;
+    const cost = costChart[i]?.value || 0;
+    const discount = discountChart[i]?.value || 0;
+    const expenses = expensesByBranch[i]?.value || 0;
+    const gross = roundMoney(sales - cost - discount);
+    const net = roundMoney(gross - expenses);
+    return {
+      ...row,
+      sales,
+      cost,
+      discount,
+      expenses,
+      gross,
+      profit: net,
+      value: net,
+    };
+  });
+
+  const totalGross = roundMoney(totalSales - totalCost - totalDiscount);
+  const totalNet = roundMoney(totalGross - totalExpenses);
 
   return {
     summary: {
       total: totalNet,
       sales: totalSales,
       cost: totalCost,
+      discount: totalDiscount,
       gross: totalGross,
       expenses: totalExpenses,
       count: rows.length,
       label: 'Net Profit',
     },
+    series: [
+      { key: 'sales', label: 'Sales', color: '#4338ca' },
+      { key: 'cost', label: 'Cost', color: '#b45309' },
+      { key: 'profit', label: 'Net profit', color: '#047857' },
+    ],
     chart,
     rows: detailed ? rows : [],
   };
@@ -975,23 +1027,25 @@ export async function getCustomerActivity({ branchId, dateRange, limit, detailed
   const map = new Map();
   invoices.forEach((sale) => {
     const t = saleInvoiceTotals(sale);
+    if (!t.items) return;
     const prev = map.get(sale.cus_id) || { purchased: 0, received: 0, bills: 0 };
     prev.purchased += t.items;
     prev.bills += 1;
     map.set(sale.cus_id, prev);
   });
   received.forEach((e) => {
-    const prev = map.get(e.cus_id) || { purchased: 0, received: 0, bills: 0 };
+    const prev = map.get(e.cus_id);
+    if (!prev) return;
     prev.received += num(e.credit_amount);
-    map.set(e.cus_id, prev);
   });
 
+  const accounts = await hydrateAccounts([...map.keys()]);
   const ranked = [...map.entries()]
     .map(([cus_id, v]) => ({ cus_id, ...v, pending: v.purchased - v.received }))
+    .filter((r) => r.purchased > 0 && !isSystemParty(accounts.get(r.cus_id)))
     .sort((a, b) => b.purchased - a.purchased)
     .slice(0, take);
 
-  const accounts = await hydrateAccounts(ranked.map((r) => r.cus_id));
   const rows = ranked.map((r) => {
     const c = accounts.get(r.cus_id);
     return {
@@ -1020,6 +1074,7 @@ export async function getCustomerActivity({ branchId, dateRange, limit, detailed
     series: [
       { key: 'purchased', label: 'Purchased', color: '#4338ca' },
       { key: 'received', label: 'Received', color: '#047857' },
+      { key: 'pending', label: 'Still', color: '#b45309' },
     ],
     chart: rows.map((r) => ({
       label: r.customer,
@@ -1034,36 +1089,58 @@ export async function getCustomerActivity({ branchId, dateRange, limit, detailed
 
 export async function getSupplierActivity({ branchId, dateRange, limit, detailed = false }) {
   const take = invoiceChartLimit(limit, 12);
-  const skipIds = await skipCategoryIds();
-  const [invoices, paid] = await Promise.all([
-    loadPurchaseInvoices({ branchId, dateRange }),
-    centralPrisma.ledger.findMany({
-      where: { ...ledgerBaseWhere(branchId, dateRange), ...supplierAccountFilter(skipIds), ...PAY_LEDGER_WHERE },
-      select: { cus_id: true, debit_amount: true },
-      take: 4000,
-    }),
-  ]);
+  const invoices = await loadPurchaseInvoices({ branchId, dateRange });
 
   const map = new Map();
   invoices.forEach((purchase) => {
     const t = purchaseInvoiceTotals(purchase);
+    if (!t.items) return;
     const prev = map.get(purchase.cus_id) || { purchased: 0, paid: 0, bills: 0 };
     prev.purchased += t.items;
     prev.bills += 1;
     map.set(purchase.cus_id, prev);
   });
+
+  const cusIds = [...map.keys()];
+  const paid = cusIds.length
+    ? await centralPrisma.ledger.findMany({
+      where: {
+        ...ledgerBaseWhere(branchId, dateRange),
+        cus_id: { in: cusIds },
+        debit_amount: { gt: 0 },
+        OR: [
+          { ledger_type: { in: ['Payment', 'Pay', 'DEBIT'] } },
+          { details: { contains: 'Payment Paid' } },
+          { details: { contains: 'Payment to' } },
+        ],
+      },
+      select: { cus_id: true, debit_amount: true, payments: true, details: true },
+      take: 4000,
+    })
+    : [];
+
   paid.forEach((e) => {
-    const prev = map.get(e.cus_id) || { purchased: 0, paid: 0, bills: 0 };
-    prev.paid += num(e.debit_amount);
-    map.set(e.cus_id, prev);
+    const prev = map.get(e.cus_id);
+    if (!prev) return;
+    const detail = String(e.details || '');
+    if (/purchase invoice/i.test(detail) && !/payment/i.test(detail)) return;
+    prev.paid += num(e.payments) || num(e.debit_amount);
   });
 
+  const accounts = await hydrateAccounts([...map.keys()]);
   const ranked = [...map.entries()]
-    .map(([cus_id, v]) => ({ cus_id, ...v, pending: v.purchased - v.paid }))
+    .map(([cus_id, v]) => {
+      const c = accounts.get(cus_id);
+      return {
+        cus_id,
+        ...v,
+        pending: Math.round((-num(c?.cus_balance)) * 100) / 100,
+      };
+    })
+    .filter((r) => r.purchased > 0 && !isSystemParty(accounts.get(r.cus_id)))
     .sort((a, b) => b.purchased - a.purchased)
     .slice(0, take);
 
-  const accounts = await hydrateAccounts(ranked.map((r) => r.cus_id));
   const rows = ranked.map((r) => {
     const c = accounts.get(r.cus_id);
     return {
@@ -1092,6 +1169,7 @@ export async function getSupplierActivity({ branchId, dateRange, limit, detailed
     series: [
       { key: 'purchased', label: 'Purchased', color: '#0f766e' },
       { key: 'paid', label: 'Paid', color: '#b45309' },
+      { key: 'pending', label: 'Still to pay', color: '#64748b' },
     ],
     chart: rows.map((r) => ({
       label: r.customer,
