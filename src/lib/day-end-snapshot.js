@@ -74,6 +74,27 @@ function isStandaloneLedger(entry, cashBankCusIds) {
   return n(d) > 0 || n(c) > 0;
 }
 
+function isReportMemo(entry) {
+  const det = String(entry.details || '');
+  if (!det.includes('no receivable change')) return false;
+  const d = n(entry.debit_amount);
+  const c = n(entry.credit_amount);
+  return d > 0 && c > 0 && Math.abs(d - c) < 0.02;
+}
+
+function ledgerCategoryTitle(entry) {
+  return String(entry.customer?.customer_category?.cus_cat_title || '').toLowerCase();
+}
+
+function isBankLedgerAccount(entry) {
+  return ledgerCategoryTitle(entry).includes('bank');
+}
+
+function isCashLedgerAccount(entry) {
+  const cat = ledgerCategoryTitle(entry);
+  return cat.includes('cash') && !cat.includes('bank');
+}
+
 function classifyLedgerEntry(entry) {
   const trnxType = String(entry.trnx_type || '').toUpperCase();
   const details = String(entry.details || '').toLowerCase();
@@ -237,6 +258,7 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
   purchaseReturns.forEach((ret) => {
     totalPurchaseReturns += n(ret.total_return_amount);
   });
+  const cashPurchaseReturns = totalPurchaseReturns;
 
   let totalReceipts = 0;
   let cashReceipts = 0;
@@ -262,45 +284,76 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     }
   });
 
-  const totalCashInflow = cashSales + cashReceipts;
-  const totalCashOutflow = cashPurchases + cashPayments + cashExpenses + cashSaleReturns;
-  const totalBankInflow = bankSales + bankReceipts;
-  const totalBankOutflow = bankPurchases + bankPayments + bankExpenses + bankSaleReturns;
-  const netBankFlow = totalBankInflow - totalBankOutflow;
+  const cashLedgerEntries = [];
+  const bankLedgerEntries = [];
+  let ledgerCashIn = 0;
+  let ledgerCashOut = 0;
+  let ledgerBankIn = 0;
+  let ledgerBankOut = 0;
+  ledgerEntries.forEach((entry) => {
+    if (isReportMemo(entry)) return;
+    const debit = n(entry.debit_amount);
+    const credit = n(entry.credit_amount);
+    if (debit <= 0 && credit <= 0) return;
+    if (isBankLedgerAccount(entry)) {
+      ledgerBankIn += debit;
+      ledgerBankOut += credit;
+      bankLedgerEntries.push(entry);
+      return;
+    }
+    if (isCashLedgerAccount(entry)) {
+      ledgerCashIn += debit;
+      ledgerCashOut += credit;
+      cashLedgerEntries.push(entry);
+    }
+  });
 
-  const prevDayEnd = await prisma.dayEnd.findFirst({
+  const totalCashInflow = ledgerCashIn;
+  const totalCashOutflow = ledgerCashOut;
+  const totalBankInflow = ledgerBankIn;
+  const totalBankOutflow = ledgerBankOut;
+  const netBankFlow = totalBankInflow - totalBankOutflow;
+  totalReceipts = totalCashInflow + totalBankInflow;
+  totalPayments = totalCashOutflow + totalBankOutflow;
+  cashReceipts = totalCashInflow;
+  cashPayments = totalCashOutflow;
+  bankReceipts = totalBankInflow;
+  bankPayments = totalBankOutflow;
+
+  const prevClosed = await prisma.dayEnd.findFirst({
     where: {
       business_date: { lt: pkBusinessDate(dateStr) },
-      OR: [
-        { status: 'CLOSED' },
-        { closing_cash: { not: null } },
-      ],
+      status: 'CLOSED',
     },
     orderBy: { business_date: 'desc' },
   });
+  const prevClosedDate = prevClosed?.business_date ? getPkDateString(prevClosed.business_date) : null;
+  const openingCashLocked = prevClosed?.closing_cash != null;
 
   let openingCash;
-  if (openingCashOverride !== undefined && openingCashOverride !== null && openingCashOverride !== '') {
+  let openingCashSource = 'ZERO';
+  if (dayEndRecord?.status === 'CLOSED' && dayEndRecord?.opening_cash != null) {
+    openingCash = n(dayEndRecord.opening_cash);
+    openingCashSource = 'FROZEN';
+  } else if (openingCashLocked) {
+    openingCash = n(prevClosed.closing_cash);
+    openingCashSource = 'PREVIOUS_CLOSE';
+  } else if (openingCashOverride !== undefined && openingCashOverride !== null && openingCashOverride !== '') {
     openingCash = n(openingCashOverride);
-  } else if (dayEndRecord?.status === 'CLOSED' && dayEndRecord?.opening_cash != null) {
-    openingCash = n(dayEndRecord.opening_cash);
-  } else if (dayEndRecord?.opening_cash != null && prevDayEnd?.closing_cash == null) {
-    openingCash = n(dayEndRecord.opening_cash);
-  } else if (prevDayEnd?.closing_cash != null) {
-    openingCash = n(prevDayEnd.closing_cash);
+    openingCashSource = 'ENTERED';
   } else if (dayEndRecord?.opening_cash != null) {
     openingCash = n(dayEndRecord.opening_cash);
+    openingCashSource = 'SAVED';
   } else {
-    openingCash = totalCashAccountsBalance - (totalCashInflow - totalCashOutflow);
+    openingCash = 0;
+    openingCashSource = 'ZERO';
   }
 
   const expectedCashInHand = money(openingCash + totalCashInflow - totalCashOutflow);
   const actualClosingCash = dayEndRecord?.closing_cash != null ? money(dayEndRecord.closing_cash) : null;
   const variance = actualClosingCash != null ? money(actualClosingCash - expectedCashInHand) : 0;
 
-  const openingBank = prevDayEnd?.bank_balance != null
-    ? n(prevDayEnd.bank_balance)
-    : totalBankAccountsBalance - netBankFlow;
+  const openingBank = prevClosed?.bank_balance != null ? n(prevClosed.bank_balance) : 0;
   const expectedClosingBank = openingBank + netBankFlow;
   const savedClosingBank = dayEndRecord?.bank_balance != null ? n(dayEndRecord.bank_balance) : null;
 
@@ -334,8 +387,8 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     { id: 2, title: `Sale returns posted (${saleReturns.length})`, status: 'Completed' },
     { id: 3, title: `Purchase bills posted (${purchases.length})`, status: 'Completed' },
     { id: 4, title: `Purchase returns posted (${purchaseReturns.length})`, status: 'Completed' },
-    { id: 5, title: `Receipts posted (${standaloneLedgers.filter((e) => n(e.credit_amount) > 0).length})`, status: 'Completed' },
-    { id: 6, title: `Payments posted (${standaloneLedgers.filter((e) => n(e.debit_amount) > 0).length})`, status: 'Completed' },
+    { id: 5, title: `Cash/bank in posted (${cashLedgerEntries.filter((e) => n(e.debit_amount) > 0).length + bankLedgerEntries.filter((e) => n(e.debit_amount) > 0).length})`, status: 'Completed' },
+    { id: 6, title: `Cash/bank out posted (${cashLedgerEntries.filter((e) => n(e.credit_amount) > 0).length + bankLedgerEntries.filter((e) => n(e.credit_amount) > 0).length})`, status: 'Completed' },
     { id: 7, title: 'Physical cash count entered', status: cashCounted ? 'Completed' : 'Pending' },
     { id: 8, title: 'Bank closing balance recorded', status: isClosed || savedClosingBank != null ? 'Completed' : 'Pending' },
     { id: 9, title: openOrdersCount > 0 ? `Open orders still pending (${openOrdersCount})` : 'No open orders pending', status: openOrdersCount > 0 ? 'Pending' : 'Completed' },
@@ -377,6 +430,9 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
 
   const summary = {
     openingCash: money(openingCash),
+    openingCashLocked,
+    openingCashSource,
+    openingCashFromDate: prevClosedDate,
     totalSales: money(totalSales),
     cashSales: money(cashSales),
     bankSales: money(bankSales),
@@ -392,6 +448,7 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     cashSaleReturns: money(cashSaleReturns),
     bankSaleReturns: money(bankSaleReturns),
     totalPurchaseReturns: money(totalPurchaseReturns),
+    cashPurchaseReturns: money(cashPurchaseReturns),
     totalReceipts: money(totalReceipts),
     cashReceipts: money(cashReceipts),
     bankReceipts: money(bankReceipts),
@@ -416,10 +473,13 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     netProfit: money(netProfit),
     profitMargin,
     closingBalance: money(expectedCashInHand + (savedClosingBank ?? expectedClosingBank)),
+    cashMovementSource: 'LEDGER_CASH_BANK',
     invoicesCount: sales.length,
-    receiptsCount: standaloneLedgers.filter((e) => n(e.credit_amount) > 0).length,
+    receiptsCount: cashLedgerEntries.filter((e) => n(e.debit_amount) > 0).length
+      + bankLedgerEntries.filter((e) => n(e.debit_amount) > 0).length,
     billsCount: purchases.length,
-    paymentsCount: standaloneLedgers.filter((e) => n(e.debit_amount) > 0).length,
+    paymentsCount: cashLedgerEntries.filter((e) => n(e.credit_amount) > 0).length
+      + bankLedgerEntries.filter((e) => n(e.credit_amount) > 0).length,
     returnsCount: saleReturns.length,
     openOrdersCount,
     holdBillsCount,
@@ -435,6 +495,8 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     expenses,
     ledgerEntries,
     standaloneLedgers,
+    cashLedgerEntries,
+    bankLedgerEntries,
     saleReturns,
     purchaseReturns,
     summary,
@@ -504,27 +566,51 @@ export function buildDayEndDetails(dayEndId, snapshot) {
       description: `Purchase Return #${r.id || r.return_id}`,
     });
   });
-  snapshot.standaloneLedgers.forEach((l) => {
-    const classified = classifyLedgerEntry(l);
-    const paymentType = mapTrnxToPaymentType(l.trnx_type);
-    if (classified.credit > 0) {
+  (snapshot.cashLedgerEntries || []).forEach((l) => {
+    const debit = n(l.debit_amount);
+    const credit = n(l.credit_amount);
+    if (debit > 0) {
       details.push({
         day_end_id: dayEndId,
-        transaction_type: 'RECEIPT',
+        transaction_type: 'CASH_IN',
         transaction_id: l.l_id,
-        amount: classified.credit,
-        payment_type: paymentType,
-        description: l.details || 'Receipt Voucher',
+        amount: debit,
+        payment_type: 'CASH',
+        description: l.details || `Cash in — ${l.customer?.cus_name || 'Cash'}`,
       });
     }
-    if (classified.debit > 0) {
+    if (credit > 0) {
       details.push({
         day_end_id: dayEndId,
-        transaction_type: 'PAYMENT',
+        transaction_type: 'CASH_OUT',
         transaction_id: l.l_id,
-        amount: classified.debit,
-        payment_type: paymentType,
-        description: l.details || 'Payment Voucher',
+        amount: credit,
+        payment_type: 'CASH',
+        description: l.details || `Cash out — ${l.customer?.cus_name || 'Cash'}`,
+      });
+    }
+  });
+  (snapshot.bankLedgerEntries || []).forEach((l) => {
+    const debit = n(l.debit_amount);
+    const credit = n(l.credit_amount);
+    if (debit > 0) {
+      details.push({
+        day_end_id: dayEndId,
+        transaction_type: 'BANK_IN',
+        transaction_id: l.l_id,
+        amount: debit,
+        payment_type: 'BANK_TRANSFER',
+        description: l.details || `Bank in — ${l.customer?.cus_name || 'Bank'}`,
+      });
+    }
+    if (credit > 0) {
+      details.push({
+        day_end_id: dayEndId,
+        transaction_type: 'BANK_OUT',
+        transaction_id: l.l_id,
+        amount: credit,
+        payment_type: 'BANK_TRANSFER',
+        description: l.details || `Bank out — ${l.customer?.cus_name || 'Bank'}`,
       });
     }
   });

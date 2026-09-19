@@ -246,7 +246,14 @@ export function expandLegacyModules(allowed) {
 
 export function normalizeAllowedModules(raw) {
   const expanded = expandLegacyModules(parseAllowedModules(raw));
-  return expanded.filter((id) => id !== 'dashboard-analytics');
+  const pages = expanded.filter((id) => id !== 'dashboard-analytics');
+  const hasAnyAnalytics = DASHBOARD_ANALYTICS_CHILD_WIDGET_IDS.some((id) => pages.includes(id));
+  if (hasAnyAnalytics) {
+    ['dashboard-top-customers-sale', 'dashboard-top-products-sale'].forEach((id) => {
+      if (!pages.includes(id)) pages.push(id);
+    });
+  }
+  return pages;
 }
 
 export function hasPageAccess(allowed, pageId) {

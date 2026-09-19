@@ -269,7 +269,11 @@ export default function DayEndPage() {
       if (response.ok) {
         const data = await response.json();
         alert(data.warning ? `Day Closed Successfully!\n\n${data.warning}` : 'Day Closed Successfully!');
-        fetchDayEndData(selectedDate);
+        if (data.nextRequiredDate && data.nextRequiredDate !== selectedDate) {
+          setSelectedDate(data.nextRequiredDate);
+        } else {
+          fetchDayEndData(selectedDate);
+        }
       } else {
         const err = await response.json();
         alert(err.error || 'Failed to close day');
@@ -404,6 +408,14 @@ export default function DayEndPage() {
                 Frozen snapshot
               </span>
             )}
+            {isClosed && closeReadiness?.nextRequiredDate && (
+              <button
+                onClick={() => setSelectedDate(closeReadiness.nextRequiredDate)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold"
+              >
+                Next open day {closeReadiness.nextRequiredDate}
+              </button>
+            )}
 
             {/* Main Action Button */}
             {isClosed ? (
@@ -433,8 +445,11 @@ export default function DayEndPage() {
             <div className="flex items-start gap-2 text-rose-800">
               <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-bold">Days must be closed in order</p>
+                <p className="text-sm font-bold">Close older days first</p>
                 <p className="text-xs mt-0.5">{closeReadiness.error}</p>
+                <p className="text-[11px] mt-1 text-rose-700">
+                  This screen shows the selected date. Closing is only allowed on the oldest open day.
+                </p>
               </div>
             </div>
             {closeReadiness.previousOpenDate && (
@@ -473,11 +488,11 @@ export default function DayEndPage() {
               <TrendingUp className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-xs font-semibold text-slate-500">Total Receipts</p>
+              <p className="text-xs font-semibold text-slate-500">Cash + Bank In</p>
               <h3 className="text-lg font-black text-slate-900 mt-0.5">
                 Rs. {formatCurrency(summary?.totalReceipts)}
               </h3>
-              <p className="text-[11px] text-slate-400 font-medium">Entries: {summary?.receiptsCount || 0}</p>
+              <p className="text-[11px] text-slate-400 font-medium">Ledger lines: {summary?.receiptsCount || 0}</p>
             </div>
           </div>
 
@@ -501,11 +516,11 @@ export default function DayEndPage() {
               <CreditCard className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-xs font-semibold text-slate-500">Total Payments</p>
+              <p className="text-xs font-semibold text-slate-500">Cash + Bank Out</p>
               <h3 className="text-lg font-black text-slate-900 mt-0.5">
                 Rs. {formatCurrency(summary?.totalPayments)}
               </h3>
-              <p className="text-[11px] text-slate-400 font-medium">Entries: {summary?.paymentsCount || 0}</p>
+              <p className="text-[11px] text-slate-400 font-medium">Ledger lines: {summary?.paymentsCount || 0}</p>
             </div>
           </div>
 
@@ -585,27 +600,27 @@ export default function DayEndPage() {
 
             <div className="space-y-3.5">
               <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
-                <span className="font-semibold text-slate-600">Opening Cash</span>
+                <span className="font-semibold text-slate-600">
+                  Opening Cash
+                  {summary?.openingCashFromDate ? ` (last close ${summary.openingCashFromDate})` : ''}
+                </span>
                 <span className="font-bold text-slate-900">Rs. {formatCurrency(summary?.openingCash)}</span>
               </div>
               <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
-                <span className="font-semibold text-slate-600">Total Cash Inflow (Sales + Receipts)</span>
+                <span className="font-semibold text-slate-600">Cash In (Cash Report / Ledger)</span>
                 <span className="font-bold text-emerald-600">Rs. {formatCurrency(summary?.totalCashInflow)}</span>
               </div>
               <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
-                <span className="font-semibold text-slate-600">Total Cash Outflow (Purchases + Payments + Expenses)</span>
+                <span className="font-semibold text-slate-600">Cash Out (Cash Report / Ledger)</span>
                 <span className="font-bold text-rose-600">Rs. {formatCurrency(summary?.totalCashOutflow)}</span>
               </div>
-              {parseFloat(summary?.totalSaleReturns || 0) > 0 && (
-                <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
-                  <span className="font-semibold text-slate-600">Cash sale returns (out)</span>
-                  <span className="font-bold text-rose-600">Rs. {formatCurrency(summary?.cashSaleReturns)}</span>
-                </div>
-              )}
               <div className="flex justify-between items-center text-xs py-2 bg-blue-50/80 px-3 rounded-xl border border-blue-200/60 mt-2">
-                <span className="font-extrabold text-blue-900">Expected Cash In Hand</span>
+                  <span className="font-extrabold text-blue-900">Expected Cash In Hand</span>
                 <span className="font-black text-sm text-blue-700">Rs. {formatCurrency(summary?.expectedCashInHand)}</span>
               </div>
+              <p className="text-[11px] text-slate-500">
+                Sales and purchases are invoice totals. Cash in/out is only from the cash ledger, same as Cash Report. Credit bills are not treated as cash.
+              </p>
               {summary?.actualClosingCash != null && (
                 <div className={`flex justify-between items-center text-xs py-2 px-3 rounded-xl border ${
                   Math.abs(summary?.variance || 0) > 0.01
@@ -739,15 +754,18 @@ export default function DayEndPage() {
 
               <div className="space-y-2 text-xs">
                 <div className="flex justify-between py-1 border-b border-slate-100">
-                  <span className="font-semibold text-slate-600">Opening Bank</span>
+                  <span className="font-semibold text-slate-600">
+                    Opening Bank
+                    {summary?.openingCashFromDate ? ` (last close ${summary.openingCashFromDate})` : ''}
+                  </span>
                   <span className="font-bold text-slate-900">Rs. {formatCurrency(summary?.openingBank)}</span>
                 </div>
                 <div className="flex justify-between py-1 border-b border-slate-100">
-                  <span className="font-semibold text-slate-600">Bank Inflow</span>
+                  <span className="font-semibold text-slate-600">Bank In (Bank Report / Ledger)</span>
                   <span className="font-bold text-emerald-700">Rs. {formatCurrency(summary?.totalBankInflow)}</span>
                 </div>
                 <div className="flex justify-between py-1 border-b border-slate-100">
-                  <span className="font-semibold text-slate-600">Bank Outflow</span>
+                  <span className="font-semibold text-slate-600">Bank Out (Bank Report / Ledger)</span>
                   <span className="font-bold text-rose-700">Rs. {formatCurrency(summary?.totalBankOutflow)}</span>
                 </div>
                 <div className="flex justify-between py-2 bg-indigo-50/80 px-3 rounded-xl border border-indigo-200/60 mt-2">
@@ -758,7 +776,7 @@ export default function DayEndPage() {
 
               {/* Itemized Bank Accounts List */}
               <div className="pt-2">
-                <p className="text-[11px] font-bold uppercase text-slate-400 tracking-wider mb-2">Individual Bank Accounts</p>
+                <p className="text-[11px] font-bold uppercase text-slate-400 tracking-wider mb-2">Live book balances (not this day&apos;s close)</p>
                 <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                   {accountBalances?.bankAccounts?.map(acc => (
                     <div key={acc.cus_id} className="flex justify-between items-center text-xs py-1.5 px-3 bg-slate-50 rounded-lg hover:bg-indigo-50/50 transition-colors border border-slate-100">
@@ -793,9 +811,14 @@ export default function DayEndPage() {
                   type="number"
                   value={openingCash}
                   onChange={(e) => setOpeningCash(e.target.value)}
-                  disabled={isClosed}
+                  disabled={isClosed || Boolean(summary?.openingCashLocked)}
                   className="w-full p-2.5 text-sm font-bold bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none text-slate-900 disabled:bg-slate-100"
                 />
+                <p className="text-[11px] text-slate-500">
+                  {summary?.openingCashLocked
+                    ? `Taken from physical closing cash of ${summary.openingCashFromDate}. This cannot be edited.`
+                    : 'No previous closed day. Enter the drawer opening for this first close.'}
+                </p>
               </div>
 
               {/* Physical Cash Input & Calculator */}

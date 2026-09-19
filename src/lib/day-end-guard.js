@@ -62,23 +62,75 @@ export async function dayHasPostingActivity(dateStr) {
   );
 }
 
+function activityCreatedWhere(fromDateStr, beforeDateStr) {
+  const before = pkDayRange(beforeDateStr)?.gte;
+  if (!before) return null;
+  const after = fromDateStr ? pkDayRange(fromDateStr)?.gte : null;
+  return after ? { gte: after, lt: before } : { lt: before };
+}
+
 /**
- * Today cannot close while yesterday still has unclosed bills.
- * A past date can be closed as catch-up without forcing older imported history.
+ * Earliest Pakistan day with bills in [fromDateStr, beforeDateStr).
+ * fromDateStr null = from the first bill on this branch.
+ */
+export async function findEarliestActivityPkDateBefore(beforeDateStr, fromDateStr = null) {
+  const createdWhere = activityCreatedWhere(fromDateStr, beforeDateStr);
+  const beforeBiz = pkBusinessDate(beforeDateStr);
+  if (!createdWhere || !beforeBiz) return null;
+
+  const journalWhere = {
+    status: { not: 'DRAFT' },
+    journal_date: fromDateStr
+      ? { gte: pkBusinessDate(fromDateStr), lt: beforeBiz }
+      : { lt: beforeBiz },
+  };
+
+  const rows = await Promise.all([
+    prisma.sale.findFirst({ where: { created_at: createdWhere, bill_type: 'BILL' }, orderBy: { created_at: 'asc' }, select: { created_at: true } }),
+    prisma.purchase.findFirst({ where: { created_at: createdWhere }, orderBy: { created_at: 'asc' }, select: { created_at: true } }),
+    prisma.expense.findFirst({ where: { created_at: createdWhere }, orderBy: { created_at: 'asc' }, select: { created_at: true } }),
+    prisma.saleReturn.findFirst({ where: { created_at: createdWhere }, orderBy: { created_at: 'asc' }, select: { created_at: true } }),
+    prisma.purchaseReturn.findFirst({ where: { created_at: createdWhere }, orderBy: { created_at: 'asc' }, select: { created_at: true } }),
+    prisma.ledger.findFirst({ where: { created_at: createdWhere }, orderBy: { created_at: 'asc' }, select: { created_at: true } }),
+    prisma.payment.findFirst({ where: { created_at: createdWhere }, orderBy: { created_at: 'asc' }, select: { created_at: true } }),
+    prisma.employeeAdvance.findFirst({ where: { created_at: createdWhere }, orderBy: { created_at: 'asc' }, select: { created_at: true } }),
+    prisma.journal.findFirst({ where: journalWhere, orderBy: { journal_date: 'asc' }, select: { journal_date: true } }),
+  ]);
+
+  let earliest = null;
+  for (const row of rows) {
+    const stamp = row?.created_at || row?.journal_date;
+    if (stamp && (!earliest || stamp < earliest)) earliest = stamp;
+  }
+  return earliest ? getPkDateString(earliest) : null;
+}
+
+/** Oldest unclosed activity day before dateStr. Empty days after the last close are skipped. */
+export async function findRequiredCloseDate(dateStr) {
+  const lastClosed = await prisma.dayEnd.findFirst({
+    where: { status: 'CLOSED', business_date: { lt: pkBusinessDate(dateStr) } },
+    orderBy: { business_date: 'desc' },
+    select: { business_date: true },
+  });
+  const fromDate = lastClosed ? shiftPkDate(getPkDateString(lastClosed.business_date), 1) : null;
+  return findEarliestActivityPkDateBefore(dateStr, fromDate);
+}
+
+/** Next day that still needs closing after a successful close. */
+export async function findNextCloseableDate(afterDateStr) {
+  const today = getPkDateString();
+  const start = shiftPkDate(afterDateStr, 1);
+  if (!start || start > today) return null;
+  const tomorrow = shiftPkDate(today, 1);
+  return findEarliestActivityPkDateBefore(tomorrow, start) || (start <= today ? today : null);
+}
+
+/**
+ * Oldest unclosed activity day before dateStr. Used by close-order checks.
  */
 export async function findPreviousOpenActivityDay(dateStr) {
-  const today = getPkDateString();
-  if (dateStr < today) return null;
-
-  const yesterday = shiftPkDate(dateStr, -1);
-  if (!yesterday || yesterday >= dateStr) return null;
-
-  const alreadyClosed = await prisma.dayEnd.findFirst({
-    where: { business_date: pkBusinessDate(yesterday), status: 'CLOSED' },
-    select: { day_end_id: true },
-  });
-  if (alreadyClosed) return null;
-  if (await dayHasPostingActivity(yesterday)) return yesterday;
+  const required = await findRequiredCloseDate(dateStr);
+  if (required && required < dateStr) return required;
   return null;
 }
 
@@ -140,7 +192,7 @@ export async function inspectCloseReadiness(dateStr) {
     return {
       ok: false,
       code: 'PREVIOUS_DAY_OPEN',
-      error: `${previousOpenDate} still has unclosed bills. Close that day first.`,
+      error: `${previousOpenDate} is the oldest open day with bills. Close that day first, then the next open day.`,
       previousOpenDate,
     };
   }

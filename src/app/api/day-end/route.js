@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 import { getPkDateString, pkBusinessDate } from '@/lib/date-helper';
-import { assertCanCloseBusinessDay, inspectCloseReadiness } from '@/lib/day-end-guard';
+import { assertCanCloseBusinessDay, findNextCloseableDate, inspectCloseReadiness } from '@/lib/day-end-guard';
 import { buildDayEndDetails, loadDayEndSnapshot } from '@/lib/day-end-snapshot';
 
 function n(val) {
@@ -80,7 +80,13 @@ export async function GET(request) {
     });
     const summary = freezeClosedSummary(snapshot.summary, dayEnd);
     const closeReadiness = dayEnd?.status === 'CLOSED'
-      ? { ok: false, code: 'ALREADY_CLOSED', error: 'Day is already closed.', previousOpenDate: null }
+      ? {
+          ok: false,
+          code: 'ALREADY_CLOSED',
+          error: 'Day is already closed.',
+          previousOpenDate: null,
+          nextRequiredDate: await findNextCloseableDate(dateStr),
+        }
       : await inspectCloseReadiness(dateStr);
 
     const checklistStatus = (snapshot.checklistStatus || []).map((item) => {
@@ -89,8 +95,8 @@ export async function GET(request) {
       return {
         ...item,
         title: closeReadiness.previousOpenDate && closeReadiness.code === 'PREVIOUS_DAY_OPEN'
-          ? `Previous day still open (${closeReadiness.previousOpenDate})`
-          : 'Previous business day is closed (or had no bills)',
+          ? `Oldest open day must be closed first (${closeReadiness.previousOpenDate})`
+          : 'Previous business days with bills are closed',
         status: previousOk ? 'Completed' : 'Pending',
       };
     });
@@ -321,6 +327,8 @@ export async function POST(request) {
       }
     }
 
+    const nextRequiredDate = isClosing ? await findNextCloseableDate(dateStr) : null;
+
     return NextResponse.json({
       ...result.dayEnd,
       warning,
@@ -328,6 +336,7 @@ export async function POST(request) {
       expected_cash_in_hand: summary.expectedCashInHand,
       expected_closing_bank: summary.expectedClosingBank,
       variance: isClosing ? (finalClosingCash - summary.expectedCashInHand) : summary.variance,
+      nextRequiredDate,
     });
   } catch (error) {
     console.error('Error creating/updating day end:', error);

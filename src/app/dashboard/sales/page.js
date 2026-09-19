@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, Suspense, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, Suspense, useRef, useCallback, forwardRef } from 'react';
 import { formatDatePK, formatDateTimePK, formatTimePK, getCreatedByName } from '@/lib/date-helper';
 import { useSearchParams, useRouter } from 'next/navigation';
 import DashboardLayout from '../components/dashboard-layout';
@@ -61,7 +61,6 @@ import {
   Print as PrintIcon,
   AttachMoney as AttachMoneyIcon,
   TrendingDown as TrendingDownIcon,
-  CreditCard as CreditCardIcon,
   Inventory as PackageIcon,
   Clear as ClearIcon,
   Person as PersonIcon,
@@ -240,6 +239,191 @@ const SALES_PAGE_CARD_SX = {
   overflow: 'hidden',
 };
 
+const SALE_ENTRY_LABEL_SX = {
+  mb: 0.75,
+  fontWeight: 700,
+  fontSize: '0.72rem',
+  color: '#64748b',
+  textTransform: 'uppercase',
+  letterSpacing: '0.04em',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 1,
+  minHeight: 22,
+  whiteSpace: 'nowrap',
+};
+
+const SALE_ENTRY_CONTROL_SX = {
+  width: '100%',
+  minWidth: 0,
+  bgcolor: '#fff',
+  '& .MuiInputBase-root': {
+    height: 40,
+    bgcolor: '#fff',
+  },
+  '& .MuiInputBase-input, & .MuiSelect-select': {
+    fontSize: '0.875rem',
+    py: 0,
+  },
+};
+
+const SALE_ENTRY_CELL_SX = {
+  minWidth: 0,
+  width: '100%',
+};
+
+const SALE_ENTRY_ROW1_SX = {
+  display: 'grid',
+  gridTemplateColumns: {
+    xs: '1fr',
+    sm: 'repeat(2, minmax(0, 1fr))',
+    md: 'minmax(0, 2.4fr) minmax(0, 1fr) minmax(0, 1.2fr)',
+  },
+  gap: { xs: 1.5, md: 1.75 },
+  alignItems: 'end',
+  width: '100%',
+  mb: 2,
+};
+
+const SALE_ENTRY_ROW1_RETURN_SX = {
+  ...SALE_ENTRY_ROW1_SX,
+  gridTemplateColumns: {
+    xs: '1fr',
+    sm: 'repeat(2, minmax(0, 1fr))',
+    md: 'minmax(0, 2fr) minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.15fr)',
+  },
+};
+
+const SALE_ENTRY_ROW2_SX = {
+  display: 'grid',
+  gridTemplateColumns: {
+    xs: '1fr 1fr',
+    sm: 'repeat(3, minmax(0, 1fr))',
+    md: 'minmax(0, 2.35fr) minmax(0, 1.15fr) minmax(0, 0.7fr) minmax(0, 0.85fr) minmax(0, 0.85fr) minmax(0, 0.7fr) 44px',
+  },
+  gap: { xs: 1.5, md: 1.75 },
+  alignItems: 'end',
+  width: '100%',
+  mb: 2,
+};
+
+const SALE_DROPDOWN_LINE = '1px solid #c5c5c5';
+const SALE_CUSTOMER_DROPDOWN_GRID = '32px minmax(320px, 3.2fr) 110px minmax(110px, 1fr) 100px';
+
+const saleDropdownRowStyle = (columns) => ({
+  display: 'grid',
+  gridTemplateColumns: columns,
+  alignItems: 'stretch',
+  width: '100%',
+  padding: 0,
+  margin: 0,
+  minHeight: 32,
+  borderBottom: SALE_DROPDOWN_LINE,
+});
+
+const saleDropdownCellStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  padding: '4px 8px',
+  borderRight: SALE_DROPDOWN_LINE,
+  minWidth: 0,
+  boxSizing: 'border-box',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  fontSize: 13,
+};
+
+const saleDropdownHeaderCell = {
+  ...saleDropdownCellStyle,
+  fontSize: 11,
+  fontWeight: 800,
+  color: '#1e3a5f',
+  textTransform: 'uppercase',
+  letterSpacing: '0.04em',
+};
+
+function SaleDropdownListbox({ columns, headers, props, listRef }) {
+  const { children, ownerState, sx, className, style, slots, slotProps, ...other } = props;
+  return (
+    <ul
+      ref={listRef}
+      className={className}
+      style={{
+        listStyle: 'none',
+        margin: 0,
+        padding: 0,
+        maxHeight: 320,
+        overflow: 'auto',
+        border: SALE_DROPDOWN_LINE,
+        background: '#fff',
+        ...style,
+      }}
+      {...other}
+    >
+      {headers.length > 0 && (
+      <li
+        role="presentation"
+        aria-hidden
+        style={{
+          ...saleDropdownRowStyle(columns),
+          position: 'sticky',
+          top: 0,
+          zIndex: 2,
+          pointerEvents: 'none',
+          background: '#d9e2f3',
+        }}
+      >
+        {headers.map((label, i) => (
+          <span
+            key={label || `h-${i}`}
+            style={{
+              ...saleDropdownHeaderCell,
+              borderRight: i === headers.length - 1 ? 'none' : SALE_DROPDOWN_LINE,
+              justifyContent: label === '#' ? 'center' : 'flex-start',
+            }}
+          >
+            {label}
+          </span>
+        ))}
+      </li>
+      )}
+      {children}
+    </ul>
+  );
+}
+
+const SaleCustomerDropdownListbox = forwardRef(function SaleCustomerDropdownListbox(props, ref) {
+  return (
+    <SaleDropdownListbox
+      listRef={ref}
+      props={props}
+      columns={SALE_CUSTOMER_DROPDOWN_GRID}
+      headers={['#', 'Name', 'Phone', 'Address', 'City']}
+    />
+  );
+});
+
+const SALE_DROPDOWN_POPPER_SX = {
+  zIndex: 1400,
+  '& .MuiPaper-root': {
+    borderRadius: 0,
+    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.18)',
+    overflow: 'hidden',
+  },
+  '& .MuiAutocomplete-option': {
+    padding: '0 !important',
+    minHeight: '32px !important',
+    alignItems: 'stretch',
+  },
+  '& .MuiAutocomplete-option:nth-of-type(even)': {
+    backgroundColor: '#f3f3f3',
+  },
+  '& .MuiAutocomplete-option.Mui-focused, & .MuiAutocomplete-option[aria-selected="true"]': {
+    backgroundColor: '#cde6f7 !important',
+  },
+};
+
 const SALES_EXCEL_TABLE_SX = {
   minWidth: 1200,
   borderCollapse: 'collapse',
@@ -270,17 +454,6 @@ const SALES_NUM_CELL_SX = {
   textAlign: 'right',
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   fontVariantNumeric: 'tabular-nums',
-};
-
-const SALES_STATS_GRID = {
-  display: 'grid',
-  gridTemplateColumns: {
-    xs: 'repeat(2, 1fr)',
-    sm: 'repeat(2, 1fr)',
-    lg: 'repeat(4, 1fr)',
-  },
-  gap: 1.5,
-  width: '100%',
 };
 
 const SALES_FILTER_GRID = {
@@ -4593,12 +4766,6 @@ function SalesPageContent() {
 
 
 
-  // Calculate stats from filtered sales
-  const totalSales = filteredSales.length;
-  const totalSalesValue = filteredSales.reduce((sum, sale) => sum + parseFloat(sale.total_amount || 0), 0);
-  const totalDiscount = filteredSales.reduce((sum, sale) => sum + parseFloat(sale.discount || 0), 0);
-  const totalPayment = filteredSales.reduce((sum, sale) => sum + parseFloat(sale.payment || 0), 0);
-
   // Filter and sort sales
   const filteredAndSortedSales = sales
     .filter(sale => {
@@ -5178,12 +5345,11 @@ function SalesPageContent() {
                 ) : <Box />}
               </Box>
 
-              {/* First Row - Date, Customer, Reference */}
-              <Grid container spacing={2} sx={{ mb: 2, alignItems: 'flex-end' }}>
-                <Grid item xs={12} md={billType === 'SALE_RETURN' ? 4 : 6}>
-                  <Box sx={{ position: 'relative' }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 'medium', color: 'text.secondary' }}>
+              {/* First Row - Customer, Date, Reference */}
+              <Box sx={billType === 'SALE_RETURN' ? SALE_ENTRY_ROW1_RETURN_SX : SALE_ENTRY_ROW1_SX}>
+                <Box sx={SALE_ENTRY_CELL_SX}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.75, gap: 1, minHeight: 22, flexWrap: 'wrap' }}>
+                      <Typography sx={{ ...SALE_ENTRY_LABEL_SX, mb: 0 }}>
                         CUSTOMER
                       </Typography>
                       {formSelectedCustomer && (
@@ -5255,7 +5421,8 @@ function SalesPageContent() {
                       fullWidth
                       size="small"
                       sx={{ 
-                        minWidth: 450,
+                        width: '100%',
+                        minWidth: 0,
                         '& .MuiAutocomplete-popupIndicator': { color: 'white' },
                         '& .MuiAutocomplete-clearIndicator': { color: 'white' }
                       }}
@@ -5296,7 +5463,19 @@ function SalesPageContent() {
                         return true;
                       })}
                       getOptionLabel={(option) => option.cus_name || ''}
-                      ListboxProps={{ sx: { maxHeight: 180 } }}
+                      slots={{ listbox: SaleCustomerDropdownListbox }}
+                      slotProps={{
+                        popper: {
+                          sx: {
+                            ...SALE_DROPDOWN_POPPER_SX,
+                            minWidth: 740,
+                          },
+                          modifiers: [{ name: 'flip', enabled: false }],
+                        },
+                        paper: {
+                          sx: { width: 740, maxWidth: '92vw', mt: 0.5 },
+                        },
+                      }}
                       filterOptions={(options, { inputValue }) => {
                         const q = inputValue.toLowerCase().trim();
                         if (!q) return options;
@@ -5322,17 +5501,37 @@ function SalesPageContent() {
                       autoHighlight={true}
                       openOnFocus={true}
                       selectOnFocus={true}
-                      renderOption={(props, option) => {
-                        const { key, ...optionProps } = props;
+                      renderOption={(props, option, { index }) => {
+                        const { key, ownerState, ...optionProps } = props;
                         return (
-                          <Box component="li" key={option.cus_id} {...optionProps}>
-                            <Box sx={{ display: 'flex', flexDirection: 'column', py: 0.5 }}>
-                              <Typography variant="body1" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>{option.cus_name}</Typography>
-                              <Typography variant="body2" sx={{ fontSize: '0.8rem' }} color="text.secondary">
-                                {[option.cus_phone_no, option.cus_address, option.city?.city_name, option.cus_reference].filter(Boolean).join(' • ')}
-                              </Typography>
-                            </Box>
-                          </Box>
+                          <li key={option.cus_id ?? key} {...optionProps} style={{ ...saleDropdownRowStyle(SALE_CUSTOMER_DROPDOWN_GRID), ...optionProps.style }}>
+                            <span style={{ ...saleDropdownCellStyle, justifyContent: 'center', color: '#64748b', fontSize: 12, fontWeight: 700 }}>
+                              {index + 1}
+                            </span>
+                            <span
+                              title={option.cus_name || ''}
+                              style={{
+                                ...saleDropdownCellStyle,
+                                fontWeight: 700,
+                                color: '#111827',
+                                whiteSpace: 'normal',
+                                overflow: 'visible',
+                                textOverflow: 'unset',
+                                lineHeight: 1.25,
+                              }}
+                            >
+                              {option.cus_name || ''}
+                            </span>
+                            <span title={option.cus_phone_no || ''} style={{ ...saleDropdownCellStyle, fontVariantNumeric: 'tabular-nums' }}>
+                              {option.cus_phone_no || ''}
+                            </span>
+                            <span title={option.cus_address || ''} style={saleDropdownCellStyle}>
+                              {option.cus_address || ''}
+                            </span>
+                            <span title={option.city?.city_name || ''} style={{ ...saleDropdownCellStyle, borderRight: 'none' }}>
+                              {option.city?.city_name || ''}
+                            </span>
+                          </li>
                         );
                       }}
                       renderInput={(params) => (
@@ -5344,10 +5543,12 @@ function SalesPageContent() {
                           onFocus={(e) => e.target.select()}
                           sx={{
                             bgcolor: '#2e7d32',
-                            minWidth: 450,
+                            width: '100%',
+                            minWidth: 0,
                             borderRadius: 1,
                             '& .MuiOutlinedInput-root': {
-                              fontSize: '1.1rem',
+                              height: 40,
+                              fontSize: '0.95rem',
                               color: 'white !important',
                               WebkitTextFillColor: 'white !important',
                               '& fieldset': {
@@ -5375,14 +5576,12 @@ function SalesPageContent() {
                         />
                       )}
                     />
-                  </Box>
-                </Grid>
+                </Box>
 
                 {/* Return Invoice Selection (Only for Sale Return) */}
                 {billType === 'SALE_RETURN' && (
-                  <Grid item xs={12} md={3}>
-                    <Box>
-                      <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
+                  <Box sx={SALE_ENTRY_CELL_SX}>
+                      <Typography sx={SALE_ENTRY_LABEL_SX}>
                         SELECT INVOICE
                       </Typography>
                       <Autocomplete
@@ -5444,7 +5643,7 @@ function SalesPageContent() {
                                 if (productInput) productInput.focus();
                               }
                             }}
-                            sx={{ bgcolor: 'white', minWidth: 250 }}
+                            sx={{ ...SALE_ENTRY_CONTROL_SX }}
                             InputProps={{
                               ...params.InputProps,
                               endAdornment: (
@@ -5458,14 +5657,12 @@ function SalesPageContent() {
                         noOptionsText="No sales found"
                       />
                     </Box>
-                  </Grid>
                 )}
 
 
-                <Grid item xs={12} md={billType === 'SALE_RETURN' ? 2 : 3}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                      DATE:
+                <Box sx={SALE_ENTRY_CELL_SX}>
+                    <Typography sx={SALE_ENTRY_LABEL_SX}>
+                      DATE
                     </Typography>
                     <TextField
                       fullWidth
@@ -5473,38 +5670,35 @@ function SalesPageContent() {
                       size="small"
                       defaultValue={new Date().toISOString().split('T')[0]}
                       onFocus={(e) => e.target.select()}
-                      sx={{ bgcolor: 'white' }}
+                      sx={SALE_ENTRY_CONTROL_SX}
                     />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={billType === 'SALE_RETURN' ? 3 : 3}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
+                </Box>
+                <Box sx={SALE_ENTRY_CELL_SX}>
+                    <Typography sx={SALE_ENTRY_LABEL_SX}>
                       REFERENCE
                     </Typography>
                     <TextField
                       fullWidth
                       size="small"
-                      sx={{ bgcolor: 'white' }}
+                      sx={SALE_ENTRY_CONTROL_SX}
                       value={paymentData.notes || ''}
                       onChange={(e) => setPaymentData(prev => ({ ...prev, notes: e.target.value }))}
                       onFocus={(e) => e.target.select()}
                     />
-                  </Box>
-                </Grid>
-              </Grid>
+                </Box>
+              </Box>
 
 
               {/* Product Selection Row */}
-              <Grid container spacing={2} sx={{ mb: 2 }}>
-                <Grid item xs={12} md={4}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
+              <Box sx={SALE_ENTRY_ROW2_SX}>
+                <Box sx={SALE_ENTRY_CELL_SX}>
+                    <Typography sx={SALE_ENTRY_LABEL_SX}>
                       SELECT PRODUCT
                     </Typography>
                     <Autocomplete
                       size="small"
-                      sx={{ minWidth: 450 }}
+                      fullWidth
+                      sx={{ width: '100%', minWidth: 0 }}
                       options={products || []}
                       getOptionLabel={(option) => option.pro_title || ''}
                       getOptionKey={(option) => option.pro_id}
@@ -5526,7 +5720,7 @@ function SalesPageContent() {
                           },
                         },
                         paper: {
-                          sx: { width: 450, mt: 0.5 },
+                          sx: { width: '100%', minWidth: 280, mt: 0.5 },
                         },
                         popper: {
                           modifiers: [
@@ -5604,25 +5798,21 @@ function SalesPageContent() {
                               prevKeyDown?.(e);
                             },
                           }}
-                          sx={{ bgcolor: 'white', width: 450, minWidth: 450, '& .MuiInputBase-input': { fontWeight: formSelectedProduct ? 'bold' : 'normal' } }}
+                          sx={{ ...SALE_ENTRY_CONTROL_SX, '& .MuiInputBase-input': { fontWeight: formSelectedProduct ? 'bold' : 'normal' } }}
                         />
                         );
                       }}
                       disabled={products.length === 0}
                     />
-                    {/* Debug info */}
-                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                      Debug: {products.length} products available
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={1.5}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
+                </Box>
+                <Box sx={SALE_ENTRY_CELL_SX}>
+                    <Typography sx={SALE_ENTRY_LABEL_SX}>
                       SELECT STORE
                     </Typography>
                     <Autocomplete
                       size="small"
+                      fullWidth
+                      sx={{ width: '100%', minWidth: 0 }}
                       options={stores || []}
                       getOptionLabel={(option) => option.store_name || ''}
                       value={formSelectedStore}
@@ -5650,15 +5840,13 @@ function SalesPageContent() {
                           {...params}
                           placeholder="Select Store"
                           onFocus={(e) => e.target.select()}
-                          sx={{ bgcolor: 'white', '& .MuiInputBase-input': { fontWeight: formSelectedStore ? 'bold' : 'normal' } }}
+                          sx={{ ...SALE_ENTRY_CONTROL_SX, '& .MuiInputBase-input': { fontWeight: formSelectedStore ? 'bold' : 'normal' } }}
                         />
                       )}
                     />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={1.2}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
+                </Box>
+                <Box sx={SALE_ENTRY_CELL_SX}>
+                    <Typography sx={SALE_ENTRY_LABEL_SX}>
                       QTY
                     </Typography>
                     <TextField
@@ -5689,9 +5877,7 @@ function SalesPageContent() {
                         }
                       }}
                       sx={{
-                        bgcolor: 'white',
-                        width: 130,
-                        minWidth: 130,
+                        ...SALE_ENTRY_CONTROL_SX,
                         '& .MuiInputBase-input': {
                           fontWeight: 'bold',
                           color: '#000000',
@@ -5705,12 +5891,10 @@ function SalesPageContent() {
                         }
                       }}
                     />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={1.5}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                      SALE RATE:
+                </Box>
+                <Box sx={SALE_ENTRY_CELL_SX}>
+                    <Typography sx={SALE_ENTRY_LABEL_SX}>
+                      SALE RATE
                     </Typography>
                     <TextField
                       fullWidth
@@ -5736,9 +5920,7 @@ function SalesPageContent() {
                         }
                       }}
                       sx={{
-                        bgcolor: 'white',
-                        width: 150,
-                        minWidth: 150,
+                        ...SALE_ENTRY_CONTROL_SX,
                         '& .MuiInputBase-input': {
                           fontWeight: 'bold',
                           color: '#000000',
@@ -5752,28 +5934,22 @@ function SalesPageContent() {
                         }
                       }}
                     />
-                  </Box>
-                </Grid>
-
-
-                <Grid item xs={12} md={1.5}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                      AMOUNT:
+                </Box>
+                <Box sx={SALE_ENTRY_CELL_SX}>
+                    <Typography sx={SALE_ENTRY_LABEL_SX}>
+                      AMOUNT
                     </Typography>
                     <TextField
                       fullWidth
                       size="small"
                       type="number"
                       value={productFormData.amount ?? ''}
-                      sx={{ bgcolor: 'white', width: 150, minWidth: 150 }}
+                      sx={SALE_ENTRY_CONTROL_SX}
                       disabled
                     />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={1.5}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
+                </Box>
+                <Box sx={SALE_ENTRY_CELL_SX}>
+                    <Typography sx={SALE_ENTRY_LABEL_SX}>
                       STOCK
                     </Typography>
                     <TextField
@@ -5781,12 +5957,10 @@ function SalesPageContent() {
                       size="small"
                       value={productFormData.stock ?? ''}
                       disabled
-                      sx={{ bgcolor: '#f8f9fa', width: 150, minWidth: 150 }}
+                      sx={{ ...SALE_ENTRY_CONTROL_SX, bgcolor: '#f8f9fa', '& .MuiInputBase-root': { ...SALE_ENTRY_CONTROL_SX['& .MuiInputBase-root'], bgcolor: '#f8f9fa' } }}
                     />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={0.3}>
-                  <Box sx={{ mt: 2 }}>
+                </Box>
+                <Box sx={{ minWidth: 0, width: '100%', display: 'flex', alignItems: 'end' }}>
                     <Button
                       variant="contained"
                       id="add-product-btn"
@@ -5795,16 +5969,18 @@ function SalesPageContent() {
                       sx={{
                         bgcolor: '#6f42c1',
                         color: 'white',
-                        borderRadius: 2,
-                        minHeight: 40,
+                        borderRadius: 1,
+                        minWidth: 40,
+                        width: 44,
+                        height: 40,
+                        p: 0,
                         '&:hover': { bgcolor: '#5a2d91' }
                       }}
                     >
                       +
                     </Button>
-                  </Box>
-                </Grid>
-              </Grid>
+                </Box>
+              </Box>
 
               {/* Product Table */}
               <TableContainer component={Paper} sx={{ mb: 2, border: '1px solid #e9ecef' }}>
@@ -8080,53 +8256,6 @@ function SalesPageContent() {
 
           {/* Sales panel — stats, filters & excel grid */}
           <Card sx={{ ...SALES_PAGE_CARD_SX, mb: 3 }}>
-            {/* Stats strip */}
-            <Box sx={{ px: { xs: 1.5, md: 2 }, py: 1.75, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-              <Box sx={SALES_STATS_GRID}>
-                {[
-                  { title: 'Total Sales', val: totalSales, color: BRAND.primary.blue, bg: BRAND.tint.blue, icon: <ShoppingCartIcon fontSize="small" />, isCount: true },
-                  { title: 'Total Revenue', val: totalSalesValue, color: BRAND.text.green, bg: BRAND.tint.green, icon: <AttachMoneyIcon fontSize="small" /> },
-                  { title: 'Total Discount', val: totalDiscount, color: BRAND.text.pink, bg: BRAND.tint.pink, icon: <TrendingDownIcon fontSize="small" /> },
-                  { title: 'Total Payment', val: totalPayment, color: '#b45309', bg: '#fffbeb', icon: <CreditCardIcon fontSize="small" /> },
-                ].map((stat, i) => (
-                  <Box key={i} sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1.25,
-                    p: 1.5,
-                    width: '100%',
-                    minHeight: 72,
-                    borderRadius: 1.5,
-                    border: '1px solid #e2e8f0',
-                    bgcolor: '#fff',
-                  }}>
-                    <Box sx={{
-                      width: 38,
-                      height: 38,
-                      borderRadius: 1.25,
-                      bgcolor: stat.bg,
-                      color: stat.color,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
-                    }}>
-                      {stat.icon}
-                    </Box>
-                    <Box sx={{ minWidth: 0, flex: 1 }}>
-                      <Typography noWrap sx={{ fontSize: '0.625rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1.2 }}>
-                        {stat.title}
-                      </Typography>
-                      <Typography noWrap sx={{ fontWeight: 800, color: stat.color, fontSize: '0.9375rem', lineHeight: 1.3, mt: 0.25 }}>
-                        {!stat.isCount && <Box component="span" sx={{ fontSize: '0.625rem', mr: 0.35, opacity: 0.85, fontWeight: 700 }}>PKR</Box>}
-                        {stat.isCount ? stat.val : fmtAmt(stat.val)}
-                      </Typography>
-                    </Box>
-                  </Box>
-                ))}
-              </Box>
-            </Box>
-
             {/* Filters toolbar */}
             <Box sx={{
               px: { xs: 1.5, md: 2 },

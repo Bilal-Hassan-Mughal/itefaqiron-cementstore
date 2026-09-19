@@ -8,7 +8,7 @@ import {
   filterDashboardShortcuts,
   canViewDashboardLowStock,
 } from '@/lib/staff-access';
-import { formatDatePK } from '@/lib/date-helper';
+import { eachPkWeekInRange, formatDatePK, formatPkWeekLabel, getPkDateString, lastNPkDaysInclusive } from '@/lib/date-helper';
 import { useRouter } from 'next/navigation';
 import {
   DollarSign,
@@ -72,9 +72,14 @@ const stockStatusLabel = (status) => {
 const formatMonthLabel = (mStr) => {
   if (!mStr) return '';
   const parts = mStr.split('-');
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  if (parts.length === 3) {
+    const d = parseInt(parts[2], 10);
+    const mIndex = parseInt(parts[1], 10) - 1;
+    return `${d} ${monthNames[mIndex] || parts[1]}`;
+  }
   if (parts.length < 2) return mStr;
   const mIndex = parseInt(parts[1], 10) - 1;
-  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   return `${monthNames[mIndex] || parts[1]} '${parts[0].slice(2)}`;
 };
 
@@ -89,6 +94,10 @@ const CARD = 'relative bg-white rounded-[1.25rem] border border-slate-200/60 sha
 const CARD_HOVER = 'transition-all duration-300 ease-out hover:shadow-[0_4px_8px_rgba(15,23,42,0.05),0_16px_40px_rgba(15,23,42,0.11)] hover:-translate-y-1';
 
 const EMPTY_DATE_FILTER = { fromDate: '', toDate: '' };
+
+function last30DaysFilter() {
+  return lastNPkDaysInclusive(30);
+}
 
 const ReportViewContext = createContext(null);
 
@@ -111,43 +120,33 @@ function ReportFullscreenExpandButton() {
 }
 
 function buildDatePreset(days) {
-  const today = new Date();
-  const toStr = today.toISOString().split('T')[0];
-  let fromDate = new Date();
   if (days === 'year') {
-    fromDate = new Date(today.getFullYear(), 0, 1);
-  } else {
-    fromDate.setDate(today.getDate() - days);
+    const today = getPkDateString();
+    return { fromDate: `${today.slice(0, 4)}-01-01`, toDate: today };
   }
-  return { fromDate: fromDate.toISOString().split('T')[0], toDate: toStr };
+  return lastNPkDaysInclusive(Number(days) || 30);
 }
 
 function buildWeeklyChartData(salesList, days) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const slots = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const date = new Date(today);
-    date.setDate(date.getDate() - i);
-    slots.push({
-      date,
-      dateStr: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      billAmt: 0,
-      orderAmt: 0,
-      totalCount: 0,
-      orderCount: 0,
-    });
-  }
+  const range = lastNPkDaysInclusive(days);
+  const slots = eachPkWeekInRange(range.fromDate, range.toDate).map((week) => ({
+    from: week.from,
+    to: week.to,
+    dateStr: week.label || formatPkWeekLabel(week.from, week.to),
+    billAmt: 0,
+    orderAmt: 0,
+    totalCount: 0,
+    orderCount: 0,
+  }));
   (salesList || []).forEach((sale) => {
-    const sd = new Date(sale.created_at);
-    sd.setHours(0, 0, 0, 0);
-    const slot = slots.find((d) => d.date.getTime() === sd.getTime());
+    const day = getPkDateString(sale.created_at);
+    const slot = slots.find((item) => day >= item.from && day <= item.to);
     if (!slot) return;
     const amt = parseFloat(sale.total_amount || 0);
-    slot.totalCount++;
+    slot.totalCount += 1;
     if (sale.bill_type === 'ORDER') {
       slot.orderAmt += amt;
-      slot.orderCount++;
+      slot.orderCount += 1;
     } else if (sale.bill_type !== 'QUOTATION') {
       slot.billAmt += amt;
     }
@@ -275,17 +274,21 @@ function WidgetDateFilter({ filters, onChange, loading = false, accent }) {
           { label: '3M', days: 90 },
           { label: '6M', days: 180 },
           { label: 'Year', days: 'year' },
-        ].map(({ label, days }) => (
+        ].map(({ label, days }) => {
+          const preset = buildDatePreset(days);
+          const active = filters.fromDate === preset.fromDate && filters.toDate === preset.toDate;
+          return (
           <button
             key={label}
             type="button"
-            onClick={() => onChange(buildDatePreset(days))}
-            className={REPORT.presetBtn}
-            style={{ ['--neon-accent']: neon.primary }}
+            onClick={() => onChange(preset)}
+            className={`${REPORT.presetBtn}${active ? ` ${REPORT.presetBtnActive}` : ''}`}
+            style={active ? { color: neon.primary } : { ['--neon-accent']: neon.primary }}
           >
             {label}
           </button>
-        ))}
+          );
+        })}
       </div>
       {(filters.fromDate || filters.toDate) && (
         <button
@@ -477,7 +480,7 @@ function renderSmoothBarChart({
         const cx = pL + grpW * i + grpW / 2;
         const bx = cx - barW / 2;
         const bH = Math.max((Math.abs(val) / maxV) * cH, val !== 0 ? 4 : 0);
-        const lbl = formatLabel(item[labelKey]);
+        const lbl = item.label || formatLabel(item[labelKey]);
         return (
           <g key={i} className="cursor-pointer">
             <rect
@@ -645,7 +648,7 @@ function renderRankingBarChart({ rows, color, gradient, gradId, loading, emptyLa
               fill={`url(#${gradId})`}
               filter={`url(#${gradId}-shadow)`}
             >
-              <title>{`${r.name}: PKR ${r.balance.toLocaleString()}`}</title>
+              <title>{`${r.name}: PKR ${Number(r.balance || 0).toLocaleString()}${r.qty != null ? ` · Qty ${formatQty(r.qty)}` : ''}${r.invoices != null ? ` · ${r.invoices} bills` : ''}`}</title>
             </rect>
             <text x={bx + barW / 2} y={pT + cH - bH - 6} fontSize="10" fill={color} textAnchor="middle" fontWeight="700">
               {fmtK(r.balance)}
@@ -732,12 +735,12 @@ export default function DashboardContent({ activeTab }) {
   const [profitData, setProfitData] = useState([]);
   const [allCategories, setAllCategories] = useState([]);
 
-  const [kpiFilters, setKpiFilters] = useState(EMPTY_DATE_FILTER);
+  const [kpiFilters, setKpiFilters] = useState(last30DaysFilter);
 
-  const [monthlyCreditFilters, setMonthlyCreditFilters] = useState(EMPTY_DATE_FILTER);
-  const [monthlyDebitFilters, setMonthlyDebitFilters] = useState(EMPTY_DATE_FILTER);
-  const [monthlyProfitFilters, setMonthlyProfitFilters] = useState(EMPTY_DATE_FILTER);
-  const [monthlySalesFilters, setMonthlySalesFilters] = useState(EMPTY_DATE_FILTER);
+  const [monthlyCreditFilters, setMonthlyCreditFilters] = useState(last30DaysFilter);
+  const [monthlyDebitFilters, setMonthlyDebitFilters] = useState(last30DaysFilter);
+  const [monthlyProfitFilters, setMonthlyProfitFilters] = useState(last30DaysFilter);
+  const [monthlySalesFilters, setMonthlySalesFilters] = useState(last30DaysFilter);
   const [monthlyCreditData, setMonthlyCreditData] = useState([]);
   const [monthlyDebitData, setMonthlyDebitData] = useState([]);
   const [monthlyProfitData, setMonthlyProfitData] = useState([]);
@@ -747,17 +750,24 @@ export default function DashboardContent({ activeTab }) {
   const [monthlyProfitLoading, setMonthlyProfitLoading] = useState(false);
   const [monthlySalesLoading, setMonthlySalesLoading] = useState(false);
 
-  const [customerBalanceFilters, setCustomerBalanceFilters] = useState({ ...EMPTY_DATE_FILTER, cusCatId: '' });
-  const [supplierBalanceFilters, setSupplierBalanceFilters] = useState({ ...EMPTY_DATE_FILTER, supCatId: '' });
+  const [customerBalanceFilters, setCustomerBalanceFilters] = useState({ ...last30DaysFilter(), cusCatId: '' });
+  const [supplierBalanceFilters, setSupplierBalanceFilters] = useState({ ...last30DaysFilter(), supCatId: '' });
   const [customerBalanceData, setCustomerBalanceData] = useState([]);
   const [supplierBalanceData, setSupplierBalanceData] = useState([]);
   const [customerBalanceLoading, setCustomerBalanceLoading] = useState(false);
   const [supplierBalanceLoading, setSupplierBalanceLoading] = useState(false);
 
+  const [topCustomersSaleFilters, setTopCustomersSaleFilters] = useState(last30DaysFilter);
+  const [topProductsSaleFilters, setTopProductsSaleFilters] = useState(last30DaysFilter);
+  const [topCustomersSaleData, setTopCustomersSaleData] = useState([]);
+  const [topProductsSaleData, setTopProductsSaleData] = useState([]);
+  const [topCustomersSaleLoading, setTopCustomersSaleLoading] = useState(false);
+  const [topProductsSaleLoading, setTopProductsSaleLoading] = useState(false);
+
   const [rawSalesList, setRawSalesList] = useState([]);
   const [weeklyDataLoading, setWeeklyDataLoading] = useState(false);
-  const [salesOverviewDays, setSalesOverviewDays] = useState(7);
-  const [transactionsOverviewDays, setTransactionsOverviewDays] = useState(7);
+  const [salesOverviewDays, setSalesOverviewDays] = useState(30);
+  const [transactionsOverviewDays, setTransactionsOverviewDays] = useState(30);
 
   const [recentActivityLimit, setRecentActivityLimit] = useState(5);
   const [lowStockData, setLowStockData] = useState({
@@ -804,11 +814,14 @@ export default function DashboardContent({ activeTab }) {
         transactionsOverview: false,
         customerBalance: false,
         supplierBalance: false,
+        topCustomersSale: false,
+        topProductsSale: false,
         recentActivity: false,
         any: false,
         anyMonthlyChart: false,
         anyWeeklyChart: false,
         anyBalanceChart: false,
+        anyTopSaleChart: false,
       };
     }
     const w = (id) => hasDashboardWidgetAccess(dashboardUser, id);
@@ -820,6 +833,8 @@ export default function DashboardContent({ activeTab }) {
     const transactionsOverview = w('dashboard-transactions-overview');
     const customerBalance = w('dashboard-customer-balance');
     const supplierBalance = w('dashboard-supplier-balance');
+    const topCustomersSale = w('dashboard-top-customers-sale');
+    const topProductsSale = w('dashboard-top-products-sale');
     const recentActivity = w('dashboard-recent-activity');
     const kpi = w('dashboard-kpi');
     return {
@@ -832,11 +847,14 @@ export default function DashboardContent({ activeTab }) {
       transactionsOverview,
       customerBalance,
       supplierBalance,
+      topCustomersSale,
+      topProductsSale,
       recentActivity,
       any: canViewAnyDashboardAnalytics(dashboardUser),
       anyMonthlyChart: monthlyCredit || monthlyDebit || monthlyProfit || monthlySales,
       anyWeeklyChart: salesOverview || transactionsOverview,
       anyBalanceChart: customerBalance || supplierBalance,
+      anyTopSaleChart: topCustomersSale || topProductsSale,
     };
   }, [dashboardUser, permVersion]);
 
@@ -952,7 +970,7 @@ export default function DashboardContent({ activeTab }) {
     const fetchRecentData = async () => {
       setWeeklyDataLoading(true);
       try {
-        const salesRes = await fetch('/api/sales?limit=500');
+        const salesRes = await fetch('/api/sales?limit=3000');
         const salesDataRaw = salesRes.ok ? await salesRes.json() : [];
         const salesList = Array.isArray(salesDataRaw) ? salesDataRaw : (salesDataRaw.data || []);
         setRawSalesList(salesList);
@@ -1070,6 +1088,46 @@ export default function DashboardContent({ activeTab }) {
     };
     fetchSupplierBalance();
   }, [activeTab, analyticsWidgets.supplierBalance, supplierBalanceFilters]);
+
+  useEffect(() => {
+    if (activeTab !== 'dashboard' || !analyticsWidgets.topCustomersSale) return;
+    const fetchTopCustomers = async () => {
+      setTopCustomersSaleLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (topCustomersSaleFilters.fromDate) params.set('fromDate', topCustomersSaleFilters.fromDate);
+        if (topCustomersSaleFilters.toDate) params.set('toDate', topCustomersSaleFilters.toDate);
+        const res = await fetch(`/api/dashboard/top-sales?${params}`);
+        const json = res.ok ? await res.json() : null;
+        if (json?.success) setTopCustomersSaleData(json.customers || []);
+      } catch (err) {
+        console.error('Error fetching top customers by sale:', err);
+      } finally {
+        setTopCustomersSaleLoading(false);
+      }
+    };
+    fetchTopCustomers();
+  }, [activeTab, analyticsWidgets.topCustomersSale, topCustomersSaleFilters]);
+
+  useEffect(() => {
+    if (activeTab !== 'dashboard' || !analyticsWidgets.topProductsSale) return;
+    const fetchTopProducts = async () => {
+      setTopProductsSaleLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (topProductsSaleFilters.fromDate) params.set('fromDate', topProductsSaleFilters.fromDate);
+        if (topProductsSaleFilters.toDate) params.set('toDate', topProductsSaleFilters.toDate);
+        const res = await fetch(`/api/dashboard/top-sales?${params}`);
+        const json = res.ok ? await res.json() : null;
+        if (json?.success) setTopProductsSaleData(json.products || []);
+      } catch (err) {
+        console.error('Error fetching top products by sale:', err);
+      } finally {
+        setTopProductsSaleLoading(false);
+      }
+    };
+    fetchTopProducts();
+  }, [activeTab, analyticsWidgets.topProductsSale, topProductsSaleFilters]);
 
   useEffect(() => {
     if (activeTab !== 'dashboard' || !analyticsWidgets.monthlyProfit) return;
@@ -1193,6 +1251,8 @@ export default function DashboardContent({ activeTab }) {
     const totalOrderTxCount = transactionsOverviewChart.orderCounts.reduce((s, v) => s + v, 0);
     const customerBalanceTotal = customerBalanceData.slice(0, 15).reduce((s, r) => s + r.balance, 0);
     const supplierBalanceTotal = supplierBalanceData.slice(0, 15).reduce((s, r) => s + r.balance, 0);
+    const topCustomersSaleTotal = topCustomersSaleData.slice(0, 15).reduce((s, r) => s + Number(r.amount || r.balance || 0), 0);
+    const topProductsSaleTotal = topProductsSaleData.slice(0, 15).reduce((s, r) => s + Number(r.amount || r.balance || 0), 0);
 
     return (
       <div className="space-y-6 max-w-[1400px] mx-auto">
@@ -1502,7 +1562,7 @@ export default function DashboardContent({ activeTab }) {
               <WidgetDateFilter filters={monthlyCreditFilters} onChange={setMonthlyCreditFilters} loading={monthlyCreditLoading} accent={CHART_COLORS.credit} />
               <ReportWidgetHeader
                 title="Monthly Credit"
-                subtitle="Credit / receivings by period"
+                subtitle="Credit / receivings · week by week"
                 icon={Banknote}
                 tint={CHART_COLORS.credit.tint}
                 primary={CHART_COLORS.credit.primary}
@@ -1519,7 +1579,7 @@ export default function DashboardContent({ activeTab }) {
               </ReportChartArea>
               <ReportWidgetFooter
                 accent={CHART_COLORS.credit}
-                formula={`Sum of ledger credit amounts · ${monthlyCreditList.length} period(s) in range`}
+                formula={`Ledger credit · ${monthlyCreditList.length} week(s) in selected range`}
                 total={`PKR ${fmtAmt(totalCreditVal)}`}
               />
             </ReportWidgetShell>
@@ -1532,7 +1592,7 @@ export default function DashboardContent({ activeTab }) {
               <WidgetDateFilter filters={monthlyDebitFilters} onChange={setMonthlyDebitFilters} loading={monthlyDebitLoading} accent={CHART_COLORS.debit} />
               <ReportWidgetHeader
                 title="Monthly Debit"
-                subtitle="Debit / payments by period"
+                subtitle="Debit / payments · week by week"
                 icon={CreditCard}
                 tint={CHART_COLORS.debit.tint}
                 primary={CHART_COLORS.debit.primary}
@@ -1549,7 +1609,7 @@ export default function DashboardContent({ activeTab }) {
               </ReportChartArea>
               <ReportWidgetFooter
                 accent={CHART_COLORS.debit}
-                formula={`Sum of ledger debit amounts · ${monthlyDebitList.length} period(s) in range`}
+                formula={`Ledger debit · ${monthlyDebitList.length} week(s) in selected range`}
                 total={`PKR ${fmtAmt(totalDebitVal)}`}
               />
             </ReportWidgetShell>
@@ -1562,7 +1622,7 @@ export default function DashboardContent({ activeTab }) {
               <WidgetDateFilter filters={monthlyProfitFilters} onChange={setMonthlyProfitFilters} loading={monthlyProfitLoading} accent={CHART_COLORS.profit} />
               <ReportWidgetHeader
                 title="Monthly Profit"
-                subtitle="Net profit performance"
+                subtitle="Net profit · week by week"
                 icon={TrendingUp}
                 tint={CHART_COLORS.profit.tint}
                 primary={CHART_COLORS.profit.primary}
@@ -1579,7 +1639,7 @@ export default function DashboardContent({ activeTab }) {
               </ReportChartArea>
               <ReportWidgetFooter
                 accent={CHART_COLORS.profit}
-                formula={`Sum of (revenue − cost − expenses) per month · ${monthlyProfitList.length} period(s)`}
+                formula={`Revenue − cost − expenses · ${monthlyProfitList.length} week(s)`}
                 total={`PKR ${fmtAmt(totalProfitVal)}`}
               />
             </ReportWidgetShell>
@@ -1592,7 +1652,7 @@ export default function DashboardContent({ activeTab }) {
               <WidgetDateFilter filters={monthlySalesFilters} onChange={setMonthlySalesFilters} loading={monthlySalesLoading} accent={CHART_COLORS.sales} />
               <ReportWidgetHeader
                 title="Monthly Sales"
-                subtitle="Total sales volume by period"
+                subtitle="Total sales volume · week by week"
                 icon={ShoppingCart}
                 tint={CHART_COLORS.sales.tint}
                 primary={CHART_COLORS.sales.primary}
@@ -1609,13 +1669,102 @@ export default function DashboardContent({ activeTab }) {
               </ReportChartArea>
               <ReportWidgetFooter
                 accent={CHART_COLORS.sales}
-                formula={`Sum of sale totals (excl. quotations) · ${monthlySalesList.length} period(s)`}
+                formula={`Sale totals excluding quotations · ${monthlySalesList.length} week(s)`}
                 total={`PKR ${fmtAmt(totalSalesVal)}`}
               />
             </ReportWidgetShell>
               ),
             },
           ])}
+
+        {analyticsWidgets.anyTopSaleChart && renderAnalyticsGrid([
+          analyticsWidgets.topCustomersSale && {
+            key: 'top-customers-sale',
+            node: (() => {
+              const rows = topCustomersSaleData;
+              const color = CHART_COLORS.bills.primary;
+              const n = Math.min(rows.length, 15);
+              const neon = getReportNeonStyles(CHART_COLORS.bills);
+              return (
+                <ReportWidgetShell accent={CHART_COLORS.bills} title="Top Customers by Sale">
+                  <WidgetDateFilter
+                    filters={topCustomersSaleFilters}
+                    onChange={(f) => setTopCustomersSaleFilters((prev) => ({ ...prev, ...f }))}
+                    loading={topCustomersSaleLoading}
+                    accent={CHART_COLORS.bills}
+                  />
+                  <div className={`${REPORT.cardInner} flex flex-wrap items-center gap-3 border-b`} style={{ borderColor: neon.divider }}>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.08em]" style={{ color: neon.text }}>Top Customers by Sale</p>
+                      <p className="text-xs text-slate-500 mt-1">Confirmed bills · each item qty × sale rate · minus returns</p>
+                    </div>
+                    <span className={REPORT.badge} style={{ color, background: CHART_COLORS.bills.tint, borderColor: neon.badgeBorder }}>
+                      Top {n}
+                    </span>
+                  </div>
+                  <ReportChartArea accent={CHART_COLORS.bills}>
+                    {renderRankingBarChart({
+                      rows,
+                      color,
+                      gradient: CHART_COLORS.bills.gradient,
+                      gradId: 'topCustSaleG',
+                      loading: topCustomersSaleLoading,
+                      emptyLabel: 'No confirmed bill sales in this period',
+                    })}
+                  </ReportChartArea>
+                  <ReportWidgetFooter
+                    accent={CHART_COLORS.bills}
+                    formula={`BILL invoices only · item qty × rate, then minus sale-return qty × rate · top ${n} customers`}
+                    total={`PKR ${fmtAmt(topCustomersSaleTotal)}`}
+                  />
+                </ReportWidgetShell>
+              );
+            })(),
+          },
+          analyticsWidgets.topProductsSale && {
+            key: 'top-products-sale',
+            node: (() => {
+              const rows = topProductsSaleData;
+              const color = CHART_COLORS.sales.primary;
+              const n = Math.min(rows.length, 15);
+              const neon = getReportNeonStyles(CHART_COLORS.sales);
+              return (
+                <ReportWidgetShell accent={CHART_COLORS.sales} title="Top Products by Sale">
+                  <WidgetDateFilter
+                    filters={topProductsSaleFilters}
+                    onChange={(f) => setTopProductsSaleFilters((prev) => ({ ...prev, ...f }))}
+                    loading={topProductsSaleLoading}
+                    accent={CHART_COLORS.sales}
+                  />
+                  <div className={`${REPORT.cardInner} flex flex-wrap items-center gap-3 border-b`} style={{ borderColor: neon.divider }}>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.08em]" style={{ color: neon.text }}>Top Products by Sale</p>
+                      <p className="text-xs text-slate-500 mt-1">Confirmed bills · each item qty × sale rate · minus returns</p>
+                    </div>
+                    <span className={REPORT.badge} style={{ color, background: CHART_COLORS.sales.tint, borderColor: neon.badgeBorder }}>
+                      Top {n}
+                    </span>
+                  </div>
+                  <ReportChartArea accent={CHART_COLORS.sales}>
+                    {renderRankingBarChart({
+                      rows,
+                      color,
+                      gradient: CHART_COLORS.sales.gradient,
+                      gradId: 'topProdSaleG',
+                      loading: topProductsSaleLoading,
+                      emptyLabel: 'No confirmed bill product sales in this period',
+                    })}
+                  </ReportChartArea>
+                  <ReportWidgetFooter
+                    accent={CHART_COLORS.sales}
+                    formula={`BILL invoices only · item qty × rate, then minus sale-return qty × rate · top ${n} products`}
+                    total={`PKR ${fmtAmt(topProductsSaleTotal)}`}
+                  />
+                </ReportWidgetShell>
+              );
+            })(),
+          },
+        ])}
 
         {/* Weekly Overview Charts */}
         {analyticsWidgets.anyWeeklyChart && renderAnalyticsGrid([
@@ -1626,7 +1775,7 @@ export default function DashboardContent({ activeTab }) {
             <WidgetDayFilter days={salesOverviewDays} onChange={setSalesOverviewDays} loading={weeklyDataLoading} accent={CHART_COLORS.sales} />
             <ReportWidgetHeader
               title="Sales Overview"
-              subtitle={`Bills vs Orders — last ${salesOverviewDays} days`}
+              subtitle={`Bills vs Orders · week by week · last ${salesOverviewDays} days`}
               icon={TrendingUp}
               tint={CHART_COLORS.sales.tint}
               primary={CHART_COLORS.sales.primary}
@@ -1648,7 +1797,7 @@ export default function DashboardContent({ activeTab }) {
             </ReportChartArea>
             <ReportWidgetFooter
               accent={CHART_COLORS.sales}
-              formula={`Bills PKR ${fmtAmt(totalBillsOverview)} + Orders PKR ${fmtAmt(totalOrdersOverview)} · last ${salesOverviewDays} days`}
+              formula={`Bills PKR ${fmtAmt(totalBillsOverview)} + Orders PKR ${fmtAmt(totalOrdersOverview)} · weekly totals · last ${salesOverviewDays} days`}
               total={`PKR ${fmtAmt(totalBillsOverview + totalOrdersOverview)}`}
             />
           </ReportWidgetShell>
@@ -1661,7 +1810,7 @@ export default function DashboardContent({ activeTab }) {
             <WidgetDayFilter days={transactionsOverviewDays} onChange={setTransactionsOverviewDays} loading={weeklyDataLoading} accent={CHART_COLORS.profit} />
             <ReportWidgetHeader
               title="Transactions Overview"
-              subtitle={`All transactions vs Orders — last ${transactionsOverviewDays} days`}
+              subtitle={`All transactions vs Orders · week by week · last ${transactionsOverviewDays} days`}
               icon={ShoppingCart}
               tint={CHART_COLORS.profit.tint}
               primary={CHART_COLORS.profit.primary}

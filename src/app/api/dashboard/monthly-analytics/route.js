@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { initBranchScope } from '@/lib/branch-server';
+import { eachPkDate, eachPkWeekInRange, lastNPkDaysInclusive, pkDayRange } from '@/lib/date-helper';
+
+function n(val) {
+  const num = parseFloat(val);
+  return Number.isFinite(num) ? num : 0;
+}
 
 export async function GET(request) {
   const __branchScope = await initBranchScope(request);
@@ -10,149 +16,138 @@ export async function GET(request) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const fromDate = searchParams.get('fromDate');
-    const toDate = searchParams.get('toDate');
+    const fallback = lastNPkDaysInclusive(30);
+    const fromDate = searchParams.get('fromDate') || fallback.fromDate;
+    const toDate = searchParams.get('toDate') || fallback.toDate;
+    const fromRange = pkDayRange(fromDate);
+    const toRange = pkDayRange(toDate);
+    const startDate = fromRange?.gte;
+    const endDate = toRange?.lte;
+    const dayCount = eachPkDate(fromDate, toDate).length;
+    const useWeekly = dayCount > 0 && dayCount <= 90;
+    const periodExpr = useWeekly
+      ? "DATE_FORMAT(created_at + INTERVAL 5 HOUR, '%Y-%m-%d')"
+      : "DATE_FORMAT(created_at + INTERVAL 5 HOUR, '%Y-%m')";
+    const salePeriodExpr = useWeekly
+      ? "DATE_FORMAT(s.created_at + INTERVAL 5 HOUR, '%Y-%m-%d')"
+      : "DATE_FORMAT(s.created_at + INTERVAL 5 HOUR, '%Y-%m')";
 
-    let startDate = fromDate ? new Date(`${fromDate}T00:00:00.000Z`) : null;
-    let endDate = toDate ? new Date(`${toDate}T23:59:59.999Z`) : null;
+    const startSql = startDate.toISOString().slice(0, 19).replace('T', ' ');
+    const endSql = endDate.toISOString().slice(0, 19).replace('T', ' ');
 
-    let ledgerWhere = [`branch_id = ${branchId}`];
-    let salesWhere = [`branch_id = ${branchId}`, "bill_type != 'QUOTATION'"];
-    let profitWhere = [`s.branch_id = ${branchId}`, "s.bill_type != 'QUOTATION'"];
-    let expenseWhere = [`branch_id = ${branchId}`];
+    const ledgerWhere = `WHERE branch_id = ${branchId} AND created_at >= '${startSql}' AND created_at <= '${endSql}'`;
+    const salesWhere = `WHERE branch_id = ${branchId} AND bill_type != 'QUOTATION' AND created_at >= '${startSql}' AND created_at <= '${endSql}'`;
+    const profitWhere = `WHERE s.branch_id = ${branchId} AND s.bill_type != 'QUOTATION' AND s.created_at >= '${startSql}' AND s.created_at <= '${endSql}'`;
+    const expenseWhere = `WHERE branch_id = ${branchId} AND created_at >= '${startSql}' AND created_at <= '${endSql}'`;
 
-    if (startDate) {
-      const sStr = startDate.toISOString().slice(0, 19).replace('T', ' ');
-      ledgerWhere.push(`created_at >= '${sStr}'`);
-      salesWhere.push(`created_at >= '${sStr}'`);
-      profitWhere.push(`s.created_at >= '${sStr}'`);
-      expenseWhere.push(`created_at >= '${sStr}'`);
-    }
-
-    if (endDate) {
-      const eStr = endDate.toISOString().slice(0, 19).replace('T', ' ');
-      ledgerWhere.push(`created_at <= '${eStr}'`);
-      salesWhere.push(`created_at <= '${eStr}'`);
-      profitWhere.push(`s.created_at <= '${eStr}'`);
-      expenseWhere.push(`created_at <= '${eStr}'`);
-    }
-
-    if (!startDate && !endDate) {
-      // Default to last 12 months if no date filter specified
-      const defaultStart = new Date();
-      defaultStart.setMonth(defaultStart.getMonth() - 11);
-      defaultStart.setDate(1);
-      const dsStr = defaultStart.toISOString().slice(0, 19).replace('T', ' ');
-      ledgerWhere.push(`created_at >= '${dsStr}'`);
-      salesWhere.push(`created_at >= '${dsStr}'`);
-      profitWhere.push(`s.created_at >= '${dsStr}'`);
-      expenseWhere.push(`created_at >= '${dsStr}'`);
-    }
-
-    const whereClauseLedger = ledgerWhere.length > 0 ? `WHERE ${ledgerWhere.join(' AND ')}` : '';
-    const whereClauseSales = `WHERE ${salesWhere.join(' AND ')}`;
-    const whereClauseProfit = `WHERE ${profitWhere.join(' AND ')}`;
-    const whereClauseExpense = expenseWhere.length > 0 ? `WHERE ${expenseWhere.join(' AND ')}` : '';
-
-    // 1. Monthly Credit & Debit from Ledger
-    const ledgerRows = await prisma.$queryRawUnsafe(`
-      SELECT 
-        DATE_FORMAT(created_at, '%Y-%m') AS period,
-        SUM(credit_amount) AS credit_total,
-        SUM(debit_amount) AS debit_total
-      FROM ledger
-      ${whereClauseLedger}
-      GROUP BY DATE_FORMAT(created_at, '%Y-%m')
-      ORDER BY period ASC
-    `);
-
-    // 2. Monthly Sales
-    const salesRows = await prisma.$queryRawUnsafe(`
-      SELECT 
-        DATE_FORMAT(created_at, '%Y-%m') AS period,
-        SUM(total_amount) AS total_sales,
-        COUNT(sale_id) AS total_orders
-      FROM sales
-      ${whereClauseSales}
-      GROUP BY DATE_FORMAT(created_at, '%Y-%m')
-      ORDER BY period ASC
-    `);
-
-    // 3. Monthly Profit (Sales Revenue - Product Cost)
-    const profitRows = await prisma.$queryRawUnsafe(`
-      SELECT
-        DATE_FORMAT(s.created_at, '%Y-%m') AS period,
-        SUM(sd.net_total) AS revenue,
-        SUM(p.pro_cost_price * sd.qnty) AS cost
-      FROM sale_details sd
-      JOIN sales s ON sd.sale_id = s.sale_id
-      JOIN products p ON sd.pro_id = p.pro_id
-      ${whereClauseProfit}
-      GROUP BY DATE_FORMAT(s.created_at, '%Y-%m')
-      ORDER BY period ASC
-    `);
-
-    // 4. Monthly Expenses
-    const expenseRows = await prisma.$queryRawUnsafe(`
-      SELECT
-        DATE_FORMAT(created_at, '%Y-%m') AS period,
-        SUM(exp_amount) AS total_expense
-      FROM expenses
-      ${whereClauseExpense}
-      GROUP BY DATE_FORMAT(created_at, '%Y-%m')
-      ORDER BY period ASC
-    `);
-
-    const periodsSet = new Set([
-      ...ledgerRows.map(r => r.period),
-      ...salesRows.map(r => r.period),
-      ...profitRows.map(r => r.period),
-      ...expenseRows.map(r => r.period)
+    const [ledgerRows, salesRows, profitRows, expenseRows] = await Promise.all([
+      prisma.$queryRawUnsafe(`
+        SELECT
+          ${periodExpr} AS period,
+          SUM(credit_amount) AS credit_total,
+          SUM(debit_amount) AS debit_total
+        FROM ledger
+        ${ledgerWhere}
+        GROUP BY period
+        ORDER BY period ASC
+      `),
+      prisma.$queryRawUnsafe(`
+        SELECT
+          ${periodExpr} AS period,
+          SUM(total_amount) AS total_sales,
+          COUNT(sale_id) AS total_orders
+        FROM sales
+        ${salesWhere}
+        GROUP BY period
+        ORDER BY period ASC
+      `),
+      prisma.$queryRawUnsafe(`
+        SELECT
+          ${salePeriodExpr} AS period,
+          SUM(sd.net_total) AS revenue,
+          SUM(p.pro_cost_price * sd.qnty) AS cost
+        FROM sale_details sd
+        JOIN sales s ON sd.sale_id = s.sale_id
+        JOIN products p ON sd.pro_id = p.pro_id
+        ${profitWhere}
+        GROUP BY period
+        ORDER BY period ASC
+      `),
+      prisma.$queryRawUnsafe(`
+        SELECT
+          ${periodExpr} AS period,
+          SUM(exp_amount) AS total_expense
+        FROM expenses
+        ${expenseWhere}
+        GROUP BY period
+        ORDER BY period ASC
+      `),
     ]);
 
-    const sortedPeriods = Array.from(periodsSet).sort();
+    const ledgerMap = new Map(ledgerRows.map((r) => [r.period, r]));
+    const salesMap = new Map(salesRows.map((r) => [r.period, r]));
+    const profitMap = new Map(profitRows.map((r) => [r.period, r]));
+    const expenseMap = new Map(expenseRows.map((r) => [r.period, r]));
 
-    const ledgerMap = new Map(ledgerRows.map(r => [r.period, r]));
-    const salesMap = new Map(salesRows.map(r => [r.period, r]));
-    const profitMap = new Map(profitRows.map(r => [r.period, r]));
-    const expenseMap = new Map(expenseRows.map(r => [r.period, r]));
+    const buckets = useWeekly
+      ? eachPkWeekInRange(fromDate, toDate).map((week) => ({
+        period: week.key,
+        label: week.label,
+        days: eachPkDate(week.from, week.to),
+      }))
+      : Array.from(new Set([
+        ...ledgerRows.map((r) => r.period),
+        ...salesRows.map((r) => r.period),
+        ...profitRows.map((r) => r.period),
+        ...expenseRows.map((r) => r.period),
+      ])).sort().map((period) => ({ period, label: period, days: [period] }));
 
     const monthlyCredit = [];
     const monthlyDebit = [];
     const monthlySales = [];
     const monthlyProfit = [];
 
-    sortedPeriods.forEach(period => {
-      const l = ledgerMap.get(period) || {};
-      const s = salesMap.get(period) || {};
-      const p = profitMap.get(period) || {};
-      const e = expenseMap.get(period) || {};
+    buckets.forEach((bucket) => {
+      let credit = 0;
+      let debit = 0;
+      let salesVal = 0;
+      let orders = 0;
+      let revenue = 0;
+      let cost = 0;
+      let expense = 0;
+      bucket.days.forEach((day) => {
+        const l = ledgerMap.get(day) || {};
+        const s = salesMap.get(day) || {};
+        const p = profitMap.get(day) || {};
+        const e = expenseMap.get(day) || {};
+        credit += n(l.credit_total);
+        debit += n(l.debit_total);
+        salesVal += n(s.total_sales);
+        orders += Number(s.total_orders || 0);
+        revenue += n(p.revenue);
+        cost += n(p.cost);
+        expense += n(e.total_expense);
+      });
 
-      const credit = parseFloat(l.credit_total || 0);
-      const debit = parseFloat(l.debit_total || 0);
-      const salesVal = parseFloat(s.total_sales || 0);
-      const revenue = parseFloat(p.revenue || 0);
-      const cost = parseFloat(p.cost || 0);
-      const expense = parseFloat(e.total_expense || 0);
-      const profitVal = revenue - cost - expense;
-
-      monthlyCredit.push({ period, amount: credit });
-      monthlyDebit.push({ period, amount: debit });
-      monthlySales.push({ period, amount: salesVal, count: Number(s.total_orders || 0) });
-      monthlyProfit.push({ period, revenue, cost, expense, profit: profitVal });
+      monthlyCredit.push({ period: bucket.period, label: bucket.label, amount: credit });
+      monthlyDebit.push({ period: bucket.period, label: bucket.label, amount: debit });
+      monthlySales.push({ period: bucket.period, label: bucket.label, amount: salesVal, count: orders });
+      monthlyProfit.push({ period: bucket.period, label: bucket.label, revenue, cost, expense, profit: revenue - cost - expense });
     });
 
     return NextResponse.json({
       success: true,
       data: {
-        periods: sortedPeriods,
+        grain: useWeekly ? 'week' : 'month',
+        fromDate,
+        toDate,
+        periods: buckets.map((b) => b.period),
         monthlyCredit,
         monthlyDebit,
         monthlySales,
-        monthlyProfit
-      }
+        monthlyProfit,
+      },
     });
-
   } catch (error) {
     console.error('Error fetching monthly analytics:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

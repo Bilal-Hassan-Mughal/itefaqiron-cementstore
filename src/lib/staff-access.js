@@ -268,7 +268,15 @@ export function canAccessMenuItem(user, item) {
 export function hasDashboardWidgetAccess(user, widgetId) {
   if (!user || !widgetId) return false;
   if (!DASHBOARD_ANALYTICS_WIDGET_ID_SET.has(widgetId)) return false;
-  return hasPageAccess(getStaffAllowedModules(user), widgetId);
+  const allowed = getStaffAllowedModules(user);
+  if (hasPageAccess(allowed, widgetId)) return true;
+  if (
+    (widgetId === 'dashboard-top-customers-sale' || widgetId === 'dashboard-top-products-sale') &&
+    DASHBOARD_ANALYTICS_WIDGET_IDS.some((id) => hasPageAccess(allowed, id))
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /** Day End Closing widget — e.g. Profit Summary on day-end page. */

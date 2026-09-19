@@ -138,6 +138,31 @@ function filterOrderCustomerTypes(options, inputValue) {
   return options.filter((o) => String(o.cus_type_title || '').toLowerCase().includes(q));
 }
 
+/** Same Customer Type list as the Sale page */
+const ORDER_PAGE_CUSTOMER_TYPE_RULES = [
+  { label: 'Walk in Customer', match: /walk\s*in?\s*cust/i },
+  { label: 'Factories', match: /^factories?$/i },
+  { label: 'Sarya Shop', match: /sarya\s*shops?/i },
+  { label: 'Bloak', match: /^bloak$|^block$/i },
+  { label: 'Solar', match: /^solar$/i },
+  { label: 'Cement', match: /^cement$/i },
+  { label: 'Welders', match: /^welders?$/i },
+  { label: 'Homes', match: /^homes?$/i },
+];
+
+function filterOrderPageCustomerTypes(allTypes) {
+  if (!Array.isArray(allTypes)) return [];
+  const picked = [];
+  for (let order = 0; order < ORDER_PAGE_CUSTOMER_TYPE_RULES.length; order += 1) {
+    const rule = ORDER_PAGE_CUSTOMER_TYPE_RULES[order];
+    const found = allTypes.find((t) => rule.match.test(String(t.cus_type_title || '').trim()));
+    if (found && !picked.some((p) => p.cus_type_id === found.cus_type_id)) {
+      picked.push(found);
+    }
+  }
+  return picked;
+}
+
 function getFocusedAutocompleteOption() {
   const el = document.querySelector(
     '.MuiAutocomplete-popper .MuiAutocomplete-option.Mui-focused, .MuiAutocomplete-popper .MuiAutocomplete-option[aria-selected="true"]'
@@ -548,6 +573,10 @@ function OrdersPageContent() {
   // Form state for sales creation
   const [formSelectedCustomer, setFormSelectedCustomer] = useState(null);
   const [selectedCustomerType, setSelectedCustomerType] = useState(null); // customer type filter in form
+  const orderPageCustomerTypeOptions = useMemo(
+    () => filterOrderPageCustomerTypes(customerTypes),
+    [customerTypes]
+  );
   const [formSelectedProduct, setFormSelectedProduct] = useState(null);
   const [formSelectedStore, setFormSelectedStore] = useState(null);
   const customerTypeHighlightRef = useRef(null);
@@ -3064,12 +3093,29 @@ function OrdersPageContent() {
                       size="small"
                       fullWidth
                       sx={{ width: '100%', minWidth: 0 }}
-                      options={customerTypes || []}
+                      options={
+                        selectedCustomerType &&
+                        !orderPageCustomerTypeOptions.some((t) => t.cus_type_id === selectedCustomerType.cus_type_id)
+                          ? [selectedCustomerType, ...orderPageCustomerTypeOptions]
+                          : orderPageCustomerTypeOptions
+                      }
                       getOptionLabel={(option) => option.cus_type_title || ''}
                       getOptionKey={(option) => option.cus_type_id}
                       value={selectedCustomerType}
                       onChange={(event, newValue) => {
                         setSelectedCustomerType(newValue);
+                        if (newValue) {
+                          const typeTitle = (newValue.cus_type_title || '').toLowerCase();
+                          if (typeTitle.includes('walk')) {
+                            const matchingCustomer = customers.find((c) =>
+                              c.cus_type === newValue.cus_type_id ||
+                              (c.cus_name || '').toLowerCase().includes('walk')
+                            );
+                            if (matchingCustomer) {
+                              setFormSelectedCustomer(matchingCustomer);
+                            }
+                          }
+                        }
                       }}
                       isOptionEqualToValue={(option, value) => option.cus_type_id === value?.cus_type_id}
                       autoSelect={true}
@@ -3093,7 +3139,7 @@ function OrdersPageContent() {
                             onKeyDown: (e) => {
                               if (!e.shiftKey && (e.key === 'Tab' || e.key === 'Enter')) {
                                 const inputValue = e.currentTarget.value || '';
-                                const filtered = filterOrderCustomerTypes(customerTypes || [], inputValue);
+                                const filtered = filterOrderCustomerTypes(orderPageCustomerTypeOptions, inputValue);
                                 const idx = getFocusedAutocompleteOption();
                                 const pick = customerTypeHighlightRef.current
                                   || (idx != null ? filtered[idx] : null)

@@ -41,6 +41,16 @@ export const DASHBOARD_ANALYTICS_WIDGETS = [
     description: 'All transactions vs orders — last 7 days',
   },
   {
+    id: 'dashboard-top-customers-sale',
+    name: 'Top Customers by Sale',
+    description: 'Top customers ranked by confirmed bill item sales (qty × rate, minus returns)',
+  },
+  {
+    id: 'dashboard-top-products-sale',
+    name: 'Top Products by Sale',
+    description: 'Top products ranked by confirmed bill item sales (qty × rate, minus returns)',
+  },
+  {
     id: 'dashboard-customer-balance',
     name: 'Top Customers by Balance',
     description: 'Customer balance bar chart with category filter',

@@ -91,6 +91,74 @@ export function shiftPkDate(dateStr, days) {
   return getPkDateString(base);
 }
 
+/** Inclusive Pakistan range: today plus the previous (days - 1) days. 30 => today + 29 before. */
+export function lastNPkDaysInclusive(days = 30) {
+  const toDate = getPkDateString();
+  const count = Math.max(1, Number(days) || 30);
+  return { fromDate: shiftPkDate(toDate, -(count - 1)), toDate };
+}
+
+export function eachPkDate(fromDate, toDate) {
+  const dates = [];
+  if (!fromDate || !toDate || fromDate > toDate) return dates;
+  for (let cursor = fromDate; cursor <= toDate; cursor = shiftPkDate(cursor, 1)) {
+    dates.push(cursor);
+    if (dates.length > 400) break;
+  }
+  return dates;
+}
+
+/** 0 = Sunday … 6 = Saturday for a Pakistan YYYY-MM-DD. */
+export function pkWeekday(dateStr) {
+  const [year, month, day] = String(dateStr || '').split('-').map(Number);
+  if (!year || !month || !day) return 0;
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+}
+
+/** Monday start of the Pakistan week that contains dateStr. */
+export function pkWeekStart(dateStr) {
+  const dow = pkWeekday(dateStr);
+  const mondayOffset = dow === 0 ? -6 : 1 - dow;
+  return shiftPkDate(dateStr, mondayOffset);
+}
+
+function formatPkDayMonth(dateStr) {
+  const [year, month, day] = String(dateStr || '').split('-').map(Number);
+  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${day} ${names[(month || 1) - 1] || ''}`;
+}
+
+export function formatPkWeekLabel(fromDate, toDate) {
+  if (!fromDate) return '';
+  if (!toDate || fromDate === toDate) return formatPkDayMonth(fromDate);
+  const [, fromMonth] = fromDate.split('-');
+  const [, toMonth] = toDate.split('-');
+  if (fromMonth === toMonth) {
+    return `${parseInt(fromDate.slice(8), 10)}–${formatPkDayMonth(toDate)}`;
+  }
+  return `${formatPkDayMonth(fromDate)}–${formatPkDayMonth(toDate)}`;
+}
+
+/** Monday–Sunday weeks that overlap the range, clipped to from/to. */
+export function eachPkWeekInRange(fromDate, toDate) {
+  const weeks = [];
+  if (!fromDate || !toDate || fromDate > toDate) return weeks;
+  const lastStart = pkWeekStart(toDate);
+  for (let start = pkWeekStart(fromDate); start <= lastStart; start = shiftPkDate(start, 7)) {
+    const end = shiftPkDate(start, 6);
+    const from = start < fromDate ? fromDate : start;
+    const to = end > toDate ? toDate : end;
+    weeks.push({
+      key: start,
+      from,
+      to,
+      label: formatPkWeekLabel(from, to),
+    });
+    if (weeks.length > 80) break;
+  }
+  return weeks;
+}
+
 export const getCreatedByName = (item, currentUser = null) => {
   if (!item) return currentUser?.full_name || currentUser?.name || 'Admin';
   return (
