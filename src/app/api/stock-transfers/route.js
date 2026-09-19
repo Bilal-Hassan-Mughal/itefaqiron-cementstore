@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { updateStoreStock, getStoreStock } from '@/lib/storeStock';
 import { initBranchScope } from '@/lib/branch-server';
+import { rejectIfDayClosed } from '@/lib/day-end-guard';
 
 // GET - Get all stock transfers or a specific transfer
 export async function GET(request) {
@@ -203,6 +204,8 @@ export async function GET(request) {
 export async function POST(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
   const branchId = __branchScope.branchId;
 
   try {
@@ -433,6 +436,8 @@ export async function POST(request) {
 export async function PUT(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
   const branchId = __branchScope.branchId;
 
   try {
@@ -549,6 +554,8 @@ export async function PUT(request) {
 export async function DELETE(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
   const branchId = __branchScope.branchId;
 
   try {

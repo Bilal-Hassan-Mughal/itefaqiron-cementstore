@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { initBranchScope } from '@/lib/branch-server';
+import { pkBusinessDate } from '@/lib/date-helper';
 
 
 // GET - Fetch day end history with pagination and filtering
@@ -24,21 +25,27 @@ export async function GET(request) {
     
     if (startDate && endDate) {
       whereClause.business_date = {
-        gte: new Date(startDate),
-        lte: new Date(endDate)
+        gte: pkBusinessDate(startDate),
+        lte: pkBusinessDate(endDate),
       };
     } else if (startDate) {
       whereClause.business_date = {
-        gte: new Date(startDate)
+        gte: pkBusinessDate(startDate),
       };
     } else if (endDate) {
       whereClause.business_date = {
-        lte: new Date(endDate)
+        lte: pkBusinessDate(endDate),
       };
     }
 
     if (status) {
       whereClause.status = status;
+    } else {
+      whereClause.OR = [
+        { status: 'CLOSED' },
+        { closed_at: { not: null } },
+        { closing_cash: { not: null } },
+      ];
     }
 
     // Get day ends with pagination

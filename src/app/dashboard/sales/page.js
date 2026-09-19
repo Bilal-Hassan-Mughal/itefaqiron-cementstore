@@ -123,6 +123,29 @@ function filterSaleProducts(options, { inputValue }) {
   return out;
 }
 
+function getFocusedAutocompleteOption() {
+  const el = document.querySelector(
+    '.MuiAutocomplete-popper .MuiAutocomplete-option.Mui-focused, .MuiAutocomplete-popper .MuiAutocomplete-option[aria-selected="true"]'
+  );
+  if (!el) return null;
+  const idx = Number.parseInt(el.getAttribute('data-option-index'), 10);
+  return Number.isFinite(idx) ? idx : null;
+}
+
+function commitDropdownOnTab(e, highlighted, applyValue, focusNext) {
+  if (e.shiftKey || (e.key !== 'Tab' && e.key !== 'Enter')) return false;
+  e.preventDefault();
+  e.stopPropagation();
+  if (highlighted) applyValue(highlighted);
+  window.setTimeout(() => {
+    const el = typeof focusNext === 'function' ? focusNext() : document.querySelector(focusNext);
+    if (!el) return;
+    el.focus();
+    if (typeof el.select === 'function') el.select();
+  }, 0);
+  return true;
+}
+
 /** Sale entry screen only — limit Customer Type filter to these categories (display order) */
 const SALE_PAGE_CUSTOMER_TYPE_RULES = [
   { label: 'Walk in Customer', match: /walk\s*in?\s*cust/i },
@@ -594,6 +617,9 @@ function SalesPageContent() {
   const [formSelectedCustomer, setFormSelectedCustomer] = useState(null);
   const [formSelectedProduct, setFormSelectedProduct] = useState(null);
   const [formSelectedStore, setFormSelectedStore] = useState(null);
+  const customerHighlightRef = useRef(null);
+  const productHighlightRef = useRef(null);
+  const storeHighlightRef = useRef(null);
 
   // Sale Return state for main form
   const [saleSearchOpen, setSaleSearchOpen] = useState(false);
@@ -5234,21 +5260,27 @@ function SalesPageContent() {
                         '& .MuiAutocomplete-clearIndicator': { color: 'white' }
                       }}
                       onKeyDown={(e) => {
-                        if ((e.key === 'Tab' || e.key === 'Enter') && !e.shiftKey) {
-                          e.preventDefault();
-                          if (billType === 'SALE_RETURN') {
-                            const invoiceInput = document.querySelector('input[placeholder*="Search Sale ID"]');
-                            if (invoiceInput) invoiceInput.focus();
-                          } else {
-                            const productInput = document.getElementById('product-select-dropdown-input');
-                            if (productInput) {
-                              productInput.focus();
-                            } else {
-                              const fallbackInput = document.querySelector('input[placeholder*="Select product"]');
-                              if (fallbackInput) fallbackInput.focus();
+                        commitDropdownOnTab(
+                          e,
+                          customerHighlightRef.current || formSelectedCustomer,
+                          (val) => {
+                            setFormSelectedCustomer(val);
+                            if (billType === 'SALE_RETURN') {
+                              setSaleSearchResults([]);
+                              setSelectedSaleForReturnMain(null);
                             }
+                          },
+                          () => {
+                            if (billType === 'SALE_RETURN') {
+                              return document.querySelector('input[placeholder*="Search Sale ID"]');
+                            }
+                            return document.getElementById('product-select-dropdown-input')
+                              || document.querySelector('input[placeholder*="Select product"]');
                           }
-                        }
+                        );
+                      }}
+                      onHighlightChange={(_, option) => {
+                        if (option) customerHighlightRef.current = option;
                       }}
                       options={customers.filter(customer => {
                         // Filter by Category: Customer
@@ -5475,6 +5507,7 @@ function SalesPageContent() {
                       sx={{ minWidth: 450 }}
                       options={products || []}
                       getOptionLabel={(option) => option.pro_title || ''}
+                      getOptionKey={(option) => option.pro_id}
                       filterOptions={filterSaleProducts}
                       slotProps={{
                         listbox: {
@@ -5504,7 +5537,7 @@ function SalesPageContent() {
                       renderOption={(props, option) => {
                         const { key, ...optionProps } = props;
                         return (
-                        <li key={key || option.pro_id} {...optionProps} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                        <li key={option.pro_id ?? key} {...optionProps} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                           <Typography noWrap sx={{ fontWeight: 500, flex: 1, minWidth: 0 }}>
                             {option.pro_title}
                           </Typography>
@@ -5533,25 +5566,48 @@ function SalesPageContent() {
                       }}
                       isOptionEqualToValue={(option, value) => option.pro_id === value?.pro_id}
                       autoHighlight={true}
+                      autoSelect={true}
                       openOnFocus={true}
                       selectOnFocus={true}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && formSelectedProduct) {
-                          e.preventDefault();
-                          // Move focus to Store selection
-                          const storeInput = document.querySelector('input[placeholder*="Select Store"]');
-                          if (storeInput) storeInput.focus();
-                        }
+                      onHighlightChange={(_, option) => {
+                        if (option) productHighlightRef.current = option;
                       }}
-                      renderInput={(params) => (
+                      renderInput={(params) => {
+                        const prevKeyDown = params.inputProps?.onKeyDown;
+                        return (
                         <TextField
                           {...params}
                           id="product-select-dropdown-input"
                           placeholder={products.length === 0 ? "No products available" : "Select product"}
                           onFocus={(e) => e.target.select()}
+                          inputProps={{
+                            ...params.inputProps,
+                            onKeyDown: (e) => {
+                              if (!e.shiftKey && (e.key === 'Tab' || e.key === 'Enter')) {
+                                const inputValue = e.currentTarget.value || '';
+                                const filtered = filterSaleProducts(products || [], { inputValue });
+                                const idx = getFocusedAutocompleteOption();
+                                const pick = productHighlightRef.current
+                                  || (idx != null ? filtered[idx] : null)
+                                  || filtered[0]
+                                  || formSelectedProduct;
+                                if (pick) {
+                                  commitDropdownOnTab(
+                                    e,
+                                    pick,
+                                    (val) => handleProductSelect(val),
+                                    () => document.querySelector('input[placeholder*="Select Store"]')
+                                  );
+                                  return;
+                                }
+                              }
+                              prevKeyDown?.(e);
+                            },
+                          }}
                           sx={{ bgcolor: 'white', width: 450, minWidth: 450, '& .MuiInputBase-input': { fontWeight: formSelectedProduct ? 'bold' : 'normal' } }}
                         />
-                      )}
+                        );
+                      }}
                       disabled={products.length === 0}
                     />
                     {/* Debug info */}
@@ -5578,18 +5634,16 @@ function SalesPageContent() {
                       autoHighlight={true}
                       openOnFocus={true}
                       selectOnFocus={true}
+                      onHighlightChange={(_, option) => {
+                        if (option) storeHighlightRef.current = option;
+                      }}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter' && formSelectedStore) {
-                          e.preventDefault();
-                          // Move focus to QTY field
-                          const qtyInput = document.querySelector('input[type="number"][value=""], input[type="number"]:not([disabled])');
-                          // Actually let's find it more accurately
-                          const allNumInputs = document.querySelectorAll('input[type="number"]');
-                          // QTY is typically the first or second numeric input in the product row
-                          if (allNumInputs.length > 0) {
-                            allNumInputs[0].focus();
-                          }
-                        }
+                        commitDropdownOnTab(
+                          e,
+                          storeHighlightRef.current || formSelectedStore,
+                          (val) => setFormSelectedStore(val),
+                          () => document.querySelector('#sale-qty-input')
+                        );
                       }}
                       renderInput={(params) => (
                         <TextField
@@ -5611,6 +5665,7 @@ function SalesPageContent() {
                       fullWidth
                       size="small"
                       type="number"
+                      id="sale-qty-input"
                       value={paymentInputValue(productFormData.quantity)}
                       onChange={(e) => handleQuantityChange(e.target.value)}
                       onFocus={(e) => e.target.select()}

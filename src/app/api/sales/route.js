@@ -7,6 +7,7 @@ import { Prisma } from '@prisma/client';
 import { updateStoreStock, getStoreStock, checkStockAvailability } from '@/lib/storeStock';
 import { calculateClosingBalance, createLedgerEntry } from '@/lib/ledger-helper';
 import { initBranchScope } from '@/lib/branch-server';
+import { rejectIfDayClosed } from '@/lib/day-end-guard';
 
 const SPECIAL_ACCOUNTS_CACHE_TTL_MS = 60_000;
 const saleLog = () => {};
@@ -1074,6 +1075,8 @@ export async function POST(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
   const branchId = __branchScope.branchId;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
 
   try {
     const body = await request.json();
@@ -2021,6 +2024,8 @@ export async function PUT(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
   const branchId = __branchScope.branchId;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
 
   try {
     const body = await request.json();
@@ -2770,6 +2775,8 @@ export async function PATCH(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
   const branchId = __branchScope.branchId;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
 
   try {
     const body = await request.json();
@@ -2812,6 +2819,8 @@ export async function DELETE(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
   const branchId = __branchScope.branchId;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
 
   try {
     const { searchParams } = new URL(request.url);

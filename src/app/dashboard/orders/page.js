@@ -99,6 +99,91 @@ const toReadOnlyNumberInput = (val) => {
   return n;
 };
 
+const ORDER_PRODUCT_LIST_LIMIT = 50;
+
+function filterOrderProducts(options, { inputValue }) {
+  const q = String(inputValue || '').toLowerCase().trim();
+  const out = [];
+  for (let i = 0; i < options.length && out.length < ORDER_PRODUCT_LIST_LIMIT; i += 1) {
+    if (!q) {
+      out.push(options[i]);
+      continue;
+    }
+    const title = String(options[i].pro_title || '').toLowerCase();
+    const code = String(options[i].pro_code || '').toLowerCase();
+    if (title.includes(q) || code.includes(q)) out.push(options[i]);
+  }
+  return out;
+}
+
+function filterOrderCustomers(options, inputValue) {
+  const q = String(inputValue || '').toLowerCase().trim();
+  if (!q) return options;
+  return options.filter((o) =>
+    (o.cus_name || '').toLowerCase().includes(q) ||
+    (o.cus_phone_no || '').toLowerCase().includes(q) ||
+    (o.cus_phone_no2 || '').toLowerCase().includes(q)
+  );
+}
+
+function filterOrderStores(options, { inputValue }) {
+  const q = String(inputValue || '').toLowerCase().trim();
+  if (!q) return options;
+  return options.filter((o) => String(o.store_name || '').toLowerCase().includes(q));
+}
+
+function filterOrderCustomerTypes(options, inputValue) {
+  const q = String(inputValue || '').toLowerCase().trim();
+  if (!q) return options;
+  return options.filter((o) => String(o.cus_type_title || '').toLowerCase().includes(q));
+}
+
+function getFocusedAutocompleteOption() {
+  const el = document.querySelector(
+    '.MuiAutocomplete-popper .MuiAutocomplete-option.Mui-focused, .MuiAutocomplete-popper .MuiAutocomplete-option[aria-selected="true"]'
+  );
+  if (!el) return null;
+  const idx = Number.parseInt(el.getAttribute('data-option-index'), 10);
+  return Number.isFinite(idx) ? idx : null;
+}
+
+function findOrderInput(id, extraSelector) {
+  const byId = document.getElementById(id);
+  if (byId) {
+    if (byId.matches?.('input, textarea, button, select, [tabindex]')) return byId;
+    return byId.querySelector?.('input, textarea, button, select') || byId;
+  }
+  return extraSelector ? document.querySelector(extraSelector) : null;
+}
+
+function focusOrderInput(el) {
+  if (!el) return false;
+  const input = el.matches?.('input, textarea, button, select')
+    ? el
+    : (el.querySelector?.('input, textarea, button, select') || el);
+  input.focus();
+  if (typeof input.select === 'function') input.select();
+  return document.activeElement === input;
+}
+
+function commitDropdownOnTab(e, highlighted, applyValue, focusNext) {
+  if (e.shiftKey || (e.key !== 'Tab' && e.key !== 'Enter')) return false;
+  e.preventDefault();
+  e.stopPropagation();
+  e.nativeEvent?.stopImmediatePropagation?.();
+  e.currentTarget?.blur?.();
+  if (highlighted) applyValue(highlighted);
+  const tryFocus = () => {
+    const el = typeof focusNext === 'function' ? focusNext() : document.querySelector(focusNext);
+    return focusOrderInput(el);
+  };
+  window.setTimeout(() => {
+    if (tryFocus()) return;
+    window.setTimeout(tryFocus, 60);
+  }, 40);
+  return true;
+}
+
 const ORDER_FILTER_GRID = {
   display: 'grid',
   gridTemplateColumns: {
@@ -177,6 +262,66 @@ const ORDER_PAGE_CARD_SX = {
   boxShadow: '0 1px 4px rgba(15, 23, 42, 0.06)',
   bgcolor: '#ffffff',
   overflow: 'hidden',
+};
+
+const ORDER_ENTRY_LABEL_SX = {
+  fontSize: '0.7rem',
+  fontWeight: 700,
+  letterSpacing: '0.06em',
+  color: '#64748b',
+  lineHeight: '20px',
+  height: 20,
+  mb: 0.75,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 1,
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+};
+
+const ORDER_ENTRY_CONTROL_SX = {
+  width: '100%',
+  minWidth: 0,
+  bgcolor: '#fff',
+  '& .MuiInputBase-root': {
+    height: 40,
+    bgcolor: '#fff',
+  },
+  '& .MuiInputBase-input, & .MuiSelect-select': {
+    fontSize: '0.875rem',
+    py: 0,
+  },
+};
+
+const ORDER_ENTRY_CELL_SX = {
+  minWidth: 0,
+  width: '100%',
+};
+
+const ORDER_ENTRY_ROW1_SX = {
+  display: 'grid',
+  gridTemplateColumns: {
+    xs: '1fr',
+    sm: 'repeat(2, minmax(0, 1fr))',
+    md: 'minmax(0, 1.05fr) minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 1.05fr) minmax(0, 1.15fr)',
+  },
+  gap: { xs: 1.5, md: 1.75 },
+  alignItems: 'end',
+  width: '100%',
+  mb: 2,
+};
+
+const ORDER_ENTRY_ROW2_SX = {
+  display: 'grid',
+  gridTemplateColumns: {
+    xs: '1fr 1fr',
+    sm: 'repeat(3, minmax(0, 1fr))',
+    md: 'minmax(0, 2.35fr) minmax(0, 1.15fr) minmax(0, 0.7fr) minmax(0, 0.85fr) minmax(0, 0.85fr) minmax(0, 0.7fr) 44px',
+  },
+  gap: { xs: 1.5, md: 1.75 },
+  alignItems: 'end',
+  width: '100%',
+  mb: 2,
 };
 
 const ORDER_EXCEL_TABLE_SX = {
@@ -405,6 +550,10 @@ function OrdersPageContent() {
   const [selectedCustomerType, setSelectedCustomerType] = useState(null); // customer type filter in form
   const [formSelectedProduct, setFormSelectedProduct] = useState(null);
   const [formSelectedStore, setFormSelectedStore] = useState(null);
+  const customerTypeHighlightRef = useRef(null);
+  const customerHighlightRef = useRef(null);
+  const productHighlightRef = useRef(null);
+  const storeHighlightRef = useRef(null);
 
   // Product form state
   const [productFormData, setProductFormData] = useState({
@@ -2904,74 +3053,100 @@ function OrdersPageContent() {
           {/* Main Form */}
           <Card>
             <CardContent sx={{ p: 2 }}>
-              {/* First Row - Date, Customer, Reference */}
-              <Grid container spacing={2} sx={{ mb: 2 }}>
-                <Grid item xs={12} md={2}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
+              {/* First Row - Type, Customer, Bill, Date, Reference */}
+              <Box sx={ORDER_ENTRY_ROW1_SX}>
+                <Box sx={ORDER_ENTRY_CELL_SX}>
+                    <Typography sx={ORDER_ENTRY_LABEL_SX}>
                       CUSTOMER TYPE
                     </Typography>
                     <Autocomplete
                       id="customer-type-select"
                       size="small"
+                      fullWidth
+                      sx={{ width: '100%', minWidth: 0 }}
                       options={customerTypes || []}
                       getOptionLabel={(option) => option.cus_type_title || ''}
+                      getOptionKey={(option) => option.cus_type_id}
                       value={selectedCustomerType}
                       onChange={(event, newValue) => {
                         setSelectedCustomerType(newValue);
                       }}
                       isOptionEqualToValue={(option, value) => option.cus_type_id === value?.cus_type_id}
-                      autoHighlight
-                      openOnFocus
-                      selectOnFocus
-                      onKeyDown={(e) => {
-                        if ((e.key === 'Tab' || e.key === 'Enter') && !e.shiftKey) {
-                          e.preventDefault();
-                          const customerInput = document.getElementById('customer-autocomplete-input');
-                          if (customerInput) {
-                            customerInput.focus();
-                          }
-                        }
+                      autoSelect={true}
+                      autoHighlight={true}
+                      openOnFocus={true}
+                      selectOnFocus={true}
+                      onHighlightChange={(_, option) => {
+                        if (option) customerTypeHighlightRef.current = option;
                       }}
-                      renderInput={(params) => (
+                      renderInput={(params) => {
+                        const prevKeyDown = params.inputProps?.onKeyDown;
+                        return (
                         <TextField
                           {...params}
+                          id="customer-type-select-input"
                           placeholder="All Types"
                           onFocus={(e) => e.target.select()}
+                          inputProps={{
+                            ...params.inputProps,
+                            id: 'customer-type-select-input',
+                            onKeyDown: (e) => {
+                              if (!e.shiftKey && (e.key === 'Tab' || e.key === 'Enter')) {
+                                const inputValue = e.currentTarget.value || '';
+                                const filtered = filterOrderCustomerTypes(customerTypes || [], inputValue);
+                                const idx = getFocusedAutocompleteOption();
+                                const pick = customerTypeHighlightRef.current
+                                  || (idx != null ? filtered[idx] : null)
+                                  || selectedCustomerType;
+                                commitDropdownOnTab(
+                                  e,
+                                  pick,
+                                  (val) => setSelectedCustomerType(val),
+                                  () => findOrderInput('customer-autocomplete-input', '#customer-autocomplete input, input[placeholder*="Search by name"]')
+                                );
+                                return;
+                              }
+                              prevKeyDown?.(e);
+                            },
+                          }}
                           sx={{
-                            bgcolor: 'white',
+                            ...ORDER_ENTRY_CONTROL_SX,
                             '& .MuiInputBase-input': {
-                              fontWeight: selectedCustomerType ? 'bold' : 'normal'
+                              fontWeight: selectedCustomerType ? 700 : 500,
                             }
                           }}
                         />
-                      )}
+                        );
+                      }}
                     />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={3}>
-                  <Box sx={{ position: 'relative' }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 'medium', color: 'text.secondary' }}>
-                        CUSTOMER
-                      </Typography>
+                </Box>
+                <Box sx={ORDER_ENTRY_CELL_SX}>
+                    <Typography sx={ORDER_ENTRY_LABEL_SX}>
+                      CUSTOMER
                       {formSelectedCustomer && (
-                        <Typography variant="body2" sx={{
-                          fontWeight: 'bold',
-                          color: 'white',
-                          fontSize: '0.875rem',
-                          bgcolor: 'primary.light',
-                          px: 1,
-                          py: 0.5,
-                          borderRadius: 1
-                        }}>
-                          Balance: {formSelectedCustomer.cus_balance ? fmtAmt(formSelectedCustomer.cus_balance) : '0.00'}
-                        </Typography>
+                        <Box
+                          component="span"
+                          sx={{
+                            ml: 'auto',
+                            bgcolor: '#dbeafe',
+                            color: '#1d4ed8',
+                            px: 0.75,
+                            borderRadius: '6px',
+                            fontSize: '0.7rem',
+                            fontWeight: 800,
+                            lineHeight: '18px',
+                            height: 18,
+                          }}
+                        >
+                          {fmtAmt(formSelectedCustomer.cus_balance)}
+                        </Box>
                       )}
-                    </Box>
+                    </Typography>
                     <Autocomplete
                       id="customer-autocomplete"
                       size="small"
+                      fullWidth
+                      sx={{ width: '100%', minWidth: 0 }}
                       options={customers.filter(customer => {
                         const category = customerCategories.find(c => c.cus_cat_id === customer.cus_category);
                         const isCustomer = category && category.cus_cat_title.toLowerCase().includes('customer');
@@ -2981,14 +3156,8 @@ function OrdersPageContent() {
                       })}
                       getOptionLabel={(option) => option.cus_name || ''}
                       ListboxProps={{ sx: { maxHeight: 180 } }}
-                      filterOptions={(options, { inputValue }) => {
-                        const q = inputValue.toLowerCase();
-                        return options.filter(o =>
-                          (o.cus_name || '').toLowerCase().includes(q) ||
-                          (o.cus_phone_no || '').toLowerCase().includes(q) ||
-                          (o.cus_phone_no2 || '').toLowerCase().includes(q)
-                        );
-                      }}
+                      getOptionKey={(option) => option.cus_id}
+                      filterOptions={(options, { inputValue }) => filterOrderCustomers(options, inputValue)}
                       renderOption={(props, option) => {
                         const { key, ...optionProps } = props;
                         return (
@@ -3011,43 +3180,80 @@ function OrdersPageContent() {
                       autoHighlight={true}
                       openOnFocus={true}
                       selectOnFocus={true}
-                      onKeyDown={(e) => {
-                        if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
-                          e.preventDefault();
-                          const productInput = document.getElementById('product-autocomplete-input');
-                          if (productInput) {
-                            productInput.focus();
-                          }
-                        } else if (e.key === 'Tab' && e.shiftKey) {
-                          e.preventDefault();
-                          const typeInput = document.getElementById('customer-type-select');
-                          if (typeInput) {
-                            typeInput.focus();
-                          }
-                        }
+                      onHighlightChange={(_, option) => {
+                        if (option) customerHighlightRef.current = option;
                       }}
-                      renderInput={(params) => (
+                      renderInput={(params) => {
+                        const prevKeyDown = params.inputProps?.onKeyDown;
+                        return (
                         <TextField
                           {...params}
                           id="customer-autocomplete-input"
                           placeholder="Search by name or phone..."
                           onFocus={(e) => e.target.select()}
-                          sx={{ bgcolor: 'white', minWidth: 250, '& .MuiInputBase-input': { fontWeight: formSelectedCustomer ? 'bold' : 'normal' } }}
+                          inputProps={{
+                            ...params.inputProps,
+                            id: 'customer-autocomplete-input',
+                            onKeyDown: (e) => {
+                              if (e.key === 'Tab' && e.shiftKey) {
+                                e.preventDefault();
+                                findOrderInput('customer-type-select-input', '#customer-type-select input')?.focus();
+                                return;
+                              }
+                              if (!e.shiftKey && (e.key === 'Tab' || e.key === 'Enter')) {
+                                const inputValue = e.currentTarget.value || '';
+                                const customerOptions = (customers || []).filter((customer) => {
+                                  const category = customerCategories.find((c) => c.cus_cat_id === customer.cus_category);
+                                  const isCustomer = category && category.cus_cat_title.toLowerCase().includes('customer');
+                                  if (!isCustomer) return false;
+                                  if (!selectedCustomerType) return true;
+                                  return customer.cus_type === selectedCustomerType.cus_type_id;
+                                });
+                                const filtered = filterOrderCustomers(customerOptions, inputValue);
+                                const idx = getFocusedAutocompleteOption();
+                                const pick = customerHighlightRef.current
+                                  || (idx != null ? filtered[idx] : null)
+                                  || filtered[0]
+                                  || formSelectedCustomer;
+                                if (pick) {
+                                  commitDropdownOnTab(
+                                    e,
+                                    pick,
+                                    (val) => setFormSelectedCustomer(val),
+                                    () => findOrderInput('product-autocomplete-input', 'input[placeholder*="Select product"]')
+                                  );
+                                  return;
+                                }
+                              }
+                              prevKeyDown?.(e);
+                            },
+                          }}
+                          sx={{ ...ORDER_ENTRY_CONTROL_SX, '& .MuiInputBase-input': { fontWeight: formSelectedCustomer ? 700 : 500 } }}
                         />
-                      )}
+                        );
+                      }}
                     />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={2}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
+                </Box>
+                <Box sx={ORDER_ENTRY_CELL_SX}>
+                    <Typography sx={ORDER_ENTRY_LABEL_SX}>
                       BILL TYPE
                     </Typography>
-                    <FormControl fullWidth size="small">
+                    <FormControl fullWidth size="small" sx={{ minWidth: 0, width: '100%' }}>
                       <Select
                         value={billType}
                         onChange={(e) => setBillType(e.target.value)}
-                        sx={{ bgcolor: 'white', minWidth: 200, '& .MuiSelect-select': { fontWeight: 'bold' } }}
+                        sx={{
+                          height: 40,
+                          bgcolor: '#fff',
+                          fontWeight: 700,
+                          fontSize: '0.875rem',
+                          '& .MuiSelect-select': {
+                            py: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            fontWeight: 700,
+                          },
+                        }}
                       >
                         <MenuItem value="ORDER">Order</MenuItem>
                         <MenuItem value="ORDER_TRASH">Order Trash</MenuItem>
@@ -3056,56 +3262,54 @@ function OrdersPageContent() {
                         <MenuItem value="SALE_RETURN">Sale Return</MenuItem>
                       </Select>
                     </FormControl>
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={2}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                      DATE:
+                </Box>
+                <Box sx={ORDER_ENTRY_CELL_SX}>
+                    <Typography sx={ORDER_ENTRY_LABEL_SX}>
+                      DATE
                     </Typography>
                     <TextField
                       fullWidth
                       type="date"
                       size="small"
                       defaultValue={new Date().toISOString().split('T')[0]}
-                      sx={{ bgcolor: 'white' }}
+                      sx={ORDER_ENTRY_CONTROL_SX}
                     />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={1.5}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
+                </Box>
+                <Box sx={ORDER_ENTRY_CELL_SX}>
+                    <Typography sx={ORDER_ENTRY_LABEL_SX}>
                       REFERENCE
                     </Typography>
                     <TextField
                       fullWidth
                       size="small"
-                      sx={{ bgcolor: 'white' }}
+                      sx={ORDER_ENTRY_CONTROL_SX}
                       value={paymentData.notes || ''}
                       onChange={(e) => handlePaymentDataChange('notes', e.target.value)}
                       onFocus={(e) => e.target.select()}
                     />
-                  </Box>
-                </Grid>
-              </Grid>
+                </Box>
+              </Box>
 
               {/* Product Selection Row */}
-              <Grid container spacing={2} sx={{ mb: 2 }}>
-                <Grid item xs={12} md={3}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                      SELECT PRODUCT
+              <Box sx={ORDER_ENTRY_ROW2_SX}>
+                <Box sx={ORDER_ENTRY_CELL_SX}>
+                    <Typography sx={ORDER_ENTRY_LABEL_SX}>
+                      PRODUCT
                     </Typography>
                     <Autocomplete
                       size="small"
+                      fullWidth
+                      sx={{ width: '100%', minWidth: 0 }}
                       options={products || []}
                       getOptionLabel={(option) => option.pro_title || ''}
+                      getOptionKey={(option) => option.pro_id}
+                      filterOptions={filterOrderProducts}
                       ListboxProps={{ sx: { maxHeight: 130 } }}
                       renderOption={(props, option) => {
                         const { key, ...optionProps } = props;
                         return (
                           <li
-                            key={key}
+                            key={option.pro_id ?? key}
                             {...optionProps}
                             style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}
                           >
@@ -3146,48 +3350,66 @@ function OrdersPageContent() {
                       autoHighlight={true}
                       openOnFocus={true}
                       selectOnFocus={true}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && formSelectedProduct) {
-                          e.preventDefault();
-                          // Move focus to Store field
-                          const storeInputs = document.querySelectorAll('input[placeholder*="Select Store"]');
-                          if (storeInputs.length > 0) {
-                            storeInputs[0].focus();
-                          }
-                        } else if (e.key === 'Tab' && e.shiftKey) {
-                          e.preventDefault();
-                          const customerInput = document.getElementById('customer-autocomplete-input');
-                          if (customerInput) {
-                            customerInput.focus();
-                          }
-                        }
+                      onHighlightChange={(_, option) => {
+                        if (option) productHighlightRef.current = option;
                       }}
-                      renderInput={(params) => (
+                      renderInput={(params) => {
+                        const prevKeyDown = params.inputProps?.onKeyDown;
+                        return (
                         <TextField
                           {...params}
                           id="product-autocomplete-input"
                           placeholder={products.length === 0 ? "No products available" : "Select product"}
                           onFocus={(e) => e.target.select()}
-                          sx={{ bgcolor: 'white', width: 350, minWidth: 350, '& .MuiInputBase-input': { fontWeight: formSelectedProduct ? 'bold' : 'normal' } }}
+                          inputProps={{
+                            ...params.inputProps,
+                            id: 'product-autocomplete-input',
+                            onKeyDown: (e) => {
+                              if (e.key === 'Tab' && e.shiftKey) {
+                                e.preventDefault();
+                                findOrderInput('customer-autocomplete-input', '#customer-autocomplete input')?.focus();
+                                return;
+                              }
+                              if (!e.shiftKey && (e.key === 'Tab' || e.key === 'Enter')) {
+                                const inputValue = e.currentTarget.value || '';
+                                const filtered = filterOrderProducts(products || [], { inputValue });
+                                const idx = getFocusedAutocompleteOption();
+                                const pick = productHighlightRef.current
+                                  || (idx != null ? filtered[idx] : null)
+                                  || filtered[0]
+                                  || formSelectedProduct;
+                                if (pick) {
+                                  commitDropdownOnTab(
+                                    e,
+                                    pick,
+                                    (val) => handleProductSelect(val),
+                                    () => findOrderInput('order-store-input', 'input[placeholder*="Select Store"]')
+                                  );
+                                  return;
+                                }
+                              }
+                              prevKeyDown?.(e);
+                            },
+                          }}
+                          sx={{ ...ORDER_ENTRY_CONTROL_SX, '& .MuiInputBase-input': { fontWeight: formSelectedProduct ? 700 : 500 } }}
                         />
-                      )}
+                        );
+                      }}
                       disabled={products.length === 0}
                     />
-                    {/* Debug info */}
-                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                      Debug: {products.length} products available
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={2}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                      SELECT STORE
+                </Box>
+                <Box sx={ORDER_ENTRY_CELL_SX}>
+                    <Typography sx={ORDER_ENTRY_LABEL_SX}>
+                      STORE
                     </Typography>
                     <Autocomplete
                       size="small"
+                      fullWidth
+                      sx={{ width: '100%', minWidth: 0 }}
                       options={stores || []}
                       getOptionLabel={(option) => option.store_name || ''}
+                      getOptionKey={(option) => option.storeid}
+                      filterOptions={filterOrderStores}
                       value={formSelectedStore}
                       onChange={(event, newValue) => {
                         setFormSelectedStore(newValue || null);
@@ -3197,36 +3419,62 @@ function OrdersPageContent() {
                       autoHighlight={true}
                       openOnFocus={true}
                       selectOnFocus={true}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && formSelectedStore) {
-                          e.preventDefault();
-                          // Move focus to Quantity field
-                          const qtyInputs = document.querySelectorAll('input[placeholder*="QTY"], input[type="number"]');
-                          if (qtyInputs.length > 0) {
-                            qtyInputs[0]?.focus();
-                          }
-                        }
+                      onHighlightChange={(_, option) => {
+                        if (option) storeHighlightRef.current = option;
                       }}
-                      renderInput={(params) => (
+                      renderInput={(params) => {
+                        const prevKeyDown = params.inputProps?.onKeyDown;
+                        return (
                         <TextField
                           {...params}
+                          id="order-store-input"
                           placeholder="Select Store"
                           onFocus={(e) => e.target.select()}
-                          sx={{ bgcolor: 'white', '& .MuiInputBase-input': { fontWeight: formSelectedStore ? 'bold' : 'normal' } }}
+                          inputProps={{
+                            ...params.inputProps,
+                            id: 'order-store-input',
+                            onKeyDown: (e) => {
+                              if (e.key === 'Tab' && e.shiftKey) {
+                                e.preventDefault();
+                                findOrderInput('product-autocomplete-input', 'input[placeholder*="Select product"]')?.focus();
+                                return;
+                              }
+                              if (!e.shiftKey && (e.key === 'Tab' || e.key === 'Enter')) {
+                                const inputValue = e.currentTarget.value || '';
+                                const filtered = filterOrderStores(stores || [], { inputValue });
+                                const idx = getFocusedAutocompleteOption();
+                                const pick = storeHighlightRef.current
+                                  || (idx != null ? filtered[idx] : null)
+                                  || filtered[0]
+                                  || formSelectedStore;
+                                if (pick) {
+                                  commitDropdownOnTab(
+                                    e,
+                                    pick,
+                                    (val) => setFormSelectedStore(val || null),
+                                    () => findOrderInput('order-qty-input')
+                                  );
+                                  return;
+                                }
+                              }
+                              prevKeyDown?.(e);
+                            },
+                          }}
+                          sx={{ ...ORDER_ENTRY_CONTROL_SX, '& .MuiInputBase-input': { fontWeight: formSelectedStore ? 700 : 500 } }}
                         />
-                      )}
+                        );
+                      }}
                     />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={1.5}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
+                </Box>
+                <Box sx={ORDER_ENTRY_CELL_SX}>
+                    <Typography sx={ORDER_ENTRY_LABEL_SX}>
                       QTY
                     </Typography>
                     <TextField
                       fullWidth
                       size="small"
                       type="number"
+                      id="order-qty-input"
                       value={productFormData.quantity === 0 ? '' : productFormData.quantity}
                       onChange={(e) => handleQuantityChange(e.target.value)}
                       onFocus={(e) => e.target.select()}
@@ -3234,29 +3482,25 @@ function OrdersPageContent() {
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
-                          // If rate is already filled, add product directly
                           if (productFormData.rate > 0) {
                             handleAddProductToTable();
                           } else {
-                            // Focus on rate field if rate is not filled
-                            const rateInput = document.getElementById('product-rate-input');
-                            if (rateInput) rateInput.focus();
+                            document.getElementById('product-rate-input')?.focus();
                           }
+                        } else if (e.key === 'Tab' && e.shiftKey) {
+                          e.preventDefault();
+                          document.getElementById('order-store-input')?.focus();
                         } else if (e.key === 'Tab') {
                           e.preventDefault();
-                          // Tab should move to RATE field
-                          const rateInput = document.getElementById('product-rate-input');
-                          if (rateInput) rateInput.focus();
+                          document.getElementById('product-rate-input')?.focus();
                         }
                       }}
-                      sx={{ bgcolor: 'white', width: 160, minWidth: 160 }}
+                      sx={{ ...ORDER_ENTRY_CONTROL_SX, '& .MuiInputBase-input': { fontWeight: 700 } }}
                     />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={1.5}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                      RATE:
+                </Box>
+                <Box sx={ORDER_ENTRY_CELL_SX}>
+                    <Typography sx={ORDER_ENTRY_LABEL_SX}>
+                      RATE
                     </Typography>
                     <TextField
                       fullWidth
@@ -3270,37 +3514,33 @@ function OrdersPageContent() {
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
-                          // Add product to table when Enter is pressed in rate field
                           handleAddProductToTable();
+                        } else if (e.key === 'Tab' && e.shiftKey) {
+                          e.preventDefault();
+                          document.getElementById('order-qty-input')?.focus();
                         } else if (e.key === 'Tab') {
                           e.preventDefault();
-                          // Focus + button
-                          const addBtn = document.getElementById('add-product-btn');
-                          if (addBtn) addBtn.focus();
+                          document.getElementById('add-product-btn')?.focus();
                         }
                       }}
-                      sx={{ bgcolor: 'white', width: 150, minWidth: 150 }}
+                      sx={{ ...ORDER_ENTRY_CONTROL_SX, '& .MuiInputBase-input': { fontWeight: 700 } }}
                     />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={1.5}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                      AMOUNT:
+                </Box>
+                <Box sx={ORDER_ENTRY_CELL_SX}>
+                    <Typography sx={ORDER_ENTRY_LABEL_SX}>
+                      AMOUNT
                     </Typography>
                     <TextField
                       fullWidth
                       size="small"
                       type="number"
                       value={productFormData.amount}
-                      sx={{ bgcolor: 'white', width: 150, minWidth: 150 }}
+                      sx={ORDER_ENTRY_CONTROL_SX}
                       disabled
                     />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={1.5}>
-                  <Box>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
+                </Box>
+                <Box sx={ORDER_ENTRY_CELL_SX}>
+                    <Typography sx={ORDER_ENTRY_LABEL_SX}>
                       STOCK
                     </Typography>
                     <TextField
@@ -3308,38 +3548,56 @@ function OrdersPageContent() {
                       size="small"
                       value={productFormData.stock}
                       disabled
-                      sx={{ bgcolor: '#f8f9fa', width: 150, minWidth: 150 }}
+                      sx={{ ...ORDER_ENTRY_CONTROL_SX, bgcolor: '#f8fafc' }}
                     />
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={1}>
-                  <Box sx={{ mt: 2 }}>
+                </Box>
+                <Box sx={{ ...ORDER_ENTRY_CELL_SX, width: 44 }}>
                     <Button
                       variant="contained"
                       id="add-product-btn"
                       onClick={handleAddProductToTable}
                       onKeyDown={(e) => {
-                        if (e.key === 'Tab' && !e.shiftKey && productTableData.length === 0) {
+                        if (e.key === 'Enter') {
                           e.preventDefault();
-                          const labourInput = document.getElementById('payment-labour-input');
-                          if (labourInput) {
-                            labourInput.focus();
+                          handleAddProductToTable();
+                          return;
+                        }
+                        if (e.key === 'Tab' && e.shiftKey) {
+                          e.preventDefault();
+                          document.getElementById('product-rate-input')?.focus();
+                          return;
+                        }
+                        if (e.key === 'Tab' && !e.shiftKey) {
+                          if (formSelectedProduct && formSelectedStore && productFormData.quantity > 0 && productFormData.rate > 0) {
+                            e.preventDefault();
+                            handleAddProductToTable();
+                            return;
+                          }
+                          if (productTableData.length === 0) {
+                            e.preventDefault();
+                            document.getElementById('payment-labour-input')?.focus();
                           }
                         }
                       }}
                       sx={{
                         bgcolor: '#6f42c1',
                         color: 'white',
-                        borderRadius: 2,
+                        borderRadius: '8px',
+                        minWidth: 44,
+                        width: 44,
+                        height: 40,
                         minHeight: 40,
+                        p: 0,
+                        fontSize: '1.25rem',
+                        fontWeight: 700,
+                        lineHeight: 1,
                         '&:hover': { bgcolor: '#5a2d91' }
                       }}
                     >
                       +
                     </Button>
-                  </Box>
-                </Grid>
-              </Grid>
+                </Box>
+              </Box>
 
               {/* Product Table */}
               <TableContainer component={Paper} sx={{ mb: 2, border: '1px solid #e9ecef' }}>

@@ -2,11 +2,14 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getNextId } from '@/lib/id-helper';
 import { initBranchScope } from '@/lib/branch-server';
+import { rejectIfDayClosed } from '@/lib/day-end-guard';
 
 // POST - Post journal entry (change status from DRAFT to POSTED)
 export async function POST(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
 
   try {
     const body = await request.json();

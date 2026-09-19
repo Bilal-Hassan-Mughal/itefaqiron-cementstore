@@ -40,6 +40,9 @@ import {
 } from 'lucide-react';
 import DashboardLayout from '../components/dashboard-layout';
 import { hasDayEndProfitSummaryAccess } from '@/lib/staff-access';
+import { getPkDateString, shiftPkDate } from '@/lib/date-helper';
+import { usePinAuth } from '../../hooks/usePinAuth';
+import BiometricAuthDialog from '../components/BiometricAuthDialog';
 
 function readDayEndUser() {
   if (typeof window === 'undefined') return null;
@@ -72,10 +75,18 @@ export default function DayEndPage() {
   const [last7DaysTrend, setLast7DaysTrend] = useState([]);
   const [topSellingItems, setTopSellingItems] = useState([]);
   const [stockSummary, setStockSummary] = useState(null);
+  const [closeReadiness, setCloseReadiness] = useState(null);
   
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const q = new URLSearchParams(window.location.search).get('date');
+      if (q && /^\d{4}-\d{2}-\d{2}$/.test(q)) return q;
+    }
+    return getPkDateString();
+  });
+  const { requireAuth, authDialogOpen, handleAuthSuccess, handleAuthCancel } = usePinAuth();
   const [showHistory, setShowHistory] = useState(false);
   const [showDenominations, setShowDenominations] = useState(false);
   const [dayEndUser, setDayEndUser] = useState(null);
@@ -157,6 +168,7 @@ export default function DayEndPage() {
         setStockSummary(data.stockSummary || null);
 
         if (data.checklistStatus) setChecklist(data.checklistStatus);
+        setCloseReadiness(data.closeReadiness || null);
 
         setOpeningCash(data.summary?.openingCash?.toString() || '0');
         setClosingCash(data.dayEnd?.closing_cash !== null && data.dayEnd?.closing_cash !== undefined ? data.dayEnd.closing_cash?.toString() : '');
@@ -202,32 +214,42 @@ export default function DayEndPage() {
     fetchDayEndData(selectedDate);
   }, [selectedDate]);
 
-  const handlePrevDay = () => {
-    const d = new Date(selectedDate);
-    d.setDate(d.getDate() - 1);
-    setSelectedDate(d.toISOString().split('T')[0]);
-  };
-
+  const todayPk = getPkDateString();
+  const handlePrevDay = () => setSelectedDate(shiftPkDate(selectedDate, -1));
   const handleNextDay = () => {
-    const d = new Date(selectedDate);
-    d.setDate(d.getDate() + 1);
-    setSelectedDate(d.toISOString().split('T')[0]);
+    const next = shiftPkDate(selectedDate, 1);
+    if (next > todayPk) return;
+    setSelectedDate(next);
   };
-
-  const handleToday = () => {
-    setSelectedDate(new Date().toISOString().split('T')[0]);
-  };
+  const handleToday = () => setSelectedDate(todayPk);
 
   // Close Day / Save Action
   const handleCloseDay = async () => {
+    if (closeReadiness && !closeReadiness.ok && closeReadiness.code !== 'ALREADY_CLOSED') {
+      alert(closeReadiness.error || 'Close the previous business day first.');
+      if (closeReadiness.previousOpenDate) setSelectedDate(closeReadiness.previousOpenDate);
+      return;
+    }
     if (closingCash === '' || closingCash === null) {
       alert('Please enter physical closing cash amount before closing the day.');
       return;
     }
 
-    if (!window.confirm('Are you sure you want to CLOSE the day? This will record physical closing balances.')) {
+    if (selectedDate > getPkDateString()) {
+      alert('Cannot close a future date.');
       return;
     }
+    if ((summary?.holdBillsCount || 0) > 0 || (summary?.draftJournalsCount || 0) > 0) {
+      const ok = window.confirm(
+        `There are still ${summary?.holdBillsCount || 0} hold bill(s) and ${summary?.draftJournalsCount || 0} draft journal(s). Close anyway?`
+      );
+      if (!ok) return;
+    }
+    if (!window.confirm('Close this business day? Sales, purchases, payments, and expenses will be locked until you re-open.')) {
+      return;
+    }
+    const authed = await requireAuth();
+    if (!authed) return;
 
     try {
       setSaving(true);
@@ -239,6 +261,7 @@ export default function DayEndPage() {
           opening_cash: openingCash,
           closing_cash: closingCash,
           notes: notes,
+          closed_by: dayEndUser?.user_id || dayEndUser?.id || null,
           action: 'CLOSE_DAY'
         })
       });
@@ -261,7 +284,9 @@ export default function DayEndPage() {
 
   // Re-open Day
   const handleReopenDay = async () => {
-    if (window.confirm('Are you sure you want to RE-OPEN this business day? This will allow edits to day-end figures.')) {
+    if (!window.confirm('Re-open this business day? Posting will be allowed again.')) return;
+    const authed = await requireAuth();
+    if (!authed) return;
       try {
         setSaving(true);
         const response = await fetch('/api/day-end', {
@@ -287,10 +312,12 @@ export default function DayEndPage() {
       } finally {
         setSaving(false);
       }
-    }
   };
 
   const isClosed = dayEndData?.status === 'CLOSED';
+  const closeBlocked = Boolean(
+    closeReadiness && !closeReadiness.ok && closeReadiness.code !== 'ALREADY_CLOSED'
+  );
 
   // SVG Chart Maximum calculation for Sales vs Purchases line chart
   const maxTrendVal = useMemo(() => {
@@ -332,13 +359,19 @@ export default function DayEndPage() {
                 <input
                   type="date"
                   value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
+                  max={todayPk}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    if (next && next > todayPk) return;
+                    setSelectedDate(next);
+                  }}
                   className="bg-transparent text-xs font-bold text-slate-800 border-none focus:outline-none cursor-pointer py-1"
                 />
               </div>
               <button
                 onClick={handleNextDay}
-                className="p-1.5 hover:bg-slate-200/60 rounded-lg transition-colors text-slate-600"
+                disabled={selectedDate >= todayPk}
+                className="p-1.5 hover:bg-slate-200/60 rounded-lg transition-colors text-slate-600 disabled:opacity-40"
                 title="Next Day"
               >
                 <ChevronRight className="w-4 h-4" />
@@ -359,8 +392,18 @@ export default function DayEndPage() {
                 : 'bg-amber-50 text-amber-700 border-amber-200'
             }`}>
               <span className={`w-2 h-2 rounded-full ${isClosed ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-              <span>Status: {isClosed ? 'Closed' : 'Not Closed'}</span>
+              <span>Status: {isClosed ? 'Closed' : 'Open'}</span>
             </div>
+            {isClosed && dayEndData?.closed_by_user?.full_name && (
+              <span className="text-[11px] font-semibold text-slate-500">
+                Closed by {dayEndData.closed_by_user.full_name}
+              </span>
+            )}
+            {summary?.frozen && (
+              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-lg">
+                Frozen snapshot
+              </span>
+            )}
 
             {/* Main Action Button */}
             {isClosed ? (
@@ -375,15 +418,35 @@ export default function DayEndPage() {
             ) : (
               <button
                 onClick={handleCloseDay}
-                disabled={saving}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 flex items-center space-x-2"
+                disabled={saving || closeBlocked}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Lock className="w-4 h-4" />
-                <span>{saving ? 'Closing...' : 'Start Day End Closing'}</span>
+                <span>{saving ? 'Closing...' : closeBlocked ? 'Close Previous Day First' : 'Start Day End Closing'}</span>
               </button>
             )}
           </div>
         </div>
+
+        {closeBlocked && (
+          <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2 text-rose-800">
+              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-bold">Days must be closed in order</p>
+                <p className="text-xs mt-0.5">{closeReadiness.error}</p>
+              </div>
+            </div>
+            {closeReadiness.previousOpenDate && (
+              <button
+                onClick={() => setSelectedDate(closeReadiness.previousOpenDate)}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold"
+              >
+                Open {closeReadiness.previousOpenDate}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* ---------------------------------------------------- */}
         {/* ROW 1: 5 METRIC CARDS */}
@@ -482,8 +545,8 @@ export default function DayEndPage() {
                   </div>
                   <div className="text-slate-400 font-bold text-lg">-</div>
                   <div>
-                    <p className="text-xs font-semibold text-amber-600">Total Purchases</p>
-                    <p className="text-sm font-black text-slate-900 mt-1">Rs. {formatCurrency(summary?.totalPurchases)}</p>
+                    <p className="text-xs font-semibold text-amber-600">Cost of Goods</p>
+                    <p className="text-sm font-black text-slate-900 mt-1">Rs. {formatCurrency(summary?.totalCOGS)}</p>
                   </div>
                   <div className="text-slate-400 font-bold text-lg">=</div>
                   <div>
@@ -533,10 +596,26 @@ export default function DayEndPage() {
                 <span className="font-semibold text-slate-600">Total Cash Outflow (Purchases + Payments + Expenses)</span>
                 <span className="font-bold text-rose-600">Rs. {formatCurrency(summary?.totalCashOutflow)}</span>
               </div>
+              {parseFloat(summary?.totalSaleReturns || 0) > 0 && (
+                <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
+                  <span className="font-semibold text-slate-600">Cash sale returns (out)</span>
+                  <span className="font-bold text-rose-600">Rs. {formatCurrency(summary?.cashSaleReturns)}</span>
+                </div>
+              )}
               <div className="flex justify-between items-center text-xs py-2 bg-blue-50/80 px-3 rounded-xl border border-blue-200/60 mt-2">
                 <span className="font-extrabold text-blue-900">Expected Cash In Hand</span>
                 <span className="font-black text-sm text-blue-700">Rs. {formatCurrency(summary?.expectedCashInHand)}</span>
               </div>
+              {summary?.actualClosingCash != null && (
+                <div className={`flex justify-between items-center text-xs py-2 px-3 rounded-xl border ${
+                  Math.abs(summary?.variance || 0) > 0.01
+                    ? 'bg-amber-50 border-amber-200'
+                    : 'bg-emerald-50 border-emerald-200'
+                }`}>
+                  <span className="font-extrabold">Variance</span>
+                  <span className="font-black text-sm">Rs. {formatCurrency(summary?.variance)}</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -637,7 +716,7 @@ export default function DayEndPage() {
 
               <div className="bg-blue-50/70 border border-blue-200/60 rounded-xl p-3 text-xs text-blue-800 flex items-center gap-2">
                 <Info className="w-4 h-4 text-blue-600 shrink-0" />
-                <span>Note: Stock is calculated on FIFO Costing Method.</span>
+                <span>Note: {stockSummary?.method || 'Current quantity × current product cost'}.</span>
               </div>
             </div>
 
@@ -661,19 +740,19 @@ export default function DayEndPage() {
               <div className="space-y-2 text-xs">
                 <div className="flex justify-between py-1 border-b border-slate-100">
                   <span className="font-semibold text-slate-600">Opening Bank</span>
-                  <span className="font-bold text-slate-900">Rs. {formatCurrency(summary?.totalBankAccountsBalance)}</span>
+                  <span className="font-bold text-slate-900">Rs. {formatCurrency(summary?.openingBank)}</span>
                 </div>
                 <div className="flex justify-between py-1 border-b border-slate-100">
-                  <span className="font-semibold text-slate-600">Total Bank Receipts</span>
-                  <span className="font-bold text-slate-900">Rs. {formatCurrency(summary?.bankReceipts)}</span>
+                  <span className="font-semibold text-slate-600">Bank Inflow</span>
+                  <span className="font-bold text-emerald-700">Rs. {formatCurrency(summary?.totalBankInflow)}</span>
                 </div>
                 <div className="flex justify-between py-1 border-b border-slate-100">
-                  <span className="font-semibold text-slate-600">Total Bank Payments</span>
-                  <span className="font-bold text-slate-900">Rs. {formatCurrency(summary?.bankPayments + summary?.bankPurchases)}</span>
+                  <span className="font-semibold text-slate-600">Bank Outflow</span>
+                  <span className="font-bold text-rose-700">Rs. {formatCurrency(summary?.totalBankOutflow)}</span>
                 </div>
                 <div className="flex justify-between py-2 bg-indigo-50/80 px-3 rounded-xl border border-indigo-200/60 mt-2">
-                  <span className="font-extrabold text-indigo-900">Closing Bank</span>
-                  <span className="font-black text-sm text-indigo-700">Rs. {formatCurrency(summary?.totalBankAccountsBalance)}</span>
+                  <span className="font-extrabold text-indigo-900">Expected Closing Bank</span>
+                  <span className="font-black text-sm text-indigo-700">Rs. {formatCurrency(summary?.savedClosingBank ?? summary?.expectedClosingBank)}</span>
                 </div>
               </div>
 
@@ -706,6 +785,17 @@ export default function DayEndPage() {
               <div className="bg-amber-50/80 border border-amber-200/70 rounded-xl p-3 text-xs text-amber-800 flex items-start gap-2">
                 <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                 <span>Please ensure all the above tasks are completed before closing the day.</span>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-700">Opening Cash</label>
+                <input
+                  type="number"
+                  value={openingCash}
+                  onChange={(e) => setOpeningCash(e.target.value)}
+                  disabled={isClosed}
+                  className="w-full p-2.5 text-sm font-bold bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none text-slate-900 disabled:bg-slate-100"
+                />
               </div>
 
               {/* Physical Cash Input & Calculator */}
@@ -755,11 +845,11 @@ export default function DayEndPage() {
               ) : (
                 <button
                   onClick={handleCloseDay}
-                  disabled={saving}
-                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm transition-all shadow-md active:scale-98 flex items-center justify-center space-x-2"
+                  disabled={saving || closeBlocked}
+                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm transition-all shadow-md active:scale-98 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Lock className="w-4 h-4" />
-                  <span>{saving ? 'Closing Day...' : 'Close Day'}</span>
+                  <span>{saving ? 'Closing Day...' : closeBlocked ? 'Close Previous Day First' : 'Close Day'}</span>
                 </button>
               )}
 
@@ -997,6 +1087,11 @@ export default function DayEndPage() {
         )}
 
       </div>
+      <BiometricAuthDialog
+        open={authDialogOpen}
+        onSuccess={handleAuthSuccess}
+        onClose={handleAuthCancel}
+      />
     </DashboardLayout>
   );
 }

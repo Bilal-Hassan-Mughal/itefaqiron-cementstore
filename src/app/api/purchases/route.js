@@ -4,6 +4,7 @@ import { getNextId } from '@/lib/id-helper';
 import { updateStoreStock } from '@/lib/storeStock';
 import { createLedgerEntry } from '@/lib/ledger-helper';
 import { initBranchScope } from '@/lib/branch-server';
+import { rejectIfDayClosed } from '@/lib/day-end-guard';
 
 // Helper for JSON errors
 function errorResponse(message, status = 400) {
@@ -496,6 +497,8 @@ export async function GET(request) {
 export async function POST(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
 
   try {
     const body = await request.json();
@@ -1246,6 +1249,8 @@ export async function POST(request) {
 export async function PUT(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
 
   try {
     const body = await request.json();
@@ -1825,6 +1830,8 @@ export async function PUT(request) {
 export async function DELETE(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id') ? parseInt(searchParams.get('id')) : null; // /api/purchases?id=1

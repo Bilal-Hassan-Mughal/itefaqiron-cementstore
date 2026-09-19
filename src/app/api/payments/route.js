@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { calculateClosingBalance, createLedgerEntry, createPayableLedgerEntry } from '@/lib/ledger-helper';
 import { getNextId } from '@/lib/id-helper';
 import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
+import { rejectIfDayClosed } from '@/lib/day-end-guard';
 import { persistPaymentLedger, recalculateLedgerBalances } from '@/lib/payment-ledger-writer';
 
 // GET - Fetch all payments with related data
@@ -116,6 +117,8 @@ export async function GET(request) {
 export async function POST(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
 
   try {
     const body = await request.json();
@@ -592,6 +595,8 @@ export async function POST(request) {
 export async function PUT(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
 
   try {
     const body = await request.json();
@@ -757,6 +762,8 @@ export async function PUT(request) {
 export async function DELETE(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
 
   try {
     const { searchParams } = new URL(request.url);

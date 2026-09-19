@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { createLedgerEntry } from '@/lib/ledger-helper';
 import { getNextId } from '@/lib/id-helper';
 import { initBranchScope } from '@/lib/branch-server';
+import { rejectIfDayClosed } from '@/lib/day-end-guard';
 
 // GET - Fetch all expenses with related data
 export async function GET(request) {
@@ -86,6 +87,8 @@ export async function GET(request) {
 export async function POST(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
 
   try {
     const body = await request.json();
@@ -281,6 +284,8 @@ export async function POST(request) {
 export async function PUT(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
 
   try {
     const body = await request.json();
@@ -517,6 +522,8 @@ export async function PUT(request) {
 export async function DELETE(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
 
   try {
     const { searchParams } = new URL(request.url);
