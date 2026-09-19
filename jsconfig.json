@@ -3,5 +3,11 @@
     "paths": {
       "@/*": ["./src/*"]
     }
-  }
+  },
+  "exclude": [
+    "node_modules",
+    ".next",
+    "scripts",
+    "prisma"
+  ]
 }

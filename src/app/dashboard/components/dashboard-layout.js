@@ -4,7 +4,7 @@ import { useEffect, useState, Suspense, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import StaffPathGuard from './staff-path-guard';
 import HqPosGuard from './hq-pos-guard';
-import { resolveClientBranchId, getActiveBranchMeta, isHqPosMode, exitHqPosMode } from '@/lib/branch-client';
+import { resolveClientBranchId, getActiveBranchMeta, isHqPosMode, exitHqPosMode, sanitizeUserForRequest, persistSessionUser } from '@/lib/branch-client';
 import { isHqUser } from '@/lib/branch-roles';
 import {
   Box,
@@ -49,7 +49,11 @@ export default function DashboardLayout({ children }) {
     }
 
     try {
-      const parsedUser = JSON.parse(userData);
+      const parsedUser = persistSessionUser(JSON.parse(userData));
+      if (!parsedUser) {
+        window.location.href = '/';
+        return;
+      }
       setUser(parsedUser);
       userRef.current = parsedUser;
 
@@ -69,10 +73,12 @@ export default function DashboardLayout({ children }) {
         window.fetch = (input, init = {}) => {
           const url = typeof input === 'string' ? input : input?.url || '';
           if (url.startsWith('/api/')) {
-            const headers = new Headers(init.headers || {});
+            const baseHeaders = init.headers || (typeof Request !== 'undefined' && input instanceof Request ? input.headers : undefined);
+            const headers = new Headers(baseHeaders || {});
             const u = userRef.current;
-            if (u && !headers.has('x-user-json')) {
-              headers.set('x-user-json', JSON.stringify(u));
+            const safeUser = sanitizeUserForRequest(u);
+            if (safeUser && !headers.has('x-user-json')) {
+              headers.set('x-user-json', JSON.stringify(safeUser));
             }
             const branchId = resolveClientBranchId(u);
             if (branchId && !headers.has('x-branch-id')) {

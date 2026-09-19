@@ -79,13 +79,61 @@ export function getBranchHeaders(user) {
   return { 'x-branch-id': String(branchId) };
 }
 
+/** Drop secrets/blobs that must never live in localStorage or request headers. */
+export function stripSensitiveUserFields(user) {
+  if (!user || typeof user !== 'object') return user;
+  const {
+    fingerprint_template,
+    password,
+    pin_code,
+    ...safe
+  } = user;
+  return safe;
+}
+
+export function persistSessionUser(user) {
+  if (typeof window === 'undefined' || !user) return null;
+  const safe = stripSensitiveUserFields(user);
+  try {
+    localStorage.setItem('user', JSON.stringify(safe));
+  } catch {
+    /* ignore quota / private-mode write failures */
+  }
+  return safe;
+}
+
+/** Small session payload for x-user-json — never send templates/passwords. */
+export function sanitizeUserForRequest(user) {
+  if (!user || typeof user !== 'object') return null;
+  const safe = stripSensitiveUserFields(user);
+  const branch = safe.branch && typeof safe.branch === 'object'
+    ? {
+        branch_id: safe.branch.branch_id ?? null,
+        branch_code: safe.branch.branch_code ?? '',
+        branch_name: safe.branch.branch_name ?? '',
+      }
+    : undefined;
+  return {
+    user_id: safe.user_id,
+    role: safe.role,
+    email: safe.email,
+    full_name: safe.full_name,
+    branch_id: safe.branch_id ?? null,
+    status: safe.status,
+    allowed_modules: safe.allowed_modules ?? null,
+    fingerprint_enrolled: safe.fingerprint_enrolled === true,
+    ...(branch ? { branch } : {}),
+  };
+}
+
 /** Patched fetch that sends x-branch-id for dashboard API calls. */
 export function branchFetch(user, input, init = {}) {
   const headers = new Headers(init.headers || {});
   const branchHeaders = getBranchHeaders(user);
   Object.entries(branchHeaders).forEach(([k, v]) => headers.set(k, v));
-  if (user && !headers.has('x-user-json')) {
-    headers.set('x-user-json', JSON.stringify(user));
+  const safeUser = sanitizeUserForRequest(user);
+  if (safeUser && !headers.has('x-user-json')) {
+    headers.set('x-user-json', JSON.stringify(safeUser));
   }
   return fetch(input, { ...init, headers });
 }

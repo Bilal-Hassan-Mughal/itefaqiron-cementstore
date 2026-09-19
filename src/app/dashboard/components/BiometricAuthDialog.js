@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { SampleFormat } from '@digitalpersona/devices';
+import { persistSessionUser } from '@/lib/branch-client';
 
 // Only load the reader stack when the user opens the Fingerprint tab (avoids
 // "Cannot reach … Agent" on every confirm dialog for PIN-only users).
@@ -25,7 +27,7 @@ const FingerprintScanner = dynamic(() => import('@/components/FingerprintScanner
   ),
 });
 
-export default function BiometricAuthDialog({ open, onSuccess, onClose }) {
+export default function BiometricAuthDialog({ open, onSuccess, onClose, embedded = false, side = 'center' }) {
   function getCurrentUser() {
     try {
       return JSON.parse(localStorage.getItem('user') || 'null');
@@ -74,10 +76,10 @@ export default function BiometricAuthDialog({ open, onSuccess, onClose }) {
           : null;
         if (!serverUser) return;
 
-        const enrolled = serverUser.fingerprint_enrolled !== false;
+        const enrolled = serverUser.fingerprint_enrolled === true;
         const mergedUser = { ...user, fingerprint_enrolled: enrolled };
         setCurrentUser(mergedUser);
-        localStorage.setItem('user', JSON.stringify(mergedUser));
+        persistSessionUser(mergedUser);
         if (enrolled) {
           setAuthMode('fp');
         }
@@ -182,27 +184,18 @@ export default function BiometricAuthDialog({ open, onSuccess, onClose }) {
 
   if (!open) return null;
 
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 9999,
-        background: 'rgba(0,0,0,0.55)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
+  const card = (
       <div
         style={{
           background: 'white',
-          borderRadius: '20px',
-          padding: '28px',
-          width: authMode === 'fp' ? '520px' : '380px',
-          maxWidth: '95vw',
-          boxShadow: '0 24px 64px rgba(0,0,0,0.35)',
+          borderRadius: embedded ? '16px' : '20px',
+          padding: embedded ? '18px' : '28px',
+          width: embedded ? '100%' : (authMode === 'fp' ? '520px' : '380px'),
+          maxWidth: embedded ? '100%' : '95vw',
+          boxShadow: embedded ? 'none' : '0 24px 64px rgba(0,0,0,0.35)',
           fontFamily: "'Segoe UI', system-ui, sans-serif",
+          height: embedded ? '100%' : 'auto',
+          boxSizing: 'border-box',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
@@ -469,6 +462,50 @@ export default function BiometricAuthDialog({ open, onSuccess, onClose }) {
         </button>
         )}
       </div>
+  );
+
+  if (embedded) return card;
+
+  const isSide = side === 'left' || side === 'right';
+
+  const overlay = (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1400,
+        background: isSide ? 'transparent' : 'rgba(0,0,0,0.55)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        pointerEvents: isSide ? 'none' : 'auto',
+      }}
+    >
+      <div
+        style={{
+          pointerEvents: 'auto',
+          ...(side === 'right'
+            ? {
+                position: 'absolute',
+                left: 'calc(50% + 8px)',
+                top: '50%',
+                transform: 'translateY(-50%)',
+              }
+            : side === 'left'
+              ? {
+                  position: 'absolute',
+                  right: 'calc(50% + 8px)',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                }
+              : {}),
+        }}
+      >
+        {card}
+      </div>
     </div>
   );
+
+  if (typeof document === 'undefined') return overlay;
+  return createPortal(overlay, document.body);
 }

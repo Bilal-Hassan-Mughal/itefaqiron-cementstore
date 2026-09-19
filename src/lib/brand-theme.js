@@ -127,7 +127,7 @@ export const SIDEBAR_SECTION_LABELS = {
 /** Sidebar dimensions — keep in sync with dashboard-layout */
 export const SIDEBAR_WIDTH = {
   collapsed: 72,
-  expanded: 276,
+  expanded: 232,
 };
 
 /** Dashboard shortcut icon boxes */

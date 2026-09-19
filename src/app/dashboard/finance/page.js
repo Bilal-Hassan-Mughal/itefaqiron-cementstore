@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Fragment, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, Fragment, useMemo, useRef, useCallback, forwardRef } from 'react';
 import { getCreatedByName } from '@/lib/date-helper';
 import {
   Plus,
@@ -47,6 +47,12 @@ import {
   getTransactionEditCaption,
   buildLiveEditParticulars,
 } from './payment-form-utils';
+
+const isBenignFetchError = (error) => {
+  const name = error?.name || '';
+  const message = String(error?.message || '');
+  return name === 'AbortError' || message.includes('Failed to fetch') || message.includes('NetworkError');
+};
 
 // Material-UI imports
 import {
@@ -100,6 +106,66 @@ const fmtAmt = (val) => {
 
 const customerOptionKey = (option) => String(option?.cus_id ?? '');
 const isSameCustomerOption = (a, b) => Number(a?.cus_id) === Number(b?.cus_id);
+
+const ACCOUNT_DROPDOWN_GRID = '40px minmax(0, 1fr) 148px';
+const ACCOUNT_GRID_LINE = '1px solid #c5c5c5';
+const accountGridRowStyle = {
+  display: 'grid',
+  gridTemplateColumns: ACCOUNT_DROPDOWN_GRID,
+  alignItems: 'stretch',
+  width: '100%',
+  padding: 0,
+  margin: 0,
+  minHeight: 32,
+  borderBottom: ACCOUNT_GRID_LINE,
+};
+const accountGridCellStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  padding: '5px 8px',
+  borderRight: ACCOUNT_GRID_LINE,
+  minWidth: 0,
+  boxSizing: 'border-box',
+};
+
+const AccountDropdownListbox = forwardRef(function AccountDropdownListbox(props, ref) {
+  const { children, ownerState, sx, className, style, slots, slotProps, ...other } = props;
+  return (
+    <ul
+      ref={ref}
+      className={className}
+      style={{
+        listStyle: 'none',
+        margin: 0,
+        padding: 0,
+        maxHeight: 360,
+        overflow: 'auto',
+        border: ACCOUNT_GRID_LINE,
+        background: '#fff',
+        ...style,
+      }}
+      {...other}
+    >
+      <li
+        role="presentation"
+        aria-hidden
+        style={{
+          ...accountGridRowStyle,
+          position: 'sticky',
+          top: 0,
+          zIndex: 2,
+          pointerEvents: 'none',
+          background: '#d9e2f3',
+        }}
+      >
+        <span style={{ ...accountGridCellStyle, justifyContent: 'center', fontSize: 11, fontWeight: 800, color: '#1e3a5f' }}>#</span>
+        <span style={{ ...accountGridCellStyle, fontSize: 11, fontWeight: 800, color: '#1e3a5f', textTransform: 'uppercase' }}>Account</span>
+        <span style={{ ...accountGridCellStyle, borderRight: 'none', justifyContent: 'flex-end', fontSize: 11, fontWeight: 800, color: '#1e3a5f', textTransform: 'uppercase' }}>Balance</span>
+      </li>
+      {children}
+    </ul>
+  );
+});
 
 const LEDGER_FILTER_OUTLINED_SX = {
   borderRadius: '12px',
@@ -537,6 +603,23 @@ const LEDGER_UI = {
     mt: 1.5,
     borderTop: '1px solid #eef1f6',
     bgcolor: '#fafbfd',
+  },
+  ledgerSplitBar: {
+    display: 'grid',
+    gridTemplateColumns: { xs: '1fr', md: '1fr auto 1fr' },
+    alignItems: 'center',
+    gap: { xs: 1.25, md: 2 },
+    px: { xs: 2, md: 3 },
+    py: 1.5,
+    mt: 1,
+    borderTop: '1px solid #eef1f6',
+    bgcolor: '#fff',
+  },
+  ledgerSplitCluster: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 0.75,
   },
   summaryRow: {
     '& .MuiTableCell-root': {
@@ -1146,6 +1229,8 @@ export default function FinancePage() {
   }, []);
 
   const paymentRefreshSkipRef = useRef(false);
+  const ledgerAbortRef = useRef(null);
+  const ledgerInFlightRef = useRef(false);
 
   const applyPaymentResultToState = useCallback((result) => {
     if (result.updated_balances) {
@@ -1203,6 +1288,13 @@ export default function FinancePage() {
   };
 
   const fetchLedgerData = useCallback(async (silent = false) => {
+    if (silent && ledgerInFlightRef.current) return;
+
+    const controller = new AbortController();
+    ledgerAbortRef.current?.abort();
+    ledgerAbortRef.current = controller;
+    ledgerInFlightRef.current = true;
+
     try {
       if (!silent) setLoading(true);
       const params = new URLSearchParams();
@@ -1213,14 +1305,22 @@ export default function FinancePage() {
       if (endDate) params.append('endDate', endDate);
       if (searchTerm) params.append('search', searchTerm);
 
-      const res = await fetch(`/api/ledger?${params.toString()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/ledger?${params.toString()}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
       if (res.ok) {
         const data = await res.json();
         setLedgerEntries(Array.isArray(data) ? data : []);
       }
     } catch (error) {
-      console.error('Error fetching ledger entries:', error);
+      if (!isBenignFetchError(error)) {
+        console.error('Error fetching ledger entries:', error);
+      }
     } finally {
+      if (ledgerAbortRef.current === controller) {
+        ledgerInFlightRef.current = false;
+      }
       if (!silent) setLoading(false);
     }
   }, [selectedCustomer, selectedCategory, selectedSubCategory, startDate, endDate, searchTerm]);
@@ -1234,7 +1334,9 @@ export default function FinancePage() {
         setCustomers(customersData);
       }
     } catch (error) {
-      console.error('Error refreshing customer balances:', error);
+      if (!isBenignFetchError(error)) {
+        console.error('Error refreshing customer balances:', error);
+      }
     }
   }, [fetchLedgerData]);
 
@@ -2495,7 +2597,7 @@ export default function FinancePage() {
     }
   };
 
-  const buildLedgerPdfDocument = async () => {
+  const buildLedgerPdfDocument = async (entriesOverride) => {
     const jsPDF = (await import('jspdf')).default;
     const autoTable = (await import('jspdf-autotable')).default;
     const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
@@ -2513,7 +2615,7 @@ export default function FinancePage() {
     const balance = parseFloat(customer?.cus_balance ?? ledgerViewSummary.lastClosing ?? 0);
     const showAccountCol = !selectedCustomer;
 
-    const chronologicalEntries = [...finalLedgerEntries].sort(compareChronologically);
+    const chronologicalEntries = [...(entriesOverride || finalLedgerEntries)].sort(compareChronologically);
     const pdfOpeningBalance = chronologicalEntries.length > 0 ? parseFloat(chronologicalEntries[0].opening_balance || 0) : 0;
 
     const totalDebit = chronologicalEntries.reduce((s, e) => s + getLedgerEntryDisplayAmounts(e).debit, 0);
@@ -2723,14 +2825,15 @@ export default function FinancePage() {
     return { doc, custName };
   };
 
-  const handleDownloadLedgerPdf = async () => {
-    if (finalLedgerEntries.length === 0) {
+  const saveLedgerPdf = async (entries) => {
+    const source = entries || finalLedgerEntries;
+    if (!source || source.length === 0) {
       alert('No ledger entries to download.');
       return;
     }
     try {
       setIsDownloadingLedgerPdf(true);
-      const { doc, custName } = await buildLedgerPdfDocument();
+      const { doc, custName } = await buildLedgerPdfDocument(source);
       const fileDate = new Date().toISOString().slice(0, 10);
       const safeName = String(custName).replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-') || 'Ledger';
       doc.save(`Ledger-${safeName}-${fileDate}.pdf`);
@@ -2739,6 +2842,45 @@ export default function FinancePage() {
     } finally {
       setIsDownloadingLedgerPdf(false);
     }
+  };
+
+  const getLedgerEntriesForPrintRange = () => {
+    let fromStr = printFromDate;
+    let toStr = printToDate;
+
+    if (!fromStr || !toStr) {
+      if (finalLedgerEntries.length > 0) {
+        const sortedAsc = [...finalLedgerEntries].sort(compareChronologically);
+        fromStr = fromStr || new Date(sortedAsc[0].created_at).toISOString().split('T')[0];
+        toStr = toStr || new Date(sortedAsc[sortedAsc.length - 1].created_at).toISOString().split('T')[0];
+      } else {
+        return [];
+      }
+    }
+
+    const from = new Date(fromStr);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(toStr);
+    to.setHours(23, 59, 59, 999);
+
+    return finalLedgerEntries.filter((entry) => {
+      const entryDate = new Date(entry.created_at);
+      return entryDate >= from && entryDate <= to;
+    });
+  };
+
+  const handleDownloadLedgerPdf = async () => {
+    await saveLedgerPdf(finalLedgerEntries);
+  };
+
+  const handleDownloadLedgerPdfFromDialog = async () => {
+    const ranged = getLedgerEntriesForPrintRange();
+    if (ranged.length === 0) {
+      alert('No ledger entries found in the selected date range.');
+      return;
+    }
+    await saveLedgerPdf(ranged);
+    setShowPrintLedgerDialog(false);
   };
 
   // Form handlers
@@ -3263,12 +3405,24 @@ export default function FinancePage() {
   <div class="sig"><div class="sig-line">Checked By</div></div>
   <div class="sig"><div class="sig-line">Authorized Signature</div></div>
 </div>
-<script>window.onload=function(){window.print();}<\/script>
 </body></html>`;
 
     const win = window.open('', '_blank', 'width=1100,height=700');
+    if (!win) {
+      alert('Please allow popups to print the ledger.');
+      return;
+    }
+    win.document.open();
     win.document.write(html);
     win.document.close();
+    setTimeout(() => {
+      try {
+        win.focus();
+        win.print();
+      } catch {
+        alert('Print failed. Please allow popups for this site.');
+      }
+    }, 400);
     setShowPrintLedgerDialog(false);
   };
 
@@ -3505,6 +3659,67 @@ export default function FinancePage() {
                     sx={LEDGER_FILTER_FIELD_SX}
                   />
                 )}
+                slots={{ listbox: AccountDropdownListbox }}
+                slotProps={{
+                  popper: {
+                    sx: {
+                      minWidth: 580,
+                      '& .MuiPaper-root': {
+                        borderRadius: 0,
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+                      },
+                      '& .MuiAutocomplete-option': {
+                        padding: '0 !important',
+                        minHeight: '32px !important',
+                        alignItems: 'stretch',
+                      },
+                      '& .MuiAutocomplete-option:nth-of-type(even)': {
+                        backgroundColor: '#f3f3f3',
+                      },
+                      '& .MuiAutocomplete-option.Mui-focused, & .MuiAutocomplete-option[aria-selected="true"]': {
+                        backgroundColor: '#cde6f7 !important',
+                      },
+                    },
+                  },
+                }}
+                renderOption={(props, option, { index }) => {
+                  const { key, ownerState, ...optionProps } = props;
+                  const balance = parseFloat(option.cus_balance || 0);
+                  return (
+                    <li key={key} {...optionProps} style={{ ...accountGridRowStyle, ...optionProps.style }}>
+                      <span style={{ ...accountGridCellStyle, justifyContent: 'center', color: '#64748b', fontSize: 12 }}>
+                        {index + 1}
+                      </span>
+                      <span
+                        title={option.cus_name}
+                        style={{
+                          ...accountGridCellStyle,
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: '#111827',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {option.cus_name}
+                      </span>
+                      <span
+                        style={{
+                          ...accountGridCellStyle,
+                          borderRight: 'none',
+                          justifyContent: 'flex-end',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          fontVariantNumeric: 'tabular-nums',
+                          color: balance > 0 ? '#b45309' : balance < 0 ? '#15803d' : '#4b5563',
+                        }}
+                      >
+                        PKR {fmtAmt(balance)}
+                      </span>
+                    </li>
+                  );
+                }}
                 noOptionsText="No accounts found"
                 clearOnEscape
               />
@@ -3577,56 +3792,85 @@ export default function FinancePage() {
                   <Typography component="p" sx={LEDGER_UI.ledgerTitleUr}>
                     {COMPANY.nameUr}
                   </Typography>
-                  <Typography component="h2" sx={LEDGER_UI.ledgerTitleMain}>
-                    {selectedCustomer
-                      ? customers.find(c => Number(c.cus_id) === Number(selectedCustomer))?.cus_name
-                      : 'All Accounts Ledger'}
-                  </Typography>
+                  {!selectedCustomer && (
+                    <Typography component="h2" sx={LEDGER_UI.ledgerTitleMain}>
+                      All Accounts Ledger
+                    </Typography>
+                  )}
                 </Box>
               }
               sx={{ p: 0, m: 0, pb: '0 !important', '& .MuiCardHeader-content': { width: '100%', m: 0 } }}
             />
 
             {selectedCustomer && (
-              <Box sx={LEDGER_UI.ledgerActionBar}>
-                <Button size="small" variant="contained" startIcon={<ArrowUp size={15} />} onClick={handlePayPayment}
-                  sx={{ ...LEDGER_UI.toolbarBtn, bgcolor: BRAND.primary.pink, color: '#fff', boxShadow: 'none', '&:hover': { bgcolor: '#e0074c' } }}>
-                  Pay Amount
-                </Button>
-                <Button size="small" variant="contained" startIcon={<ArrowDown size={15} />} onClick={handleReceivePayment}
-                  sx={{ ...LEDGER_UI.toolbarBtn, bgcolor: BRAND.supporting.green, color: '#fff', boxShadow: 'none', '&:hover': { bgcolor: '#00b872' } }}>
-                  Receive Amount
-                </Button>
-                <Button size="small" variant="outlined" startIcon={<Print size={15} />}
-                  onClick={() => { setPrintFromDate(''); setPrintToDate(''); setShowPrintLedgerDialog(true); }}
-                  sx={{ ...LEDGER_UI.toolbarBtn, color: '#475569', borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#fff', borderColor: BRAND.primary.blue, color: BRAND.text.blue } }}>
-                  Print
-                </Button>
-                <Button size="small" variant="outlined" disabled={isDownloadingLedgerPdf || finalLedgerEntries.length === 0}
-                  startIcon={isDownloadingLedgerPdf ? <CircularProgress size={14} color="inherit" /> : <Download size={15} />}
-                  onClick={handleDownloadLedgerPdf}
-                  sx={{ ...LEDGER_UI.toolbarBtn, color: BRAND.text.blue, borderColor: BRAND.primary.blue, bgcolor: '#fff', '&:hover': { bgcolor: BRAND.tint.blue, borderColor: BRAND.text.blue } }}>
-                  {isDownloadingLedgerPdf ? 'Downloading…' : 'Download PDF'}
-                </Button>
-                {ledgerTransactionEdit ? (
-                  <>
-                    <Button size="small" variant="outlined" onClick={cancelLedgerTransactionEdit}
-                      sx={{ ...LEDGER_UI.toolbarBtn, color: '#64748b', borderColor: '#cbd5e1', bgcolor: '#fff' }}>
-                      Cancel
-                    </Button>
-                    <Button size="small" variant="contained" startIcon={savingTransactionEdit ? <CircularProgress size={14} color="inherit" /> : <Check size={15} />}
-                      disabled={!isTransactionEditDirty || savingTransactionEdit}
-                      onClick={handleSaveTransactionEdit}
-                      sx={{ ...LEDGER_UI.toolbarBtn, bgcolor: BRAND.supporting.green, color: '#fff', boxShadow: 'none', '&:hover': { bgcolor: '#00b872' }, '&.Mui-disabled': { bgcolor: '#94a3b8', color: '#fff' } }}>
-                      {savingTransactionEdit ? 'Saving…' : 'Save Changes'}
-                    </Button>
-                  </>
-                ) : latestEditableInView && (
-                  <Button size="small" variant="contained" startIcon={<Edit size={15} />}
-                    onClick={() => startLedgerTransactionEdit(latestEditableInView)}
-                    sx={{ ...LEDGER_UI.toolbarBtn, bgcolor: BRAND.primary.blue, color: '#fff', boxShadow: 'none', '&:hover': { bgcolor: BRAND.text.blue } }}>
-                    Edit Latest Transaction
+              <Box sx={LEDGER_UI.ledgerSplitBar}>
+                <Box sx={{ ...LEDGER_UI.ledgerSplitCluster, justifyContent: { xs: 'center', md: 'flex-start' } }}>
+                  <Button size="small" variant="contained" startIcon={<ArrowUp size={15} />} onClick={handlePayPayment}
+                    sx={{ ...LEDGER_UI.toolbarBtn, bgcolor: BRAND.primary.pink, color: '#fff', boxShadow: 'none', '&:hover': { bgcolor: '#e0074c' } }}>
+                    Pay Amount
                   </Button>
+                </Box>
+
+                <Box sx={{ textAlign: 'center', px: 1, minWidth: 0 }}>
+                  <Typography component="h2" sx={{ ...LEDGER_UI.ledgerTitleMain, mt: 0, mb: 0.5 }}>
+                    {customers.find(c => Number(c.cus_id) === Number(selectedCustomer))?.cus_name || 'Account'}
+                  </Typography>
+                  <Typography sx={{ fontSize: '0.8125rem', color: '#64748b', fontWeight: 600 }}>
+                    Accounting Period: {startDate && endDate ? `${startDate} – ${endDate}` : (startDate || endDate || new Date().getFullYear())}
+                  </Typography>
+                  <Typography sx={{ fontSize: '0.8125rem', color: BRAND.primary.blue, fontWeight: 700, mt: 0.25 }}>
+                    Opening Balance: PKR {fmtAmt(accountOpeningBalance)}
+                  </Typography>
+                  <Typography sx={{ fontSize: '0.8125rem', fontWeight: 700, mt: 0.25, color: currentBalance > 0 ? '#b45309' : currentBalance < 0 ? '#15803d' : '#475569' }}>
+                    Current Balance: PKR {fmtAmt(currentBalance)}
+                  </Typography>
+                </Box>
+
+                <Box sx={{ ...LEDGER_UI.ledgerSplitCluster, justifyContent: { xs: 'center', md: 'flex-end' } }}>
+                  <Button size="small" variant="contained" startIcon={<ArrowDown size={15} />} onClick={handleReceivePayment}
+                    sx={{ ...LEDGER_UI.toolbarBtn, bgcolor: BRAND.supporting.green, color: '#fff', boxShadow: 'none', '&:hover': { bgcolor: '#00b872' } }}>
+                    Receive Amount
+                  </Button>
+                  <Button size="small" variant="outlined" disabled={isDownloadingLedgerPdf || finalLedgerEntries.length === 0}
+                    startIcon={isDownloadingLedgerPdf ? <CircularProgress size={14} color="inherit" /> : <Download size={15} />}
+                    onClick={handleDownloadLedgerPdf}
+                    sx={{ ...LEDGER_UI.toolbarBtn, color: BRAND.text.blue, borderColor: BRAND.primary.blue, bgcolor: '#fff', '&:hover': { bgcolor: BRAND.tint.blue, borderColor: BRAND.text.blue } }}>
+                    {isDownloadingLedgerPdf ? 'Downloading…' : 'Download PDF'}
+                  </Button>
+                  <Button size="small" variant="contained" startIcon={<Print size={15} />}
+                    onClick={() => {
+                      setPrintFromDate(startDate || '');
+                      setPrintToDate(endDate || '');
+                      setShowPrintLedgerDialog(true);
+                    }}
+                    sx={{ ...LEDGER_UI.toolbarBtn, bgcolor: BRAND.primary.blue, color: '#fff', boxShadow: 'none', '&:hover': { bgcolor: BRAND.text.blue } }}>
+                    Print
+                  </Button>
+                </Box>
+
+                {(ledgerTransactionEdit || latestEditableInView) && (
+                  <Box sx={{ ...LEDGER_UI.ledgerSplitCluster, gridColumn: { md: '1 / -1' }, justifyContent: 'flex-end' }}>
+                    {ledgerTransactionEdit ? (
+                      <>
+                        <Button size="small" variant="outlined" onClick={cancelLedgerTransactionEdit}
+                          sx={{ ...LEDGER_UI.toolbarBtn, color: '#64748b', borderColor: '#cbd5e1', bgcolor: '#fff' }}>
+                          Cancel
+                        </Button>
+                        <Button size="small" variant="contained" startIcon={savingTransactionEdit ? <CircularProgress size={14} color="inherit" /> : <Check size={15} />}
+                          disabled={!isTransactionEditDirty || savingTransactionEdit}
+                          onClick={handleSaveTransactionEdit}
+                          sx={{ ...LEDGER_UI.toolbarBtn, bgcolor: BRAND.supporting.green, color: '#fff', boxShadow: 'none', '&:hover': { bgcolor: '#00b872' }, '&.Mui-disabled': { bgcolor: '#94a3b8', color: '#fff' } }}>
+                          {savingTransactionEdit ? 'Saving…' : 'Save Changes'}
+                        </Button>
+                      </>
+                    ) : (
+                      <Button size="small" variant="contained" startIcon={<Edit size={15} />}
+                        onClick={() => startLedgerTransactionEdit(latestEditableInView)}
+                        sx={{ ...LEDGER_UI.toolbarBtn, bgcolor: BRAND.primary.blue, color: '#fff', boxShadow: 'none', '&:hover': { bgcolor: BRAND.text.blue } }}>
+                        Edit Latest Transaction
+                      </Button>
+                    )}
+                  </Box>
                 )}
               </Box>
             )}
@@ -4772,6 +5016,7 @@ export default function FinancePage() {
       <PaymentFormDialog
         open={showReceivePaymentForm}
         onClose={() => {
+          if (authDialogOpen) handleAuthCancel();
           setShowReceivePaymentForm(false);
           clearPaymentEditState();
         }}
@@ -4787,11 +5032,13 @@ export default function FinancePage() {
         ledgerSerial={ledgerEntries.length + 1}
         initialValues={paymentFormInitialValues}
         editPaymentId={editingPaymentId}
+        authOpen={showReceivePaymentForm && authDialogOpen}
       />
 
       <PaymentFormDialog
         open={showPayPaymentForm}
         onClose={() => {
+          if (authDialogOpen) handleAuthCancel();
           setShowPayPaymentForm(false);
           clearPaymentEditState();
         }}
@@ -4807,6 +5054,7 @@ export default function FinancePage() {
         ledgerSerial={ledgerEntries.length + 1}
         initialValues={paymentFormInitialValues}
         editPaymentId={editingPaymentId}
+        authOpen={showPayPaymentForm && authDialogOpen}
       />
 
       {/* Payment Receipt Dialog */}
@@ -6356,10 +6604,10 @@ export default function FinancePage() {
               </Box>
               <Box>
                 <Typography variant="h6" sx={{ fontWeight: 800, color: 'white', lineHeight: 1.2 }}>
-                  Print Ledger
+                  Print or Download Ledger
                 </Typography>
                 <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.75)' }}>
-                  Select date range to print ledger statement
+                  Select a date range, then print or download PDF
                 </Typography>
               </Box>
             </Box>
@@ -6507,6 +6755,15 @@ export default function FinancePage() {
             Cancel
           </Button>
           <Button
+            variant="outlined"
+            startIcon={isDownloadingLedgerPdf ? <CircularProgress size={16} color="inherit" /> : <Download size={18} />}
+            onClick={handleDownloadLedgerPdfFromDialog}
+            disabled={isDownloadingLedgerPdf || !printFromDate || !printToDate}
+            sx={{ borderColor: BRAND.primary.blue, color: BRAND.text.blue, px: 3, fontWeight: 700, borderRadius: 2 }}
+          >
+            {isDownloadingLedgerPdf ? 'Downloading…' : 'Download PDF'}
+          </Button>
+          <Button
             variant="contained"
             startIcon={<Print size={18} />}
             onClick={handlePrintLedger}
@@ -6516,10 +6773,10 @@ export default function FinancePage() {
               '&:hover': { background: 'linear-gradient(135deg, #4f46e5 0%, #4338ca 100%)' },
               px: 4, fontWeight: 700, borderRadius: 2,
               boxShadow: !printFromDate || !printToDate ? 'none' : '0 4px 14px rgba(99,102,241,0.4)',
-              minWidth: 160,
+              minWidth: 140,
             }}
           >
-            Print Ledger
+            Print
           </Button>
         </DialogActions>
       </Dialog>
@@ -6774,6 +7031,7 @@ export default function FinancePage() {
         open={authDialogOpen}
         onSuccess={handleAuthSuccess}
         onClose={handleAuthCancel}
+        side={showReceivePaymentForm || showPayPaymentForm ? 'right' : 'center'}
       />
     </DashboardLayout>
   );

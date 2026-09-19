@@ -3,13 +3,13 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { isHqUser } from '@/lib/branch-roles';
-import { setActiveBranch, clearActiveBranch, setHqPosMode } from '@/lib/branch-client';
+import { setActiveBranch, clearActiveBranch, setHqPosMode, persistSessionUser } from '@/lib/branch-client';
 
 export function useLoginRedirect() {
   const router = useRouter();
 
   return useCallback((user) => {
-    localStorage.setItem('user', JSON.stringify(user));
+    persistSessionUser(user);
     if (isHqUser(user)) {
       clearActiveBranch();
       setHqPosMode(false);

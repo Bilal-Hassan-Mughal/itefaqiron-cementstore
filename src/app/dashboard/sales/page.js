@@ -87,14 +87,41 @@ import {
 import { getOfflineSalesQueue, saveOfflineSale, syncOfflineSalesQueue } from '@/lib/offline-sales-helper';
 import { BRAND } from '@/lib/brand-theme';
 
-// Helper to get product cost price safely, handling decimal-as-string from API and avoiding JS truthy string bugs
+// Sale-page "below cost" check must use cost rate (pro_cost_price), never purchase/crate.
 const getProductCostPrice = (product) => {
   if (!product) return 0;
-  const crateVal = parseFloat(product.pro_crate || 0);
-  const costPriceVal = parseFloat(product.pro_cost_price || 0);
-  if (crateVal > 0) return crateVal;
-  return costPriceVal;
+  const costPriceVal = parseFloat(product.pro_cost_price ?? product.cost_price ?? 0);
+  return Number.isFinite(costPriceVal) && costPriceVal > 0 ? costPriceVal : 0;
 };
+
+const findCatalogProduct = (catalog, proId) => {
+  const id = Number(proId);
+  if (!Number.isFinite(id)) return null;
+  return (catalog || []).find((p) => Number(p.pro_id) === id) || null;
+};
+
+const getCartLineCostRate = (cartRow, catalog) => {
+  const fromCatalog = getProductCostPrice(findCatalogProduct(catalog, cartRow?.pro_id));
+  if (fromCatalog > 0) return fromCatalog;
+  return getProductCostPrice(cartRow);
+};
+
+const SALE_PRODUCT_LIST_LIMIT = 50;
+
+function filterSaleProducts(options, { inputValue }) {
+  const q = String(inputValue || '').toLowerCase().trim();
+  const out = [];
+  for (let i = 0; i < options.length && out.length < SALE_PRODUCT_LIST_LIMIT; i += 1) {
+    if (!q) {
+      out.push(options[i]);
+      continue;
+    }
+    const title = String(options[i].pro_title || '').toLowerCase();
+    const code = String(options[i].pro_code || '').toLowerCase();
+    if (title.includes(q) || code.includes(q)) out.push(options[i]);
+  }
+  return out;
+}
 
 /** Sale entry screen only — limit Customer Type filter to these categories (display order) */
 const SALE_PAGE_CUSTOMER_TYPE_RULES = [
@@ -463,6 +490,7 @@ function SalesPageContent() {
               rate: parseFloat(item.unit_rate || 0),
               amount: parseFloat(item.total_amount || 0),
               crate: item.product ? (item.product.pro_crate || '') : '',
+              cost_price: getProductCostPrice(item.product),
               stock: 0,
               storeid: fullQuotation.store_id || selectedStore?.storeid,
               store_name: selectedStore ? selectedStore.store_name : 'Unknown'
@@ -636,6 +664,8 @@ function SalesPageContent() {
 
   // Load Order state
   const [loadOrderDialogOpen, setLoadOrderDialogOpen] = useState(false);
+  const [loadOrderList, setLoadOrderList] = useState([]);
+  const [loadOrderListLoading, setLoadOrderListLoading] = useState(false);
   const [orderSearchTerm, setOrderSearchTerm] = useState('');
   const [isSearchingOrder, setIsSearchingOrder] = useState(false);
   const [loadedOrderId, setLoadedOrderId] = useState(null); // Track the order being converted to bill
@@ -1097,7 +1127,7 @@ function SalesPageContent() {
         stock: 0, // always derive from store-wise stock when available
         amount: defaultRate, // rate * 1
         crate: selectedProduct.pro_crate || '',
-        cost_price: getProductCostPrice(selectedProduct) // Store cost price hidden
+        cost_price: getProductCostPrice(selectedProduct)
       }));
 
       // If a store is selected, fetch store-wise stock
@@ -1204,7 +1234,7 @@ function SalesPageContent() {
 
     // Always add as a new line item (don't merge with existing products)
     const newProduct = {
-      id: Date.now(), // Temporary ID for table row (unique for each addition)
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       pro_id: formSelectedProduct.pro_id,
       pro_title: formSelectedProduct.pro_title,
       storeid: formSelectedStore.storeid,
@@ -1213,7 +1243,7 @@ function SalesPageContent() {
       rate: productFormData.rate,
       amount: productFormData.amount,
       stock: productFormData.stock,
-      cost_price: getProductCostPrice(formSelectedProduct) // hidden cost price for loss check
+      cost_price: getProductCostPrice(formSelectedProduct)
     };
 
     setProductTableData(prev => [newProduct, ...prev]);
@@ -1506,6 +1536,21 @@ function SalesPageContent() {
     });
   };
 
+  const openLoadOrderDialog = async () => {
+    setLoadOrderDialogOpen(true);
+    setLoadOrderListLoading(true);
+    try {
+      const res = await fetch('/api/sales?list=true&bill_type=ORDER', { cache: 'no-store' });
+      const data = res.ok ? await res.json() : [];
+      setLoadOrderList(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Failed to fetch orders:', error);
+      setLoadOrderList([]);
+    } finally {
+      setLoadOrderListLoading(false);
+    }
+  };
+
   // Handle loading an order into the form
   const handleLoadOrder = async (order) => {
     try {
@@ -1568,6 +1613,7 @@ function SalesPageContent() {
           rate: parseFloat(item.unit_rate || 0),
           amount: parseFloat(item.total_amount || 0),
           crate: item.product ? (item.product.pro_crate || '') : '',
+          cost_price: getProductCostPrice(item.product),
           stock: 0, // Stock will need to be fetched or updated
           storeid: fullOrder.store_id, // Map the store ID from the order
           store_name: selectedStore ? selectedStore.store_name : 'Unknown'
@@ -1675,6 +1721,7 @@ function SalesPageContent() {
             quantity: parseFloat(detail.qnty) || 0,
             rate: parseFloat(detail.unit_rate) || 0,
             amount: parseFloat(detail.total_amount) || 0,
+            cost_price: getProductCostPrice(detail.product),
             stock: 0 // We don't have current stock here, could fetch it but for now 0 is safe
           };
         });
@@ -1709,11 +1756,7 @@ function SalesPageContent() {
     if (billType !== 'SALE_RETURN' && !bypassLossCheck) {
       const itemsSellingAtLoss = [];
       productTableData.forEach(item => {
-        // Always look up from products list first (freshest data), then fall back to stored cost_price
-        const matchingProduct = products.find(p => p.pro_id === item.pro_id);
-        const costPrice = matchingProduct
-          ? getProductCostPrice(matchingProduct)
-          : parseFloat(item.cost_price || 0);
+        const costPrice = getCartLineCostRate(item, products);
         const salePrice = parseFloat(item.rate || 0);
         console.log(`💰 Loss check: ${item.pro_title} — costPrice=${costPrice}, salePrice=${salePrice}`);
         if (costPrice > 0 && salePrice < costPrice) {
@@ -3944,6 +3987,7 @@ function SalesPageContent() {
           quantity: parseFloat(detail.qnty) || 0,
           rate: parseFloat(detail.unit_rate) || 0,
           amount: parseFloat(detail.total_amount) || 0,
+          cost_price: getProductCostPrice(detail.product),
           stock: detail.product?.pro_stock_qnty || 0 // Note: This might need a fresh fetch for latest stock
         }));
         setProductTableData(products);
@@ -4119,6 +4163,7 @@ function SalesPageContent() {
           quantity: parseFloat(detail.qnty) || 0,
           rate: parseFloat(detail.unit_rate) || 0,
           amount: parseFloat(detail.total_amount) || 0,
+          cost_price: getProductCostPrice(detail.product),
           stock: detail.product?.pro_stock_qnty || 0
         }));
         setProductTableData(products);
@@ -4598,7 +4643,8 @@ function SalesPageContent() {
           amount: parseFloat(detail.total_amount),
           stock: 0,
           unit: detail.unit || 'PCS',
-          crate: parseFloat(detail.unit_rate)
+          crate: parseFloat(detail.unit_rate),
+          cost_price: getProductCostPrice(detail.product)
         };
       }));
 
@@ -4820,7 +4866,7 @@ function SalesPageContent() {
             <Button
               variant="outlined"
               startIcon={<ListAltIcon />}
-              onClick={() => setLoadOrderDialogOpen(true)}
+              onClick={openLoadOrderDialog}
               sx={{
                 mr: 2,
                 borderColor: '#1976d2',
@@ -5429,30 +5475,45 @@ function SalesPageContent() {
                       sx={{ minWidth: 450 }}
                       options={products || []}
                       getOptionLabel={(option) => option.pro_title || ''}
-                      ListboxProps={{ sx: { maxHeight: 130 } }}
-                      filterOptions={(options, { inputValue }) => {
-                        const q = inputValue.toLowerCase().trim();
-                        if (!q) return options;
-                        return options.filter(o =>
-                          (o.pro_title || '').toLowerCase().includes(q) ||
-                          (o.pro_code || '').toLowerCase().includes(q)
-                        );
+                      filterOptions={filterSaleProducts}
+                      slotProps={{
+                        listbox: {
+                          sx: {
+                            height: 240,
+                            maxHeight: 240,
+                            overflowY: 'auto',
+                            overscrollBehavior: 'contain',
+                            py: 0,
+                            '& .MuiAutocomplete-option': {
+                              minHeight: 36,
+                              height: 36,
+                              py: 0,
+                              alignItems: 'center',
+                            },
+                          },
+                        },
+                        paper: {
+                          sx: { width: 450, mt: 0.5 },
+                        },
+                        popper: {
+                          modifiers: [
+                            { name: 'flip', enabled: false },
+                          ],
+                        },
                       }}
                       renderOption={(props, option) => {
                         const { key, ...optionProps } = props;
                         return (
-                        <li key={option.pro_id} {...optionProps} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Typography sx={{ fontWeight: 500 }}>{option.pro_title}</Typography>
-                          </Box>
-
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <li key={key || option.pro_id} {...optionProps} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                          <Typography noWrap sx={{ fontWeight: 500, flex: 1, minWidth: 0 }}>
+                            {option.pro_title}
+                          </Typography>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
                             {visibleCrates.includes(option.pro_id) && (
-                              <Typography variant="body2" sx={{ color: 'text.secondary', mr: 1 }}>
+                              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                                 {option.pro_cost_price ? 'PKR ' + fmtRateQty(option.pro_cost_price) : 'N/A'}
                               </Typography>
                             )}
-
                             <IconButton
                               size="small"
                               tabIndex={-1}
@@ -5468,11 +5529,9 @@ function SalesPageContent() {
                       }}
                       value={formSelectedProduct}
                       onChange={(event, newValue) => {
-                        console.log('🔍 Product selected:', newValue);
                         handleProductSelect(newValue);
                       }}
                       isOptionEqualToValue={(option, value) => option.pro_id === value?.pro_id}
-                      autoSelect={true}
                       autoHighlight={true}
                       openOnFocus={true}
                       selectOnFocus={true}
@@ -5787,7 +5846,12 @@ function SalesPageContent() {
                               inputProps={{ min: 0.01, step: 'any' }}
                             />
                           </TableCell>
-                          <TableCell sx={{ py: 1 }}>
+                          <TableCell sx={{ py: 1, whiteSpace: 'normal', overflow: 'visible', verticalAlign: 'top' }}>
+                            {(() => {
+                              const cp = getCartLineCostRate(product, products);
+                              const belowCost = cp > 0 && parseFloat(product.rate) < cp;
+                              return (
+                                <>
                             <TextField
                               size="small"
                               type="number"
@@ -5795,16 +5859,18 @@ function SalesPageContent() {
                               onChange={(e) => {
                                 const newRate = parseFloat(e.target.value) || 0;
                                 if (newRate >= 0) {
-                                  const updatedData = productTableData.map((p) =>
-                                    p.id === product.id
-                                      ? {
-                                        ...p,
-                                        rate: newRate,
-                                        amount: Number((p.quantity * newRate).toFixed(0))
-                                      }
-                                      : p
+                                  setProductTableData((prev) =>
+                                    prev.map((p) =>
+                                      p.id === product.id
+                                        ? {
+                                          ...p,
+                                          rate: newRate,
+                                          amount: Number((p.quantity * newRate).toFixed(0)),
+                                          cost_price: p.cost_price || cp
+                                        }
+                                        : p
+                                    )
                                   );
-                                  setProductTableData(updatedData);
                                 }
                               }}
                               onFocus={(e) => e.target.select()}
@@ -5814,37 +5880,24 @@ function SalesPageContent() {
                                   padding: '4px 8px',
                                   textAlign: 'center',
                                   fontWeight: 'bold',
-                                  color: (() => {
-                                    const mp = products.find(p => p.pro_id === product.pro_id);
-                                    const cp = getProductCostPrice(mp);
-                                    return (cp > 0 && parseFloat(product.rate) < cp) ? '#dc2626' : 'inherit';
-                                  })()
+                                  color: belowCost ? '#dc2626' : 'inherit'
                                 },
                                 '& .MuiOutlinedInput-root': {
                                   '& fieldset': {
-                                    borderColor: (() => {
-                                      const mp = products.find(p => p.pro_id === product.pro_id);
-                                      const cp = getProductCostPrice(mp);
-                                      return (cp > 0 && parseFloat(product.rate) < cp) ? '#dc2626' : undefined;
-                                    })(),
-                                    borderWidth: (() => {
-                                      const mp = products.find(p => p.pro_id === product.pro_id);
-                                      const cp = getProductCostPrice(mp);
-                                      return (cp > 0 && parseFloat(product.rate) < cp) ? 2 : undefined;
-                                    })()
+                                    borderColor: belowCost ? '#dc2626' : undefined,
+                                    borderWidth: belowCost ? 2 : undefined
                                   }
                                 }
                               }}
                               inputProps={{ min: 0, step: 'any' }}
                             />
-                            {(() => {
-                              const mp = products.find(p => p.pro_id === product.pro_id);
-                              const cp = getProductCostPrice(mp);
-                              return (cp > 0 && parseFloat(product.rate) < cp) ? (
-                                <Typography variant="caption" sx={{ color: '#dc2626', display: 'block', mt: 0.25, fontWeight: 600 }}>
-                                  ⚠️ Below cost ({cp})
+                            {belowCost ? (
+                                <Typography variant="caption" sx={{ color: '#dc2626', display: 'block', mt: 0.25, fontWeight: 600, whiteSpace: 'normal', lineHeight: 1.3 }}>
+                                  ⚠️ Below cost ({fmtRateQty(cp)})
                                 </Typography>
-                              ) : null;
+                            ) : null}
+                                </>
+                              );
                             })()}
                           </TableCell>
                           <TableCell sx={{ py: 1, fontWeight: 'bold' }}>{parseFloat(product.amount || 0).toFixed(0)}</TableCell>
@@ -7910,8 +7963,8 @@ function SalesPageContent() {
               }}
               size="large"
               sx={{
-                background: 'linear-gradient(45deg, #2e7d32 30%, #4caf50 90%)',
-                boxShadow: '0 8px 30px rgba(46, 125, 50, 0.4)',
+                background: 'linear-gradient(180deg, #43a047 0%, #2e7d32 100%)',
+                boxShadow: '0 8px 24px rgba(46, 125, 50, 0.28)',
                 px: 6,
                 py: 2.5,
                 fontSize: '1.3rem',
@@ -7921,220 +7974,49 @@ function SalesPageContent() {
                 minHeight: '70px',
                 position: 'relative',
                 overflow: 'hidden',
-                border: '2px solid transparent',
-                backgroundClip: 'padding-box',
-                animation: 'float 3s ease-in-out infinite, glow 2s ease-in-out infinite alternate, heartbeat 1.5s ease-in-out infinite',
+                textTransform: 'none',
+                transition: 'transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.35s ease, background 0.35s ease',
+                animation: 'saleBtnGlow 3.2s ease-in-out infinite',
                 '&::before': {
                   content: '""',
                   position: 'absolute',
                   top: 0,
-                  left: '-100%',
-                  width: '100%',
+                  left: '-60%',
+                  width: '40%',
                   height: '100%',
-                  background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)',
-                  transition: 'left 0.8s ease-in-out',
-                  animation: 'shimmer 3s infinite',
-                },
-                '&::after': {
-                  content: '""',
-                  position: 'absolute',
-                  top: '-2px',
-                  left: '-2px',
-                  right: '-2px',
-                  bottom: '-2px',
-                  background: 'linear-gradient(45deg, #1b5e20, #2e7d32, #4caf50, #66bb6a)',
-                  borderRadius: '18px',
-                  zIndex: -1,
-                  opacity: 0,
-                  transition: 'opacity 0.3s ease-in-out',
-                  animation: 'borderPulse 2s ease-in-out infinite',
-                },
-                '& .particle': {
-                  position: 'absolute',
-                  width: '4px',
-                  height: '4px',
-                  background: '#4caf50',
-                  borderRadius: '50%',
-                  pointerEvents: 'none',
-                  animation: 'particleFloat 3s ease-in-out infinite',
-                },
-                '& .particle:nth-of-type(1)': {
-                  top: '10%',
-                  left: '10%',
-                  animationDelay: '0s',
-                },
-                '& .particle:nth-of-type(2)': {
-                  top: '20%',
-                  right: '15%',
-                  animationDelay: '0.5s',
-                },
-                '& .particle:nth-of-type(3)': {
-                  bottom: '15%',
-                  left: '20%',
-                  animationDelay: '1s',
-                },
-                '& .particle:nth-of-type(4)': {
-                  bottom: '10%',
-                  right: '10%',
-                  animationDelay: '1.5s',
-                },
-                '&:hover::before': {
-                  left: '100%',
+                  background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.22), transparent)',
+                  transform: 'skewX(-20deg)',
+                  animation: 'saleBtnSheen 4s ease-in-out infinite',
                 },
                 '&:hover': {
-                  background: 'linear-gradient(45deg, #1b5e20 30%, #2e7d32 90%)',
-                  transform: 'scale(1.15) translateY(-4px) rotate(1deg)',
-                  boxShadow: '0 20px 60px rgba(46, 125, 50, 0.8), 0 0 30px rgba(46, 125, 50, 0.6), 0 0 0 4px rgba(76, 175, 80, 0.3), inset 0 0 20px rgba(255, 255, 255, 0.1)',
-                  animation: 'bounce 0.6s ease-in-out, rainbowGlow 1.5s ease-in-out infinite, blink 1s ease-in-out infinite, magnetic 0.3s ease-out',
-                  border: '2px solid rgba(255,255,255,0.3)',
-                  '&::after': {
-                    opacity: 1,
-                    animation: 'borderPulse 0.8s ease-in-out infinite',
-                  },
-                  '& .MuiButton-startIcon': {
-                    animation: 'iconBounce 0.5s ease-in-out infinite, spin 2s linear infinite',
-                  }
+                  background: 'linear-gradient(180deg, #4caf50 0%, #2e7d32 100%)',
+                  transform: 'translateY(-2px)',
+                  boxShadow: '0 12px 28px rgba(46, 125, 50, 0.36)',
+                  animation: 'none',
                 },
                 '&:active': {
-                  transform: 'scale(1.1) translateY(-2px) rotate(0deg)',
-                  boxShadow: '0 10px 30px rgba(46, 125, 50, 0.6)',
-                  animation: 'press 0.2s ease-in-out',
+                  transform: 'translateY(0)',
+                  boxShadow: '0 6px 16px rgba(46, 125, 50, 0.28)',
                 },
-                '@keyframes float': {
-                  '0%, 100%': {
-                    transform: 'translateY(0px)',
-                  },
-                  '50%': {
-                    transform: 'translateY(-5px)',
-                  },
-                },
-                '@keyframes glow': {
-                  '0%': {
-                    boxShadow: '0 8px 30px rgba(46, 125, 50, 0.4)',
-                  },
-                  '100%': {
-                    boxShadow: '0 8px 30px rgba(46, 125, 50, 0.6), 0 0 20px rgba(46, 125, 50, 0.3)',
-                  },
-                },
-                '@keyframes shimmer': {
-                  '0%': {
-                    transform: 'translateX(-100%)',
-                  },
-                  '100%': {
-                    transform: 'translateX(100%)',
-                  },
-                },
-                '@keyframes bounce': {
-                  '0%': {
-                    transform: 'scale(1.15) translateY(-4px) rotate(1deg)',
-                  },
-                  '50%': {
-                    transform: 'scale(1.2) translateY(-8px) rotate(-1deg)',
-                  },
-                  '100%': {
-                    transform: 'scale(1.15) translateY(-4px) rotate(1deg)',
-                  },
-                },
-                '@keyframes rainbowGlow': {
-                  '0%': {
-                    boxShadow: '0 20px 60px rgba(46, 125, 50, 0.8), 0 0 30px rgba(46, 125, 50, 0.6)',
-                  },
-                  '25%': {
-                    boxShadow: '0 20px 60px rgba(76, 175, 80, 0.8), 0 0 30px rgba(76, 175, 80, 0.6)',
-                  },
-                  '50%': {
-                    boxShadow: '0 20px 60px rgba(129, 199, 132, 0.8), 0 0 30px rgba(129, 199, 132, 0.6)',
-                  },
-                  '75%': {
-                    boxShadow: '0 20px 60px rgba(165, 214, 167, 0.8), 0 0 30px rgba(165, 214, 167, 0.6)',
-                  },
-                  '100%': {
-                    boxShadow: '0 20px 60px rgba(46, 125, 50, 0.8), 0 0 30px rgba(46, 125, 50, 0.6)',
-                  },
-                },
-                '@keyframes press': {
-                  '0%': {
-                    transform: 'scale(1.1) translateY(-2px)',
-                  },
-                  '100%': {
-                    transform: 'scale(1.05) translateY(0px)',
-                  },
-                },
-                transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
                 '& .MuiButton-startIcon': {
-                  fontSize: '1.8rem',
-                  marginRight: '12px',
-                  animation: 'iconBounce 2s ease-in-out infinite',
+                  marginRight: '10px',
+                  transition: 'transform 0.35s cubic-bezier(0.22, 1, 0.36, 1)',
                 },
-                '@keyframes iconBounce': {
+                '&:hover .MuiButton-startIcon': {
+                  transform: 'translateX(2px)',
+                },
+                '@keyframes saleBtnGlow': {
                   '0%, 100%': {
-                    transform: 'scale(1)',
+                    boxShadow: '0 8px 24px rgba(46, 125, 50, 0.24)',
                   },
                   '50%': {
-                    transform: 'scale(1.2)',
+                    boxShadow: '0 10px 28px rgba(46, 125, 50, 0.34)',
                   },
                 },
-                '@keyframes heartbeat': {
-                  '0%, 100%': {
-                    transform: 'scale(1)',
-                  },
-                  '25%': {
-                    transform: 'scale(1.02)',
-                  },
-                  '50%': {
-                    transform: 'scale(1.05)',
-                  },
-                  '75%': {
-                    transform: 'scale(1.02)',
-                  },
+                '@keyframes saleBtnSheen': {
+                  '0%': { left: '-60%' },
+                  '45%, 100%': { left: '130%' },
                 },
-                '@keyframes borderPulse': {
-                  '0%, 100%': {
-                    opacity: 0.3,
-                    transform: 'scale(1)',
-                  },
-                  '50%': {
-                    opacity: 0.8,
-                    transform: 'scale(1.02)',
-                  },
-                },
-                '@keyframes blink': {
-                  '0%, 50%, 100%': {
-                    opacity: 1,
-                  },
-                  '25%, 75%': {
-                    opacity: 0.7,
-                  },
-                },
-                '@keyframes spin': {
-                  '0%': {
-                    transform: 'rotate(0deg)',
-                  },
-                  '100%': {
-                    transform: 'rotate(360deg)',
-                  },
-                },
-                '@keyframes particleFloat': {
-                  '0%, 100%': {
-                    transform: 'translateY(0px) scale(1)',
-                    opacity: 0.7,
-                  },
-                  '50%': {
-                    transform: 'translateY(-10px) scale(1.2)',
-                    opacity: 1,
-                  },
-                },
-                '@keyframes magnetic': {
-                  '0%': {
-                    transform: 'scale(1.15) translateY(-4px) rotate(1deg)',
-                  },
-                  '50%': {
-                    transform: 'scale(1.18) translateY(-6px) rotate(0deg)',
-                  },
-                  '100%': {
-                    transform: 'scale(1.15) translateY(-4px) rotate(1deg)',
-                  },
-                }
               }}
             >
               Add New Sale
@@ -8778,7 +8660,7 @@ function SalesPageContent() {
             <TextField
               fullWidth
               size="small"
-              placeholder="Search by customer name or order ID..."
+              placeholder="Search by customer name, order ID, or order number..."
               value={orderSearchTerm}
               onChange={(e) => setOrderSearchTerm(e.target.value)}
               InputProps={{
@@ -8795,6 +8677,7 @@ function SalesPageContent() {
               <TableHead>
                 <TableRow>
                   <TableCell>Order ID</TableCell>
+                  <TableCell>Order Number</TableCell>
                   <TableCell>Customer</TableCell>
                   <TableCell>Date</TableCell>
                   <TableCell align="right">Amount</TableCell>
@@ -8802,22 +8685,34 @@ function SalesPageContent() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {sales
+                {loadOrderListLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                      <CircularProgress size={28} />
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  <>
+                {loadOrderList
                   .filter(sale => {
-                    const isOrder = sale.bill_type === 'ORDER';
-                    if (!isOrder) return false;
-
                     if (!orderSearchTerm) return true;
 
                     const searchLower = orderSearchTerm.toLowerCase();
+                    const orderNo = getBillDisplayNo(sale);
                     const matchesName = sale.customer?.cus_name?.toLowerCase().includes(searchLower);
                     const matchesId = sale.sale_id?.toString().includes(searchLower);
+                    const matchesOrderNo =
+                      String(sale.bill_number || '').includes(searchLower) ||
+                      orderNo.toLowerCase().includes(searchLower);
 
-                    return matchesName || matchesId;
+                    return matchesName || matchesId || matchesOrderNo;
                   })
                   .map((sale) => (
                     <TableRow key={sale.sale_id} hover>
                       <TableCell>{sale.sale_id}</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>
+                        {getBillDisplayNo(sale) || '—'}
+                      </TableCell>
                       <TableCell>{sale.customer?.cus_name || 'N/A'}</TableCell>
                       <TableCell>{formatDatePK(sale?.created_at) || '—'}</TableCell>
                       <TableCell align="right">{parseFloat(sale.total_amount || 0).toFixed(0)}</TableCell>
@@ -8833,24 +8728,27 @@ function SalesPageContent() {
                       </TableCell>
                     </TableRow>
                   ))}
-                {sales.filter(sale => {
-                  const isOrder = sale.bill_type === 'ORDER';
-                  if (!isOrder) return false;
-
+                {!loadOrderListLoading && loadOrderList.filter(sale => {
                   if (!orderSearchTerm) return true;
 
                   const searchLower = orderSearchTerm.toLowerCase();
+                  const orderNo = getBillDisplayNo(sale);
                   const matchesName = sale.customer?.cus_name?.toLowerCase().includes(searchLower);
                   const matchesId = sale.sale_id?.toString().includes(searchLower);
+                  const matchesOrderNo =
+                    String(sale.bill_number || '').includes(searchLower) ||
+                    orderNo.toLowerCase().includes(searchLower);
 
-                  return matchesName || matchesId;
+                  return matchesName || matchesId || matchesOrderNo;
                 }).length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
+                      <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
                         {orderSearchTerm ? 'No matching orders found' : 'No orders found'}
                       </TableCell>
                     </TableRow>
                   )}
+                  </>
+                )}
               </TableBody>
             </Table>
           </TableContainer>

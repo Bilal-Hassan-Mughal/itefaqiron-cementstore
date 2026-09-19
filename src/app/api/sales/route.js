@@ -347,6 +347,7 @@ export async function GET(request) {
     const id = searchParams.get('id') ? parseInt(searchParams.get('id')) : searchParams.get('sale_id') ? parseInt(searchParams.get('sale_id')) : null;
     const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')) : null;
     const listMode = searchParams.get('list') === 'true';
+    const billTypeFilter = searchParams.get('bill_type');
 
     if (id) {
       // Fetch single sale
@@ -690,11 +691,17 @@ export async function GET(request) {
                   select: { full_name: true, role: true },
                 },
               },
-              where: { branch_id: branchId },
+              where: {
+                branch_id: branchId,
+                ...(billTypeFilter ? { bill_type: billTypeFilter } : {}),
+              },
               orderBy: { created_at: 'desc' },
             }
           : {
-              where: { branch_id: branchId },
+              where: {
+                branch_id: branchId,
+                ...(billTypeFilter ? { bill_type: billTypeFilter } : {}),
+              },
               include: {
                 customer: {
                   include: {
@@ -753,7 +760,7 @@ export async function GET(request) {
 
         if (limit && limit > 0) {
           findOptions.take = limit;
-        } else if (listMode) {
+        } else if (listMode && !billTypeFilter) {
           findOptions.take = 500;
         }
 

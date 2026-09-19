@@ -45,6 +45,7 @@ function PaymentFormDialog({
   ledgerSerial = 1,
   initialValues = null,
   editPaymentId = null,
+  authOpen = false,
 }) {
   const isReceive = mode === 'RECEIVE';
   const isEditing = Boolean(editPaymentId);
@@ -171,7 +172,37 @@ function PaymentFormDialog({
       };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 2 } }}>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="sm"
+      fullWidth
+      disableEnforceFocus={authOpen}
+      disableAutoFocus={authOpen}
+      hideBackdrop={false}
+      sx={{
+        '& .MuiDialog-container': {
+          justifyContent: 'center',
+          alignItems: 'center',
+        },
+      }}
+      PaperProps={{
+        sx: {
+          borderRadius: 2,
+          maxWidth: 600,
+          m: { xs: 1, md: 2 },
+          ...(authOpen
+            ? {
+                position: 'absolute',
+                left: { xs: 12, md: 'calc(50% - 8px)' },
+                top: '50%',
+                transform: { xs: 'none', md: 'translate(-100%, -50%)' },
+                m: 0,
+              }
+            : {}),
+        },
+      }}
+    >
       <DialogTitle
         component="div"
         sx={{
