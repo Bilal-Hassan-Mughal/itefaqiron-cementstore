@@ -320,7 +320,7 @@ model Product {
 }
 
 model Ledger {
-  l_id            Int             @id
+  l_id            Int             @id @default(autoincrement())
   branch_id       Int             @default(1)
   cus_id          Int
   opening_balance Float           @default(0)
@@ -430,6 +430,8 @@ model Sale {
   split_payments    SplitPayment[]
 
   @@index([branch_id], map: "sales_branch_id_fkey")
+  @@index([bill_type, bill_number], map: "sales_bill_type_bill_number_idx")
+  @@index([branch_id, bill_type, bill_number], map: "sales_branch_bill_type_bill_number_idx")
   @@index([credit_account_id], map: "sales_credit_account_id_fkey")
   @@index([cus_id], map: "sales_cus_id_fkey")
   @@index([debit_account_id], map: "sales_debit_account_id_fkey")

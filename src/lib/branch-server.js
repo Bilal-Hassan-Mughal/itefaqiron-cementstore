@@ -17,6 +17,9 @@ export function parseUserFromRequest(request) {
   }
 }
 
+const validUserIdsCache = new Set();
+const invalidUserIdsCache = new Set();
+
 /** Resolve a valid Users.user_id for updated_by, or null if none exists. */
 export async function resolveUpdatedByUserId(request, bodyUpdatedBy, db = centralPrisma) {
   const candidates = [];
@@ -36,9 +39,17 @@ export async function resolveUpdatedByUserId(request, bodyUpdatedBy, db = centra
   }
 
   for (const userId of candidates) {
+    if (validUserIdsCache.has(userId)) return userId;
+    if (invalidUserIdsCache.has(userId)) continue;
+
     try {
-      const exists = await db.users.findUnique({ where: { user_id: userId } });
-      if (exists) return userId;
+      const rows = await centralPrisma.$queryRaw`SELECT user_id FROM users WHERE user_id = ${userId} LIMIT 1`;
+      if (Array.isArray(rows) && rows.length > 0) {
+        validUserIdsCache.add(userId);
+        return userId;
+      } else {
+        invalidUserIdsCache.add(userId);
+      }
     } catch {
       /* try next candidate */
     }

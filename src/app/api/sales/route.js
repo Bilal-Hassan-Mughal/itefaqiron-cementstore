@@ -4,7 +4,7 @@ import { getNextId } from '@/lib/id-helper';
 
 export const dynamic = 'force-dynamic';
 import { Prisma } from '@prisma/client';
-import { updateStoreStock, getStoreStock, checkStockAvailability } from '@/lib/storeStock';
+import { updateStoreStock, bulkUpdateStoreStock, getStoreStock, checkStockAvailability } from '@/lib/storeStock';
 import { calculateClosingBalance, createLedgerEntry } from '@/lib/ledger-helper';
 import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
@@ -21,84 +21,69 @@ async function syncAccountBalancesFromEntries(tx, ledgerEntries) {
   for (const entry of ledgerEntries) {
     closingByCusId.set(entry.cus_id, parseFloat(entry.closing_balance || 0));
   }
-  await Promise.all(
-    [...closingByCusId.entries()].map(([accountId, closingBal]) =>
-      tx.customer.update({
-        where: { cus_id: accountId },
-        data: { cus_balance: Number(closingBal.toFixed(2)) }
-      })
-    )
-  );
+  const entries = [...closingByCusId.entries()];
+  if (!entries.length) return;
+
+  if (entries.length === 1) {
+    const [cusId, closingBal] = entries[0];
+    await tx.customer.update({
+      where: { cus_id: cusId },
+      data: { cus_balance: Number(closingBal.toFixed(2)) }
+    });
+    return;
+  }
+
+  const caseClauses = entries
+    .map(([cusId, closingBal]) => `WHEN ${cusId} THEN ${Number(closingBal.toFixed(2))}`)
+    .join(' ');
+  const cusIdsStr = entries.map(([cusId]) => cusId).join(', ');
+
+  const sql = `
+    UPDATE customers
+    SET cus_balance = CASE cus_id ${caseClauses} END,
+        updated_at = NOW()
+    WHERE cus_id IN (${cusIdsStr})
+  `;
+  await tx.$executeRawUnsafe(sql);
 }
+
+let globalSpecialAccountsCache = null;
 
 // Helper function to get special accounts (moved outside transaction for better performance)
 async function getSpecialAccounts() {
-  // Find special accounts by category (case-insensitive)
-  // Get all categories first
-  const allCategories = await prisma.customerCategory.findMany();
+  try {
+    const rows = await prisma.$queryRaw`
+      SELECT c.*, cat.cus_cat_title
+      FROM customers c
+      JOIN customer_categories cat ON c.cus_category = cat.cus_cat_id
+      WHERE LOWER(cat.cus_cat_title) LIKE '%cash%'
+         OR LOWER(cat.cus_cat_title) LIKE '%bank%'
+         OR LOWER(cat.cus_cat_title) LIKE '%creditor%'
+         OR LOWER(cat.cus_cat_title) LIKE '%debtor%'
+      ORDER BY c.cus_id ASC
+    `;
+    const accounts = {};
+    if (Array.isArray(rows)) {
+      for (const row of rows) {
+        const lowerCat = (row.cus_cat_title || '').toLowerCase();
+        const lowerName = (row.cus_name || '').toLowerCase();
 
-  // Find matching categories (case-insensitive)
-  const categoryMap = {};
-
-  allCategories.forEach(cat => {
-    const lowerTitle = cat.cus_cat_title.toLowerCase();
-    if (lowerTitle === 'cash' || (lowerTitle.includes('cash') && lowerTitle.includes('account'))) {
-      categoryMap['Cash Account'] = cat.cus_cat_id;
-    } else if (lowerTitle === 'bank' || (lowerTitle.includes('bank') && lowerTitle.includes('account'))) {
-      categoryMap['Bank Account'] = cat.cus_cat_id;
-    } else if (lowerTitle.includes('sundry') && lowerTitle.includes('creditor')) {
-      categoryMap['Sundry Creditors'] = cat.cus_cat_id;
-    } else if (lowerTitle.includes('sundry') && lowerTitle.includes('debtor')) {
-      categoryMap['Sundry Debtors'] = cat.cus_cat_id;
+        if (lowerCat.includes('cash') && (!accounts.cash || lowerName === 'cash account')) {
+          accounts.cash = row;
+        } else if (lowerCat.includes('bank') && !['bank account', 'bank', 'bank accounts'].includes(lowerName)) {
+          accounts.bank = row;
+        } else if (lowerCat.includes('creditor') && !accounts.sundryCreditors) {
+          accounts.sundryCreditors = row;
+        } else if (lowerCat.includes('debtor') && !accounts.sundryDebtors) {
+          accounts.sundryDebtors = row;
+        }
+      }
     }
-  });
-
-  const accounts = {};
-  const lookups = [];
-
-  if (categoryMap['Cash Account']) {
-    lookups.push(
-      prisma.customer.findFirst({
-        where: { cus_category: categoryMap['Cash Account'], cus_name: 'Cash Account' }
-      }).then((row) => { if (row) accounts.cash = row; })
-    );
-    lookups.push(
-      prisma.customer.findFirst({
-        where: { cus_category: categoryMap['Cash Account'] }
-      }).then((row) => { if (row && !accounts.cash) accounts.cash = row; })
-    );
+    return accounts;
+  } catch (err) {
+    console.error('getSpecialAccounts query error:', err);
+    return {};
   }
-  if (categoryMap['Bank Account']) {
-    lookups.push(
-      prisma.customer.findMany({
-        where: {
-          cus_category: categoryMap['Bank Account'],
-          NOT: { cus_name: { in: ['Bank Account', 'Bank', 'Bank Accounts'] } }
-        },
-        orderBy: { cus_id: 'asc' }
-      }).then((rows) => {
-        if (rows.length) accounts.bank = rows[rows.length - 1];
-      })
-    );
-  }
-  if (categoryMap['Sundry Creditors']) {
-    lookups.push(
-      prisma.customer.findFirst({
-        where: { cus_category: categoryMap['Sundry Creditors'] }
-      }).then((row) => { if (row) accounts.sundryCreditors = row; })
-    );
-  }
-  if (categoryMap['Sundry Debtors']) {
-    lookups.push(
-      prisma.customer.findFirst({
-        where: { cus_category: categoryMap['Sundry Debtors'] }
-      }).then((row) => { if (row) accounts.sundryDebtors = row; })
-    );
-  }
-
-  await Promise.all(lookups);
-
-  return accounts;
 }
 
 /**
@@ -151,21 +136,18 @@ async function findOrCreateCashAccount() {
 
 /** Resolves getSpecialAccounts() and ensures a cash account customer exists for ledger / balance updates. */
 async function getSpecialAccountsForSale() {
-  const now = Date.now();
-  let accounts = specialAccountsCache.data && now < specialAccountsCache.expiresAt
-    ? specialAccountsCache.data
-    : null;
-
-  if (!accounts) {
-    accounts = await getSpecialAccounts();
-    specialAccountsCache = { data: accounts, expiresAt: now + SPECIAL_ACCOUNTS_CACHE_TTL_MS };
+  if (globalSpecialAccountsCache && globalSpecialAccountsCache.cash) {
+    return globalSpecialAccountsCache;
   }
 
-  if (accounts.cash) return accounts;
-  const cash = await findOrCreateCashAccount();
-  const merged = cash ? { ...accounts, cash } : accounts;
-  specialAccountsCache = { data: merged, expiresAt: now + SPECIAL_ACCOUNTS_CACHE_TTL_MS };
-  return merged;
+  let accounts = await getSpecialAccounts();
+  if (!accounts.cash) {
+    const cash = await findOrCreateCashAccount();
+    if (cash) accounts = { ...accounts, cash };
+  }
+
+  globalSpecialAccountsCache = accounts;
+  return accounts;
 }
 
 /** Resolves the correct opening balance for any customer/account at a target created_at timestamp. */
@@ -1212,10 +1194,37 @@ export async function POST(request) {
     saleLog(`   bill_type: ${bill_type}`);
     saleLog(`   Customer ID: ${cus_id}`);
 
-    // Use transaction to ensure data consistency with increased timeout (30 seconds)
+    // Use transaction to ensure data consistency
     const result = await prisma.$transaction(async (tx) => {
-      // Get customer's current balance
-      const customer = await tx.customer.findUnique({
+      // Pre-fetch all involved account IDs in 1 batch query for instant performance
+      const targetAccountIds = new Set([
+        cus_id,
+        debit_account_id ? parseInt(debit_account_id) : null,
+        credit_account_id ? parseInt(credit_account_id) : null,
+        specialAccounts?.cash?.cus_id,
+        specialAccounts?.bank?.cus_id,
+        specialAccounts?.sundryCreditors?.cus_id,
+        specialAccounts?.sundryDebtors?.cus_id,
+      ]);
+      if (transport_details?.length) {
+        transport_details.forEach((td) => { if (td.account_id) targetAccountIds.add(parseInt(td.account_id)); });
+      }
+      if (split_payments?.length) {
+        split_payments.forEach((sp) => {
+          if (sp.debit_account_id) targetAccountIds.add(parseInt(sp.debit_account_id));
+          if (sp.credit_account_id) targetAccountIds.add(parseInt(sp.credit_account_id));
+        });
+      }
+      targetAccountIds.delete(null);
+      targetAccountIds.delete(undefined);
+
+      const accountList = await tx.customer.findMany({
+        where: { cus_id: { in: Array.from(targetAccountIds).filter(Boolean) } },
+        include: { city: true }
+      });
+      const accountMap = new Map(accountList.map((a) => [a.cus_id, a]));
+
+      const customer = accountMap.get(cus_id) || await tx.customer.findUnique({
         where: { cus_id },
         include: { city: true }
       });
@@ -1226,13 +1235,29 @@ export async function POST(request) {
 
       saleLog(`   Customer name: ${customer.cus_name}`);
 
+      // Calculate bill_number before create using indexed query
+      const isOrderGroup = ['ORDER', 'ORDER_TRASH'].includes(bill_type || 'BILL');
+      let maxRow;
+      if (isOrderGroup) {
+        [maxRow] = await tx.$queryRaw`
+          SELECT COALESCE(MAX(bill_number), 0) AS maxNum FROM sales
+          WHERE branch_id = ${branchId} AND (bill_type = 'ORDER' OR bill_type = 'ORDER_TRASH')
+        `;
+      } else {
+        const bt = bill_type || 'BILL';
+        [maxRow] = await tx.$queryRaw`
+          SELECT COALESCE(MAX(bill_number), 0) AS maxNum FROM sales WHERE branch_id = ${branchId} AND bill_type = ${bt}
+        `;
+      }
+      const nextBillNumber = Number(maxRow?.maxNum || 0) + 1;
+
       // Create sale - try with store_id first, fallback if column doesn't exist
       let sale;
       try {
         sale = await tx.sale.create({
           data: {
             cus_id,
-            store_id: parseInt(store_id), // Added store_id
+            store_id: parseInt(store_id),
             total_amount: Number(parseFloat(total_amount).toFixed(2)),
             discount: Number(parseFloat(discount || 0).toFixed(2)),
             payment: Number(parseFloat(payment).toFixed(2)),
@@ -1248,6 +1273,7 @@ export async function POST(request) {
             labour_charges: Number(parseFloat(labour_charges || 0).toFixed(2)),
             shipping_amount: Number(parseFloat(shipping_amount || 0).toFixed(2)),
             bill_type: bill_type || 'BILL',
+            bill_number: nextBillNumber,
             reference: reference || null,
             updated_by: validatedUpdatedBy
           }
@@ -1257,13 +1283,12 @@ export async function POST(request) {
         if (storeIdError.code === 'P2022' && storeIdError.message?.includes('store_id')) {
           console.warn('⚠️ store_id column not found, creating sale using raw SQL. Please run migration!');
 
-          // Use raw SQL to insert sale without store_id column
           await tx.$executeRaw`
             INSERT INTO sales (
               branch_id, cus_id, total_amount, discount, payment, payment_type,
               cash_payment, bank_payment, bank_title, advance_payment,
               debit_account_id, credit_account_id, loader_id, labour_charges, shipping_amount,
-              bill_type, reference, updated_by, created_at, updated_at
+              bill_type, bill_number, reference, updated_by, created_at, updated_at
             ) VALUES (
               ${branchId}, ${cus_id}, ${Number(parseFloat(total_amount).toFixed(2))}, ${Number(parseFloat(discount || 0).toFixed(2))},
               ${Number(parseFloat(payment).toFixed(2))}, ${payment_type},
@@ -1271,12 +1296,11 @@ export async function POST(request) {
               ${Number(parseFloat(advance_payment || 0).toFixed(2))},
               ${debit_account_id || null}, ${credit_account_id || null},
               ${loader_id || null}, ${Number(parseFloat(labour_charges || 0).toFixed(2))}, ${Number(parseFloat(shipping_amount || 0).toFixed(2))},
-              ${bill_type || 'BILL'}, ${reference || null}, ${validatedUpdatedBy},
+              ${bill_type || 'BILL'}, ${nextBillNumber}, ${reference || null}, ${validatedUpdatedBy},
               NOW(), NOW()
             )
           `;
 
-          // Get the inserted sale using raw SQL
           const insertedSales = await tx.$queryRaw`
             SELECT * FROM sales 
             WHERE branch_id = ${branchId}
@@ -1295,27 +1319,6 @@ export async function POST(request) {
         } else {
           throw storeIdError;
         }
-      }
-
-      // Assign bill_number: separate sequence per type group
-      // ORDER + ORDER_TRASH share one series; BILL has its own; others get their own
-      {
-        const isOrderGroup = ['ORDER', 'ORDER_TRASH'].includes(bill_type || 'BILL');
-        let maxRow;
-        if (isOrderGroup) {
-          [maxRow] = await tx.$queryRaw`
-            SELECT COALESCE(MAX(bill_number), 0) AS maxNum FROM sales
-            WHERE bill_type = 'ORDER' OR bill_type = 'ORDER_TRASH'
-          `;
-        } else {
-          const bt = bill_type || 'BILL';
-          [maxRow] = await tx.$queryRaw`
-            SELECT COALESCE(MAX(bill_number), 0) AS maxNum FROM sales WHERE bill_type = ${bt}
-          `;
-        }
-        const nextNum = Number(maxRow.maxNum) + 1;
-        await tx.$executeRaw`UPDATE sales SET bill_number = ${nextNum} WHERE sale_id = ${sale.sale_id}`;
-        sale = { ...sale, bill_number: nextNum };
       }
 
       const detailRows = sale_details.map((detail) => ({
@@ -1382,10 +1385,7 @@ export async function POST(request) {
       // isQuotation and isOrder are already defined above (before transaction)
       // Update store stock quantities (instead of global product stock) - Skip for quotations and orders
       if (!isQuotation && !isOrder && store_id) {
-        const storeStockUpdatePromises = sale_details.map(async detail => {
-          await updateStoreStock(store_id, detail.pro_id, parseFloat(detail.qnty || 0), 'decrement', validatedUpdatedBy, tx);
-        });
-        await Promise.all(storeStockUpdatePromises);
+        await bulkUpdateStoreStock(store_id, sale_details, 'decrement', validatedUpdatedBy, tx);
       }
 
       // Special accounts already fetched before transaction
@@ -1565,7 +1565,7 @@ export async function POST(request) {
 
           // 1. Try to resolve by debit_account_id if provided
           if (debit_account_id) {
-            const specificBank = await tx.customer.findUnique({
+            const specificBank = accountMap.get(Number(debit_account_id)) || await tx.customer.findUnique({
               where: { cus_id: Number(debit_account_id) }
             });
             if (specificBank) {
@@ -1665,7 +1665,7 @@ export async function POST(request) {
             }
             if (!td.account_id || transportAmount <= 0) continue;
 
-            const transportAccount = await tx.customer.findUnique({ where: { cus_id: parseInt(td.account_id) } });
+            const transportAccount = accountMap.get(parseInt(td.account_id)) || await tx.customer.findUnique({ where: { cus_id: parseInt(td.account_id) } });
             if (!transportAccount) {
               console.warn(`⚠️ Transport account ${td.account_id} not found — skipping ledger entry`);
               continue;
@@ -1718,7 +1718,7 @@ export async function POST(request) {
 
             // Debit Split Payment Account (only if not bank/cash)
             if (splitPayment.debit_account_id) {
-              const debitAccount = await tx.customer.findUnique({
+              const debitAccount = accountMap.get(splitPayment.debit_account_id) || await tx.customer.findUnique({
                 where: { cus_id: splitPayment.debit_account_id }
               });
 
@@ -1740,7 +1740,7 @@ export async function POST(request) {
 
             // Credit Split Payment Account
             if (splitPayment.credit_account_id) {
-              const creditAccount = await tx.customer.findUnique({
+              const creditAccount = accountMap.get(splitPayment.credit_account_id) || await tx.customer.findUnique({
                 where: { cus_id: splitPayment.credit_account_id }
               });
 
@@ -1764,10 +1764,9 @@ export async function POST(request) {
 
         // Create all ledger entries (skip for quotations)
         if (!isQuotation) {
-          const startLId = await getNextId('ledger', 'l_id', tx);
           await tx.ledger.createMany({
-            data: ledgerEntries.map((entry, i) => ({
-              l_id: startLId + i,
+            data: ledgerEntries.map((entry) => ({
+              branch_id: branchId,
               cus_id: entry.cus_id,
               opening_balance: entry.opening_balance,
               debit_amount: entry.debit_amount,

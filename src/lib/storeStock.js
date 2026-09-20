@@ -24,7 +24,6 @@ async function ensureStoreStocksTable(prismaClient) {
       ) ENGINE=InnoDB;
     `);
   } catch (e) {
-    // If creation fails (permissions), log and continue; callers will handle fallbacks
     console.warn('ensureStoreStocksTable: could not ensure table exists:', e.message);
   }
 }
@@ -33,18 +32,18 @@ async function ensureStoreStocksTable(prismaClient) {
  * Get or create store stock entry for a product
  */
 export async function getOrCreateStoreStock(storeId, productId, updatedBy = null, prismaClient = null) {
-  const prisma = prismaClient ?? getPrismaClient();
+  const db = prismaClient ?? getPrismaClient();
 
-  // Ensure storeId and productId are integers
-  const storeIdInt = parseInt(storeId);
-  const productIdInt = parseInt(productId);
+  const storeIdInt = parseInt(storeId, 10);
+  const productIdInt = parseInt(productId, 10);
+
+  if (isNaN(storeIdInt) || isNaN(productIdInt)) return null;
 
   try {
-    const useDelegate = !!prisma.storeStock;
-    let storeStock;
-    if (useDelegate) {
+    let storeStock = null;
+    if (db.storeStock) {
       try {
-        storeStock = await prisma.storeStock.findUnique({
+        storeStock = await db.storeStock.findUnique({
           where: {
             store_id_pro_id: {
               store_id: storeIdInt,
@@ -54,7 +53,7 @@ export async function getOrCreateStoreStock(storeId, productId, updatedBy = null
         });
       } catch (e) {
         if (e.code === 'P2021') {
-          await ensureStoreStocksTable(prisma);
+          await ensureStoreStocksTable(db);
         } else {
           throw e;
         }
@@ -62,14 +61,14 @@ export async function getOrCreateStoreStock(storeId, productId, updatedBy = null
     }
 
     if (!storeStock) {
-      const rows = await prisma.$queryRaw`SELECT * FROM store_stocks WHERE store_id = ${storeIdInt} AND pro_id = ${productIdInt} LIMIT 1`;
+      const rows = await db.$queryRaw`SELECT * FROM store_stocks WHERE store_id = ${storeIdInt} AND pro_id = ${productIdInt} LIMIT 1`;
       storeStock = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
     }
 
     if (!storeStock) {
-      if (useDelegate) {
+      if (db.storeStock) {
         try {
-          storeStock = await prisma.storeStock.upsert({
+          storeStock = await db.storeStock.upsert({
             where: {
               store_id_pro_id: {
                 store_id: storeIdInt,
@@ -88,7 +87,7 @@ export async function getOrCreateStoreStock(storeId, productId, updatedBy = null
           });
         } catch (e) {
           if (e.code === 'P2021') {
-            await ensureStoreStocksTable(prisma);
+            await ensureStoreStocksTable(db);
           } else {
             throw e;
           }
@@ -96,84 +95,123 @@ export async function getOrCreateStoreStock(storeId, productId, updatedBy = null
       }
 
       if (!storeStock) {
-        await prisma.$executeRaw`INSERT INTO store_stocks (store_id, pro_id, stock_quantity, min_stock, max_stock, updated_by) VALUES (${storeIdInt}, ${productIdInt}, 0.00, 0.00, 1000.00, ${updatedBy}) ON DUPLICATE KEY UPDATE store_stock_id = store_stock_id`;
-        const rows2 = await prisma.$queryRaw`SELECT * FROM store_stocks WHERE store_id = ${storeIdInt} AND pro_id = ${productIdInt} LIMIT 1`;
+        await db.$executeRaw`INSERT INTO store_stocks (store_id, pro_id, stock_quantity, min_stock, max_stock, updated_by) VALUES (${storeIdInt}, ${productIdInt}, 0.00, 0.00, 1000.00, ${updatedBy}) ON DUPLICATE KEY UPDATE store_stock_id = store_stock_id`;
+        const rows2 = await db.$queryRaw`SELECT * FROM store_stocks WHERE store_id = ${storeIdInt} AND pro_id = ${productIdInt} LIMIT 1`;
         storeStock = Array.isArray(rows2) && rows2.length > 0 ? rows2[0] : null;
       }
     }
 
     return storeStock;
-  } finally {
-    // Don't disconnect if using shared instance
-    if (prismaClient && prismaClient !== prisma) {
-      await prisma.$disconnect();
-    }
+  } catch (err) {
+    console.error('getOrCreateStoreStock error:', err);
+    return null;
   }
 }
 
 /**
- * Update store stock quantity
+ * Update store stock quantity instantly using single-query ON DUPLICATE KEY UPDATE
  */
 export async function updateStoreStock(storeId, productId, quantityChange, operation = 'increment', updatedBy = null, prismaClient = null) {
-  const prisma = prismaClient ?? getPrismaClient();
+  const db = prismaClient ?? getPrismaClient();
 
-  // Ensure storeId and productId are integers
-  const storeIdInt = parseInt(storeId);
-  const productIdInt = parseInt(productId);
+  const storeIdInt = parseInt(storeId, 10);
+  const productIdInt = parseInt(productId, 10);
+  const qty = parseFloat(quantityChange || 0);
+
+  if (isNaN(storeIdInt) || isNaN(productIdInt) || isNaN(qty)) return null;
 
   try {
-    const storeStock = await getOrCreateStoreStock(storeIdInt, productIdInt, updatedBy, prisma);
-
-    const updateData = {
-      updated_by: updatedBy,
-      updated_at: new Date()
-    };
-
     if (operation === 'increment') {
-      updateData.stock_quantity = {
-        increment: quantityChange
-      };
+      await db.$executeRaw`
+        INSERT INTO store_stocks (store_id, pro_id, stock_quantity, min_stock, max_stock, updated_by, created_at, updated_at)
+        VALUES (${storeIdInt}, ${productIdInt}, ${qty}, 0.00, 1000.00, ${updatedBy}, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE stock_quantity = stock_quantity + ${qty}, updated_at = NOW(), updated_by = ${updatedBy}
+      `;
     } else if (operation === 'decrement') {
-      updateData.stock_quantity = {
-        decrement: quantityChange
-      };
-    } else if (operation === 'set') {
-      updateData.stock_quantity = quantityChange;
+      await db.$executeRaw`
+        INSERT INTO store_stocks (store_id, pro_id, stock_quantity, min_stock, max_stock, updated_by, created_at, updated_at)
+        VALUES (${storeIdInt}, ${productIdInt}, ${-qty}, 0.00, 1000.00, ${updatedBy}, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE stock_quantity = stock_quantity - ${qty}, updated_at = NOW(), updated_by = ${updatedBy}
+      `;
+    } else {
+      await db.$executeRaw`
+        INSERT INTO store_stocks (store_id, pro_id, stock_quantity, min_stock, max_stock, updated_by, created_at, updated_at)
+        VALUES (${storeIdInt}, ${productIdInt}, ${qty}, 0.00, 1000.00, ${updatedBy}, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE stock_quantity = ${qty}, updated_at = NOW(), updated_by = ${updatedBy}
+      `;
     }
-
-    if (prisma.storeStock) {
+    return true;
+  } catch (e) {
+    if (e.code === 'P2010' || e.message?.includes("doesn't exist")) {
+      await ensureStoreStocksTable(db);
       try {
-        return await prisma.storeStock.update({
-          where: {
-            store_id_pro_id: {
-              store_id: storeIdInt,
-              pro_id: productIdInt
-            }
-          },
-          data: updateData
-        });
-      } catch (e) {
-        if (e.code !== 'P2021') throw e;
-        await ensureStoreStocksTable(prisma);
-        // Fall through to raw SQL
+        if (operation === 'increment') {
+          await db.$executeRaw`UPDATE store_stocks SET stock_quantity = stock_quantity + ${qty}, updated_by = ${updatedBy}, updated_at = NOW() WHERE store_id = ${storeIdInt} AND pro_id = ${productIdInt}`;
+        } else if (operation === 'decrement') {
+          await db.$executeRaw`UPDATE store_stocks SET stock_quantity = stock_quantity - ${qty}, updated_by = ${updatedBy}, updated_at = NOW() WHERE store_id = ${storeIdInt} AND pro_id = ${productIdInt}`;
+        } else {
+          await db.$executeRaw`UPDATE store_stocks SET stock_quantity = ${qty}, updated_by = ${updatedBy}, updated_at = NOW() WHERE store_id = ${storeIdInt} AND pro_id = ${productIdInt}`;
+        }
+        return true;
+      } catch (err2) {
+        console.error('updateStoreStock fallback error:', err2);
       }
     }
+    return null;
+  }
+}
 
-    // Raw SQL fallback
-    if (operation === 'increment') {
-      await prisma.$executeRaw`UPDATE store_stocks SET stock_quantity = stock_quantity + ${quantityChange}, updated_by = ${updatedBy}, updated_at = NOW() WHERE store_id = ${storeIdInt} AND pro_id = ${productIdInt}`;
-    } else if (operation === 'decrement') {
-      await prisma.$executeRaw`UPDATE store_stocks SET stock_quantity = stock_quantity - ${quantityChange}, updated_by = ${updatedBy}, updated_at = NOW() WHERE store_id = ${storeIdInt} AND pro_id = ${productIdInt}`;
-    } else {
-      await prisma.$executeRaw`UPDATE store_stocks SET stock_quantity = ${quantityChange}, updated_by = ${updatedBy}, updated_at = NOW() WHERE store_id = ${storeIdInt} AND pro_id = ${productIdInt}`;
+/**
+ * Bulk update store stock for multiple products in 1 single SQL query
+ */
+export async function bulkUpdateStoreStock(storeId, items, operation = 'decrement', updatedBy = null, prismaClient = null) {
+  const db = prismaClient ?? getPrismaClient();
+
+  const storeIdInt = parseInt(storeId, 10);
+  if (isNaN(storeIdInt) || !Array.isArray(items) || items.length === 0) return true;
+
+  const validItems = items.map(item => ({
+    proId: parseInt(item.pro_id, 10),
+    qty: parseFloat(item.qnty || 0)
+  })).filter(item => !isNaN(item.proId) && !isNaN(item.qty) && item.qty !== 0);
+
+  if (validItems.length === 0) return true;
+
+  const safeUpdatedBy = updatedBy ? parseInt(updatedBy, 10) : null;
+  const updatedBySql = Number.isFinite(safeUpdatedBy) ? safeUpdatedBy : 'NULL';
+
+  const valueClauses = validItems.map(item => {
+    const change = operation === 'decrement' ? -item.qty : item.qty;
+    return `(${storeIdInt}, ${item.proId}, ${change}, 0.00, 1000.00, ${updatedBySql}, NOW(), NOW())`;
+  }).join(', ');
+
+  const sql = `
+    INSERT INTO store_stocks (store_id, pro_id, stock_quantity, min_stock, max_stock, updated_by, created_at, updated_at)
+    VALUES ${valueClauses}
+    ON DUPLICATE KEY UPDATE 
+      stock_quantity = stock_quantity + VALUES(stock_quantity),
+      updated_at = NOW(),
+      updated_by = VALUES(updated_by)
+  `;
+
+  try {
+    await db.$executeRawUnsafe(sql);
+    return true;
+  } catch (e) {
+    if (e.code === 'P2010' || e.message?.includes("doesn't exist")) {
+      await ensureStoreStocksTable(db);
+      try {
+        await db.$executeRawUnsafe(sql);
+        return true;
+      } catch (err2) {
+        console.error('bulkUpdateStoreStock error:', err2);
+      }
     }
-    const rows = await prisma.$queryRaw`SELECT * FROM store_stocks WHERE store_id = ${storeIdInt} AND pro_id = ${productIdInt} LIMIT 1`;
-    return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
-  } finally {
-    // Don't disconnect if using shared instance
-    if (prismaClient && prismaClient !== prisma) {
-      await prisma.$disconnect();
+    // Fallback to sequential updates
+    for (const item of validItems) {
+      await updateStoreStock(storeIdInt, item.proId, item.qty, operation, updatedBy, db);
     }
+    return true;
   }
 }
 
@@ -181,16 +219,15 @@ export async function updateStoreStock(storeId, productId, quantityChange, opera
  * Get current stock for a product in a store
  */
 export async function getStoreStock(storeId, productId, prismaClient = null) {
-  const prisma = prismaClient ?? getPrismaClient();
+  const db = prismaClient ?? getPrismaClient();
 
-  // Ensure storeId and productId are integers
-  const storeIdInt = parseInt(storeId);
-  const productIdInt = parseInt(productId);
+  const storeIdInt = parseInt(storeId, 10);
+  const productIdInt = parseInt(productId, 10);
 
   try {
-    if (prisma.storeStock) {
+    if (db.storeStock) {
       try {
-        const storeStock = await prisma.storeStock.findUnique({
+        const storeStock = await db.storeStock.findUnique({
           where: {
             store_id_pro_id: {
               store_id: storeIdInt,
@@ -198,13 +235,12 @@ export async function getStoreStock(storeId, productId, prismaClient = null) {
             }
           }
         });
-        return storeStock ? storeStock.stock_quantity : 0;
+        return storeStock ? Number(storeStock.stock_quantity) : 0;
       } catch (e) {
         if (e.code !== 'P2021') throw e;
-        await ensureStoreStocksTable(prisma);
-        // Try again after table creation
+        await ensureStoreStocksTable(db);
         try {
-          const storeStock = await prisma.storeStock.findUnique({
+          const storeStock = await db.storeStock.findUnique({
             where: {
               store_id_pro_id: {
                 store_id: storeIdInt,
@@ -212,15 +248,14 @@ export async function getStoreStock(storeId, productId, prismaClient = null) {
               }
             }
           });
-          return storeStock ? storeStock.stock_quantity : 0;
+          return storeStock ? Number(storeStock.stock_quantity) : 0;
         } catch (retryError) {
           return 0;
         }
       }
     } else {
-      // Fallback to raw SQL
       try {
-        const rows = await prisma.$queryRaw`
+        const rows = await db.$queryRaw`
           SELECT stock_quantity 
           FROM store_stocks 
           WHERE store_id = ${storeIdInt} AND pro_id = ${productIdInt} 
@@ -228,19 +263,15 @@ export async function getStoreStock(storeId, productId, prismaClient = null) {
         `;
         return Array.isArray(rows) && rows.length > 0 ? Number(rows[0].stock_quantity) : 0;
       } catch (e) {
-        // If table doesn't exist, try to create and return 0
         if (e.code === 'P2010') {
-          await ensureStoreStocksTable(prisma);
+          await ensureStoreStocksTable(db);
           return 0;
         }
         throw e;
       }
     }
-  } finally {
-    // Don't disconnect if using shared instance
-    if (prismaClient && prismaClient !== prisma) {
-      await prisma.$disconnect();
-    }
+  } catch (err) {
+    return 0;
   }
 }
 
@@ -248,15 +279,14 @@ export async function getStoreStock(storeId, productId, prismaClient = null) {
  * Get all store stocks for a product across all stores
  */
 export async function getProductStocksAcrossStores(productId, prismaClient = null) {
-  const prisma = prismaClient ?? getPrismaClient();
+  const db = prismaClient ?? getPrismaClient();
 
-  // Ensure productId is an integer
-  const productIdInt = parseInt(productId);
+  const productIdInt = parseInt(productId, 10);
 
   try {
-    if (prisma.storeStock) {
+    if (db.storeStock) {
       try {
-        return await prisma.storeStock.findMany({
+        return await db.storeStock.findMany({
           where: {
             pro_id: productIdInt
           },
@@ -272,12 +302,11 @@ export async function getProductStocksAcrossStores(productId, prismaClient = nul
         });
       } catch (e) {
         if (e.code !== 'P2021') throw e;
-        await ensureStoreStocksTable(prisma);
+        await ensureStoreStocksTable(db);
         return [];
       }
     } else {
-      // Fallback to raw SQL
-      const rows = await prisma.$queryRaw`
+      const rows = await db.$queryRaw`
         SELECT 
           ss.*,
           s.storeid,
@@ -296,11 +325,8 @@ export async function getProductStocksAcrossStores(productId, prismaClient = nul
         }
       }));
     }
-  } finally {
-    // Don't disconnect if using shared instance
-    if (prismaClient && prismaClient !== prisma) {
-      await prisma.$disconnect();
-    }
+  } catch (err) {
+    return [];
   }
 }
 
@@ -308,16 +334,14 @@ export async function getProductStocksAcrossStores(productId, prismaClient = nul
  * Get all products and their stocks for a specific store
  */
 export async function getStoreStockSummary(storeId, prismaClient = null) {
-  const prisma = prismaClient ?? getPrismaClient();
+  const db = prismaClient ?? getPrismaClient();
 
-  // Ensure storeId is an integer
-  const storeIdInt = parseInt(storeId);
+  const storeIdInt = parseInt(storeId, 10);
 
   try {
-    // Check if storeStock model exists, otherwise use raw SQL
-    if (prisma.storeStock) {
+    if (db.storeStock) {
       try {
-        return await prisma.storeStock.findMany({
+        return await db.storeStock.findMany({
           where: {
             store_id: storeIdInt
           },
@@ -340,13 +364,12 @@ export async function getStoreStockSummary(storeId, prismaClient = null) {
         });
       } catch (e) {
         if (e.code !== 'P2021') throw e;
-        await ensureStoreStocksTable(prisma);
+        await ensureStoreStocksTable(db);
         return [];
       }
     } else {
-      // Fallback to raw SQL if model not available
       try {
-        const rows = await prisma.$queryRaw`
+        const rows = await db.$queryRaw`
           SELECT 
             ss.store_stock_id,
             ss.store_id,
@@ -368,7 +391,6 @@ export async function getStoreStockSummary(storeId, prismaClient = null) {
           ORDER BY p.pro_title ASC
         `;
 
-        // Transform raw SQL results to match expected format
         return rows.map(row => ({
           store_stock_id: row.store_stock_id,
           store_id: row.store_id,
@@ -389,17 +411,14 @@ export async function getStoreStockSummary(storeId, prismaClient = null) {
         }));
       } catch (e) {
         if (e.code === 'P2010') {
-          await ensureStoreStocksTable(prisma);
+          await ensureStoreStocksTable(db);
           return [];
         }
         throw e;
       }
     }
-  } finally {
-    // Don't disconnect if using shared instance
-    if (prismaClient && prismaClient !== prisma) {
-      await prisma.$disconnect();
-    }
+  } catch (err) {
+    return [];
   }
 }
 
@@ -415,19 +434,18 @@ export async function checkStockAvailability(storeId, productId, requiredQuantit
  * Get low stock products for a store
  */
 export async function getLowStockProducts(storeId, prismaClient = null) {
-  const prisma = prismaClient ?? getPrismaClient();
+  const db = prismaClient ?? getPrismaClient();
 
-  // Ensure storeId is an integer
-  const storeIdInt = parseInt(storeId);
+  const storeIdInt = parseInt(storeId, 10);
 
   try {
-    if (prisma.storeStock) {
+    if (db.storeStock) {
       try {
-        return await prisma.storeStock.findMany({
+        return await db.storeStock.findMany({
           where: {
             store_id: storeIdInt,
             stock_quantity: {
-              lte: prisma.storeStock.fields.min_stock
+              lte: db.storeStock.fields.min_stock
             }
           },
           include: {
@@ -442,13 +460,12 @@ export async function getLowStockProducts(storeId, prismaClient = null) {
         });
       } catch (e) {
         if (e.code !== 'P2021') throw e;
-        await ensureStoreStocksTable(prisma);
+        await ensureStoreStocksTable(db);
         return [];
       }
     } else {
-      // Fallback to raw SQL
       try {
-        const rows = await prisma.$queryRaw`
+        const rows = await db.$queryRaw`
           SELECT 
             ss.*,
             p.pro_id as product_pro_id,
@@ -468,17 +485,14 @@ export async function getLowStockProducts(storeId, prismaClient = null) {
         }));
       } catch (e) {
         if (e.code === 'P2010') {
-          await ensureStoreStocksTable(prisma);
+          await ensureStoreStocksTable(db);
           return [];
         }
         throw e;
       }
     }
-  } finally {
-    // Don't disconnect if using shared instance
-    if (prismaClient && prismaClient !== prisma) {
-      await prisma.$disconnect();
-    }
+  } catch (err) {
+    return [];
   }
 }
 
@@ -486,25 +500,14 @@ export async function getLowStockProducts(storeId, prismaClient = null) {
  * Transfer stock between stores
  */
 export async function transferStock(fromStoreId, toStoreId, productId, quantity, updatedBy = null, prismaClient = null) {
-  const prisma = prismaClient ?? getPrismaClient();
+  const db = prismaClient ?? getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
-      // Decrease stock in source store
-      await updateStoreStock(fromStoreId, productId, quantity, 'decrement', updatedBy);
-
-      // Increase stock in destination store
-      await updateStoreStock(toStoreId, productId, quantity, 'increment', updatedBy);
-
-      return {
-        success: true,
-        message: `Transferred ${quantity} units of product ${productId} from store ${fromStoreId} to store ${toStoreId}`
-      };
-    });
-  } finally {
-    // Don't disconnect if using shared instance
-    if (prismaClient && prismaClient !== prisma) {
-      await prisma.$disconnect();
-    }
-  }
+  return await db.$transaction(async (tx) => {
+    await updateStoreStock(fromStoreId, productId, quantity, 'decrement', updatedBy, tx);
+    await updateStoreStock(toStoreId, productId, quantity, 'increment', updatedBy, tx);
+    return {
+      success: true,
+      message: `Transferred ${quantity} units of product ${productId} from store ${fromStoreId} to store ${toStoreId}`
+    };
+  });
 }
