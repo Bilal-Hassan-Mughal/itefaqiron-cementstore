@@ -801,6 +801,57 @@ const getKarachiDateKey = (dateInput) => {
 
 const getTodayKarachiDateKey = () => getKarachiDateKey(new Date());
 
+const getKarachiDateKeyDaysAgo = (daysAgo) => {
+  const todayKey = getTodayKarachiDateKey();
+  const [y, m, d] = todayKey.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  date.setDate(date.getDate() - daysAgo);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getMonthStartKarachiDateKey = () => {
+  const todayKey = getTodayKarachiDateKey();
+  return `${todayKey.slice(0, 7)}-01`;
+};
+
+const LEDGER_DATE_PRESETS = [
+  {
+    id: 'today',
+    label: 'Today',
+    getRange: () => {
+      const today = getTodayKarachiDateKey();
+      return { start: today, end: today };
+    },
+  },
+  {
+    id: '7d',
+    label: '7 Days',
+    getRange: () => ({
+      start: getKarachiDateKeyDaysAgo(6),
+      end: getTodayKarachiDateKey(),
+    }),
+  },
+  {
+    id: '15d',
+    label: '15 Days',
+    getRange: () => ({
+      start: getKarachiDateKeyDaysAgo(14),
+      end: getTodayKarachiDateKey(),
+    }),
+  },
+  {
+    id: 'month',
+    label: 'Month',
+    getRange: () => ({
+      start: getMonthStartKarachiDateKey(),
+      end: getTodayKarachiDateKey(),
+    }),
+  },
+];
+
 const getLedgerEntryDisplayAmounts = (entry) => {
   const debitAmt = parseFloat(entry.debit_amount || 0);
   const creditAmt = parseFloat(entry.credit_amount || 0);
@@ -1002,6 +1053,7 @@ export default function FinancePage() {
   const [sortOrder, setSortOrder] = useState('desc');
   const [startDate, setStartDate] = useState(() => getTodayKarachiDateKey());
   const [endDate, setEndDate] = useState(() => getTodayKarachiDateKey());
+  const [ledgerDatePreset, setLedgerDatePreset] = useState('today');
   const [selectedLedgerType, setSelectedLedgerType] = useState('');
   const [staticDataLoaded, setStaticDataLoaded] = useState(false);
   /** All Accounts: default recent rows; Clear shows full ledger */
@@ -1011,6 +1063,17 @@ export default function FinancePage() {
     const today = getTodayKarachiDateKey();
     setStartDate(today);
     setEndDate(today);
+    setLedgerDatePreset('today');
+    setAllAccountsFullLedger(false);
+  }, []);
+
+  const applyLedgerDatePreset = useCallback((presetId) => {
+    const preset = LEDGER_DATE_PRESETS.find((p) => p.id === presetId);
+    if (!preset) return;
+    const { start, end } = preset.getRange();
+    setStartDate(start);
+    setEndDate(end);
+    setLedgerDatePreset(presetId);
     setAllAccountsFullLedger(false);
   }, []);
 
@@ -3786,15 +3849,57 @@ export default function FinancePage() {
                 </Button>
               </Box>
             </Box>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mt: 1.25, alignItems: 'center' }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b', mr: 0.25 }}>
+                Period:
+              </Typography>
+              {LEDGER_DATE_PRESETS.map((preset) => {
+                const active = ledgerDatePreset === preset.id;
+                return (
+                  <Button
+                    key={preset.id}
+                    size="small"
+                    variant={active ? 'contained' : 'outlined'}
+                    onClick={() => applyLedgerDatePreset(preset.id)}
+                    sx={{
+                      textTransform: 'none',
+                      fontWeight: 700,
+                      minWidth: 0,
+                      px: 1.5,
+                      py: 0.35,
+                      borderRadius: '999px',
+                      fontSize: '0.75rem',
+                      boxShadow: 'none',
+                      ...(active
+                        ? {
+                          bgcolor: BRAND.primary.blue,
+                          color: '#fff',
+                          '&:hover': { bgcolor: '#0f4fd0' },
+                        }
+                        : {
+                          borderColor: '#cbd5e1',
+                          color: '#475569',
+                          bgcolor: '#fff',
+                          '&:hover': { bgcolor: '#f8fafc', borderColor: '#94a3b8' },
+                        }),
+                    }}
+                  >
+                    {preset.label}
+                  </Button>
+                );
+              })}
+            </Box>
           </Box>
 
           {filtersExpanded && (
             <Box sx={{ px: { xs: 2, md: 2.5 }, pb: 2, pt: 0.5 }}>
               <Box sx={{ ...LEDGER_FILTER_GRID, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' } }}>
                 <TextField fullWidth size="small" label="From Date" type="date" value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)} InputLabelProps={{ shrink: true }} sx={LEDGER_FILTER_FIELD_SX} />
+                  onChange={(e) => { setStartDate(e.target.value); setLedgerDatePreset('custom'); }}
+                  InputLabelProps={{ shrink: true }} sx={LEDGER_FILTER_FIELD_SX} />
                 <TextField fullWidth size="small" label="To Date" type="date" value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)} InputLabelProps={{ shrink: true }} sx={LEDGER_FILTER_FIELD_SX} />
+                  onChange={(e) => { setEndDate(e.target.value); setLedgerDatePreset('custom'); }}
+                  InputLabelProps={{ shrink: true }} sx={LEDGER_FILTER_FIELD_SX} />
                 <FormControl fullWidth size="small" sx={LEDGER_FILTER_FIELD_SX}>
                   <InputLabel>Type</InputLabel>
                   <Select value={selectedLedgerType} onChange={(e) => setSelectedLedgerType(e.target.value)} label="Type">
@@ -3820,9 +3925,23 @@ export default function FinancePage() {
           )}
         </Card>
 
-        {startDate === getTodayKarachiDateKey() && endDate === getTodayKarachiDateKey() && (
+        {(startDate || endDate) && (
           <Alert severity="info" sx={{ borderRadius: '12px', py: 0.75, alignItems: 'center' }}>
-            Showing <strong>today&apos;s ledger entries</strong> ({startDate}). Expand filters to change the date range.
+            {ledgerDatePreset === 'today' && (
+              <>Showing <strong>today&apos;s ledger entries</strong> ({startDate}).</>
+            )}
+            {ledgerDatePreset === '7d' && (
+              <>Showing <strong>last 7 days</strong> ({startDate} – {endDate}).</>
+            )}
+            {ledgerDatePreset === '15d' && (
+              <>Showing <strong>last 15 days</strong> ({startDate} – {endDate}).</>
+            )}
+            {ledgerDatePreset === 'month' && (
+              <>Showing <strong>this month</strong> ({startDate} – {endDate}).</>
+            )}
+            {ledgerDatePreset === 'custom' && (
+              <>Showing <strong>custom period</strong> ({startDate || '…'} – {endDate || '…'}).</>
+            )}
           </Alert>
         )}
 
