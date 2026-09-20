@@ -7,7 +7,7 @@ import { rejectIfDayClosed } from '@/lib/day-end-guard';
 
 const EXPENSE_TX_OPTIONS = { timeout: 60000, maxWait: 60000 };
 
-async function writeExpenseLedgerEntry(tx, {
+function buildExpenseLedgerRow({
   account,
   amount,
   billNo,
@@ -18,10 +18,9 @@ async function writeExpenseLedgerEntry(tx, {
   cashPayment = 0,
   bankPayment = 0,
 }) {
-  const currentBalance = parseFloat(account.cus_balance || 0);
   const ledgerEntryData = createLedgerEntry({
     cus_id: account.cus_id,
-    opening_balance: currentBalance,
+    opening_balance: parseFloat(account.cus_balance || 0),
     debit_amount: 0,
     credit_amount: amount,
     bill_no: billNo,
@@ -34,19 +33,49 @@ async function writeExpenseLedgerEntry(tx, {
     updated_by: updatedBy,
   });
 
-  await tx.ledger.create({
-    data: {
-      l_id: lId,
-      ...ledgerEntryData,
-    },
-  });
+  account.cus_balance = ledgerEntryData.closing_balance;
 
+  return {
+    l_id: lId,
+    ...ledgerEntryData,
+    closingBalance: ledgerEntryData.closing_balance,
+  };
+}
+
+async function writeExpenseLedgerEntry(tx, params) {
+  const row = buildExpenseLedgerRow(params);
+  const { closingBalance, ...ledgerData } = row;
+  await tx.ledger.create({ data: ledgerData });
   await tx.customer.update({
-    where: { cus_id: account.cus_id },
-    data: { cus_balance: ledgerEntryData.closing_balance },
+    where: { cus_id: params.account.cus_id },
+    data: { cus_balance: closingBalance },
+  });
+  return closingBalance;
+}
+
+async function writeExpenseLedgerEntries(tx, entries) {
+  if (!entries.length) return;
+
+  if (entries.length === 1) {
+    await writeExpenseLedgerEntry(tx, entries[0]);
+    return;
+  }
+
+  const rows = entries.map((entry) => buildExpenseLedgerRow(entry));
+  await tx.ledger.createMany({
+    data: rows.map(({ closingBalance, ...ledgerData }) => ledgerData),
   });
 
-  return ledgerEntryData.closing_balance;
+  const balanceByAccount = new Map();
+  for (const row of rows) {
+    balanceByAccount.set(row.cus_id, row.closingBalance);
+  }
+
+  await Promise.all(
+    [...balanceByAccount.entries()].map(([cus_id, cus_balance]) =>
+      tx.customer.update({ where: { cus_id }, data: { cus_balance } })
+    )
+  );
 }
 
 // GET - Fetch all expenses with related data
@@ -203,27 +232,39 @@ export async function POST(request) {
 
     const validatedUpdatedBy = await resolveUpdatedByUserId(request, updated_by, prisma);
 
-    const result = await prisma.$transaction(async (tx) => {
-      let cashAccount = null;
-      let bankAccount = null;
+    const paymentDetailsPrefix = `Payment for ${expenseTitle.title}: ${exp_title.trim()}`;
+    const refSuffix = payment_reference ? ` - Ref: ${payment_reference}` : '';
 
+    const result = await prisma.$transaction(async (tx) => {
+      const accountFetches = [];
       if (cashAmt > 0) {
-        cashAccount = await tx.customer.findUnique({
-          where: { cus_id: parseInt(paid_from_account_id) }
-        });
-        if (!cashAccount) throw new Error('Cash account not found');
+        accountFetches.push(
+          tx.customer.findUnique({ where: { cus_id: parseInt(paid_from_account_id) } })
+        );
+      }
+      if (bankAmt > 0) {
+        accountFetches.push(
+          tx.customer.findUnique({ where: { cus_id: parseInt(bank_account_id) } })
+        );
       }
 
+      const [exp_id, fetchedAccounts] = await Promise.all([
+        body.exp_id ? Promise.resolve(body.exp_id) : getNextId('expense', 'exp_id', tx),
+        accountFetches.length ? Promise.all(accountFetches) : Promise.resolve([]),
+      ]);
+
+      let cashAccount = null;
+      let bankAccount = null;
+      let accountIdx = 0;
+      if (cashAmt > 0) {
+        cashAccount = fetchedAccounts[accountIdx++];
+        if (!cashAccount) throw new Error('Cash account not found');
+      }
       if (bankAmt > 0) {
-        bankAccount = await tx.customer.findUnique({
-          where: { cus_id: parseInt(bank_account_id) }
-        });
+        bankAccount = fetchedAccounts[accountIdx++];
         if (!bankAccount) throw new Error('Bank account not found');
       }
 
-      const exp_id = body.exp_id || await getNextId('expense', 'exp_id', tx);
-
-      // Create expense
       const expense = await tx.expense.create({
         data: {
           exp_id,
@@ -238,59 +279,58 @@ export async function POST(request) {
           bank_amount: bankAmt,
           payment_date: new Date(),
           payment_reference: payment_reference || null,
-          updated_by: validatedUpdatedBy
+          updated_by: validatedUpdatedBy,
         },
-        include: {
-          expense_title: true,
-          updated_by_user: {
-            select: {
-              full_name: true,
-              role: true
-            }
-          }
-        }
       });
 
       const billNo = `EXP-${expense.exp_id}`;
       const ledgerWriteCount = (cashAmt > 0 ? 1 : 0) + (bankAmt > 0 ? 1 : 0);
-      let nextLedgerId = ledgerWriteCount > 0 ? await getNextId('ledger', 'l_id', tx) : null;
+      const nextLedgerId =
+        ledgerWriteCount > 0 ? await getNextId('ledger', 'l_id', tx) : null;
+      const ledgerEntries = [];
 
       if (cashAmt > 0 && cashAccount) {
-        await writeExpenseLedgerEntry(tx, {
+        ledgerEntries.push({
           account: cashAccount,
           amount: cashAmt,
           billNo,
           trnxType: 'CASH_PAYMENT',
-          details: `Payment for ${expense.expense_title?.title || 'Expense'}: ${expense.exp_title}${paymentMethod === 'PARTIAL' ? ' (Partial cash payment)' : ''}${payment_reference ? ` - Ref: ${payment_reference}` : ''}`,
+          details: `${paymentDetailsPrefix}${paymentMethod === 'PARTIAL' ? ' (Partial cash payment)' : ''}${refSuffix}`,
           updatedBy: validatedUpdatedBy,
           lId: nextLedgerId,
           cashPayment: cashAmt,
           bankPayment: 0,
         });
-        nextLedgerId += 1;
       }
 
       if (bankAmt > 0 && bankAccount) {
         const activeBank =
-          cashAccount && cashAccount.cus_id === bankAccount.cus_id
-            ? await tx.customer.findUnique({ where: { cus_id: bankAccount.cus_id } })
-            : bankAccount;
-        if (!activeBank) throw new Error('Bank account not found');
-
-        await writeExpenseLedgerEntry(tx, {
+          cashAccount && cashAccount.cus_id === bankAccount.cus_id ? cashAccount : bankAccount;
+        ledgerEntries.push({
           account: activeBank,
           amount: bankAmt,
           billNo,
           trnxType: 'BANK_PAYMENT',
-          details: `Payment for ${expense.expense_title?.title || 'Expense'}: ${expense.exp_title}${paymentMethod === 'PARTIAL' ? ' (Partial bank payment)' : ''}${payment_reference ? ` - Ref: ${payment_reference}` : ''}`,
+          details: `${paymentDetailsPrefix}${paymentMethod === 'PARTIAL' ? ' (Partial bank payment)' : ''}${refSuffix}`,
           updatedBy: validatedUpdatedBy,
-          lId: nextLedgerId,
+          lId: nextLedgerId + (cashAmt > 0 ? 1 : 0),
           cashPayment: 0,
           bankPayment: bankAmt,
         });
       }
 
-      return expense;
+      await writeExpenseLedgerEntries(tx, ledgerEntries);
+
+      return {
+        ...expense,
+        expense_title: expenseTitle,
+        paid_from_account: cashAccount
+          ? { cus_id: cashAccount.cus_id, cus_name: cashAccount.cus_name }
+          : null,
+        bank_account: bankAccount
+          ? { cus_id: bankAccount.cus_id, cus_name: bankAccount.cus_name }
+          : null,
+      };
     }, EXPENSE_TX_OPTIONS);
 
     return NextResponse.json(result, { status: 201 });

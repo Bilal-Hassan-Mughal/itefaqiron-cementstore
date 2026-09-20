@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { formatDatePK } from '@/lib/date-helper';
+import { notifyLedgerDataChanged } from '@/lib/ledger-tabs';
 import {
   Plus,
   Edit,
@@ -82,7 +83,40 @@ export default function ExpensesPage() {
   const [showTypeDialog, setShowTypeDialog] = useState(false);
   const [newTypeName, setNewTypeName] = useState('');
   const [isSubmittingType, setIsSubmittingType] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const saveInFlightRef = useRef(false);
+
+  const getDefaultFormData = useCallback(() => {
+    const defaultCashAcc = paymentAccounts.find((acc) => {
+      const typeTitle = acc.customer_type?.cus_type_title?.toLowerCase() || '';
+      const catTitle = acc.customer_category?.cus_cat_title?.toLowerCase() || '';
+      return typeTitle.includes('cash') && catTitle.includes('cash');
+    });
+    return {
+      exp_title: '',
+      exp_type: '',
+      exp_detail: '',
+      exp_amount: '',
+      is_paid: 'true',
+      paid_from_account_id: defaultCashAcc ? defaultCashAcc.cus_id.toString() : '',
+      bank_account_id: '',
+      cash_amount: '',
+      bank_amount: '',
+      payment_reference: '',
+      paymentMethod: 'CASH',
+    };
+  }, [paymentAccounts]);
+
+  const refreshPaymentAccounts = useCallback(async () => {
+    try {
+      const accountsRes = await fetch('/api/customers?dropdown=true');
+      if (accountsRes.ok) {
+        const accountsData = await accountsRes.json();
+        setPaymentAccounts(accountsData);
+      }
+    } catch (error) {
+      console.error('Error refreshing payment accounts:', error);
+    }
+  }, []);
 
   // Fetch data
   useEffect(() => {
@@ -229,8 +263,81 @@ export default function ExpensesPage() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
+  const getPaymentAmounts = () => {
+    const expenseAmount = parseFloat(formData.exp_amount || 0);
+    if (formData.paymentMethod === 'CASH') {
+      return {
+        cashAmt: expenseAmount,
+        bankAmt: 0,
+        cashAccountId: parseInt(formData.paid_from_account_id, 10),
+        bankAccountId: null,
+      };
+    }
+    if (formData.paymentMethod === 'BANK') {
+      return {
+        cashAmt: 0,
+        bankAmt: expenseAmount,
+        cashAccountId: null,
+        bankAccountId: parseInt(formData.bank_account_id, 10),
+      };
+    }
+    return {
+      cashAmt: parseFloat(formData.cash_amount || 0),
+      bankAmt: parseFloat(formData.bank_amount || 0),
+      cashAccountId: parseInt(formData.paid_from_account_id, 10),
+      bankAccountId: parseInt(formData.bank_account_id, 10),
+    };
+  };
+
+  const buildOptimisticExpense = (tempId) => {
+    const expenseTitle = expenseTitles.find((t) => String(t.id) === String(formData.exp_type));
+    const { cashAmt, bankAmt, cashAccountId, bankAccountId } = getPaymentAmounts();
+    const cashAccount = paymentAccounts.find((a) => a.cus_id === cashAccountId);
+    const bankAccount = paymentAccounts.find((a) => a.cus_id === bankAccountId);
+
+    return {
+      exp_id: tempId,
+      exp_title: formData.exp_title.trim(),
+      exp_type: parseInt(formData.exp_type, 10),
+      exp_detail: formData.exp_detail?.trim() || null,
+      exp_amount: parseFloat(formData.exp_amount || 0),
+      is_paid: true,
+      paid_from_account_id: cashAmt > 0 ? cashAccountId : null,
+      cash_amount: cashAmt,
+      bank_account_id: bankAmt > 0 ? bankAccountId : null,
+      bank_amount: bankAmt,
+      payment_reference: formData.payment_reference || null,
+      payment_date: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      expense_title: expenseTitle || { id: parseInt(formData.exp_type, 10), title: 'Expense' },
+      paid_from_account: cashAccount
+        ? { cus_id: cashAccount.cus_id, cus_name: cashAccount.cus_name }
+        : null,
+      bank_account: bankAccount
+        ? { cus_id: bankAccount.cus_id, cus_name: bankAccount.cus_name }
+        : null,
+      _optimistic: true,
+    };
+  };
+
+  const applyLocalAccountDeductions = ({ cashAmt, bankAmt, cashAccountId, bankAccountId }) => {
+    if (cashAmt <= 0 && bankAmt <= 0) return;
+    setPaymentAccounts((prev) =>
+      prev.map((acc) => {
+        if (cashAmt > 0 && acc.cus_id === cashAccountId) {
+          return { ...acc, cus_balance: parseFloat(acc.cus_balance || 0) - cashAmt };
+        }
+        if (bankAmt > 0 && acc.cus_id === bankAccountId) {
+          return { ...acc, cus_balance: parseFloat(acc.cus_balance || 0) - bankAmt };
+        }
+        return acc;
+      })
+    );
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saveInFlightRef.current) return;
     
     // Validation
     if (!formData.exp_title.trim()) {
@@ -278,55 +385,90 @@ export default function ExpensesPage() {
       }
     }
 
+    const url = '/api/expenses';
+    const isEditing = Boolean(editingExpense);
+    const method = isEditing ? 'PUT' : 'POST';
+    const body = isEditing ? { id: editingExpense.exp_id, ...formData } : formData;
+    const paymentAmounts = getPaymentAmounts();
+    const optimisticId = `temp-${Date.now()}`;
+    const snapshotForm = { ...formData };
+    const snapshotEditing = editingExpense;
+
+    saveInFlightRef.current = true;
+
+    if (isEditing) {
+      const optimisticExpense = {
+        ...buildOptimisticExpense(snapshotEditing.exp_id),
+        exp_id: snapshotEditing.exp_id,
+        created_at: snapshotEditing.created_at,
+      };
+      setExpenses((prev) =>
+        prev.map((exp) => (exp.exp_id === snapshotEditing.exp_id ? optimisticExpense : exp))
+      );
+    } else {
+      const optimisticExpense = buildOptimisticExpense(optimisticId);
+      setExpenses((prev) => [optimisticExpense, ...prev]);
+      applyLocalAccountDeductions(paymentAmounts);
+      notifyLedgerDataChanged('expense');
+    }
+
+    setCurrentView('list');
+    setEditingExpense(null);
+    setFormData(getDefaultFormData());
+
     try {
-      setIsSubmitting(true);
-      const url = '/api/expenses';
-      const method = editingExpense ? 'PUT' : 'POST';
-
-      const body = editingExpense
-        ? {
-          id: editingExpense.exp_id,
-          ...formData
-        }
-        : formData;
-
       const response = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
       });
 
       if (response.ok) {
-        await fetchData();
-        setCurrentView('list');
-        setEditingExpense(null);
-        const defaultCashAcc = paymentAccounts.find(acc => {
-          const typeTitle = acc.customer_type?.cus_type_title?.toLowerCase() || '';
-          const catTitle = acc.customer_category?.cus_cat_title?.toLowerCase() || '';
-          return typeTitle.includes('cash') && catTitle.includes('cash');
-        });
-        setFormData({
-          exp_title: '',
-          exp_type: '',
-          exp_detail: '',
-          exp_amount: '',
-          is_paid: 'true',
-          paid_from_account_id: defaultCashAcc ? defaultCashAcc.cus_id.toString() : '',
-          bank_account_id: '',
-          cash_amount: '',
-          bank_amount: '',
-          payment_reference: '',
-          paymentMethod: 'CASH'
-        });
+        const savedExpense = await response.json();
+        setExpenses((prev) =>
+          prev.map((exp) => {
+            if (isEditing && exp.exp_id === snapshotEditing.exp_id) {
+              return { ...savedExpense, _optimistic: false };
+            }
+            if (!isEditing && exp.exp_id === optimisticId) {
+              return { ...savedExpense, _optimistic: false };
+            }
+            return exp;
+          })
+        );
+        notifyLedgerDataChanged('expense');
+        void refreshPaymentAccounts();
       } else {
         const error = await response.json();
+        if (isEditing) {
+          setExpenses((prev) =>
+            prev.map((exp) => (exp.exp_id === snapshotEditing.exp_id ? snapshotEditing : exp))
+          );
+        } else {
+          setExpenses((prev) => prev.filter((exp) => exp.exp_id !== optimisticId));
+        }
+        setFormData(snapshotForm);
+        setEditingExpense(isEditing ? snapshotEditing : null);
+        setCurrentView('create');
         alert(error.error || 'Failed to save expense');
+        void refreshPaymentAccounts();
       }
     } catch (error) {
       console.error('Error saving expense:', error);
+      if (isEditing) {
+        setExpenses((prev) =>
+          prev.map((exp) => (exp.exp_id === snapshotEditing.exp_id ? snapshotEditing : exp))
+        );
+      } else {
+        setExpenses((prev) => prev.filter((exp) => exp.exp_id !== optimisticId));
+      }
+      setFormData(snapshotForm);
+      setEditingExpense(isEditing ? snapshotEditing : null);
+      setCurrentView('create');
       alert('Failed to save expense');
+      void refreshPaymentAccounts();
     } finally {
-      setIsSubmitting(false);
+      saveInFlightRef.current = false;
     }
   };
 
@@ -1129,22 +1271,9 @@ export default function ExpensesPage() {
               <button
                 type="submit"
                 form="expense-modal-form"
-                disabled={isSubmitting}
-                className={`px-7 py-2.5 bg-gradient-to-r from-red-500 to-pink-500 text-white text-sm font-medium rounded-xl hover:from-red-600 hover:to-pink-600 transition-all shadow-md hover:shadow-lg ${
-                  isSubmitting ? 'opacity-60 cursor-not-allowed' : 'transform hover:scale-105'
-                }`}
+                className="px-7 py-2.5 bg-gradient-to-r from-red-500 to-pink-500 text-white text-sm font-medium rounded-xl hover:from-red-600 hover:to-pink-600 transition-all shadow-md hover:shadow-lg transform hover:scale-105"
               >
-                {isSubmitting ? (
-                  <span className="flex items-center justify-center">
-                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    {editingExpense ? 'Updating...' : 'Creating...'}
-                  </span>
-                ) : (
-                  editingExpense ? 'Update Expense' : 'Create Expense'
-                )}
+                {editingExpense ? 'Update Expense' : 'Create Expense'}
               </button>
             </div>
           </div>
