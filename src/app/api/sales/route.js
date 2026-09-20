@@ -1224,8 +1224,9 @@ export async function POST(request) {
       });
       const accountMap = new Map(accountList.map((a) => [a.cus_id, a]));
 
-      const customer = accountMap.get(cus_id) || await tx.customer.findUnique({
-        where: { cus_id },
+      const cusIdNum = parseInt(cus_id, 10);
+      const customer = accountMap.get(cusIdNum) || accountMap.get(cus_id) || await tx.customer.findUnique({
+        where: { cus_id: cusIdNum },
         include: { city: true }
       });
 
@@ -1234,6 +1235,10 @@ export async function POST(request) {
       }
 
       saleLog(`   Customer name: ${customer.cus_name}`);
+
+      const saleCreatedAt = new Date();
+      const customerOpeningBalance = await resolveOpeningBalance(tx, cusIdNum, saleCreatedAt);
+      saleLog(`   Customer opening balance (pre-sale): ${customerOpeningBalance}`);
 
       // Calculate bill_number before create using indexed query
       const isOrderGroup = ['ORDER', 'ORDER_TRASH'].includes(bill_type || 'BILL');
@@ -1266,7 +1271,13 @@ export async function POST(request) {
             bank_payment: Number(eff_bank.toFixed(2)),
             bank_title: bank_title || null,
             advance_payment: Number(parseFloat(advance_payment || 0).toFixed(2)),
-            previous_balance: Number(parseFloat(previous_balance || 0).toFixed(2)),
+            previous_balance: Number(parseFloat(
+              isOrder
+                ? customerOpeningBalance
+                : (previous_balance != null && previous_balance !== ''
+                    ? previous_balance
+                    : customerOpeningBalance)
+            ).toFixed(2)),
             debit_account_id: debit_account_id || null,
             credit_account_id: credit_account_id || null,
             loader_id: loader_id || null,
@@ -1391,8 +1402,7 @@ export async function POST(request) {
       // Special accounts already fetched before transaction
       // Create comprehensive ledger entries (only for non-quotations)
       const ledgerEntries = [];
-      const saleCreatedAt = sale.created_at || new Date();
-      let runningBalance = parseFloat(customer.cus_balance || 0);
+      let runningBalance = customerOpeningBalance;
 
       if (!isQuotation) {
         // Create bill/order entry for both BILL and ORDER types

@@ -85,6 +85,43 @@ const fmtAmt = (val) => {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
+function resolveCustomerBalance(customer, customersList) {
+  if (!customer?.cus_id) return 0;
+  const fresh = Array.isArray(customersList)
+    ? customersList.find((c) => c.cus_id === customer.cus_id)
+    : null;
+  const raw = fresh?.cus_balance ?? customer.cus_balance ?? 0;
+  const n = parseFloat(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Order receipt balance rows: previous (سابقہ), current bill remaining (موجوده), total (كل). */
+function getOrderReceiptBalances(bill) {
+  const total = parseFloat(bill?.total_amount || 0);
+  const payment = parseFloat(bill?.payment || 0);
+  const remaining = total - payment;
+  const isOrder = ['ORDER', 'ORDER_TRASH'].includes(bill?.bill_type || 'ORDER');
+  const currentBalance = parseFloat(bill?.customer?.cus_balance || 0);
+  const storedPrevRaw = bill?.previous_balance;
+  const storedPrev = storedPrevRaw != null && storedPrevRaw !== '' ? parseFloat(storedPrevRaw) : NaN;
+
+  let previousBalance;
+  if (storedPrevRaw != null && storedPrevRaw !== '' && !Number.isNaN(storedPrev)) {
+    previousBalance = storedPrev;
+  } else if (isOrder) {
+    // After order save: customer balance = previous - advance payment
+    previousBalance = currentBalance + payment;
+  } else {
+    previousBalance = currentBalance - remaining;
+  }
+
+  return {
+    previousBalance,
+    remaining,
+    totalBalance: previousBalance + remaining,
+  };
+}
+
 /** Use for MUI `type="number"` (editable) — no commas. Empty string for 0 keeps optional fields clear. */
 const toNumberInputValue = (val) => {
   const n = parseFloat(val);
@@ -572,6 +609,31 @@ function OrdersPageContent() {
 
   // Form state for sales creation
   const [formSelectedCustomer, setFormSelectedCustomer] = useState(null);
+  const formCustomerPrevBalance = useMemo(
+    () => resolveCustomerBalance(formSelectedCustomer, customers),
+    [formSelectedCustomer, customers]
+  );
+  const applySelectedCustomer = useCallback(async (customer) => {
+    if (!customer) {
+      setFormSelectedCustomer(null);
+      return;
+    }
+    const fromList = customers.find((c) => c.cus_id === customer.cus_id) || customer;
+    setFormSelectedCustomer(fromList);
+    try {
+      const res = await fetch(`/api/customers?id=${customer.cus_id}`);
+      if (!res.ok) return;
+      const fresh = await res.json();
+      setFormSelectedCustomer((prev) =>
+        prev?.cus_id === fresh.cus_id ? { ...prev, ...fresh } : prev
+      );
+      setCustomers((prev) =>
+        prev.map((c) => (c.cus_id === fresh.cus_id ? { ...c, ...fresh } : c))
+      );
+    } catch (_) {
+      // ignore fetch errors; list copy is still shown
+    }
+  }, [customers]);
   const [selectedCustomerType, setSelectedCustomerType] = useState(null); // customer type filter in form
   const orderPageCustomerTypeOptions = useMemo(
     () => filterOrderPageCustomerTypes(customerTypes),
@@ -1052,6 +1114,18 @@ function OrdersPageContent() {
     }
   }, [customers, customerCategories]);
 
+  // Keep selected customer object in sync when customers list refreshes
+  useEffect(() => {
+    if (!formSelectedCustomer?.cus_id || customers.length === 0) return;
+    const fresh = customers.find((c) => c.cus_id === formSelectedCustomer.cus_id);
+    if (!fresh) return;
+    const freshBal = parseFloat(fresh.cus_balance ?? 0);
+    const currentBal = parseFloat(formSelectedCustomer.cus_balance ?? 0);
+    if (freshBal !== currentBal) {
+      setFormSelectedCustomer((prev) => (prev ? { ...prev, ...fresh } : prev));
+    }
+  }, [customers, formSelectedCustomer]);
+
   // Auto-save when customer changes
   useEffect(() => {
     if (currentScreenIndex >= 0 && screenStack[currentScreenIndex]) {
@@ -1412,6 +1486,18 @@ function OrdersPageContent() {
         ? bankAccounts.find(acc => acc.cus_id === paymentData.bankAccountId)
         : null;
 
+      let prevBalanceAtSave = formCustomerPrevBalance;
+      try {
+        const freshRes = await fetch(`/api/customers?id=${formSelectedCustomer.cus_id}`);
+        if (freshRes.ok) {
+          const freshCustomer = await freshRes.json();
+          const freshBal = parseFloat(freshCustomer?.cus_balance);
+          if (Number.isFinite(freshBal)) prevBalanceAtSave = freshBal;
+        }
+      } catch (_) {
+        // use formCustomerPrevBalance
+      }
+
       const saleData = {
         cus_id: formSelectedCustomer.cus_id,
         store_id: formSelectedStore.storeid, // Added store_id for multi-store functionality
@@ -1429,6 +1515,7 @@ function OrdersPageContent() {
         shipping_amount: totalShippingAmount, // Include both transport and delivery charges
         bill_type: billType || 'BILL',
         reference: paymentData.notes || null,
+        previous_balance: prevBalanceAtSave,
         is_loaded_order: paymentData.isLoadedOrder || false, // Flag for converted orders
         advance_payment: (billType === 'ORDER' || billType === 'ORDER_TRASH') ? totalCashReceived : 0, // Save advance payment for orders
         sale_details: productTableData.map(product => ({
@@ -1492,6 +1579,10 @@ function OrdersPageContent() {
           }
         }
 
+        if (billForPrint && (billForPrint.previous_balance == null || billForPrint.previous_balance === '')) {
+          billForPrint.previous_balance = prevBalanceAtSave;
+        }
+
         if (!billForPrint) {
           billForPrint = {
             sale_id: savedSaleId,
@@ -1508,7 +1599,7 @@ function OrdersPageContent() {
             bill_type: billType || 'ORDER',
             reference: paymentData.notes || null,
             created_at: result.created_at || new Date().toISOString(),
-            previous_balance: formSelectedCustomer?.cus_balance ?? null,
+            previous_balance: prevBalanceAtSave,
             customer: formSelectedCustomer,
             sale_details: productTableData.map((product, index) => ({
               sale_detail_id: index + 1,
@@ -1578,6 +1669,11 @@ function OrdersPageContent() {
         const data = await res.json();
         const arr = Array.isArray(data) ? data : (data.value || []);
         setCustomers(arr);
+        setFormSelectedCustomer((prev) => {
+          if (!prev?.cus_id) return prev;
+          const updated = arr.find((c) => c.cus_id === prev.cus_id);
+          return updated ? { ...prev, ...updated } : prev;
+        });
       }
     } catch (_) {}
   };
@@ -1849,7 +1945,7 @@ function OrdersPageContent() {
         await fetchData();
         // Auto-select the newly created customer in the form
         if (createdCustomer && createdCustomer.cus_id) {
-          setFormSelectedCustomer(createdCustomer);
+          applySelectedCustomer(createdCustomer);
         }
       } else {
         const errorData = await response.json();
@@ -2681,8 +2777,8 @@ function OrdersPageContent() {
 
       console.log('📝 Editing sale:', saleData);
 
-      // 1. Set Customer
-      setFormSelectedCustomer(saleData.customer);
+      // 1. Set Customer (refresh balance from list/API)
+      await applySelectedCustomer(saleData.customer);
       let matchingType = null;
       if (saleData.customer && customerTypes.length > 0) {
         matchingType = customerTypes.find(t => t.cus_type_id === saleData.customer.cus_type);
@@ -3112,7 +3208,7 @@ function OrdersPageContent() {
                               (c.cus_name || '').toLowerCase().includes('walk')
                             );
                             if (matchingCustomer) {
-                              setFormSelectedCustomer(matchingCustomer);
+                              applySelectedCustomer(matchingCustomer);
                             }
                           }
                         }
@@ -3167,27 +3263,30 @@ function OrdersPageContent() {
                     />
                 </Box>
                 <Box sx={ORDER_ENTRY_CELL_SX}>
-                    <Typography sx={ORDER_ENTRY_LABEL_SX}>
-                      CUSTOMER
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.75, gap: 1, minHeight: 22, flexWrap: 'wrap' }}>
+                      <Typography sx={{ ...ORDER_ENTRY_LABEL_SX, mb: 0 }}>
+                        CUSTOMER
+                      </Typography>
                       {formSelectedCustomer && (
                         <Box
                           component="span"
                           sx={{
-                            ml: 'auto',
-                            bgcolor: '#dbeafe',
-                            color: '#1d4ed8',
-                            px: 0.75,
+                            bgcolor: '#bbf7d0',
+                            color: '#14532d',
+                            border: '1px solid #22c55e',
+                            px: 1,
+                            py: 0.25,
                             borderRadius: '6px',
                             fontSize: '0.7rem',
                             fontWeight: 800,
-                            lineHeight: '18px',
-                            height: 18,
+                            lineHeight: 1.3,
+                            whiteSpace: 'nowrap',
                           }}
                         >
-                          {fmtAmt(formSelectedCustomer.cus_balance)}
+                          Prev. Bal: {fmtAmt(formCustomerPrevBalance)}
                         </Box>
                       )}
-                    </Typography>
+                    </Box>
                     <Autocomplete
                       id="customer-autocomplete"
                       size="small"
@@ -3219,7 +3318,7 @@ function OrdersPageContent() {
                       }}
                       value={formSelectedCustomer}
                       onChange={(event, newValue) => {
-                        setFormSelectedCustomer(newValue);
+                        applySelectedCustomer(newValue);
                       }}
                       isOptionEqualToValue={(option, value) => option.cus_id === value?.cus_id}
                       autoSelect={true}
@@ -3265,7 +3364,7 @@ function OrdersPageContent() {
                                   commitDropdownOnTab(
                                     e,
                                     pick,
-                                    (val) => setFormSelectedCustomer(val),
+                                    (val) => applySelectedCustomer(val),
                                     () => findOrderInput('product-autocomplete-input', 'input[placeholder*="Select product"]')
                                   );
                                   return;
@@ -3977,6 +4076,31 @@ function OrdersPageContent() {
                   display: 'flex',
                   flexDirection: 'column'
                 }}>
+                  {formSelectedCustomer && (
+                    <Box sx={{ mb: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 'medium', color: 'warning.main', minWidth: '140px' }}>
+                        PREV. BALANCE
+                      </Typography>
+                      <TextField
+                        size="small"
+                        type="number"
+                        value={formCustomerPrevBalance.toFixed(0)}
+                        inputProps={{ readOnly: true }}
+                        sx={{
+                          bgcolor: '#fffbeb',
+                          flex: 1,
+                          '& .MuiInputBase-input': {
+                            padding: '8px',
+                            fontWeight: 'bold',
+                            color: '#c2410c !important',
+                            WebkitTextFillColor: '#c2410c !important',
+                          },
+                        }}
+                        placeholder="0"
+                      />
+                    </Box>
+                  )}
+
                   {/* Items total (products only) — value must be plain number, not fmtAmt, for type="number" */}
                   <Box sx={{ mb: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
                     <Typography variant="body2" sx={{ fontWeight: 'medium', color: 'text.secondary', minWidth: '140px' }}>
@@ -4379,17 +4503,7 @@ function OrdersPageContent() {
                       <Table size="small">
                         <TableBody>
                           {(() => {
-                            const _rem = parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0);
-                            const _isOrd = ['ORDER', 'ORDER_TRASH'].includes(currentBillData.bill_type);
-                            const _bal = parseFloat(currentBillData.customer?.cus_balance || 0);
-                            const _pay = parseFloat(currentBillData.payment || 0);
-                            // Fresh receipt: previous_balance stored before API call (always correct)
-                            // Historical view: for ORDER cus_balance = prev - advance, so prev = bal + pay
-                            //                 for BILL  cus_balance = prev + total - pay, so prev = bal - rem
-                            const _prev = currentBillData.previous_balance != null
-                              ? parseFloat(currentBillData.previous_balance)
-                              : _isOrd ? _bal + _pay : _bal - _rem;
-                            const _total = _prev + _rem;
+                            const { previousBalance: _prev, remaining: _rem, totalBalance: _total } = getOrderReceiptBalances(currentBillData);
                             return (
                               <>
                                 <TableRow>
@@ -4631,14 +4745,7 @@ function OrdersPageContent() {
                         <Table size="small">
                           <TableBody>
                             {(() => {
-                              const _rem = parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0);
-                              const _isOrd = ['ORDER', 'ORDER_TRASH'].includes(currentBillData.bill_type);
-                              const _bal = parseFloat(currentBillData.customer?.cus_balance || 0);
-                              const _pay = parseFloat(currentBillData.payment || 0);
-                              const _prev = currentBillData.previous_balance != null
-                                ? parseFloat(currentBillData.previous_balance)
-                                : _isOrd ? _bal + _pay : _bal - _rem;
-                              const _total = _prev + _rem;
+                              const { previousBalance: _prev, remaining: _rem, totalBalance: _total } = getOrderReceiptBalances(currentBillData);
                               return (
                                 <>
                                   <TableRow>
@@ -6078,24 +6185,31 @@ function OrdersPageContent() {
                     <TableContainer component={Paper} variant="outlined" sx={{ border: '1px solid #000', width: '100%', boxShadow: 'none' }}>
                       <Table size="small">
                         <TableBody>
-                          <TableRow>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.4, border: '1px solid #777', color: '#000', fontSize: '0.85rem' }}>سابقہ بقایا</TableCell>
-                            <TableCell align="right" sx={{ px: 1, py: 0.4, border: '1px solid #777', color: '#000', fontSize: '0.85rem' }}>
-                              {fmtAmt(selectedBill.customer?.cus_balance)}
-                            </TableCell>
-                          </TableRow>
-                          <TableRow>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.4, border: '1px solid #777', color: '#000', fontSize: '0.85rem' }}>موجوده بقايا</TableCell>
-                            <TableCell align="right" sx={{ px: 1, py: 0.4, border: '1px solid #777', color: '#000', fontSize: '0.85rem' }}>
-                              {fmtAmt(parseFloat(selectedBill.total_amount || 0) - parseFloat(selectedBill.payment || 0))}
-                            </TableCell>
-                          </TableRow>
-                          <TableRow sx={{ bgcolor: '#808080' }}>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.4, border: '1px solid #777', color: '#ffffff', fontSize: '0.85rem' }}>كل بقايا</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.4, border: '1px solid #777', color: '#ffffff', fontSize: '0.85rem' }}>
-                              {fmtAmt(parseFloat(selectedBill.customer?.cus_balance || 0) + parseFloat(selectedBill.total_amount || 0) - parseFloat(selectedBill.payment || 0))}
-                            </TableCell>
-                          </TableRow>
+                          {(() => {
+                            const { previousBalance, remaining, totalBalance } = getOrderReceiptBalances(selectedBill);
+                            return (
+                              <>
+                                <TableRow>
+                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.4, border: '1px solid #777', color: '#000', fontSize: '0.85rem' }}>سابقہ بقایا</TableCell>
+                                  <TableCell align="right" sx={{ px: 1, py: 0.4, border: '1px solid #777', color: '#000', fontSize: '0.85rem' }}>
+                                    {fmtAmt(previousBalance)}
+                                  </TableCell>
+                                </TableRow>
+                                <TableRow>
+                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.4, border: '1px solid #777', color: '#000', fontSize: '0.85rem' }}>موجوده بقايا</TableCell>
+                                  <TableCell align="right" sx={{ px: 1, py: 0.4, border: '1px solid #777', color: '#000', fontSize: '0.85rem' }}>
+                                    {fmtAmt(remaining)}
+                                  </TableCell>
+                                </TableRow>
+                                <TableRow sx={{ bgcolor: '#808080' }}>
+                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.4, border: '1px solid #777', color: '#ffffff', fontSize: '0.85rem' }}>كل بقايا</TableCell>
+                                  <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.4, border: '1px solid #777', color: '#ffffff', fontSize: '0.85rem' }}>
+                                    {fmtAmt(totalBalance)}
+                                  </TableCell>
+                                </TableRow>
+                              </>
+                            );
+                          })()}
                         </TableBody>
                       </Table>
                     </TableContainer>
@@ -7117,24 +7231,31 @@ function OrdersPageContent() {
                   <TableContainer component={Paper} variant="outlined" sx={{ border: '1px solid #000', width: '100%', boxShadow: 'none' }}>
                     <Table size="small">
                       <TableBody>
-                        <TableRow>
-                          <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.4, border: '1px solid #777', color: '#000', fontSize: '0.85rem' }}>سابقہ بقایا</TableCell>
-                          <TableCell align="right" sx={{ px: 1, py: 0.4, border: '1px solid #777', color: '#000', fontSize: '0.85rem' }}>
-                            {fmtAmt(activeBillData.customer?.cus_balance)}
-                          </TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.4, border: '1px solid #777', color: '#000', fontSize: '0.85rem' }}>موجوده بقايا</TableCell>
-                          <TableCell align="right" sx={{ px: 1, py: 0.4, border: '1px solid #777', color: '#000', fontSize: '0.85rem' }}>
-                            {fmtAmt(parseFloat(activeBillData.total_amount || 0) - parseFloat(activeBillData.payment || 0))}
-                          </TableCell>
-                        </TableRow>
-                        <TableRow sx={{ bgcolor: '#808080' }}>
-                          <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.4, border: '1px solid #777', color: '#ffffff', fontSize: '0.85rem' }}>كل بقايا</TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.4, border: '1px solid #777', color: '#ffffff', fontSize: '0.85rem' }}>
-                            {fmtAmt(parseFloat(activeBillData.customer?.cus_balance || 0) + parseFloat(activeBillData.total_amount || 0) - parseFloat(activeBillData.payment || 0))}
-                          </TableCell>
-                        </TableRow>
+                        {(() => {
+                          const { previousBalance, remaining, totalBalance } = getOrderReceiptBalances(activeBillData);
+                          return (
+                            <>
+                              <TableRow>
+                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.4, border: '1px solid #777', color: '#000', fontSize: '0.85rem' }}>سابقہ بقایا</TableCell>
+                                <TableCell align="right" sx={{ px: 1, py: 0.4, border: '1px solid #777', color: '#000', fontSize: '0.85rem' }}>
+                                  {fmtAmt(previousBalance)}
+                                </TableCell>
+                              </TableRow>
+                              <TableRow>
+                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.4, border: '1px solid #777', color: '#000', fontSize: '0.85rem' }}>موجوده بقايا</TableCell>
+                                <TableCell align="right" sx={{ px: 1, py: 0.4, border: '1px solid #777', color: '#000', fontSize: '0.85rem' }}>
+                                  {fmtAmt(remaining)}
+                                </TableCell>
+                              </TableRow>
+                              <TableRow sx={{ bgcolor: '#808080' }}>
+                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.4, border: '1px solid #777', color: '#ffffff', fontSize: '0.85rem' }}>كل بقايا</TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.4, border: '1px solid #777', color: '#ffffff', fontSize: '0.85rem' }}>
+                                  {fmtAmt(totalBalance)}
+                                </TableCell>
+                              </TableRow>
+                            </>
+                          );
+                        })()}
                       </TableBody>
                     </Table>
                   </TableContainer>
