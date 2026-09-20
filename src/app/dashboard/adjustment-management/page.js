@@ -91,13 +91,12 @@ export default function AdjustmentManagementPage() {
       setSubmitting(true);
       setAlert(null);
 
-      // Retrieve user ID from localStorage if available
-      let userId = 6; // default fallback admin
+      let updatedBy;
       const userData = localStorage.getItem('user');
       if (userData) {
         try {
           const parsed = JSON.parse(userData);
-          if (parsed.user_id) userId = parsed.user_id;
+          if (parsed.user_id) updatedBy = parsed.user_id;
         } catch (_) {}
       }
 
@@ -109,7 +108,7 @@ export default function AdjustmentManagementPage() {
           amount: transferAmount,
           date,
           description,
-          updated_by: userId
+          ...(updatedBy != null ? { updated_by: updatedBy } : {})
         })
       });
 

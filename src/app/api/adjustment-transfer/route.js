@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { calculateClosingBalance, createLedgerEntry } from '@/lib/ledger-helper';
 import { getNextId } from '@/lib/id-helper';
-import { initBranchScope } from '@/lib/branch-server';
+import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
 
 export const dynamic = 'force-dynamic';
@@ -85,6 +85,8 @@ export async function POST(request) {
       return errorResponse('Invalid transfer direction');
     }
 
+    const validatedUpdatedBy = await resolveUpdatedByUserId(request, updated_by, prisma);
+
     const result = await prisma.$transaction(async (tx) => {
       // Fetch both accounts
       const cashAccount = await tx.customer.findUnique({ where: { cus_id: 2551 } });
@@ -147,7 +149,7 @@ export async function POST(request) {
         payments: transferAmount,
         cash_payment: direction === 'cash_to_adjustment' ? 0 : transferAmount,
         bank_payment: 0,
-        updated_by: updated_by ? parseInt(updated_by) : null
+        updated_by: validatedUpdatedBy
       });
 
       await tx.ledger.create({
@@ -176,7 +178,7 @@ export async function POST(request) {
         payments: transferAmount,
         cash_payment: 0,
         bank_payment: 0,
-        updated_by: updated_by ? parseInt(updated_by) : null
+        updated_by: validatedUpdatedBy
       });
 
       await tx.ledger.create({
