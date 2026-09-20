@@ -22,6 +22,14 @@ function parseEntryDate(dateStr) {
   return entryDate;
 }
 
+function isEntryDateTodayOrLater(entryDate) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const entryDay = new Date(entryDate);
+  entryDay.setHours(0, 0, 0, 0);
+  return entryDay >= today;
+}
+
 function cleanTransferDescription(details) {
   if (!details) return '';
   return details.replace(/\s*\(From\s+.*?\)\s*|\s*\(To\s+.*?\)\s*/gi, '').trim();
@@ -91,8 +99,7 @@ async function recalculateLedgerBalances(tx, cus_id) {
   }
 
   if (updates.length > 0) {
-    const client = typeof tx.$transaction === 'function' ? tx : prisma;
-    await client.$transaction(updates);
+    await Promise.all(updates);
   }
 
   await tx.customer.update({
@@ -132,12 +139,16 @@ async function createTransferEntries(tx, {
   const isDestCash = (destAccount.customer_category?.cus_cat_title || '').toLowerCase().includes('cash');
 
   const entryDate = parseEntryDate(date);
-  const billNo = existingBillNo || `TRF-${await getNextId('ledger', 'l_id', tx)}`;
+  const useLiveBalance = isEntryDateTodayOrLater(entryDate);
+  const startLedgerId = await getNextId('ledger', 'l_id', tx);
+  const billNo = existingBillNo || `TRF-${startLedgerId}`;
 
-  const sourceOpening = await resolveOpeningBalance(tx, sourceAccount.cus_id, entryDate);
+  const sourceOpening = useLiveBalance
+    ? parseFloat(sourceAccount.cus_balance || 0)
+    : await resolveOpeningBalance(tx, sourceAccount.cus_id, entryDate);
   const sourceDetails = `${description || 'Internal Transfer'} (To ${destAccount.cus_name})`;
 
-  const sourceLedgerId = await getNextId('ledger', 'l_id', tx);
+  const sourceLedgerId = startLedgerId;
   const sourceLedgerEntry = createLedgerEntry({
     cus_id: sourceAccount.cus_id,
     opening_balance: sourceOpening,
@@ -165,10 +176,12 @@ async function createTransferEntries(tx, {
   const destOpening =
     sourceAccount.cus_id === destAccount.cus_id
       ? sourceLedgerEntry.closing_balance
-      : await resolveOpeningBalance(tx, destAccount.cus_id, entryDate);
+      : useLiveBalance
+        ? parseFloat(destAccount.cus_balance || 0)
+        : await resolveOpeningBalance(tx, destAccount.cus_id, entryDate);
 
   const destDetails = `${description || 'Internal Transfer'} (From ${sourceAccount.cus_name})`;
-  const destLedgerId = await getNextId('ledger', 'l_id', tx);
+  const destLedgerId = startLedgerId + 1;
   const destLedgerEntry = createLedgerEntry({
     cus_id: destAccount.cus_id,
     opening_balance: destOpening,
@@ -303,17 +316,20 @@ export async function POST(request) {
       return errorResponse('Source and destination accounts must be different');
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      const transfer = await createTransferEntries(tx, {
-        source_id,
-        destination_id,
-        amount: transferAmount,
-        date,
-        description,
-        updated_by,
-      });
-      return { success: true, message: 'Transfer completed successfully', ...transfer };
-    });
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const transfer = await createTransferEntries(tx, {
+          source_id,
+          destination_id,
+          amount: transferAmount,
+          date,
+          description,
+          updated_by,
+        });
+        return { success: true, message: 'Transfer completed successfully', ...transfer };
+      },
+      { timeout: 60000, maxWait: 60000 }
+    );
 
     return NextResponse.json(result);
   } catch (error) {
@@ -389,7 +405,7 @@ export async function PUT(request) {
         message: 'Transfer updated successfully',
         ...transfer,
       };
-    }, { timeout: 60000 });
+    }, { timeout: 60000, maxWait: 60000 });
 
     return NextResponse.json(result);
   } catch (error) {

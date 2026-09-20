@@ -3353,6 +3353,14 @@ export default function FinancePage() {
     });
   };
 
+  const clearAllLedgerTabs = () => {
+    resetLedgerDatesToToday();
+    setOpenLedgers([]);
+    setActiveLedgerId(null);
+    setSelectedCustomer('');
+    setAccountSearchTerm('');
+  };
+
   const restoreLedger = (cusId) => {
     activateLedger(cusId);
   };
@@ -3741,6 +3749,31 @@ export default function FinancePage() {
                   </IconButton>
                 </Box>
               ))}
+              {openLedgers.length > 0 && (
+                <Tooltip title="Close all open and minimized ledger tabs">
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={clearAllLedgerTabs}
+                    sx={{
+                      ml: 'auto',
+                      textTransform: 'none',
+                      fontWeight: 700,
+                      fontSize: '0.8125rem',
+                      borderRadius: '999px',
+                      borderColor: '#cbd5e1',
+                      color: '#64748b',
+                      px: 1.5,
+                      py: 0.35,
+                      minHeight: 32,
+                      flexShrink: 0,
+                      '&:hover': { borderColor: '#dc2626', color: '#dc2626', bgcolor: '#fef2f2' },
+                    }}
+                  >
+                    Clear All
+                  </Button>
+                </Tooltip>
+              )}
             </Box>
           )}
 

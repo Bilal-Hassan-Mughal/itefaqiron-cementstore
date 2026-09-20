@@ -12,6 +12,27 @@ function errorResponse(message, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
+const LEDGER_TX_OPTIONS = { timeout: 60000, maxWait: 60000 };
+
+function parseBillNoSortKey(billNo) {
+  return parseInt(String(billNo || '').replace(/\D/g, ''), 10) || 0;
+}
+
+async function applyLedgerBalanceUpdates(tx, updates) {
+  const BATCH_SIZE = 100;
+  for (let i = 0; i < updates.length; i += BATCH_SIZE) {
+    const batch = updates.slice(i, i + BATCH_SIZE);
+    await Promise.all(
+      batch.map(({ l_id, opening_balance, closing_balance }) =>
+        tx.ledger.update({
+          where: { l_id },
+          data: { opening_balance, closing_balance },
+        })
+      )
+    );
+  }
+}
+
 // ========================================
 // GET — Get all ledger entries or one entry
 // ========================================
@@ -417,8 +438,6 @@ export async function PUT(request) {
         });
         if (!customer) throw new Error('Customer not found');
 
-        const categoryTitle = (customer.customer_category?.cus_cat_title || '').toLowerCase();
-
         const entries = await tx.ledger.findMany({
           where: { cus_id: existingLedger.cus_id },
           orderBy: [
@@ -431,14 +450,15 @@ export async function PUT(request) {
         entries.sort((a, b) => {
           const timeDiff = a.created_at.getTime() - b.created_at.getTime();
           if (timeDiff !== 0) return timeDiff;
-          const billA = parseInt(a.bill_no) || 0;
-          const billB = parseInt(b.bill_no) || 0;
+          const billA = parseBillNoSortKey(a.bill_no);
+          const billB = parseBillNoSortKey(b.bill_no);
           if (billA !== billB) return billA - billB;
           return a.l_id - b.l_id;
         });
 
         let runningBalance = entries.length > 0 ? parseFloat(entries[0].opening_balance || 0) : 0;
-        
+        const balanceUpdates = [];
+
         for (let i = 0; i < entries.length; i++) {
           const entry = entries[i];
           let opening = runningBalance;
@@ -453,27 +473,18 @@ export async function PUT(request) {
             opening = runningBalance;
             const debit = parseFloat(entry.debit_amount || 0);
             const credit = parseFloat(entry.credit_amount || 0);
-            let change = 0;
-            if (categoryTitle.includes('cash') || categoryTitle.includes('bank')) {
-              change = debit - credit;
-            } else {
-              change = debit - credit;
-            }
-            closing = opening + change;
+            closing = opening + debit - credit;
           }
 
-          // Update entry in db if values changed
           if (
             Math.abs(parseFloat(entry.opening_balance) - opening) > 0.01 ||
             Math.abs(parseFloat(entry.closing_balance) - closing) > 0.01 ||
-            entry.l_id === id // make sure the updated entry gets updated values
+            entry.l_id === id
           ) {
-            await tx.ledger.update({
-              where: { l_id: entry.l_id },
-              data: {
-                opening_balance: opening,
-                closing_balance: closing
-              }
+            balanceUpdates.push({
+              l_id: entry.l_id,
+              opening_balance: Number(opening.toFixed(2)),
+              closing_balance: Number(closing.toFixed(2)),
             });
             entry.opening_balance = opening;
             entry.closing_balance = closing;
@@ -482,14 +493,18 @@ export async function PUT(request) {
           runningBalance = closing;
         }
 
+        if (balanceUpdates.length > 0) {
+          await applyLedgerBalanceUpdates(tx, balanceUpdates);
+        }
+
         // Update customer balance
         await tx.customer.update({
           where: { cus_id: existingLedger.cus_id },
-          data: { cus_balance: runningBalance }
+          data: { cus_balance: Number(runningBalance.toFixed(2)) }
         });
 
         return updatedEntry;
-      });
+      }, LEDGER_TX_OPTIONS);
 
       // Return complete entry
       const completeLedger = await prisma.ledger.findUnique({
@@ -598,7 +613,7 @@ export async function PUT(request) {
       }
 
       return updatedLedger;
-    });
+    }, LEDGER_TX_OPTIONS);
 
     // Return updated entry with relations
     const completeLedger = await prisma.ledger.findUnique({
@@ -632,7 +647,7 @@ export async function PUT(request) {
     return NextResponse.json(completeLedger);
   } catch (err) {
     console.error('❌ Error updating ledger entry:', err);
-    return errorResponse('Failed to update ledger entry', 500);
+    return errorResponse(`Failed to update ledger entry: ${err.message}`, 500);
   }
 }
 
