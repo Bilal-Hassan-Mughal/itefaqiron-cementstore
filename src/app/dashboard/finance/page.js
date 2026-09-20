@@ -384,6 +384,9 @@ const LEDGER_TYPE_COLORS = {
   default: { bg: '#f8fafc', text: '#64748b', border: '#e2e8f0' },
 };
 
+/** Dark blue highlight for counterparty account names in ledger particulars */
+const LEDGER_ACCOUNT_NAME_COLOR = '#1e3a8a';
+
 function getLedgerTypeStyle(ledgerType) {
   const key = String(ledgerType || '').trim().toLowerCase();
   return LEDGER_TYPE_COLORS[key] || LEDGER_TYPE_COLORS.default;
@@ -427,6 +430,28 @@ function getParticularsBoldRanges(text, entry) {
 
   addMatch(text.match(/^Payment for\s+([^-]+?)(?:\s-\s Ref:|$)/i));
   addMatch(text.match(/^Rebate\s+(.+?)\s+MonthKey:/i));
+  // Finance payments: "Receiving {account} - ..." / "Payment {account} - ..."
+  addMatch(text.match(/^(?:Receiving|Payment)\s+(.+?)\s-\s/i));
+  addMatch(text.match(/^payment (?:received from|made to) customer account\s+(.+?)$/i));
+  // Sale / order payment lines
+  addMatch(
+    text.match(
+      /Payment Received - (?:ORDER|BILL|INVOICE|[A-Z0-9]+) - (.+?) - (?:BANK Account:|CASH Account)/i
+    )
+  );
+  addMatch(text.match(/Transport Charges - (?:ORDER|BILL|INVOICE|[A-Z0-9]+) - (.+?)\s*\(/i));
+  // Purchase / supplier lines
+  addMatch(
+    text.match(/(?:Purchase Invoice|Purchase Return)(?:\s#\S+)?\s+(?:from|to)\s+(.+?)(?:\s-\s|\s*\[|$)/i)
+  );
+  addMatch(text.match(/Purchase Update from\s+(.+?)(?:\s#|\s-\s|$)/i));
+  addMatch(
+    text.match(
+      /(?:Payment received from|Payment to|Refund from|Cash Refund from|Cargo\/Out Charges added to)\s+(.+?)\s*[—\-]/i
+    )
+  );
+  addMatch(text.match(/(?:Cash|Bank) Payment for Purchase Update to\s+(.+?)(?:\s-\s|$)/i));
+  addMatch(text.match(/Supplier:\s+(.+?)(?:\s*\(|$)/i));
 
   const inlinePatterns = [
     /\bfrom\s+([^—\-|]+?)(?:\s*[—\-|]|$)/i,
@@ -464,7 +489,11 @@ function renderLedgerParticulars(details, entry) {
   ranges.forEach(({ start, end }, i) => {
     if (cursor < start) parts.push(text.slice(cursor, start));
     parts.push(
-      <Box component="span" key={`part-bold-${i}`} sx={{ fontWeight: 800, color: '#0f172a' }}>
+      <Box
+        component="span"
+        key={`part-bold-${i}`}
+        sx={{ fontWeight: 800, color: LEDGER_ACCOUNT_NAME_COLOR }}
+      >
         {text.slice(start, end)}
       </Box>
     );
