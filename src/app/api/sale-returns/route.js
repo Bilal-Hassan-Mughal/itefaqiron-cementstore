@@ -848,14 +848,16 @@ export async function POST(request) {
 
       return { saleReturn, affectedCusIds: isQuotationReturn ? [] : affectedCusIds };
     }, {
-      timeout: 60000 // 60 seconds timeout for complex transactions with multiple operations
+      timeout: 60000,
+      maxWait: 60000
     });
 
-    // Recalculate balances chronologically for all affected accounts (outside transaction)
-    if (result.affectedCusIds && result.affectedCusIds.length > 0) {
-      for (const cid of result.affectedCusIds) {
-        await recalculateLedgerBalances(prisma, cid);
-      }
+    // Recalculate in background — transaction already wrote correct balances; don't block the invoice response.
+    if (result.affectedCusIds?.length > 0) {
+      const uniqueIds = [...new Set(result.affectedCusIds)];
+      void Promise.all(uniqueIds.map((cid) => recalculateLedgerBalances(prisma, cid))).catch((err) => {
+        console.error('Background ledger recalc after sale return failed:', err);
+      });
     }
 
     return NextResponse.json(result.saleReturn, { status: 201 });

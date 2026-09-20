@@ -64,16 +64,14 @@ export default function BiometricAuthDialog({ open, onSuccess, onClose, embedded
     setFpLoading(false);
     setLastSample(null);
 
-    // Refresh enrollment status from server to avoid stale localStorage.
+    // Refresh enrollment for the logged-in user only (avoid loading the full user list).
     (async () => {
       if (!user?.user_id) return;
       try {
-        const res = await fetch('/api/auth/user-list', { cache: 'no-store' });
+        const res = await fetch(`/api/auth/user-list?user_id=${user.user_id}`, { cache: 'no-store' });
         if (!res.ok) return;
         const data = await res.json();
-        const serverUser = Array.isArray(data?.users)
-          ? data.users.find((u) => u.user_id === user.user_id)
-          : null;
+        const serverUser = Array.isArray(data?.users) ? data.users[0] : null;
         if (!serverUser) return;
 
         const enrolled = serverUser.fingerprint_enrolled === true;

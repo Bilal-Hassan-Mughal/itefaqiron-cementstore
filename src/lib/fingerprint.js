@@ -214,3 +214,8 @@ export async function matcherHealth() {
 export function getFingerprintMatcherMode() {
   return USE_SIDECAR ? "sidecar" : "embedded";
 }
+
+// Warm embedded matcher on server startup so the first verify-self scan is not slow.
+if (typeof process !== "undefined" && !USE_SIDECAR) {
+  void loadNodeafis().catch(() => {});
+}

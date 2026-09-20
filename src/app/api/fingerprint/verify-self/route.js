@@ -49,6 +49,14 @@ export async function POST(req) {
 
   const rows = await prisma.fingerprint.findMany({
     where: { user_id: userId, format: "PngImage", NOT: { descriptor: null } },
+    select: {
+      id: true,
+      user_id: true,
+      finger: true,
+      format: true,
+      template: true,
+      descriptor: true,
+    },
   });
 
   if (rows.length === 0) {
