@@ -639,12 +639,14 @@ function SalesPageContent() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [filterItem, setFilterItem] = useState('');
+  const [filterQuantity, setFilterQuantity] = useState('');
   const [filterNotes, setFilterNotes] = useState('');
   const [listPage, setListPage] = useState(1);
   const [listPageSize, setListPageSize] = useState(25);
   const [listTotal, setListTotal] = useState(0);
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [debouncedItem, setDebouncedItem] = useState('');
+  const [debouncedQuantity, setDebouncedQuantity] = useState('');
   const [debouncedNotes, setDebouncedNotes] = useState('');
   const [debouncedAmount, setDebouncedAmount] = useState('');
   const [debouncedMinAmount, setDebouncedMinAmount] = useState('');
@@ -1648,10 +1650,7 @@ function SalesPageContent() {
     const t = term.trim();
     if (!t) return true;
     const name = detail.product?.pro_title || detail.product_name || '';
-    return (
-      saleDetailNameMatchesItemFilter(name, t) ||
-      saleDetailQtyMatchesItemFilter(detail.qnty, t)
-    );
+    return saleDetailNameMatchesItemFilter(name, t);
   };
 
   const renderHighlightedText = (text, term, nameMatches) => {
@@ -1687,6 +1686,7 @@ function SalesPageContent() {
   const renderSaleLineItemsCell = (sale) => {
     const details = getSaleDetailsInAddOrder(sale?.sale_details || []);
     const highlightTerm = filterItem.trim();
+    const highlightQty = filterQuantity.trim();
 
     if (!details.length) {
       return (
@@ -1700,7 +1700,7 @@ function SalesPageContent() {
           const name = d.product?.pro_title || d.product_name || `Item ${i + 1}`;
           const qty = parseFloat(d.qnty || 0);
           const nameMatches = saleDetailNameMatchesItemFilter(name, highlightTerm);
-          const qtyMatches = saleDetailQtyMatchesItemFilter(qty, highlightTerm);
+          const qtyMatches = saleDetailQtyMatchesItemFilter(qty, highlightQty);
 
           return (
             <Box
@@ -1713,8 +1713,8 @@ function SalesPageContent() {
                 py: 0.35,
                 px: 0.5,
                 borderBottom: i < details.length - 1 ? '1px dashed #e2e8f0' : 'none',
-                bgcolor: qtyMatches && highlightTerm ? '#fffbeb' : 'transparent',
-                borderRadius: qtyMatches && highlightTerm ? '4px' : 0,
+                bgcolor: qtyMatches && highlightQty ? '#fffbeb' : 'transparent',
+                borderRadius: qtyMatches && highlightQty ? '4px' : 0,
               }}
             >
               <Typography
@@ -1739,15 +1739,15 @@ function SalesPageContent() {
                   minWidth: 32,
                   px: 0.75,
                   py: 0.2,
-                  bgcolor: qtyMatches && highlightTerm ? '#fef08a' : '#dbeafe',
-                  color: qtyMatches && highlightTerm ? '#854d0e' : '#1d4ed8',
-                  border: qtyMatches && highlightTerm ? '2px solid #facc15' : '1px solid #93c5fd',
+                  bgcolor: qtyMatches && highlightQty ? '#fef08a' : '#dbeafe',
+                  color: qtyMatches && highlightQty ? '#854d0e' : '#1d4ed8',
+                  border: qtyMatches && highlightQty ? '2px solid #facc15' : '1px solid #93c5fd',
                   borderRadius: '4px',
                   fontSize: '0.72rem',
                   fontWeight: 800,
                   textAlign: 'center',
                   lineHeight: 1.2,
-                  boxShadow: qtyMatches && highlightTerm ? '0 0 0 2px rgba(250, 204, 21, 0.35)' : 'none',
+                  boxShadow: qtyMatches && highlightQty ? '0 0 0 2px rgba(250, 204, 21, 0.35)' : 'none',
                 }}
               >
                 {fmtRateQty(qty)}
@@ -3161,6 +3161,7 @@ function SalesPageContent() {
       });
       if (debouncedSearch.trim()) params.set('q', debouncedSearch.trim());
       if (debouncedItem.trim()) params.set('item', debouncedItem.trim());
+      if (debouncedQuantity.trim()) params.set('quantity', debouncedQuantity.trim());
       if (debouncedNotes.trim()) params.set('notes', debouncedNotes.trim());
       if (filterCustomer) params.set('cus_id', filterCustomer);
       if (filterBillType) params.set('bill_type', filterBillType);
@@ -3210,13 +3211,14 @@ function SalesPageContent() {
     const t = setTimeout(() => {
       setDebouncedSearch(searchTerm);
       setDebouncedItem(filterItem);
+      setDebouncedQuantity(filterQuantity);
       setDebouncedNotes(filterNotes);
       setDebouncedAmount(filterAmount);
       setDebouncedMinAmount(filterMinAmount);
       setDebouncedMaxAmount(filterMaxAmount);
     }, 350);
     return () => clearTimeout(t);
-  }, [searchTerm, filterItem, filterNotes, filterAmount, filterMinAmount, filterMaxAmount]);
+  }, [searchTerm, filterItem, filterQuantity, filterNotes, filterAmount, filterMinAmount, filterMaxAmount]);
 
   const listUrlView = searchParams?.get('view') || '';
   const listUrlType = searchParams?.get('type') || '';
@@ -3226,6 +3228,7 @@ function SalesPageContent() {
     listPageSize,
     debouncedSearch,
     debouncedItem,
+    debouncedQuantity,
     debouncedNotes,
     filterCustomer,
     filterBillType,
@@ -3249,6 +3252,7 @@ function SalesPageContent() {
     const filterKey = [
       debouncedSearch,
       debouncedItem,
+      debouncedQuantity,
       debouncedNotes,
       filterCustomer,
       filterBillType,
@@ -3558,6 +3562,7 @@ function SalesPageContent() {
     if (filterStore) parts.push(`Store: ${filterStore}`);
     if (filterPaymentType) parts.push(`Payment: ${filterPaymentType}`);
     if (filterItem) parts.push(`Item: ${filterItem}`);
+    if (filterQuantity) parts.push(`Qty: ${filterQuantity}`);
     if (filterNotes) parts.push(`Notes: ${filterNotes}`);
     if (filterAmount) parts.push(`Amount: ${filterAmount}`);
     if (filterMinAmount) parts.push(`Min: ${filterMinAmount}`);
@@ -5014,6 +5019,7 @@ function SalesPageContent() {
   const clearFilters = () => {
     setSearchTerm('');
     setFilterItem('');
+    setFilterQuantity('');
     setFilterNotes('');
     setSelectedCustomer(null);
     setFilterCustomer('');
@@ -8573,7 +8579,7 @@ function SalesPageContent() {
                     fullWidth
                     size="small"
                     label="Search by Item"
-                    placeholder="Product name or qty (e.g. 5)..."
+                    placeholder="Product name..."
                     value={filterItem}
                     onChange={(e) => setFilterItem(e.target.value)}
                     onFocus={(e) => e.target.select()}
@@ -8584,6 +8590,21 @@ function SalesPageContent() {
                         </InputAdornment>
                       ),
                     }}
+                    sx={SALES_FILTER_FIELD_SX}
+                  />
+                </Box>
+
+                <Box>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Search by Quantity"
+                    type="number"
+                    placeholder="e.g. 5 or 2.5"
+                    value={filterQuantity}
+                    onChange={(e) => setFilterQuantity(e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                    inputProps={{ min: 0, step: 'any' }}
                     sx={SALES_FILTER_FIELD_SX}
                   />
                 </Box>

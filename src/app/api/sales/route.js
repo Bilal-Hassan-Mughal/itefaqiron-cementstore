@@ -639,6 +639,7 @@ export async function GET(request) {
           pageSize: searchParams.get('pageSize'),
           q: searchParams.get('q'),
           item: searchParams.get('item'),
+          quantity: searchParams.get('quantity'),
           notes: searchParams.get('notes'),
           cusId: searchParams.get('cus_id'),
           storeId: searchParams.get('store_id'),

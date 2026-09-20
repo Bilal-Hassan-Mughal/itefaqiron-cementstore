@@ -67,14 +67,16 @@ function saleWhereSql(branchId, f, t) {
   if (f.balanceStatus === 'without_balance') parts.push(Prisma.sql`s.total_amount <= s.payment`);
   if (f.balanceStatus === 'overpaid') parts.push(Prisma.sql`s.total_amount < s.payment`);
   if (f.item) {
-    const itemLike = likeValue(f.item);
-    const itemNum = Number(f.item);
-    const itemBits = [Prisma.sql`p.pro_title LIKE ${itemLike}`];
-    if (Number.isFinite(itemNum)) itemBits.push(Prisma.sql`sd.qnty = ${itemNum}`);
     parts.push(Prisma.sql`EXISTS (
       SELECT 1 FROM ${t.sale_details} sd
       LEFT JOIN ${t.products} p ON p.pro_id = sd.pro_id
-      WHERE sd.sale_id = s.sale_id AND (${Prisma.join(itemBits, ' OR ')})
+      WHERE sd.sale_id = s.sale_id AND p.pro_title LIKE ${likeValue(f.item)}
+    )`);
+  }
+  if (f.quantity != null) {
+    parts.push(Prisma.sql`EXISTS (
+      SELECT 1 FROM ${t.sale_details} sd
+      WHERE sd.sale_id = s.sale_id AND ABS(sd.qnty - ${f.quantity}) < 0.001
     )`);
   }
   if (f.q) {
@@ -120,14 +122,16 @@ function returnWhereSql(branchId, f, t) {
   if (f.balanceStatus === 'without_balance') parts.push(Prisma.sql`r.total_amount <= r.payment`);
   if (f.balanceStatus === 'overpaid') parts.push(Prisma.sql`r.total_amount < r.payment`);
   if (f.item) {
-    const itemLike = likeValue(f.item);
-    const itemNum = Number(f.item);
-    const itemBits = [Prisma.sql`p.pro_title LIKE ${itemLike}`];
-    if (Number.isFinite(itemNum)) itemBits.push(Prisma.sql`rd.qnty = ${itemNum}`);
     parts.push(Prisma.sql`EXISTS (
       SELECT 1 FROM ${t.sale_return_details} rd
       LEFT JOIN ${t.products} p ON p.pro_id = rd.pro_id
-      WHERE rd.return_id = r.return_id AND (${Prisma.join(itemBits, ' OR ')})
+      WHERE rd.return_id = r.return_id AND p.pro_title LIKE ${likeValue(f.item)}
+    )`);
+  }
+  if (f.quantity != null) {
+    parts.push(Prisma.sql`EXISTS (
+      SELECT 1 FROM ${t.sale_return_details} rd
+      WHERE rd.return_id = r.return_id AND ABS(rd.qnty - ${f.quantity}) < 0.001
     )`);
   }
   if (f.q) {
@@ -274,6 +278,7 @@ export async function fetchPaginatedSalesList(prisma, branchId, params) {
   const f = {
     q: String(params.q || '').trim(),
     item: String(params.item || '').trim(),
+    quantity: params.quantity !== '' && params.quantity != null ? Number(params.quantity) : null,
     notes: String(params.notes || '').trim(),
     cusId: params.cusId ? parseInt(params.cusId, 10) : null,
     storeId: params.storeId ? parseInt(params.storeId, 10) : null,
@@ -292,6 +297,7 @@ export async function fetchPaginatedSalesList(prisma, branchId, params) {
   if (f.minAmount != null && !Number.isFinite(f.minAmount)) f.minAmount = null;
   if (f.maxAmount != null && !Number.isFinite(f.maxAmount)) f.maxAmount = null;
   if (f.exactAmount != null && !Number.isFinite(f.exactAmount)) f.exactAmount = null;
+  if (f.quantity != null && !Number.isFinite(f.quantity)) f.quantity = null;
 
   const saleSql = Prisma.sql`
     SELECT 'SALE' AS kind, s.sale_id AS id, s.created_at AS created_at,

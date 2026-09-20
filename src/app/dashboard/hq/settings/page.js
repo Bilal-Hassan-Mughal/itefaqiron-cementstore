@@ -1,15 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Paper, Typography, Box, Divider, Chip, TextField, Button, Grid,
-  Alert, Snackbar, CircularProgress, InputAdornment, IconButton
+  Alert, CircularProgress, InputAdornment, IconButton,
 } from '@mui/material';
-import { Settings, Shield, Building2, Key, Eye, EyeOff, CheckCircle2, Copy } from 'lucide-react';
+import {
+  Settings, Shield, Building2, Key, Eye, EyeOff, CheckCircle2, Copy,
+} from 'lucide-react';
 import HqPageHeader from '../components/hq-page-header';
 import { useHqSession } from '../components/use-hq-session';
 import { branchFetch } from '@/lib/branch-client';
 import HqBiometricPanel from '@/components/HqBiometricPanel';
+import HqDataDownloadPanel from '../components/hq-data-download-panel';
 
 export default function HqSettingsPage() {
   const { user, ready } = useHqSession();
@@ -372,6 +375,10 @@ export default function HqSettingsPage() {
           </Box>
         </Grid>
       </Grid>
+
+      <Box sx={{ mt: 3 }}>
+        <HqDataDownloadPanel user={user} />
+      </Box>
 
       <Box sx={{ mt: 3 }}>
         <HqBiometricPanel user={user} />
