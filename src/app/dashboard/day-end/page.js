@@ -534,7 +534,7 @@ export default function DayEndPage() {
               <h3 className="text-lg font-black text-slate-900 mt-0.5">
                 Rs. {formatCurrency(summary?.closingBalance || summary?.expectedCashInHand)}
               </h3>
-              <p className="text-[11px] text-slate-400 font-medium">As on {formatDate(selectedDate)}</p>
+              <p className="text-[11px] text-slate-400 font-medium">Cash in hand · matches Cash Report</p>
             </div>
           </div>
 
@@ -602,7 +602,11 @@ export default function DayEndPage() {
               <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
                 <span className="font-semibold text-slate-600">
                   Opening Cash
-                  {summary?.openingCashFromDate ? ` (last close ${summary.openingCashFromDate})` : ''}
+                  {summary?.openingCashSource === 'LEDGER'
+                    ? ' (from Cash Report ledger)'
+                    : summary?.openingCashFromDate
+                      ? ` (${summary.openingCashSource === 'FROZEN' ? 'frozen' : 'last close'} ${summary.openingCashFromDate})`
+                      : ''}
                 </span>
                 <span className="font-bold text-slate-900">Rs. {formatCurrency(summary?.openingCash)}</span>
               </div>
@@ -816,8 +820,10 @@ export default function DayEndPage() {
                 />
                 <p className="text-[11px] text-slate-500">
                   {summary?.openingCashLocked
-                    ? `Taken from physical closing cash of ${summary.openingCashFromDate}. This cannot be edited.`
-                    : 'No previous closed day. Enter the drawer opening for this first close.'}
+                    ? `Frozen opening cash for this closed day.`
+                    : summary?.openingCashSource === 'LEDGER'
+                      ? `Auto-filled from Cash Report ledger (Rs. ${formatCurrency(summary?.ledgerOpeningCash)}). Edit only if drawer differs.`
+                      : 'Enter the drawer opening if it differs from the ledger.'}
                 </p>
               </div>
 

@@ -1,4 +1,10 @@
 import { getPkDateString, pkBusinessDate, pkDayRange, shiftPkDate } from '@/lib/date-helper';
+import {
+  getCashCategoryIds,
+  getBankCategoryIds,
+  getLedgerOpeningBefore,
+  sumCashBankLedgerFlow,
+} from '@/lib/cash-bank-report-helper';
 
 function n(val) {
   const num = parseFloat(val);
@@ -132,6 +138,8 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     holdBillsCount,
     draftJournalsCount,
     products,
+    cashCategoryIds,
+    bankCategoryIds,
   ] = await Promise.all([
     prisma.customer.findMany({
       where: {
@@ -161,7 +169,11 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     }),
     prisma.ledger.findMany({
       where: { created_at: range },
-      include: { customer: { select: { cus_name: true, ...customerInclude } } },
+      include: {
+        customer: {
+          select: { cus_id: true, cus_name: true, cus_category: true, ...customerInclude },
+        },
+      },
       orderBy: { created_at: 'desc' },
     }),
     prisma.saleReturn.findMany({
@@ -181,6 +193,8 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     prisma.holdBill.count({ where: { created_at: range, status: 'DRAFT' } }),
     prisma.journal.count({ where: { journal_date: new Date(`${dateStr}T00:00:00.000Z`), status: 'DRAFT' } }),
     prisma.product.findMany({ select: { pro_stock_qnty: true, pro_cost_price: true } }),
+    getCashCategoryIds(prisma),
+    getBankCategoryIds(prisma),
   ]);
 
   const cashAccounts = [];
@@ -284,29 +298,14 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     }
   });
 
-  const cashLedgerEntries = [];
-  const bankLedgerEntries = [];
-  let ledgerCashIn = 0;
-  let ledgerCashOut = 0;
-  let ledgerBankIn = 0;
-  let ledgerBankOut = 0;
-  ledgerEntries.forEach((entry) => {
-    if (isReportMemo(entry)) return;
-    const debit = n(entry.debit_amount);
-    const credit = n(entry.credit_amount);
-    if (debit <= 0 && credit <= 0) return;
-    if (isBankLedgerAccount(entry)) {
-      ledgerBankIn += debit;
-      ledgerBankOut += credit;
-      bankLedgerEntries.push(entry);
-      return;
-    }
-    if (isCashLedgerAccount(entry)) {
-      ledgerCashIn += debit;
-      ledgerCashOut += credit;
-      cashLedgerEntries.push(entry);
-    }
-  });
+  const {
+    ledgerCashIn,
+    ledgerCashOut,
+    ledgerBankIn,
+    ledgerBankOut,
+    cashLedgerEntries,
+    bankLedgerEntries,
+  } = sumCashBankLedgerFlow(ledgerEntries, cashCategoryIds, bankCategoryIds);
 
   const totalCashInflow = ledgerCashIn;
   const totalCashOutflow = ledgerCashOut;
@@ -328,33 +327,31 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     orderBy: { business_date: 'desc' },
   });
   const prevClosedDate = prevClosed?.business_date ? getPkDateString(prevClosed.business_date) : null;
-  const openingCashLocked = prevClosed?.closing_cash != null;
+
+  const [ledgerOpeningCash, ledgerOpeningBank] = await Promise.all([
+    getLedgerOpeningBefore(prisma, cashCategoryIds, range.gte),
+    getLedgerOpeningBefore(prisma, bankCategoryIds, range.gte),
+  ]);
 
   let openingCash;
-  let openingCashSource = 'ZERO';
+  let openingCashSource = 'LEDGER';
   if (dayEndRecord?.status === 'CLOSED' && dayEndRecord?.opening_cash != null) {
     openingCash = n(dayEndRecord.opening_cash);
     openingCashSource = 'FROZEN';
-  } else if (openingCashLocked) {
-    openingCash = n(prevClosed.closing_cash);
-    openingCashSource = 'PREVIOUS_CLOSE';
   } else if (openingCashOverride !== undefined && openingCashOverride !== null && openingCashOverride !== '') {
     openingCash = n(openingCashOverride);
     openingCashSource = 'ENTERED';
-  } else if (dayEndRecord?.opening_cash != null) {
-    openingCash = n(dayEndRecord.opening_cash);
-    openingCashSource = 'SAVED';
   } else {
-    openingCash = 0;
-    openingCashSource = 'ZERO';
+    openingCash = ledgerOpeningCash;
+    openingCashSource = 'LEDGER';
   }
 
   const expectedCashInHand = money(openingCash + totalCashInflow - totalCashOutflow);
   const actualClosingCash = dayEndRecord?.closing_cash != null ? money(dayEndRecord.closing_cash) : null;
   const variance = actualClosingCash != null ? money(actualClosingCash - expectedCashInHand) : 0;
 
-  const openingBank = prevClosed?.bank_balance != null ? n(prevClosed.bank_balance) : 0;
-  const expectedClosingBank = openingBank + netBankFlow;
+  const openingBank = ledgerOpeningBank;
+  const expectedClosingBank = money(openingBank + netBankFlow);
   const savedClosingBank = dayEndRecord?.bank_balance != null ? n(dayEndRecord.bank_balance) : null;
 
   let totalCOGS = 0;
@@ -428,11 +425,14 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     trend.push({ date: dStr, label, sales: daySales, purchases: dayPurchases });
   }
 
+  const openingCashLocked = openingCashSource === 'FROZEN';
+
   const summary = {
     openingCash: money(openingCash),
+    ledgerOpeningCash: money(ledgerOpeningCash),
     openingCashLocked,
     openingCashSource,
-    openingCashFromDate: prevClosedDate,
+    openingCashFromDate: openingCashSource === 'LEDGER' ? dateStr : prevClosedDate,
     totalSales: money(totalSales),
     cashSales: money(cashSales),
     bankSales: money(bankSales),
@@ -464,7 +464,9 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     totalBankOutflow: money(totalBankOutflow),
     netBankFlow: money(netBankFlow),
     openingBank: money(openingBank),
-    expectedClosingBank: money(expectedClosingBank),
+    ledgerOpeningBank: money(ledgerOpeningBank),
+    openingBankSource: 'LEDGER',
+    expectedClosingBank,
     savedClosingBank: savedClosingBank != null ? money(savedClosingBank) : null,
     totalCashAccountsBalance: money(totalCashAccountsBalance),
     totalBankAccountsBalance: money(totalBankAccountsBalance),
@@ -472,7 +474,9 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     grossProfit: money(grossProfit),
     netProfit: money(netProfit),
     profitMargin,
-    closingBalance: money(expectedCashInHand + (savedClosingBank ?? expectedClosingBank)),
+    closingBalance: expectedCashInHand,
+    closingCashBalance: expectedCashInHand,
+    closingCombinedBalance: money(expectedCashInHand + (savedClosingBank ?? expectedClosingBank)),
     cashMovementSource: 'LEDGER_CASH_BANK',
     invoicesCount: sales.length,
     receiptsCount: cashLedgerEntries.filter((e) => n(e.debit_amount) > 0).length
