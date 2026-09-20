@@ -6,7 +6,6 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
-import SaveProgressBackdrop from '../components/save-progress-backdrop';
 import { openAccountLedgerTab, FINANCE_LEDGER_PATH, notifyLedgerDataChanged } from '@/lib/ledger-tabs';
 
 // Material-UI imports
@@ -547,7 +546,6 @@ function SalesPageContent() {
   const [formRefLoading, setFormRefLoading] = useState(false);
   const [listLoading, setListLoading] = useState(true);
   const [savingBill, setSavingBill] = useState(false);
-  const [saveStatusMessage, setSaveStatusMessage] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
 
   const getCurrentUserId = () => {
@@ -980,18 +978,12 @@ function SalesPageContent() {
   });
 
   // Helper functions
-  const beginSaving = (message) => {
+  const beginSaving = () => {
     setSavingBill(true);
-    setSaveStatusMessage(message);
-  };
-
-  const updateSaveStatus = (message) => {
-    setSaveStatusMessage(message);
   };
 
   const endSaving = () => {
     setSavingBill(false);
-    setSaveStatusMessage('');
   };
 
   const showSnackbar = (message, severity = 'success') => {
@@ -2070,7 +2062,7 @@ function SalesPageContent() {
         };
 
         // Call the return API
-        beginSaving('Processing sale return...');
+        beginSaving();
         const response = await fetch('/api/sale-returns', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2081,25 +2073,15 @@ function SalesPageContent() {
           const saleReturnData = await response.json();
           notifyLedgerDataChanged('sale-return');
 
-          let fullReturn = saleReturnData;
-          try {
-            const detailRes = await fetch(`/api/sale-returns?id=${saleReturnData.return_id}`);
-            if (detailRes.ok) {
-              fullReturn = await detailRes.json();
-            }
-          } catch {
-            /* use create response */
-          }
-
           // Calculate total refund (CASH + BANK)
           const totalRefund = cashReturn + bankReturn;
 
           // Prepare bill data for receipt with sale return details
           const returnReceipt = {
             ...(selectedSaleForReturnMain || {}),
-            ...fullReturn,
-            return_id: fullReturn.return_id ?? saleReturnData.return_id,
-            customer: formSelectedCustomer || fullReturn.customer || selectedSaleForReturnMain?.customer || {},
+            ...saleReturnData,
+            return_id: saleReturnData.return_id,
+            customer: formSelectedCustomer || saleReturnData.customer || selectedSaleForReturnMain?.customer || {},
             sale_details: getCartItemsInAddOrder().map((item, idx) => ({
               sale_detail_id: idx,
               product: { pro_title: item.pro_title || item.product_name || 'Unknown Product' },
@@ -2117,30 +2099,38 @@ function SalesPageContent() {
             notes: paymentData.notes,
             bill_type: 'SALE_RETURN',
             is_return: true,
-            created_at: fullReturn.created_at || new Date(),
+            created_at: saleReturnData.created_at || new Date(),
             previous_balance: parseFloat(
-              fullReturn.previous_balance ??
-              fullReturn.previous_customer_balance ??
+              saleReturnData.previous_balance ??
+              saleReturnData.previous_customer_balance ??
               formSelectedCustomer?.cus_balance ??
               selectedSaleForReturnMain?.customer?.cus_balance ?? 0
             ),
             previous_customer_balance: parseFloat(
-              fullReturn.previous_customer_balance ??
-              fullReturn.previous_balance ??
+              saleReturnData.previous_customer_balance ??
+              saleReturnData.previous_balance ??
               formSelectedCustomer?.cus_balance ??
               selectedSaleForReturnMain?.customer?.cus_balance ?? 0
             )
           };
 
-          updateSaveStatus('Generating return invoice...');
-
-          // Set current bill data and open receipt dialog
           setCurrentBillData(returnReceipt);
           setReceiptDialogOpen(true);
-
+          endSaving();
           showSnackbar('Sale return processed successfully', 'success');
 
-          // Reset form after a delay
+          void (async () => {
+            try {
+              const detailRes = await fetch(`/api/sale-returns?id=${saleReturnData.return_id}`);
+              if (detailRes.ok) {
+                const fullReturn = await detailRes.json();
+                setCurrentBillData((prev) => (prev?.return_id === fullReturn.return_id ? { ...prev, ...fullReturn } : prev));
+              }
+            } catch {
+              /* create response is enough for the receipt */
+            }
+          })();
+
           setTimeout(() => {
             setFormSelectedCustomer(null);
             setFormSelectedProduct(null);
@@ -2148,8 +2138,8 @@ function SalesPageContent() {
             setProductTableData([]);
             setPaymentData({ ...EMPTY_PAYMENT_DATA });
             setSelectedSaleForReturnMain(null);
-            setBillType('BILL'); // Reset to default
-            fetchData({ mode: 'list', silent: true }); // Refresh lists
+            setBillType('BILL');
+            fetchData({ mode: 'list', silent: true });
           }, 1000);
         } else {
           const errorData = await response.json();
@@ -2294,11 +2284,11 @@ function SalesPageContent() {
           };
         }),
         split_payments: splitPayments, // Keep split_payments for backward compatibility
-        updated_by: 6 // System Administrator
+        updated_by: getCurrentUserId()
       };
 
       const isEditing = !!editingSale;
-      beginSaving(isEditing ? 'Updating sale...' : 'Saving sale...');
+      beginSaving();
 
       // Use PUT when editing an existing sale, POST for new
       const apiBody = isEditing ? { ...saleData, id: editingSale.sale_id } : saleData;
@@ -2307,7 +2297,6 @@ function SalesPageContent() {
 
       if (!isNetworkFailure) {
         try {
-          updateSaveStatus(isEditing ? 'Updating sale on server...' : 'Saving sale to server...');
           response = await fetch('/api/sales', {
             method: isEditing ? 'PUT' : 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2321,7 +2310,6 @@ function SalesPageContent() {
 
       // Offline mode fallback when server cannot be reached
       if (isNetworkFailure || (response && response.status === 0)) {
-        updateSaveStatus('Saving bill offline...');
         const offlineId = saveOfflineSale(saleData);
         refreshOfflineCount();
 
@@ -2379,41 +2367,9 @@ function SalesPageContent() {
       }
 
       if (response && response.ok) {
-        updateSaveStatus('Updating ledger & stock...');
         const result = await response.json();
         notifyLedgerDataChanged('sale');
-        showSnackbar('Bill saved successfully!', 'success');
 
-        // If this bill was converted from an order, move the order to ORDER_TRASH
-        if (loadedOrderId) {
-          try {
-            updateSaveStatus('Finalizing order conversion...');
-            await fetch('/api/sales', {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: loadedOrderId, bill_type: 'ORDER_TRASH' })
-            });
-            console.log(`✅ Order ${loadedOrderId} moved to ORDER_TRASH after conversion to bill`);
-            setLoadedOrderId(null);
-          } catch (e) {
-            console.error('Failed to update order status to ORDER_TRASH:', e);
-          }
-        }
-
-        // If this bill was loaded from a held bill / draft, delete the draft so it is removed from held bills
-        if (currentDraftId) {
-          try {
-            updateSaveStatus('Removing held bill...');
-            await fetch(`/api/draft-sales?id=${currentDraftId}`, { method: 'DELETE' });
-            console.log(`✅ Held bill / draft ${currentDraftId} deleted after sale completion`);
-            setCurrentDraftId(null);
-            if (typeof fetchDrafts === 'function') fetchDrafts();
-          } catch (e) {
-            console.error('Failed to delete held bill after sale completion:', e);
-          }
-        }
-
-        // Store bill data for printing
         const billDataForPrint = {
           sale_id: result.sale_id,
           bill_number: result.bill_number ?? null,
@@ -2446,8 +2402,27 @@ function SalesPageContent() {
           labour: parseFloat(paymentData.labour) || 0,
           notes: paymentData.notes || ''
         };
-        updateSaveStatus('Generating invoice...');
         setCurrentBillData(billDataForPrint);
+        setReceiptDialogOpen(true);
+        endSaving();
+        showSnackbar('Bill saved successfully!', 'success');
+
+        const draftIdToDelete = currentDraftId;
+        const orderIdToFinalize = loadedOrderId;
+        if (orderIdToFinalize) setLoadedOrderId(null);
+        if (draftIdToDelete) setCurrentDraftId(null);
+
+        void (async () => {
+          if (draftIdToDelete) {
+            try {
+              await fetch(`/api/draft-sales?id=${draftIdToDelete}`, { method: 'DELETE' });
+              if (typeof fetchDrafts === 'function') fetchDrafts();
+            } catch (e) {
+              console.error('Failed to delete held bill after sale completion:', e);
+            }
+          }
+        })();
+
         upsertSaleInList({
           ...billDataForPrint,
           cash_payment: cashAmount,
@@ -2466,9 +2441,6 @@ function SalesPageContent() {
             c.cus_id === formSelectedCustomer.cus_id ? { ...c, cus_balance: nextBal } : c
           )));
         }
-
-        // Open receipt dialog
-        setReceiptDialogOpen(true);
 
         // If we were editing, clear edit state and return to list
         if (editingSale) {
@@ -4947,11 +4919,6 @@ function SalesPageContent() {
   // Render Sales Create View
   const renderSalesCreateView = () => (
     <DashboardLayout>
-      <SaveProgressBackdrop
-        open={savingBill}
-        message={saveStatusMessage}
-        subMessage="Do not close or refresh until the sale is saved and the invoice is ready"
-      />
       <Container maxWidth={false} sx={{ py: 1 }}>
         <Stack spacing={2} className="no-print">
           {(formRefLoading || (!dataLoadedRef.current.form && products.length === 0)) && (
@@ -7044,7 +7011,7 @@ function SalesPageContent() {
                   {savingBill ? (
                     <>
                       <CircularProgress size={16} sx={{ mr: 1, color: 'white' }} />
-                      {saveStatusMessage || (editingSale ? 'Updating...' : 'Saving...')}
+                      {editingSale ? 'Updating...' : 'Saving...'}
                     </>
                   ) : (
                     editingSale ? 'Update Sale' : 'Save Sale'

@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 import { Prisma } from '@prisma/client';
 import { updateStoreStock, getStoreStock, checkStockAvailability } from '@/lib/storeStock';
 import { calculateClosingBalance, createLedgerEntry } from '@/lib/ledger-helper';
-import { initBranchScope } from '@/lib/branch-server';
+import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
 import { fetchPaginatedSalesList } from '@/lib/sales-list-query';
 
@@ -201,6 +201,11 @@ async function resolveOpeningBalance(tx, cus_id, target_created_at) {
     select: { cus_balance: true }
   });
   return parseFloat(customer?.cus_balance || 0);
+}
+
+/** Fast path for new live sales — account table balance matches latest ledger state. */
+function accountOpeningBalance(account) {
+  return parseFloat(account?.cus_balance ?? 0);
 }
 
 /** Prepares a list of ledger entries about to be deleted by re-linking any subsequent entries to preserve the starting opening balance. */
@@ -1194,6 +1199,7 @@ export async function POST(request) {
 
     // Get special accounts BEFORE transaction (for better performance)
     const specialAccounts = isQuotation ? null : await getSpecialAccountsForSale();
+    const validatedUpdatedBy = await resolveUpdatedByUserId(request, updated_by, prisma);
 
     // Detect if this is a loaded order (order being converted to sale)
     // Check: (1) explicit flag, or (2) reference contains "Converted from Order"
@@ -1219,28 +1225,6 @@ export async function POST(request) {
       }
 
       saleLog(`   Customer name: ${customer.cus_name}`);
-
-      // Validate updated_by user exists (if provided)
-      let validatedUpdatedBy = null;
-      if (updated_by) {
-        try {
-          // Parse to integer to ensure it's a valid ID format
-          const userId = parseInt(updated_by);
-          if (!isNaN(userId)) {
-            const userExists = await tx.users.findUnique({
-              where: { user_id: userId }
-            });
-            if (userExists) {
-              validatedUpdatedBy = userId;
-            } else {
-              console.warn(`⚠️ User ID ${userId} not found in database, setting updated_by to null`);
-            }
-          }
-        } catch (e) {
-          // User validation failed, set to null
-          console.warn(`⚠️ User ID validation failed for ${updated_by}, setting updated_by to null`, e);
-        }
-      }
 
       // Create sale - try with store_id first, fallback if column doesn't exist
       let sale;
@@ -1408,7 +1392,7 @@ export async function POST(request) {
       // Create comprehensive ledger entries (only for non-quotations)
       const ledgerEntries = [];
       const saleCreatedAt = sale.created_at || new Date();
-      let runningBalance = isQuotation ? customer.cus_balance : await resolveOpeningBalance(tx, cus_id, saleCreatedAt);
+      let runningBalance = parseFloat(customer.cus_balance || 0);
 
       if (!isQuotation) {
         // Create bill/order entry for both BILL and ORDER types
@@ -1626,7 +1610,7 @@ export async function POST(request) {
 
             const bankEntry = createLedgerEntry({
               cus_id: bankAccountToUse.cus_id,
-              opening_balance: await resolveOpeningBalance(tx, bankAccountToUse.cus_id, saleCreatedAt),
+              opening_balance: accountOpeningBalance(bankAccountToUse),
               debit_amount: Number(eff_bank.toFixed(2)),
               credit_amount: 0,
               bill_no: sale.sale_id.toString(),
@@ -1652,7 +1636,7 @@ export async function POST(request) {
 
           const cashEntry = createLedgerEntry({
             cus_id: specialAccounts.cash.cus_id,
-            opening_balance: await resolveOpeningBalance(tx, specialAccounts.cash.cus_id, saleCreatedAt),
+            opening_balance: accountOpeningBalance(specialAccounts.cash),
             debit_amount: Number(eff_cash.toFixed(2)),
             credit_amount: 0,
             bill_no: sale.sale_id.toString(),
@@ -1689,7 +1673,7 @@ export async function POST(request) {
 
             const transportEntry = createLedgerEntry({
               cus_id: transportAccount.cus_id,
-              opening_balance: await resolveOpeningBalance(tx, transportAccount.cus_id, saleCreatedAt),
+              opening_balance: accountOpeningBalance(transportAccount),
               debit_amount: 0,
               credit_amount: Number(transportAmount.toFixed(2)),
               bill_no: sale.sale_id.toString(),
@@ -1741,7 +1725,7 @@ export async function POST(request) {
               if (debitAccount) {
                 const splitDebitEntry = createLedgerEntry({
                   cus_id: splitPayment.debit_account_id,
-                  opening_balance: await resolveOpeningBalance(tx, splitPayment.debit_account_id, saleCreatedAt),
+                  opening_balance: accountOpeningBalance(debitAccount),
                   debit_amount: splitAmount,
                   credit_amount: 0,
                   bill_no: sale.sale_id.toString(),
@@ -1763,7 +1747,7 @@ export async function POST(request) {
               if (creditAccount) {
                 const splitCreditEntry = createLedgerEntry({
                   cus_id: splitPayment.credit_account_id,
-                  opening_balance: await resolveOpeningBalance(tx, splitPayment.credit_account_id, saleCreatedAt),
+                  opening_balance: accountOpeningBalance(creditAccount),
                   debit_amount: 0,
                   credit_amount: splitAmount,
                   bill_no: sale.sale_id.toString(),
@@ -1945,7 +1929,8 @@ export async function POST(request) {
         }
       };
     }, {
-      timeout: 120000 // 120 seconds (2 minutes) timeout for complex transactions with ledger entries
+      timeout: 120000,
+      maxWait: 60000
     });
 
     return NextResponse.json(result, { status: 201 });
@@ -2736,9 +2721,12 @@ export async function PUT(request) {
       timeout: 120000 // 120 seconds timeout
     });
 
-    // Recalculate balances chronologically for all affected accounts (outside transaction)
-    for (const cid of affectedCusIds) {
-      await recalculateLedgerBalances(prisma, cid);
+    // Recalculate in background — sale update already wrote ledger lines; don't block the response.
+    if (affectedCusIds?.length > 0) {
+      const uniqueIds = [...new Set(affectedCusIds)];
+      void Promise.all(uniqueIds.map((cid) => recalculateLedgerBalances(prisma, cid))).catch((err) => {
+        console.error('Background ledger recalc after sale update failed:', err);
+      });
     }
 
     return NextResponse.json(result);
