@@ -47,7 +47,8 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Divider
+  Divider,
+  Pagination
 } from '@mui/material';
 
 import {
@@ -107,6 +108,8 @@ const getCartLineCostRate = (cartRow, catalog) => {
 
 const SALE_PRODUCT_LIST_LIMIT = 50;
 
+const SALE_CUSTOMER_LIST_LIMIT = 50;
+
 function filterSaleProducts(options, { inputValue }) {
   const q = String(inputValue || '').toLowerCase().trim();
   const out = [];
@@ -118,6 +121,29 @@ function filterSaleProducts(options, { inputValue }) {
     const title = String(options[i].pro_title || '').toLowerCase();
     const code = String(options[i].pro_code || '').toLowerCase();
     if (title.includes(q) || code.includes(q)) out.push(options[i]);
+  }
+  return out;
+}
+
+function filterSaleCustomers(options, { inputValue }) {
+  const q = String(inputValue || '').toLowerCase().trim();
+  const out = [];
+  for (let i = 0; i < options.length && out.length < SALE_CUSTOMER_LIST_LIMIT; i += 1) {
+    const o = options[i];
+    if (!q) {
+      out.push(o);
+      continue;
+    }
+    if (
+      (o.cus_name || '').toLowerCase().includes(q) ||
+      (o.cus_phone_no || '').toLowerCase().includes(q) ||
+      (o.cus_phone_no2 || '').toLowerCase().includes(q) ||
+      (o.cus_address || '').toLowerCase().includes(q) ||
+      (o.cus_reference || '').toLowerCase().includes(q) ||
+      (o.city?.city_name || '').toLowerCase().includes(q)
+    ) {
+      out.push(o);
+    }
   }
   return out;
 }
@@ -554,6 +580,17 @@ function SalesPageContent() {
   const [dateTo, setDateTo] = useState('');
   const [filterItem, setFilterItem] = useState('');
   const [filterNotes, setFilterNotes] = useState('');
+  const [listPage, setListPage] = useState(1);
+  const [listPageSize, setListPageSize] = useState(25);
+  const [listTotal, setListTotal] = useState(0);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [debouncedItem, setDebouncedItem] = useState('');
+  const [debouncedNotes, setDebouncedNotes] = useState('');
+  const [debouncedAmount, setDebouncedAmount] = useState('');
+  const [debouncedMinAmount, setDebouncedMinAmount] = useState('');
+  const [debouncedMaxAmount, setDebouncedMaxAmount] = useState('');
+  const listAbortRef = useRef(null);
+  const listFilterKeyRef = useRef('');
 
   // Bill view state
   const [viewBillDialog, setViewBillDialog] = useState(false);
@@ -568,7 +605,7 @@ function SalesPageContent() {
   const [showScreenIndicator, setShowScreenIndicator] = useState(false);
 
   // Track which data bundles have been loaded (avoid duplicate API calls)
-  const dataLoadedRef = useRef({ list: false, form: false, listFilters: false, dialogLookups: false });
+  const dataLoadedRef = useRef({ list: false, form: false, listFilters: false, dialogLookups: false, customersFull: false });
   const formFetchInFlightRef = useRef(null);
   const lastBootIdRef = useRef(salesPageBootId);
 
@@ -2411,6 +2448,24 @@ function SalesPageContent() {
         };
         updateSaveStatus('Generating invoice...');
         setCurrentBillData(billDataForPrint);
+        upsertSaleInList({
+          ...billDataForPrint,
+          cash_payment: cashAmount,
+          bank_payment: bankAmount,
+          advance_payment: advancePayment,
+          labour_charges: labourChargesValue,
+        });
+        if (formSelectedCustomer?.cus_id) {
+          const nextBal = Number((
+            parseFloat(formSelectedCustomer.cus_balance || 0)
+            + parseFloat(grandTotal || 0)
+            - cashAmount
+            - bankAmount
+          ).toFixed(2));
+          setCustomers((prev) => prev.map((c) => (
+            c.cus_id === formSelectedCustomer.cus_id ? { ...c, cus_balance: nextBal } : c
+          )));
+        }
 
         // Open receipt dialog
         setReceiptDialogOpen(true);
@@ -2426,7 +2481,6 @@ function SalesPageContent() {
           setTransportOptions([]);
           setBillType('BILL');
           setCurrentView('list');
-          fetchData({ mode: 'list', silent: true });
           showSnackbar('Sale updated successfully! Ledger adjusted.', 'success');
           return;
         }
@@ -2465,9 +2519,6 @@ function SalesPageContent() {
           setCurrentScreenIndex(-1);
           showSnackbar('✅ Sale created! Form cleared for next entry', 'success');
         }
-
-        // Refresh sales data
-        fetchData({ mode: 'list', silent: true });
       } else {
         const errorData = await response.json();
         console.error('❌ API Error Response:', errorData);
@@ -2495,27 +2546,13 @@ function SalesPageContent() {
     }
     const isCreate = viewParam === 'create' || typeParam === 'return' || saleReturnFlag;
 
-    // Prefetch create-form data in background so "New Sale" opens instantly
-    fetchFormReferenceData(true);
-
     if (isCreate) {
+      fetchFormReferenceData(true);
       setListLoading(false);
       return;
     }
 
-    let cancelled = false;
-    (async () => {
-      try {
-        await Promise.all([fetchSalesList(false), fetchListFilterData()]);
-      } catch (e) {
-        console.error('Initial sales list load failed:', e);
-        if (!cancelled) setListLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+    fetchListFilterData();
   }, []);
 
   // Load missing data when switching between list and create views (skip initial mount)
@@ -2529,14 +2566,11 @@ function SalesPageContent() {
     if (currentView === 'create' && !dataLoadedRef.current.form) {
       fetchFormReferenceData(true);
     } else if (currentView === 'list') {
-      if (!dataLoadedRef.current.list || sales.length === 0) {
-        fetchSalesList();
-      }
       if (!dataLoadedRef.current.form && !dataLoadedRef.current.listFilters) {
         fetchListFilterData();
       }
     }
-  }, [currentView, sales.length]);
+  }, [currentView]);
 
   // Lazy-load cities/categories when opening customer or product dialogs
   useEffect(() => {
@@ -2571,60 +2605,19 @@ function SalesPageContent() {
     }));
   }, [paymentData.cash, paymentData.bank]);
 
-  // Auto-save when customer changes
+  // Auto-save screen stack (debounced so typing/cart changes don't freeze the form)
   useEffect(() => {
-    if (currentScreenIndex >= 0 && screenStack[currentScreenIndex]) {
-      const updatedState = captureScreenState();
-      const newStack = [...screenStack];
-      newStack[currentScreenIndex] = updatedState;
-      setScreenStack(newStack);
-      console.log(`💾 Auto-saved on customer change - Screen ${currentScreenIndex + 1}`);
-    }
-  }, [formSelectedCustomer]);
-
-  // Auto-save when store changes
-  useEffect(() => {
-    if (currentScreenIndex >= 0 && screenStack[currentScreenIndex]) {
-      const updatedState = captureScreenState();
-      const newStack = [...screenStack];
-      newStack[currentScreenIndex] = updatedState;
-      setScreenStack(newStack);
-      console.log(`💾 Auto-saved on store change - Screen ${currentScreenIndex + 1}`);
-    }
-  }, [formSelectedStore]);
-
-  // Auto-save when product table changes
-  useEffect(() => {
-    if (currentScreenIndex >= 0 && screenStack[currentScreenIndex]) {
-      const updatedState = captureScreenState();
-      const newStack = [...screenStack];
-      newStack[currentScreenIndex] = updatedState;
-      setScreenStack(newStack);
-      console.log(`💾 Auto-saved on product table change - Screen ${currentScreenIndex + 1}`);
-    }
-  }, [productTableData]);
-
-  // Auto-save when payment data changes
-  useEffect(() => {
-    if (currentScreenIndex >= 0 && screenStack[currentScreenIndex]) {
-      const updatedState = captureScreenState();
-      const newStack = [...screenStack];
-      newStack[currentScreenIndex] = updatedState;
-      setScreenStack(newStack);
-      console.log(`💾 Auto-saved on payment change - Screen ${currentScreenIndex + 1}`);
-    }
-  }, [paymentData]);
-
-  // Auto-save when bill type changes
-  useEffect(() => {
-    if (currentScreenIndex >= 0 && screenStack[currentScreenIndex]) {
-      const updatedState = captureScreenState();
-      const newStack = [...screenStack];
-      newStack[currentScreenIndex] = updatedState;
-      setScreenStack(newStack);
-      console.log(`💾 Auto-saved on bill type change - Screen ${currentScreenIndex + 1}`);
-    }
-  }, [billType]);
+    if (currentScreenIndex < 0) return undefined;
+    const timer = window.setTimeout(() => {
+      setScreenStack((prev) => {
+        if (!prev[currentScreenIndex]) return prev;
+        const next = [...prev];
+        next[currentScreenIndex] = captureScreenState();
+        return next;
+      });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [formSelectedCustomer, formSelectedStore, productTableData, paymentData, billType, currentScreenIndex]);
 
   // Transport functions
   /** @param {unknown} [categoriesForLookup] — pass fresh list from loadData to avoid empty state on first run */
@@ -3059,44 +3052,149 @@ function SalesPageContent() {
     setSales(combined);
   };
 
+  const upsertSaleInList = (row) => {
+    if (!row?.sale_id) return;
+    setSales((prev) => {
+      const without = (prev || []).filter((s) => s.sale_id !== row.sale_id);
+      return [row, ...without];
+    });
+  };
+
   const fetchSalesList = async (silent = false) => {
     try {
+      listAbortRef.current?.abort();
+      const ac = new AbortController();
+      listAbortRef.current = ac;
       if (!silent) setListLoading(true);
 
-      const [salesRes, returnsRes] = await Promise.all([
-        fetch('/api/sales?list=true', { cache: 'no-store' }),
-        fetch('/api/sale-returns?list=true', { cache: 'no-store' })
-      ]);
+      const params = new URLSearchParams({
+        list: 'true',
+        page: String(listPage),
+        pageSize: String(listPageSize),
+      });
+      if (debouncedSearch.trim()) params.set('q', debouncedSearch.trim());
+      if (debouncedItem.trim()) params.set('item', debouncedItem.trim());
+      if (debouncedNotes.trim()) params.set('notes', debouncedNotes.trim());
+      if (filterCustomer) params.set('cus_id', filterCustomer);
+      if (filterBillType) params.set('bill_type', filterBillType);
+      if (filterStore) params.set('store_id', filterStore);
+      if (filterPaymentType) params.set('payment_type', filterPaymentType);
+      if (dateFrom) params.set('from', dateFrom);
+      if (dateTo) params.set('to', dateTo);
+      if (debouncedMinAmount !== '') params.set('min_amount', debouncedMinAmount);
+      if (debouncedMaxAmount !== '') params.set('max_amount', debouncedMaxAmount);
+      if (debouncedAmount !== '') params.set('amount', debouncedAmount);
+      if (filterBalanceStatus) params.set('balance', filterBalanceStatus);
+      if (sortBy) params.set('sort_by', sortBy);
+      if (sortOrder) params.set('sort_order', sortOrder);
 
-      let salesList = [];
-      let returnsList = [];
+      const res = await fetch(`/api/sales?${params.toString()}`, {
+        cache: 'no-store',
+        signal: ac.signal,
+      });
 
-      if (salesRes.ok) {
-        salesList = await salesRes.json();
-        if (!Array.isArray(salesList)) salesList = [];
-      }
+      if (!res.ok) throw new Error('Failed to load sales');
 
-      if (returnsRes.ok) {
-        const returnsData = await returnsRes.json();
-        if (Array.isArray(returnsData)) returnsList = returnsData;
-      }
+      const payload = await res.json();
+      if (ac.signal.aborted) return;
 
-      applySalesListData(salesList, returnsList);
+      const rows = Array.isArray(payload?.data)
+        ? payload.data
+        : (Array.isArray(payload) ? payload : []);
+      const total = Number(payload?.total);
+      setSales(rows);
+      setListTotal(Number.isFinite(total) ? total : rows.length);
       dataLoadedRef.current.list = true;
+
+      if (rows.length === 0 && Number.isFinite(total) && total > 0 && listPage > 1) {
+        setListPage(1);
+      }
     } catch (salesError) {
+      if (salesError?.name === 'AbortError') return;
       console.error('Sales/Returns fetch error:', salesError);
       setSales([]);
+      setListTotal(0);
     } finally {
       if (!silent) setListLoading(false);
     }
   };
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+      setDebouncedItem(filterItem);
+      setDebouncedNotes(filterNotes);
+      setDebouncedAmount(filterAmount);
+      setDebouncedMinAmount(filterMinAmount);
+      setDebouncedMaxAmount(filterMaxAmount);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [searchTerm, filterItem, filterNotes, filterAmount, filterMinAmount, filterMaxAmount]);
+
+  const listUrlView = searchParams?.get('view') || '';
+  const listUrlType = searchParams?.get('type') || '';
+  const salesListEffectKey = [
+    currentView,
+    listPage,
+    listPageSize,
+    debouncedSearch,
+    debouncedItem,
+    debouncedNotes,
+    filterCustomer,
+    filterBillType,
+    filterStore,
+    filterPaymentType,
+    debouncedAmount,
+    debouncedMinAmount,
+    debouncedMaxAmount,
+    filterBalanceStatus,
+    dateFrom,
+    dateTo,
+    sortBy,
+    sortOrder,
+    listUrlView,
+    listUrlType,
+  ].join('\u0001');
+
+  useEffect(() => {
+    if (currentView !== 'list') return;
+    if (listUrlView === 'create' || listUrlType === 'return') return;
+    const filterKey = [
+      debouncedSearch,
+      debouncedItem,
+      debouncedNotes,
+      filterCustomer,
+      filterBillType,
+      filterStore,
+      filterPaymentType,
+      debouncedAmount,
+      debouncedMinAmount,
+      debouncedMaxAmount,
+      filterBalanceStatus,
+      dateFrom,
+      dateTo,
+      sortBy,
+      sortOrder,
+      listPageSize,
+    ].join('|');
+
+    if (listFilterKeyRef.current !== filterKey) {
+      listFilterKeyRef.current = filterKey;
+      if (listPage !== 1) {
+        setListPage(1);
+        return;
+      }
+    }
+
+    fetchSalesList();
+  }, [salesListEffectKey]);
 
   const fetchListFilterData = async () => {
     if (dataLoadedRef.current.form || dataLoadedRef.current.listFilters) return;
 
     try {
       const [customersRes, storesRes] = await Promise.all([
-        fetch('/api/customers?dropdown=true'),
+        fetch('/api/customers?dropdown=true&lite=true'),
         fetch('/api/stores')
       ]);
 
@@ -3133,7 +3231,7 @@ function SalesPageContent() {
       try {
         if (!silent) setFormRefLoading(true);
 
-        const needCustomers = customers.length === 0;
+        const needCustomers = !dataLoadedRef.current.customersFull;
         const needProducts = products.length === 0;
         const needCustomerTypes = customerTypes.length === 0;
         const needStores = stores.length === 0;
@@ -3158,6 +3256,7 @@ function SalesPageContent() {
             const customersArray = Array.isArray(customersData) ? customersData : [];
             customersArrayForRefetch = customersArray;
             setCustomers(customersArray);
+            dataLoadedRef.current.customersFull = true;
           } else {
             setCustomers([]);
           }
@@ -3262,6 +3361,7 @@ function SalesPageContent() {
       const customersData = customersResponse.value || customersResponse;
       const customersArray = Array.isArray(customersData) ? customersData : [];
       setCustomers(customersArray);
+      dataLoadedRef.current.customersFull = true;
       fetchBankAccounts(customersArray);
       fetchTransportAccounts(customersArray, customerCategories, customerTypes);
     } catch (error) {
@@ -3273,7 +3373,7 @@ function SalesPageContent() {
     const { mode = 'all', silent = false } = typeof options === 'object' ? options : { silent: !!options };
 
     if (mode === 'list') {
-      await Promise.all([fetchSalesList(silent), fetchListFilterData()]);
+      await fetchSalesList(silent);
     } else if (mode === 'create') {
       await fetchFormReferenceData(silent);
     } else {
@@ -3288,13 +3388,15 @@ function SalesPageContent() {
     if (lastBootIdRef.current === salesPageBootId) return;
     lastBootIdRef.current = salesPageBootId;
 
-    dataLoadedRef.current = { list: false, form: false, listFilters: false, dialogLookups: false };
+    dataLoadedRef.current = { list: false, form: false, listFilters: false, dialogLookups: false, customersFull: false };
     setSales([]);
+    setListTotal(0);
+    setListPage(1);
 
-    fetchFormReferenceData(true);
     if (currentView === 'list') {
-      fetchSalesList();
       fetchListFilterData();
+    } else {
+      fetchFormReferenceData(true);
     }
   }, [salesPageBootId, currentView]);
 
@@ -3671,7 +3773,7 @@ function SalesPageContent() {
   const handlePrintSalesList = () => {
     const rows = filteredSales;
     if (!rows.length) {
-      showSnackbar('No sales to print for the current filters.', 'warning');
+      showSnackbar('No sales to print on this page.', 'warning');
       return;
     }
     const printWindow = window.open('', '_blank', 'width=1100,height=800');
@@ -4657,112 +4759,7 @@ function SalesPageContent() {
     }
   };
 
-  // Filter sales based on search criteria
-  const filteredSales = useMemo(() => {
-    if (!Array.isArray(sales) || sales.length === 0) {
-      return [];
-    }
-
-    const filtered = sales.filter(sale => {
-      // Filter to only show BILL and SALE_RETURN type (exclude QUOTATION and other types)
-      const isBillType = sale.bill_type === 'BILL' || sale.bill_type === 'SALE_RETURN' || !sale.bill_type;
-      if (!isBillType) {
-        return false;
-      }
-
-      // All filters are empty by default, so all sales should match
-      const matchesSearch = searchTerm === '' ||
-        sale.sale_id?.toString().includes(searchTerm) ||
-        (sale.is_return && sale.return_id?.toString().includes(searchTerm)) ||
-        (sale.is_return && sale.actual_sale_id?.toString().includes(searchTerm)) ||
-        sale.customer?.cus_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        sale.reference?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        sale.bill_number?.toString().includes(searchTerm) ||
-        getBillDisplayNo(sale).toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (sale.sale_details && sale.sale_details.some(d =>
-          (d.product?.pro_title || d.product_name || '').toLowerCase().includes(searchTerm.toLowerCase())
-        )) ||
-        sale.total_amount?.toString().includes(searchTerm);
-
-      const matchesItem = filterItem === '' ||
-        (sale.sale_details && sale.sale_details.some((d) => saleDetailMatchesItemFilter(d, filterItem)));
-
-      const matchesCustomer = filterCustomer === '' ||
-        sale.customer?.cus_id?.toString() === filterCustomer;
-
-      const matchesBillType = filterBillType === '' ||
-        sale.bill_type === filterBillType;
-
-      // Store filter - check if any sale detail has the store
-      const matchesStore = filterStore === '' ||
-        (sale.sale_details && sale.sale_details.some(detail =>
-          detail.store?.storeid?.toString() === filterStore ||
-          detail.store_id?.toString() === filterStore
-        )) ||
-        (sale.is_return && (!sale.sale_details || sale.sale_details.length === 0 || sale.sale_details.every(detail => !detail.store_id)));
-
-      // Payment type filter
-      const matchesPaymentType = filterPaymentType === '' ||
-        sale.payment_type === filterPaymentType;
-
-      // Amount range & exact amount filters
-      const totalAmount = parseFloat(sale.total_amount || 0);
-      const matchesAmount = filterAmount === '' ||
-        (!isNaN(parseFloat(filterAmount)) && Math.abs(totalAmount - parseFloat(filterAmount)) < 0.01);
-      const matchesMinAmount = filterMinAmount === '' ||
-        totalAmount >= parseFloat(filterMinAmount);
-      const matchesMaxAmount = filterMaxAmount === '' ||
-        totalAmount <= parseFloat(filterMaxAmount);
-
-      // Balance status filter
-      const balance = parseFloat(sale.total_amount || 0) - parseFloat(sale.payment || 0);
-      const matchesBalanceStatus = filterBalanceStatus === '' ||
-        (filterBalanceStatus === 'with_balance' && balance > 0) ||
-        (filterBalanceStatus === 'without_balance' && balance <= 0) ||
-        (filterBalanceStatus === 'overpaid' && balance < 0);
-
-      const matchesDateFrom = dateFrom === '' ||
-        (dateFrom && sale.created_at && new Date(sale.created_at) >= new Date(dateFrom));
-
-      const matchesDateTo = dateTo === '' ||
-        (dateTo && sale.created_at && new Date(sale.created_at) <= new Date(dateTo));
-
-      const matchesNotes = filterNotes === '' ||
-        (sale.reference && sale.reference.toLowerCase().includes(filterNotes.toLowerCase())) ||
-        (sale.notes && sale.notes.toLowerCase().includes(filterNotes.toLowerCase()));
-
-      return matchesSearch && matchesCustomer && matchesBillType && matchesStore &&
-        matchesPaymentType && matchesAmount && matchesMinAmount && matchesMaxAmount &&
-        matchesBalanceStatus && matchesDateFrom && matchesDateTo && matchesItem && matchesNotes;
-    });
-
-    // Apply sorting
-    filtered.sort((a, b) => {
-      let aValue, bValue;
-
-      switch (sortBy) {
-        case 'customer':
-          aValue = a.customer?.cus_name || '';
-          bValue = b.customer?.cus_name || '';
-          break;
-        case 'total_amount':
-          aValue = parseFloat(a.total_amount || 0);
-          bValue = parseFloat(b.total_amount || 0);
-          break;
-        default:
-          aValue = a.created_at ? new Date(a.created_at).getTime() : 0;
-          bValue = b.created_at ? new Date(b.created_at).getTime() : 0;
-      }
-
-      const modifier = sortOrder === 'asc' ? 1 : -1;
-
-      if (aValue < bValue) return -1 * modifier;
-      if (aValue > bValue) return 1 * modifier;
-      return 0;
-    });
-
-    return filtered;
-  }, [sales, searchTerm, filterItem, filterNotes, filterCustomer, filterBillType, filterStore, filterPaymentType, filterAmount, filterMinAmount, filterMaxAmount, filterBalanceStatus, dateFrom, dateTo, sortBy, sortOrder]);
+  const filteredSales = sales;
 
 
 
@@ -4916,6 +4913,8 @@ function SalesPageContent() {
 
       // Remove from local state
       setSales(prevSales => prevSales.filter(sale => sale.sale_id !== saleId));
+      setListTotal((n) => Math.max(0, n - 1));
+      fetchSalesList(true);
       showSnackbar('Sale deleted successfully', 'success');
     } catch (error) {
       console.error('Error deleting sale:', error);
@@ -4942,27 +4941,8 @@ function SalesPageContent() {
     setDateTo('');
     setSortBy('created_at');
     setSortOrder('desc');
+    setListPage(1);
   };
-
-  const showPageLoader = currentView === 'list' && listLoading;
-
-  if (showPageLoader) {
-    return (
-      <DashboardLayout>
-        <Box
-          sx={{
-            minHeight: '100vh',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            bgcolor: 'background.default'
-          }}
-        >
-          <CircularProgress size={80} />
-        </Box>
-      </DashboardLayout>
-    );
-  }
 
   // Render Sales Create View
   const renderSalesCreateView = () => (
@@ -5476,18 +5456,7 @@ function SalesPageContent() {
                           sx: { width: 740, maxWidth: '92vw', mt: 0.5 },
                         },
                       }}
-                      filterOptions={(options, { inputValue }) => {
-                        const q = inputValue.toLowerCase().trim();
-                        if (!q) return options;
-                        return options.filter(o =>
-                          (o.cus_name || '').toLowerCase().includes(q) ||
-                          (o.cus_phone_no || '').toLowerCase().includes(q) ||
-                          (o.cus_phone_no2 || '').toLowerCase().includes(q) ||
-                          (o.cus_address || '').toLowerCase().includes(q) ||
-                          (o.cus_reference || '').toLowerCase().includes(q) ||
-                          (o.city?.city_name || '').toLowerCase().includes(q)
-                        );
-                      }}
+                      filterOptions={filterSaleCustomers}
                       value={formSelectedCustomer}
                       onChange={(event, newValue) => {
                         setFormSelectedCustomer(newValue);
@@ -8181,6 +8150,7 @@ function SalesPageContent() {
 
   const renderSalesListView = () => (
     <DashboardLayout>
+      {listLoading && <LinearProgress sx={{ position: 'sticky', top: 0, zIndex: 10 }} />}
       <Container maxWidth={false} sx={{ py: 4 }}>
         <Stack spacing={4}>
           {/* Header - Just the Add Button */}
@@ -8275,7 +8245,7 @@ function SalesPageContent() {
               <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.25 }}>
                 <Chip
                   size="small"
-                  label={`${filteredSales.length} / ${sales.length}`}
+                  label={`${sales.length} of ${listTotal}`}
                   sx={{
                     bgcolor: BRAND.tint.blue,
                     color: BRAND.primary.blue,
@@ -8358,18 +8328,7 @@ function SalesPageContent() {
                       return isCustomer;
                     })}
                     getOptionLabel={(option) => option.cus_name || ''}
-                    filterOptions={(options, { inputValue }) => {
-                      const q = inputValue.toLowerCase().trim();
-                      if (!q) return options;
-                      return options.filter(o =>
-                        (o.cus_name || '').toLowerCase().includes(q) ||
-                        (o.cus_phone_no || '').toLowerCase().includes(q) ||
-                        (o.cus_phone_no2 || '').toLowerCase().includes(q) ||
-                        (o.cus_address || '').toLowerCase().includes(q) ||
-                        (o.cus_reference || '').toLowerCase().includes(q) ||
-                        (o.city?.city_name || '').toLowerCase().includes(q)
-                      );
-                    }}
+                    filterOptions={filterSaleCustomers}
                     value={customers.find(c => c.cus_id.toString() === filterCustomer) || null}
                     onChange={(event, newValue) => {
                       setFilterCustomer(newValue ? newValue.cus_id.toString() : '');
@@ -8620,7 +8579,9 @@ function SalesPageContent() {
                 Sales List
               </Typography>
               <Typography sx={{ fontSize: '0.8125rem', color: '#64748b', fontWeight: 600 }}>
-                {filteredSales.length} of {sales.length} rows
+                {listTotal === 0
+                  ? '0 rows'
+                  : `${((listPage - 1) * listPageSize) + 1}–${Math.min(listPage * listPageSize, listTotal)} of ${listTotal}`}
               </Typography>
             </Box>
             <TableContainer sx={{ overflowX: 'auto', maxWidth: '100%', bgcolor: '#fff', maxHeight: 'calc(100vh - 320px)' }}>
@@ -8648,7 +8609,16 @@ function SalesPageContent() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {filteredSales.length === 0 ? (
+                  {listLoading && filteredSales.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={12} align="center" sx={{ py: 6, border: '1px solid #cbd5e1' }}>
+                        <CircularProgress size={36} />
+                        <Typography sx={{ fontWeight: 600, color: '#64748b', fontSize: '0.875rem', mt: 1.5 }}>
+                          Loading sales…
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredSales.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={12} align="center" sx={{ py: 6, border: '1px solid #cbd5e1' }}>
                         <ShoppingCartIcon sx={{ fontSize: 48, color: '#cbd5e1', mb: 1 }} />
@@ -8778,6 +8748,48 @@ function SalesPageContent() {
                 </TableBody>
               </Table>
             </TableContainer>
+            <Box sx={{
+              borderTop: '1px solid #e2e8f0',
+              px: { xs: 1.5, md: 2 },
+              py: 1.5,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 1.5,
+              bgcolor: '#f8fafc',
+            }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                <FormControl variant="outlined" size="small" sx={{ minWidth: 140 }}>
+                  <InputLabel id="sales-rows-per-page-label">Rows per page</InputLabel>
+                  <Select
+                    labelId="sales-rows-per-page-label"
+                    value={listPageSize}
+                    onChange={(e) => setListPageSize(parseInt(e.target.value, 10))}
+                    label="Rows per page"
+                  >
+                    <MenuItem value={10}>10 per page</MenuItem>
+                    <MenuItem value={25}>25 per page</MenuItem>
+                    <MenuItem value={50}>50 per page</MenuItem>
+                    <MenuItem value={100}>100 per page</MenuItem>
+                  </Select>
+                </FormControl>
+                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
+                  {sales.length} on this page · {listTotal} total
+                </Typography>
+              </Box>
+              <Pagination
+                count={Math.max(1, Math.ceil(listTotal / listPageSize))}
+                page={listPage}
+                onChange={(_, value) => setListPage(value)}
+                color="primary"
+                showFirstButton
+                showLastButton
+                siblingCount={1}
+                boundaryCount={1}
+                disabled={listLoading}
+              />
+            </Box>
           </Card>
         </Stack>
       </Container>
@@ -11325,7 +11337,7 @@ export default function SalesPage() {
         </Container>
       </DashboardLayout>
     }>
-      <SalesPageContent />
+      <SalesPageContent key={salesPageBootId} />
     </Suspense>
   );
 }

@@ -970,7 +970,7 @@ export default function DashboardContent({ activeTab }) {
     const fetchRecentData = async () => {
       setWeeklyDataLoading(true);
       try {
-        const salesRes = await fetch('/api/sales?limit=3000');
+        const salesRes = await fetch('/api/sales?list=true&slim=true&limit=3000');
         const salesDataRaw = salesRes.ok ? await salesRes.json() : [];
         const salesList = Array.isArray(salesDataRaw) ? salesDataRaw : (salesDataRaw.data || []);
         setRawSalesList(salesList);

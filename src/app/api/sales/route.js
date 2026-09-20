@@ -8,8 +8,9 @@ import { updateStoreStock, getStoreStock, checkStockAvailability } from '@/lib/s
 import { calculateClosingBalance, createLedgerEntry } from '@/lib/ledger-helper';
 import { initBranchScope } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
+import { fetchPaginatedSalesList } from '@/lib/sales-list-query';
 
-const SPECIAL_ACCOUNTS_CACHE_TTL_MS = 60_000;
+const SPECIAL_ACCOUNTS_CACHE_TTL_MS = 10 * 60_000;
 const saleLog = () => {};
 let specialAccountsCache = { data: null, expiresAt: 0 };
 
@@ -348,7 +349,9 @@ export async function GET(request) {
     const id = searchParams.get('id') ? parseInt(searchParams.get('id')) : searchParams.get('sale_id') ? parseInt(searchParams.get('sale_id')) : null;
     const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')) : null;
     const listMode = searchParams.get('list') === 'true';
+    const slimList = searchParams.get('slim') === 'true';
     const billTypeFilter = searchParams.get('bill_type');
+    const pageParam = searchParams.get('page');
 
     if (id) {
       // Fetch single sale
@@ -477,9 +480,6 @@ export async function GET(request) {
           return NextResponse.json({ error: 'Sale not found' }, { status: 404 });
         }
 
-        // Fetch bill_number separately (not yet in Prisma schema until regenerated)
-        const [bnRow] = await prisma.$queryRaw`SELECT bill_number FROM sales WHERE sale_id = ${id} AND branch_id = ${branchId}`;
-
         // Fetch transport details from ledger
         // Match both legacy 'SALE' and new 'CREDIT' trnx_type for backward compatibility
         const transportLedgerEntries = await prisma.ledger.findMany({
@@ -515,7 +515,7 @@ export async function GET(request) {
         const saleWithBillNumber = { 
           ...sale, 
           notes: sale.notes || sale.reference || null,
-          bill_number: bnRow?.bill_number ?? null,
+          bill_number: sale.bill_number ?? null,
           transport_details: transportDetails
         };
 
@@ -646,12 +646,36 @@ export async function GET(request) {
         }
       }
     } else {
+      if (listMode && pageParam) {
+        const result = await fetchPaginatedSalesList(prisma, branchId, {
+          page: pageParam,
+          pageSize: searchParams.get('pageSize'),
+          q: searchParams.get('q'),
+          item: searchParams.get('item'),
+          notes: searchParams.get('notes'),
+          cusId: searchParams.get('cus_id'),
+          storeId: searchParams.get('store_id'),
+          paymentType: searchParams.get('payment_type'),
+          fromDate: searchParams.get('from'),
+          toDate: searchParams.get('to'),
+          minAmount: searchParams.get('min_amount'),
+          maxAmount: searchParams.get('max_amount'),
+          amount: searchParams.get('amount'),
+          balanceStatus: searchParams.get('balance'),
+          billType: billTypeFilter,
+          sortBy: searchParams.get('sort_by'),
+          sortOrder: searchParams.get('sort_order'),
+        });
+        return NextResponse.json(result);
+      }
+
       // Fetch all sales
       try {
         const findOptions = listMode
           ? {
               select: {
                 sale_id: true,
+                bill_number: true,
                 total_amount: true,
                 discount: true,
                 payment: true,
@@ -676,21 +700,22 @@ export async function GET(request) {
                     name_urdu: true,
                   },
                 },
-                sale_details: {
-                  select: {
-                    sale_detail_id: true,
-                    qnty: true,
-                    unit_rate: true,
-                    total_amount: true,
-                    store_id: true,
-                    product: {
-                      select: { pro_id: true, pro_title: true },
-                    },
-                  },
-                },
-                updated_by_user: {
-                  select: { full_name: true, role: true },
-                },
+                ...(slimList
+                  ? {}
+                  : {
+                      sale_details: {
+                        select: {
+                          sale_detail_id: true,
+                          qnty: true,
+                          unit_rate: true,
+                          total_amount: true,
+                          store_id: true,
+                          product: {
+                            select: { pro_id: true, pro_title: true },
+                          },
+                        },
+                      },
+                    }),
               },
               where: {
                 branch_id: branchId,
@@ -767,16 +792,10 @@ export async function GET(request) {
 
         const sales = await prisma.sale.findMany(findOptions);
 
-        // Merge bill_number from raw query (not yet in Prisma schema until regenerated)
-        const saleIds = sales.map(s => s.sale_id);
-        const billNumbers = saleIds.length > 0
-          ? await prisma.$queryRaw`SELECT sale_id, bill_number FROM sales WHERE branch_id = ${branchId} AND sale_id IN (${Prisma.join(saleIds)})`
-          : [];
-        const bnMap = Object.fromEntries(billNumbers.map(r => [r.sale_id, r.bill_number]));
         const salesWithBillNumber = sales.map(s => ({
           ...s,
-          notes: s.reference || null,
-          bill_number: bnMap[s.sale_id] ?? null
+          notes: s.reference || s.notes || null,
+          bill_number: s.bill_number ?? null
         }));
 
         saleLog('✅ Sales fetched via Prisma:', sales.length);
@@ -1315,71 +1334,44 @@ export async function POST(request) {
         sale = { ...sale, bill_number: nextNum };
       }
 
-      // Create sale details - try with store_id first, fallback to raw SQL if column doesn't exist
-      const saleDetailPromises = sale_details.map(async detail => {
-        const detailData = {
-          sale_id: sale.sale_id,
-          pro_id: detail.pro_id,
-          vehicle_no: detail.vehicle_no || null,
-          qnty: Number(parseFloat(detail.qnty || 0).toFixed(2)),
-          unit: detail.unit,
-          unit_rate: Number(parseFloat(detail.unit_rate || 0).toFixed(2)),
-          total_amount: Number(parseFloat(detail.total_amount || 0).toFixed(2)),
-          discount: Number(parseFloat(detail.discount || 0).toFixed(2)),
-          net_total: Number((parseFloat(detail.total_amount || 0) - parseFloat(detail.discount || 0)).toFixed(2)),
-          cus_id,
-          updated_by: validatedUpdatedBy
-        };
+      const detailRows = sale_details.map((detail) => ({
+        sale_id: sale.sale_id,
+        store_id: parseInt(store_id),
+        pro_id: detail.pro_id,
+        vehicle_no: detail.vehicle_no || null,
+        qnty: Number(parseFloat(detail.qnty || 0).toFixed(2)),
+        unit: detail.unit,
+        unit_rate: Number(parseFloat(detail.unit_rate || 0).toFixed(2)),
+        total_amount: Number(parseFloat(detail.total_amount || 0).toFixed(2)),
+        discount: Number(parseFloat(detail.discount || 0).toFixed(2)),
+        net_total: Number((parseFloat(detail.total_amount || 0) - parseFloat(detail.discount || 0)).toFixed(2)),
+        cus_id,
+        updated_by: validatedUpdatedBy
+      }));
 
-        // Try with store_id first
+      if (detailRows.length) {
         try {
-          return await tx.saleDetail.create({
-            data: {
-              ...detailData,
-              store_id: parseInt(store_id)
-            }
-          });
+          await tx.saleDetail.createMany({ data: detailRows });
         } catch (storeIdError) {
-          // If store_id column doesn't exist, use raw SQL
           if (storeIdError.code === 'P2022' && storeIdError.message?.includes('store_id')) {
-            console.warn('⚠️ store_id column not found in sale_details, creating using raw SQL');
-
-            // Use raw SQL to insert sale_detail without store_id column
-            await tx.$executeRaw`
+            await Promise.all(detailRows.map((row) => tx.$executeRaw`
               INSERT INTO sale_details (
                 sale_id, pro_id, vehicle_no, qnty, unit, unit_rate,
                 total_amount, discount, net_total, cus_id, updated_by
               ) VALUES (
-                ${detailData.sale_id}, ${detailData.pro_id},
-                ${detailData.vehicle_no}, ${detailData.qnty},
-                ${detailData.unit}, ${detailData.unit_rate},
-                ${detailData.total_amount}, ${detailData.discount},
-                ${detailData.net_total}, ${detailData.cus_id},
-                ${detailData.updated_by}
+                ${row.sale_id}, ${row.pro_id},
+                ${row.vehicle_no}, ${row.qnty},
+                ${row.unit}, ${row.unit_rate},
+                ${row.total_amount}, ${row.discount},
+                ${row.net_total}, ${row.cus_id},
+                ${row.updated_by}
               )
-            `;
-
-            // Return a mock object that matches the expected structure
-            return {
-              sale_id: detailData.sale_id,
-              pro_id: detailData.pro_id,
-              vehicle_no: detailData.vehicle_no,
-              qnty: detailData.qnty,
-              unit: detailData.unit,
-              unit_rate: detailData.unit_rate,
-              total_amount: detailData.total_amount,
-              discount: detailData.discount,
-              net_total: detailData.net_total,
-              cus_id: detailData.cus_id,
-              updated_by: detailData.updated_by
-            };
+            `));
           } else {
             throw storeIdError;
           }
         }
-      });
-
-      await Promise.all(saleDetailPromises);
+      }
 
       // Create split payments if provided
       saleLog('💰 Split payments received:', split_payments);
@@ -1388,27 +1380,17 @@ export async function POST(request) {
       if (split_payments && split_payments.length > 0) {
         saleLog('✅ Creating split payments for sale:', sale.sale_id);
 
-        const splitPaymentPromises = split_payments.map((splitPayment, index) => {
-          saleLog(`   Split payment ${index + 1}:`, {
-            amount: splitPayment.amount,
-            type: splitPayment.payment_type,
-            debit_account_id: splitPayment.debit_account_id
-          });
-
-          return tx.splitPayment.create({
-            data: {
-              sale_id: sale.sale_id,
-              amount: parseFloat(splitPayment.amount),
-              payment_type: splitPayment.payment_type,
-              debit_account_id: splitPayment.debit_account_id || null,
-              credit_account_id: splitPayment.credit_account_id || null,
-              reference: splitPayment.reference || null
-            }
-          });
+        const createdSplitPayments = await tx.splitPayment.createMany({
+          data: split_payments.map((splitPayment) => ({
+            sale_id: sale.sale_id,
+            amount: parseFloat(splitPayment.amount),
+            payment_type: splitPayment.payment_type,
+            debit_account_id: splitPayment.debit_account_id || null,
+            credit_account_id: splitPayment.credit_account_id || null,
+            reference: splitPayment.reference || null
+          }))
         });
-
-        const createdSplitPayments = await Promise.all(splitPaymentPromises);
-        saleLog('✅ Split payments created:', createdSplitPayments.length);
+        saleLog('✅ Split payments created:', createdSplitPayments.count);
       } else {
         saleLog('⚠️ No split payments to create - array is', split_payments === null ? 'NULL' : split_payments === undefined ? 'UNDEFINED' : 'EMPTY');
       }
@@ -1417,7 +1399,7 @@ export async function POST(request) {
       // Update store stock quantities (instead of global product stock) - Skip for quotations and orders
       if (!isQuotation && !isOrder && store_id) {
         const storeStockUpdatePromises = sale_details.map(async detail => {
-          await updateStoreStock(store_id, detail.pro_id, parseFloat(detail.qnty || 0), 'decrement', validatedUpdatedBy);
+          await updateStoreStock(store_id, detail.pro_id, parseFloat(detail.qnty || 0), 'decrement', validatedUpdatedBy, tx);
         });
         await Promise.all(storeStockUpdatePromises);
       }
@@ -1799,28 +1781,24 @@ export async function POST(request) {
         // Create all ledger entries (skip for quotations)
         if (!isQuotation) {
           const startLId = await getNextId('ledger', 'l_id', tx);
-          await Promise.all(
-            ledgerEntries.map((entry, i) =>
-              tx.ledger.create({
-                data: {
-                  l_id: startLId + i,
-                  cus_id: entry.cus_id,
-                  opening_balance: entry.opening_balance,
-                  debit_amount: entry.debit_amount,
-                  credit_amount: entry.credit_amount,
-                  closing_balance: entry.closing_balance,
-                  bill_no: entry.bill_no,
-                  trnx_type: entry.trnx_type,
-                  details: entry.details,
-                  payments: entry.payments,
-                  cash_payment: entry.cash_payment || 0,
-                  bank_payment: entry.bank_payment || 0,
-                  updated_by: entry.updated_by,
-                  ledger_type: entry.ledger_type
-                }
-              })
-            )
-          );
+          await tx.ledger.createMany({
+            data: ledgerEntries.map((entry, i) => ({
+              l_id: startLId + i,
+              cus_id: entry.cus_id,
+              opening_balance: entry.opening_balance,
+              debit_amount: entry.debit_amount,
+              credit_amount: entry.credit_amount,
+              closing_balance: entry.closing_balance,
+              bill_no: entry.bill_no,
+              trnx_type: entry.trnx_type,
+              details: entry.details,
+              payments: entry.payments,
+              cash_payment: entry.cash_payment || 0,
+              bank_payment: entry.bank_payment || 0,
+              updated_by: entry.updated_by,
+              ledger_type: entry.ledger_type || null
+            }))
+          });
 
           await syncAccountBalancesFromEntries(tx, ledgerEntries);
 

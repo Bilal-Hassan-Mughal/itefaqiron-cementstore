@@ -306,9 +306,6 @@ export async function GET(request) {
                 },
               },
             },
-            updated_by_user: {
-              select: { full_name: true, role: true },
-            },
           },
           orderBy: { created_at: 'desc' },
         });

@@ -293,38 +293,57 @@ export async function GET(request) {
         where.cus_type = parseInt(typeParam);
       }
 
-
+      const isLite = searchParams.get('lite') === 'true';
       const customers = await prisma.customer.findMany({
         where,
-        select: {
-          cus_id: true,
-          cus_name: true,
-          cus_balance: true,
-          cus_phone_no: true,
-          cus_phone_no2: true,
-          cus_address: true,
-          cus_reference: true,
-          cus_category: true,
-          cus_type: true,
-          customer_category: {
-            select: {
-              cus_cat_id: true,
-              cus_cat_title: true
+        select: isLite
+          ? {
+              cus_id: true,
+              cus_name: true,
+              cus_balance: true,
+              cus_phone_no: true,
+              customer_category: {
+                select: {
+                  cus_cat_id: true,
+                  cus_cat_title: true
+                }
+              }
             }
-          },
-          customer_type: {
-            select: {
-              cus_type_id: true,
-              cus_type_title: true
-            }
-          },
-          city: {
-            select: {
+          : {
+              cus_id: true,
+              cus_name: true,
+              cus_balance: true,
+              cus_phone_no: true,
+              cus_phone_no2: true,
+              cus_address: true,
+              cus_reference: true,
+              cus_category: true,
+              cus_type: true,
+              CNIC: true,
+              NTN_NO: true,
+              name_urdu: true,
+              other: true,
+              cus_account_info: true,
               city_id: true,
-              city_name: true
-            }
-          }
-        },
+              customer_category: {
+                select: {
+                  cus_cat_id: true,
+                  cus_cat_title: true
+                }
+              },
+              customer_type: {
+                select: {
+                  cus_type_id: true,
+                  cus_type_title: true
+                }
+              },
+              city: {
+                select: {
+                  city_id: true,
+                  city_name: true
+                }
+              }
+            },
         orderBy: { created_at: 'desc' },
       });
       return NextResponse.json(customers);
