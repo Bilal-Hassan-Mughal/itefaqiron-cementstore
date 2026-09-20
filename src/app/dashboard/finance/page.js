@@ -799,6 +799,8 @@ const getKarachiDateKey = (dateInput) => {
   return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
 };
 
+const getTodayKarachiDateKey = () => getKarachiDateKey(new Date());
+
 const getLedgerEntryDisplayAmounts = (entry) => {
   const debitAmt = parseFloat(entry.debit_amount || 0);
   const creditAmt = parseFloat(entry.credit_amount || 0);
@@ -998,12 +1000,19 @@ export default function FinancePage() {
   const [selectedSubCategory, setSelectedSubCategory] = useState(''); // This will be customer type ID
   const [sortBy, setSortBy] = useState('created_at');
   const [sortOrder, setSortOrder] = useState('desc');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [startDate, setStartDate] = useState(() => getTodayKarachiDateKey());
+  const [endDate, setEndDate] = useState(() => getTodayKarachiDateKey());
   const [selectedLedgerType, setSelectedLedgerType] = useState('');
   const [staticDataLoaded, setStaticDataLoaded] = useState(false);
   /** All Accounts: default recent rows; Clear shows full ledger */
   const [allAccountsFullLedger, setAllAccountsFullLedger] = useState(false);
+
+  const resetLedgerDatesToToday = useCallback(() => {
+    const today = getTodayKarachiDateKey();
+    setStartDate(today);
+    setEndDate(today);
+    setAllAccountsFullLedger(false);
+  }, []);
 
   // Customer dropdown filter states
   const [customerSearchTerm, setCustomerSearchTerm] = useState('');
@@ -1417,13 +1426,13 @@ export default function FinancePage() {
         setActiveLedgerId(null);
         setSelectedCustomer('');
         setAccountSearchTerm('');
-        setAllAccountsFullLedger(false);
       }
+      resetLedgerDatesToToday();
       fetchLedgerData();
     };
     window.addEventListener('branch-changed', onBranchChanged);
     return () => window.removeEventListener('branch-changed', onBranchChanged);
-  }, []);
+  }, [fetchLedgerData, resetLedgerDatesToToday]);
 
   // Reactive effect when filters change
   useEffect(() => {
@@ -3172,6 +3181,7 @@ export default function FinancePage() {
     const id = Number(cusId);
     if (!id) return;
     const name = cusName || customers.find((c) => Number(c.cus_id) === id)?.cus_name || `Account #${id}`;
+    resetLedgerDatesToToday();
     setActiveLedgerId(id);
     setSelectedCustomer(String(id));
     setAccountSearchTerm(name);
@@ -3184,6 +3194,7 @@ export default function FinancePage() {
     const id = Number(cusId);
     if (!id) return;
     const name = cusName || customers.find((c) => Number(c.cus_id) === id)?.cus_name || `Account #${id}`;
+    resetLedgerDatesToToday();
     setOpenLedgers((prev) => {
       const exists = prev.find((l) => l.id === id);
       if (exists) {
@@ -3203,10 +3214,12 @@ export default function FinancePage() {
       if (Number(activeLedgerId) === id) {
         const next = updated.find((l) => !l.minimized);
         if (next) {
+          resetLedgerDatesToToday();
           setActiveLedgerId(next.id);
           setSelectedCustomer(String(next.id));
           setAccountSearchTerm(next.name);
         } else {
+          resetLedgerDatesToToday();
           setActiveLedgerId(null);
           setSelectedCustomer('');
           setAccountSearchTerm('');
@@ -3232,6 +3245,7 @@ export default function FinancePage() {
     setOpenLedgers((prev) => {
       const updated = prev.filter((l) => l.id !== id);
       if (Number(activeLedgerId) === id) {
+        resetLedgerDatesToToday();
         const next = updated.find((l) => !l.minimized);
         if (next) {
           setActiveLedgerId(next.id);
@@ -3252,10 +3266,10 @@ export default function FinancePage() {
   };
 
   const showAllAccountsView = () => {
+    resetLedgerDatesToToday();
     setActiveLedgerId(null);
     setSelectedCustomer('');
     setAccountSearchTerm('');
-    setAllAccountsFullLedger(false);
   };
 
   const activeLedgerTab = openLedgers.find((l) => l.id === Number(activeLedgerId));
@@ -3269,12 +3283,8 @@ export default function FinancePage() {
     setSelectedSubCategory('');
     setSortBy('created_at');
     setSortOrder('desc');
-    setStartDate('');
-    setEndDate('');
+    resetLedgerDatesToToday();
     setSelectedLedgerType('');
-    if (!activeLedgerId) {
-      setAllAccountsFullLedger(true);
-    }
     // Open ledger tabs stay until you click X — not cleared here
     if (!activeLedgerId) {
       setSelectedCustomer('');
@@ -3810,9 +3820,9 @@ export default function FinancePage() {
           )}
         </Card>
 
-        {useAllAccountsRecentDefault && (
+        {startDate === getTodayKarachiDateKey() && endDate === getTodayKarachiDateKey() && (
           <Alert severity="info" sx={{ borderRadius: '12px', py: 0.75, alignItems: 'center' }}>
-            Showing <strong>today&apos;s entries</strong> plus the <strong>last entry before today</strong>. Click <strong>Clear</strong> for the full ledger.
+            Showing <strong>today&apos;s ledger entries</strong> ({startDate}). Expand filters to change the date range.
           </Alert>
         )}
 
