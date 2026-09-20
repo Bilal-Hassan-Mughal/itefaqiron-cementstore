@@ -6,7 +6,6 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
-import SaveProgressBackdrop from '../components/save-progress-backdrop';
 import { openAccountLedgerTab, FINANCE_LEDGER_PATH, notifyLedgerDataChanged } from '@/lib/ledger-tabs';
 
 // Material-UI imports
@@ -266,26 +265,11 @@ function PurchasesPageContent() {
     }
   }, [searchParams]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [saveStatusMessage, setSaveStatusMessage] = useState('');
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: '',
     severity: 'success'
   });
-
-  const beginSaving = (message) => {
-    setIsSubmitting(true);
-    setSaveStatusMessage(message);
-  };
-
-  const updateSaveStatus = (message) => {
-    setSaveStatusMessage(message);
-  };
-
-  const endSaving = () => {
-    setIsSubmitting(false);
-    setSaveStatusMessage('');
-  };
 
   // Customer form states
   const [showCustomerForm, setShowCustomerForm] = useState(false);
@@ -1525,15 +1509,7 @@ function PurchasesPageContent() {
       const authOk = await requireAuth();
       if (!authOk) return;
     }
-    beginSaving(
-      editingPurchase
-        ? 'Updating purchase...'
-        : purchaseType === 'return'
-          ? 'Processing purchase return...'
-          : 'Saving purchase...'
-    );
     try {
-
       const url = editingPurchase ? '/api/purchases' : '/api/purchases';
       const method = editingPurchase ? 'PUT' : 'POST';
 
@@ -1634,7 +1610,32 @@ function PurchasesPageContent() {
         allCashAccounts: customers.filter(c => c.cus_name.toLowerCase().includes('cash'))
       });
 
-      updateSaveStatus(editingPurchase ? 'Updating purchase on server...' : 'Saving purchase to server...');
+      const supplier = customers.find(c => Number(c.cus_id) === Number(formData.cus_id));
+      const localNetTotal = calculateNetTotal();
+      const localBill = {
+        ...formData,
+        pur_id: null,
+        total_amount: calculatedTotalAmount,
+        display_net_total: localNetTotal,
+        cash_payment: cashPayment,
+        bank_payment: bankPayment,
+        payment: totalPayment,
+        payment_type: paymentType,
+        bank_title: selectedBankAccount?.cus_name || null,
+        customer: supplier,
+        purchase_details: formData.purchase_details,
+        previous_customer_balance: parseFloat(supplier?.cus_balance ?? 0),
+        bill_type: purchaseType === 'return' ? 'PURCHASE_RETURN' : 'PURCHASE',
+        created_at: new Date().toISOString(),
+      };
+
+      if (!editingPurchase) {
+        setCurrentBillData(localBill);
+        setReceiptDialogOpen(true);
+      } else {
+        setIsSubmitting(true);
+      }
+
       const response = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -1643,60 +1644,73 @@ function PurchasesPageContent() {
 
       if (response.ok) {
         const result = await response.json();
-        notifyLedgerDataChanged('purchase');
 
-        updateSaveStatus('Updating stock & ledger...');
-        // Fetch fresh purchase data to ensure accurate balance info
-        const freshResponse = await fetch(`/api/purchases?id=${result.pur_id}`);
-        const freshData = freshResponse.ok ? await freshResponse.json() : result;
+        const mergePurchaseBill = (freshData) => {
+          const freshProductTotal = (freshData.purchase_details || []).reduce((s, d) => s + parseFloat(d.total_amount || 0), 0)
+            || parseFloat(freshData.total_amount || 0);
+          const freshNetTotal = freshProductTotal
+            + parseFloat(freshData.unloading_amount || 0)
+            + parseFloat(freshData.transport_amount || 0)
+            + parseFloat(freshData.labour_amount || 0)
+            + parseFloat(freshData.fare_amount || 0)
+            - parseFloat(freshData.discount || 0);
 
-        // Store bill data for printing receipt
-        const freshProductTotal = (freshData.purchase_details || []).reduce((s, d) => s + parseFloat(d.total_amount || 0), 0)
-          || parseFloat(freshData.total_amount || 0);
-        const freshNetTotal = freshProductTotal
-          + parseFloat(freshData.unloading_amount || 0)
-          + parseFloat(freshData.transport_amount || 0)
-          + parseFloat(freshData.labour_amount || 0)
-          + parseFloat(freshData.fare_amount || 0)
-          - parseFloat(freshData.discount || 0);
+          let freshCashPayment = parseFloat(freshData.cash_payment || 0);
+          let freshBankPayment = parseFloat(freshData.bank_payment || 0);
+          if (freshCashPayment === 0 && freshBankPayment === 0 && parseFloat(freshData.payment || 0) > 0) {
+            const totalPay = parseFloat(freshData.payment || 0);
+            if (freshData.payment_type === 'BANK_TRANSFER') freshBankPayment = totalPay;
+            else freshCashPayment = totalPay;
+          }
 
-        // Calculate payment breakdown
-        let freshCashPayment = parseFloat(freshData.cash_payment || 0);
-        let freshBankPayment = parseFloat(freshData.bank_payment || 0);
-        if (freshCashPayment === 0 && freshBankPayment === 0 && parseFloat(freshData.payment || 0) > 0) {
-          const totalPay = parseFloat(freshData.payment || 0);
-          if (freshData.payment_type === 'BANK_TRANSFER') freshBankPayment = totalPay;
-          else freshCashPayment = totalPay;
+          return {
+            ...freshData,
+            display_net_total: freshNetTotal,
+            cash_payment: freshCashPayment,
+            bank_payment: freshBankPayment,
+            bank_title: selectedBankAccount?.cus_name || null,
+            customer: freshData.customer || customers.find(c => c.cus_id === freshData.cus_id),
+            purchase_details: freshData.purchase_details || formData.purchase_details,
+            previous_customer_balance: parseFloat(freshData.previous_customer_balance ?? supplier?.cus_balance ?? 0),
+            bill_type: purchaseType === 'return' ? 'PURCHASE_RETURN' : 'PURCHASE',
+          };
+        };
+
+        if (editingPurchase) {
+          setCurrentBillData(mergePurchaseBill(result));
+          setReceiptDialogOpen(true);
+        } else {
+          setCurrentBillData((prev) => mergePurchaseBill({ ...prev, ...result }));
         }
 
-        const billDataForPrint = {
-          ...freshData,
-          display_net_total: freshNetTotal,
-          cash_payment: freshCashPayment,
-          bank_payment: freshBankPayment,
-          bank_title: selectedBankAccount?.cus_name || null,
-          customer: freshData.customer || customers.find(c => c.cus_id === freshData.cus_id),
-          purchase_details: freshData.purchase_details || formData.purchase_details,
-          previous_customer_balance: parseFloat(freshData.previous_customer_balance ?? 0),
-          bill_type: purchaseType === 'return' ? 'PURCHASE_RETURN' : 'PURCHASE'
-        };
-        setCurrentBillData(billDataForPrint);
+        setIsSubmitting(false);
+        notifyLedgerDataChanged('purchase');
 
-        // Persist any edited sale_rate (pro_sale_price) and cost_rate (pro_cost_price) values to product records
-        updateSaveStatus('Updating product prices...');
-        try {
-          const updatePromises = formData.purchase_details.map(async (detail) => {
-            const pid = parseInt(detail.pro_id, 10);
-            const existingProduct = products.find(p => p.pro_id === pid);
-            const newSaleRate = parseFloat(detail.unit_rate || detail.rate || 0);
-            const newCostRate = parseFloat(detail.cost_rate ?? detail.original_cost_rate ?? existingProduct?.pro_cost_price ?? 0);
+        void (async () => {
+          try {
+            const freshResponse = await fetch(`/api/purchases?id=${result.pur_id}`);
+            if (freshResponse.ok) {
+              const freshData = await freshResponse.json();
+              setCurrentBillData((prev) => (
+                prev?.pur_id === freshData.pur_id ? mergePurchaseBill({ ...prev, ...freshData }) : prev
+              ));
+            }
+          } catch {
+            /* local receipt is enough */
+          }
 
-            const payload = { id: pid };
-            if (!Number.isNaN(newSaleRate) && newSaleRate > 0) payload.pro_sale_price = newSaleRate;
-            if (!Number.isNaN(newCostRate) && newCostRate > 0) payload.pro_cost_price = newCostRate;
+          try {
+            await Promise.all(formData.purchase_details.map(async (detail) => {
+              const pid = parseInt(detail.pro_id, 10);
+              const existingProduct = products.find(p => p.pro_id === pid);
+              const newSaleRate = parseFloat(detail.unit_rate || detail.rate || 0);
+              const newCostRate = parseFloat(detail.cost_rate ?? detail.original_cost_rate ?? existingProduct?.pro_cost_price ?? 0);
 
-            if (Object.keys(payload).length > 1) {
-              try {
+              const payload = { id: pid };
+              if (!Number.isNaN(newSaleRate) && newSaleRate > 0) payload.pro_sale_price = newSaleRate;
+              if (!Number.isNaN(newCostRate) && newCostRate > 0) payload.pro_cost_price = newCostRate;
+
+              if (Object.keys(payload).length > 1) {
                 const resp = await fetch('/api/products', {
                   method: 'PUT',
                   headers: { 'Content-Type': 'application/json' },
@@ -1706,20 +1720,12 @@ function PurchasesPageContent() {
                   const updated = await resp.json();
                   setProducts(prev => prev.map(p => p.pro_id === updated.pro_id ? updated : p));
                 }
-              } catch (err) {
-                console.warn('Failed to persist product price update for', pid, err);
               }
-            }
-          });
-
-          await Promise.all(updatePromises);
-        } catch (err) {
-          console.warn('Error persisting product price updates after purchase save', err);
-        }
-
-        // Open receipt dialog
-        updateSaveStatus('Generating receipt...');
-        setReceiptDialogOpen(true);
+            }));
+          } catch (err) {
+            console.warn('Error persisting product price updates after purchase save', err);
+          }
+        })();
 
         // After successful purchase creation, restore previous screen state if available
         if (currentScreenIndex > 0) {
@@ -1772,11 +1778,27 @@ function PurchasesPageContent() {
           setCurrentScreenIndex(0);
           setSnackbar({ open: true, message: '✅ Purchase saved! Form cleared', severity: 'success' });
         }
+      } else {
+        if (!editingPurchase) {
+          setReceiptDialogOpen(false);
+          setCurrentBillData(null);
+        }
+        const errorData = await response.json().catch(() => ({}));
+        setSnackbar({
+          open: true,
+          message: errorData.error || 'Failed to save purchase',
+          severity: 'error',
+        });
       }
     } catch (error) {
+      if (!editingPurchase) {
+        setReceiptDialogOpen(false);
+        setCurrentBillData(null);
+      }
       console.error('Error saving purchase:', error);
+      setSnackbar({ open: true, message: 'Failed to save purchase', severity: 'error' });
     } finally {
-      endSaving();
+      setIsSubmitting(false);
     }
   };
 
@@ -2970,11 +2992,6 @@ function PurchasesPageContent() {
   // Render Purchase Create View
   const renderPurchaseCreateView = () => (
     <DashboardLayout>
-      <SaveProgressBackdrop
-        open={isSubmitting}
-        message={saveStatusMessage}
-        subMessage="Do not close or refresh until the purchase is saved and the receipt is ready"
-      />
       <Container maxWidth={false} disableGutters sx={{ py: 1, px: { xs: 0, sm: 1 } }}>
         <Stack spacing={2} sx={{ width: '100%', pb: 4 }}>
         {/* Header */}
@@ -4723,7 +4740,7 @@ function PurchasesPageContent() {
                   }}
                 >
                   {isSubmitting
-                    ? (saveStatusMessage || (editingPurchase ? 'Updating...' : 'Saving...'))
+                    ? (editingPurchase ? 'Updating...' : 'Saving...')
                     : (editingPurchase ? 'Update Purchase' : 'Save')}
                 </Button>
               </Box>

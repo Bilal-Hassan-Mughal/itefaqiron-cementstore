@@ -41,7 +41,6 @@ function PaymentFormDialog({
   defaultCashAccountId = '',
   onSubmit,
   loading = false,
-  saveStatusMessage = '',
   ledgerSerial = 1,
   initialValues = null,
   editPaymentId = null,
@@ -400,7 +399,7 @@ function PaymentFormDialog({
             fontWeight: 700,
           }}
         >
-          {loading ? saveStatusMessage || 'Processing...' : theme.confirm}
+          {loading ? 'Processing...' : theme.confirm}
         </Button>
       </DialogActions>
     </Dialog>

@@ -29,7 +29,6 @@ import {
 import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
-import SaveProgressBackdrop from '../components/save-progress-backdrop';
 import { BRAND, COMPANY } from '@/lib/brand-theme';
 import {
   notifyLedgerDataChanged,
@@ -103,6 +102,38 @@ const fmtAmt = (val) => {
   if (n % 1 === 0) return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
+
+function buildPaymentReceiptPayload({
+  type,
+  paymentId = null,
+  customer,
+  previousBalance,
+  remainingBalance,
+  cashAmount,
+  bankAmount,
+  discountAmount,
+  totalAmount,
+  bankAcc,
+  cashAcc,
+  description,
+}) {
+  return {
+    type,
+    paymentId,
+    date: new Date().toLocaleDateString('en-GB'),
+    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+    customer: customer ? { ...customer, cus_balance: remainingBalance } : null,
+    previousBalance,
+    remainingBalance,
+    cashAmount,
+    bankAmount,
+    discountAmount,
+    totalAmount,
+    bankAcc,
+    cashAcc,
+    description,
+  };
+}
 
 const customerOptionKey = (option) => String(option?.cus_id ?? '');
 const isSameCustomerOption = (a, b) => Number(a?.cus_id) === Number(b?.cus_id);
@@ -1033,21 +1064,6 @@ export default function FinancePage() {
   const [cashAccounts, setCashAccounts] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
   const [paymentStatus, setPaymentStatus] = useState({ loading: false, error: null });
-  const [saveStatusMessage, setSaveStatusMessage] = useState('');
-
-  const beginSavingPayment = (message) => {
-    setPaymentStatus({ loading: true, error: null });
-    setSaveStatusMessage(message);
-  };
-
-  const updateSaveStatus = (message) => {
-    setSaveStatusMessage(message);
-  };
-
-  const endSavingPayment = () => {
-    setPaymentStatus({ loading: false, error: null });
-    setSaveStatusMessage('');
-  };
 
   const [selectedLedgerBankAccount, setSelectedLedgerBankAccount] = useState(null);
   const [isSubmittingLedger, setIsSubmittingLedger] = useState(false);
@@ -2324,7 +2340,32 @@ export default function FinancePage() {
         return;
       }
 
-      beginSavingPayment(isPaymentEdit ? 'Updating receipt transaction...' : 'Processing amount received...');
+      const customer = paymentEditAccount || selectedCustomerRecord;
+      const previousBalance = parseFloat(customer?.cus_balance || 0);
+      const bankAcc = bankAccounts.find(b => b.cus_id === parseInt(formData.bank_account));
+      const cashAcc = cashAccounts.find(c => c.cus_id === parseInt(formData.cash_account));
+      const estimatedRemaining = previousBalance - totalAmount;
+
+      if (!isPaymentEdit) {
+        setShowReceivePaymentForm(false);
+        clearPaymentEditState();
+        setPaymentReceiptData(buildPaymentReceiptPayload({
+          type: 'RECEIVE',
+          customer,
+          previousBalance,
+          remainingBalance: estimatedRemaining,
+          cashAmount,
+          bankAmount,
+          discountAmount,
+          totalAmount,
+          bankAcc,
+          cashAcc,
+          description: formData.description,
+        }));
+        setShowPaymentReceipt(true);
+      } else {
+        setPaymentStatus({ loading: true, error: null });
+      }
 
       const accountId = paymentEditAccount?.cus_id || selectedCustomer;
       const paymentData = {
@@ -2342,10 +2383,6 @@ export default function FinancePage() {
         created_by: actorUserId
       };
 
-      const customer = paymentEditAccount || selectedCustomerRecord;
-      const previousBalance = parseFloat(customer?.cus_balance || 0);
-
-      updateSaveStatus(isPaymentEdit ? 'Updating transaction on server...' : 'Saving payment to server...');
       const response = await fetch('/api/payments', {
         method: isPaymentEdit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2354,62 +2391,54 @@ export default function FinancePage() {
 
       if (response.ok) {
         const result = await response.json();
-        if (!isPaymentEdit) {
-          const discountVal = parseFloat(formData.discount || 0);
-          if (discountVal > 0) {
-            createDiscountExpense(-discountVal, formData.description || 'Payment discount').catch((err) => {
-              console.error('Discount expense error:', err);
-            });
-          }
-        }
-
-        applyPaymentResultToState(result);
-        paymentRefreshSkipRef.current = true;
-        notifyLedgerDataChanged(isPaymentEdit ? 'payment-receive-edit' : 'payment-receive');
-
-        const bankAcc = bankAccounts.find(b => b.cus_id === parseInt(formData.bank_account));
-        const cashAcc = cashAccounts.find(c => c.cus_id === parseInt(formData.cash_account));
-        
         const displayPrevBal = result.customer_opening_balance !== undefined ? result.customer_opening_balance : previousBalance;
-        const displayRemBal = result.customer_closing_balance !== undefined ? result.customer_closing_balance : (previousBalance - totalAmount);
+        const displayRemBal = result.customer_closing_balance !== undefined ? result.customer_closing_balance : estimatedRemaining;
 
-        setPaymentReceiptData({
-          type: 'RECEIVE',
-          paymentId: result.payment_id,
-          date: new Date().toLocaleDateString('en-GB'),
-          time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
-          customer: {
-            ...customer,
-            cus_balance: displayRemBal
-          },
-          previousBalance: displayPrevBal,
-          remainingBalance: displayRemBal,
-          cashAmount,
-          bankAmount,
-          discountAmount,
-          totalAmount,
-          bankAcc,
-          cashAcc,
-          description: formData.description
-        });
-
-        setShowReceivePaymentForm(false);
-        clearPaymentEditState();
         if (isPaymentEdit) {
+          setShowReceivePaymentForm(false);
+          clearPaymentEditState();
           await fetchData();
           alert('Receipt transaction updated successfully.');
         } else {
-          setShowPaymentReceipt(true);
+          setPaymentReceiptData((prev) => ({
+            ...prev,
+            paymentId: result.payment_id,
+            previousBalance: displayPrevBal,
+            remainingBalance: displayRemBal,
+            customer: prev?.customer ? { ...prev.customer, cus_balance: displayRemBal } : prev?.customer,
+          }));
         }
+
+        queueMicrotask(() => {
+          if (!isPaymentEdit) {
+            const discountVal = parseFloat(formData.discount || 0);
+            if (discountVal > 0) {
+              createDiscountExpense(-discountVal, formData.description || 'Payment discount').catch((err) => {
+                console.error('Discount expense error:', err);
+              });
+            }
+          }
+          applyPaymentResultToState(result);
+          paymentRefreshSkipRef.current = true;
+          notifyLedgerDataChanged(isPaymentEdit ? 'payment-receive-edit' : 'payment-receive');
+        });
       } else {
+        if (!isPaymentEdit) {
+          setShowPaymentReceipt(false);
+          setPaymentReceiptData(null);
+        }
         const error = await response.json();
         alert(`Error: ${error.error}`);
       }
     } catch (error) {
+      if (!isPaymentEdit) {
+        setShowPaymentReceipt(false);
+        setPaymentReceiptData(null);
+      }
       console.error('Error submitting payment:', error);
       alert('Failed to process payment');
     } finally {
-      endSavingPayment();
+      setPaymentStatus({ loading: false, error: null });
     }
   };
 
@@ -2435,7 +2464,32 @@ export default function FinancePage() {
         return;
       }
 
-      beginSavingPayment(isPaymentEdit ? 'Updating payment transaction...' : 'Processing payout...');
+      const customer = paymentEditAccount || selectedCustomerRecord;
+      const previousBalance = parseFloat(customer?.cus_balance || 0);
+      const bankAcc = bankAccounts.find(b => b.cus_id === parseInt(formData.bank_account));
+      const cashAcc = cashAccounts.find(c => c.cus_id === parseInt(formData.cash_account));
+      const estimatedRemaining = previousBalance + totalAmount;
+
+      if (!isPaymentEdit) {
+        setShowPayPaymentForm(false);
+        clearPaymentEditState();
+        setPaymentReceiptData(buildPaymentReceiptPayload({
+          type: 'PAY',
+          customer,
+          previousBalance,
+          remainingBalance: estimatedRemaining,
+          cashAmount,
+          bankAmount,
+          discountAmount,
+          totalAmount,
+          bankAcc,
+          cashAcc,
+          description: formData.description,
+        }));
+        setShowPaymentReceipt(true);
+      } else {
+        setPaymentStatus({ loading: true, error: null });
+      }
 
       const accountId = paymentEditAccount?.cus_id || selectedCustomer;
       const paymentData = {
@@ -2453,10 +2507,6 @@ export default function FinancePage() {
         created_by: actorUserId
       };
 
-      const customer = paymentEditAccount || selectedCustomerRecord;
-      const previousBalance = parseFloat(customer?.cus_balance || 0);
-
-      updateSaveStatus(isPaymentEdit ? 'Updating transaction on server...' : 'Saving payment to server...');
       const response = await fetch('/api/payments', {
         method: isPaymentEdit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2465,62 +2515,54 @@ export default function FinancePage() {
 
       if (response.ok) {
         const result = await response.json();
-        if (!isPaymentEdit) {
-          const discountVal = parseFloat(formData.discount || 0);
-          if (discountVal > 0) {
-            createDiscountExpense(discountVal, formData.description || 'Payment discount').catch((err) => {
-              console.error('Discount expense error:', err);
-            });
-          }
-        }
-
-        applyPaymentResultToState(result);
-        paymentRefreshSkipRef.current = true;
-        notifyLedgerDataChanged(isPaymentEdit ? 'payment-pay-edit' : 'payment-pay');
-
-        const bankAcc = bankAccounts.find(b => b.cus_id === parseInt(formData.bank_account));
-        const cashAcc = cashAccounts.find(c => c.cus_id === parseInt(formData.cash_account));
-        
         const displayPrevBal = result.customer_opening_balance !== undefined ? result.customer_opening_balance : previousBalance;
-        const displayRemBal = result.customer_closing_balance !== undefined ? result.customer_closing_balance : (previousBalance + totalAmount);
+        const displayRemBal = result.customer_closing_balance !== undefined ? result.customer_closing_balance : estimatedRemaining;
 
-        setPaymentReceiptData({
-          type: 'PAY',
-          paymentId: result.payment_id,
-          date: new Date().toLocaleDateString('en-GB'),
-          time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
-          customer: {
-            ...customer,
-            cus_balance: displayRemBal
-          },
-          previousBalance: displayPrevBal,
-          remainingBalance: displayRemBal,
-          cashAmount,
-          bankAmount,
-          discountAmount,
-          totalAmount,
-          bankAcc,
-          cashAcc,
-          description: formData.description
-        });
-
-        setShowPayPaymentForm(false);
-        clearPaymentEditState();
         if (isPaymentEdit) {
+          setShowPayPaymentForm(false);
+          clearPaymentEditState();
           await fetchData();
           alert('Payment transaction updated successfully.');
         } else {
-          setShowPaymentReceipt(true);
+          setPaymentReceiptData((prev) => ({
+            ...prev,
+            paymentId: result.payment_id,
+            previousBalance: displayPrevBal,
+            remainingBalance: displayRemBal,
+            customer: prev?.customer ? { ...prev.customer, cus_balance: displayRemBal } : prev?.customer,
+          }));
         }
+
+        queueMicrotask(() => {
+          if (!isPaymentEdit) {
+            const discountVal = parseFloat(formData.discount || 0);
+            if (discountVal > 0) {
+              createDiscountExpense(discountVal, formData.description || 'Payment discount').catch((err) => {
+                console.error('Discount expense error:', err);
+              });
+            }
+          }
+          applyPaymentResultToState(result);
+          paymentRefreshSkipRef.current = true;
+          notifyLedgerDataChanged(isPaymentEdit ? 'payment-pay-edit' : 'payment-pay');
+        });
       } else {
+        if (!isPaymentEdit) {
+          setShowPaymentReceipt(false);
+          setPaymentReceiptData(null);
+        }
         const error = await response.json();
         alert(`Error: ${error.error}`);
       }
     } catch (error) {
+      if (!isPaymentEdit) {
+        setShowPaymentReceipt(false);
+        setPaymentReceiptData(null);
+      }
       console.error('Error submitting payment:', error);
       alert('Failed to process payment');
     } finally {
-      endSavingPayment();
+      setPaymentStatus({ loading: false, error: null });
     }
   };
 
@@ -3468,11 +3510,6 @@ export default function FinancePage() {
 
   return (
     <DashboardLayout>
-      <SaveProgressBackdrop
-        open={paymentStatus.loading}
-        message={saveStatusMessage}
-        subMessage="Do not close or refresh until the payment is saved and the receipt is ready"
-      />
       <Container maxWidth={false} sx={{ display: 'flex', flexDirection: 'column', p: { xs: 2, md: 2.5 }, pb: 4, gap: 2.5, ...LEDGER_UI.page }}>
 
         {/* Summary KPIs */}
@@ -5028,7 +5065,6 @@ export default function FinancePage() {
         defaultCashAccountId={cashAccounts[0]?.cus_id || ''}
         onSubmit={handleReceivePaymentSubmit}
         loading={paymentStatus.loading}
-        saveStatusMessage={saveStatusMessage}
         ledgerSerial={ledgerEntries.length + 1}
         initialValues={paymentFormInitialValues}
         editPaymentId={editingPaymentId}
@@ -5050,7 +5086,6 @@ export default function FinancePage() {
         defaultCashAccountId={cashAccounts[0]?.cus_id || ''}
         onSubmit={handlePayPaymentSubmit}
         loading={paymentStatus.loading}
-        saveStatusMessage={saveStatusMessage}
         ledgerSerial={ledgerEntries.length + 1}
         initialValues={paymentFormInitialValues}
         editPaymentId={editingPaymentId}
@@ -5071,7 +5106,7 @@ export default function FinancePage() {
         }}>
           {paymentReceiptData?.type === 'PAY' ? 'Payment Receipt' : 'Receipt - Payment Received'}
           <Typography variant="body2" sx={{ bgcolor: 'rgba(255,255,255,0.2)', px: 1.5, py: 0.5, borderRadius: 1, fontWeight: 600 }}>
-            PAY-{paymentReceiptData?.paymentId}
+            {paymentReceiptData?.paymentId != null ? `PAY-${paymentReceiptData.paymentId}` : 'PAY-NEW'}
           </Typography>
         </DialogTitle>
 
@@ -5098,7 +5133,7 @@ export default function FinancePage() {
                   )}
                 </Box>
                 <Box sx={{ textAlign: 'right' }}>
-                  <Typography variant="body2"><strong>Ref #:</strong> PAY-{paymentReceiptData.paymentId}</Typography>
+                  <Typography variant="body2"><strong>Ref #:</strong> {paymentReceiptData.paymentId != null ? `PAY-${paymentReceiptData.paymentId}` : 'PAY-NEW'}</Typography>
                   <Typography variant="body2"><strong>Date:</strong> {paymentReceiptData.date}</Typography>
                   <Typography variant="body2"><strong>Time:</strong> {paymentReceiptData.time}</Typography>
                   <Typography variant="body2"><strong>Created By:</strong> {getCreatedByName(paymentReceiptData, currentUser)}</Typography>

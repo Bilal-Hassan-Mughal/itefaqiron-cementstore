@@ -105,6 +105,57 @@ const getCartLineCostRate = (cartRow, catalog) => {
   return getProductCostPrice(cartRow);
 };
 
+function buildSaleReceiptBill({
+  saleId = null,
+  billNumber = null,
+  formSelectedCustomer,
+  finalPaymentTotal,
+  grandTotal,
+  paymentData,
+  cashAmount,
+  bankAmount,
+  advancePayment = 0,
+  selectedBankAccount,
+  totalShippingAmount,
+  billType,
+  cartItems,
+  createdAt,
+  labourChargesValue,
+}) {
+  const prevBalance = parseFloat(formSelectedCustomer?.cus_balance || 0);
+  return {
+    sale_id: saleId,
+    bill_number: billNumber,
+    cus_id: formSelectedCustomer?.cus_id,
+    total_amount: grandTotal,
+    discount: parseFloat(paymentData.discount) || 0,
+    payment: finalPaymentTotal,
+    payment_type: cashAmount > 0 && bankAmount > 0 ? 'SPLIT' : bankAmount > 0 ? 'BANK_TRANSFER' : 'CASH',
+    cash_payment: cashAmount,
+    bank_payment: bankAmount,
+    advance_payment: advancePayment,
+    previous_balance: prevBalance,
+    bank_title: selectedBankAccount?.cus_name || null,
+    shipping_amount: totalShippingAmount,
+    bill_type: billType || 'BILL',
+    reference: paymentData.notes || null,
+    created_at: createdAt || new Date().toISOString(),
+    customer: formSelectedCustomer,
+    sale_details: (cartItems || []).map((product, index) => ({
+      sale_detail_id: index + 1,
+      pro_id: product.pro_id,
+      qnty: product.quantity,
+      unit: 'PCS',
+      unit_rate: product.rate,
+      total_amount: product.amount,
+      product: { pro_title: product.pro_title || 'N/A' },
+    })),
+    labour: parseFloat(paymentData.labour) || 0,
+    labour_charges: labourChargesValue,
+    notes: paymentData.notes || '',
+  };
+}
+
 const SALE_PRODUCT_LIST_LIMIT = 50;
 
 const SALE_CUSTOMER_LIST_LIMIT = 50;
@@ -2061,62 +2112,74 @@ function SalesPageContent() {
           updated_by: getCurrentUserId()
         };
 
-        // Call the return API
-        beginSaving();
+        const totalRefund = cashReturn + bankReturn;
+        const prevReturnBalance = parseFloat(
+          formSelectedCustomer?.cus_balance ??
+          selectedSaleForReturnMain?.customer?.cus_balance ?? 0
+        );
+
+        setCurrentBillData({
+          ...(selectedSaleForReturnMain || {}),
+          return_id: null,
+          customer: formSelectedCustomer || selectedSaleForReturnMain?.customer || {},
+          sale_details: getCartItemsInAddOrder().map((item, idx) => ({
+            sale_detail_id: idx,
+            product: { pro_title: item.pro_title || item.product_name || 'Unknown Product' },
+            qnty: item.quantity,
+            unit_rate: item.rate,
+            total_amount: item.amount,
+          })),
+          total_amount: calculateTotalAmount(),
+          labour_charges: paymentData.labour || 0,
+          shipping_amount: paymentData.deliveryCharges || 0,
+          discount: paymentData.discount || 0,
+          payment: totalRefund,
+          cash_refund: cashReturn,
+          bank_refund: bankReturn,
+          cash_payment: cashReturn,
+          bank_payment: bankReturn,
+          notes: paymentData.notes,
+          bill_type: 'SALE_RETURN',
+          is_return: true,
+          created_at: new Date().toISOString(),
+          previous_balance: prevReturnBalance,
+          previous_customer_balance: prevReturnBalance,
+        });
+        setReceiptDialogOpen(true);
+
         const response = await fetch('/api/sale-returns', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(returnBody)
+          body: JSON.stringify(returnBody),
         });
 
         if (response.ok) {
           const saleReturnData = await response.json();
           notifyLedgerDataChanged('sale-return');
 
-          // Calculate total refund (CASH + BANK)
-          const totalRefund = cashReturn + bankReturn;
-
-          // Prepare bill data for receipt with sale return details
-          const returnReceipt = {
-            ...(selectedSaleForReturnMain || {}),
+          setCurrentBillData((prev) => ({
+            ...prev,
             ...saleReturnData,
             return_id: saleReturnData.return_id,
-            customer: formSelectedCustomer || saleReturnData.customer || selectedSaleForReturnMain?.customer || {},
-            sale_details: getCartItemsInAddOrder().map((item, idx) => ({
-              sale_detail_id: idx,
-              product: { pro_title: item.pro_title || item.product_name || 'Unknown Product' },
-              qnty: item.quantity,
-              unit_rate: item.rate,
-              total_amount: item.amount
-            })),
-            total_amount: calculateTotalAmount(),
-            labour_charges: paymentData.labour || 0,
-            shipping_amount: paymentData.deliveryCharges || 0,
-            discount: paymentData.discount || 0,
-            payment: totalRefund, // Total of CASH + BANK refund
-            cash_refund: cashReturn, // Breakdown: cash portion
-            bank_refund: bankReturn, // Breakdown: bank portion
-            notes: paymentData.notes,
-            bill_type: 'SALE_RETURN',
+            customer: formSelectedCustomer || saleReturnData.customer || selectedSaleForReturnMain?.customer || prev?.customer || {},
+            payment: totalRefund,
+            cash_refund: cashReturn,
+            bank_refund: bankReturn,
+            cash_payment: cashReturn,
+            bank_payment: bankReturn,
             is_return: true,
-            created_at: saleReturnData.created_at || new Date(),
             previous_balance: parseFloat(
               saleReturnData.previous_balance ??
               saleReturnData.previous_customer_balance ??
-              formSelectedCustomer?.cus_balance ??
-              selectedSaleForReturnMain?.customer?.cus_balance ?? 0
+              prevReturnBalance
             ),
             previous_customer_balance: parseFloat(
               saleReturnData.previous_customer_balance ??
               saleReturnData.previous_balance ??
-              formSelectedCustomer?.cus_balance ??
-              selectedSaleForReturnMain?.customer?.cus_balance ?? 0
-            )
-          };
-
-          setCurrentBillData(returnReceipt);
-          setReceiptDialogOpen(true);
-          endSaving();
+              prevReturnBalance
+            ),
+            created_at: saleReturnData.created_at || prev?.created_at,
+          }));
           showSnackbar('Sale return processed successfully', 'success');
 
           void (async () => {
@@ -2127,7 +2190,7 @@ function SalesPageContent() {
                 setCurrentBillData((prev) => (prev?.return_id === fullReturn.return_id ? { ...prev, ...fullReturn } : prev));
               }
             } catch {
-              /* create response is enough for the receipt */
+              /* local receipt is enough */
             }
           })();
 
@@ -2142,10 +2205,11 @@ function SalesPageContent() {
             fetchData({ mode: 'list', silent: true });
           }, 1000);
         } else {
+          setReceiptDialogOpen(false);
+          setCurrentBillData(null);
           const errorData = await response.json();
           showSnackbar('Error: ' + (errorData.error || 'Failed to process return'), 'error');
         }
-        endSaving();
         return; // Exit function
       }
 
@@ -2288,7 +2352,27 @@ function SalesPageContent() {
       };
 
       const isEditing = !!editingSale;
-      beginSaving();
+      const cartItems = getCartItemsInAddOrder();
+
+      if (!isEditing) {
+        setCurrentBillData(buildSaleReceiptBill({
+          formSelectedCustomer,
+          finalPaymentTotal,
+          grandTotal,
+          paymentData,
+          cashAmount,
+          bankAmount,
+          advancePayment,
+          selectedBankAccount,
+          totalShippingAmount,
+          billType,
+          cartItems,
+          labourChargesValue,
+        }));
+        setReceiptDialogOpen(true);
+      } else {
+        beginSaving();
+      }
 
       // Use PUT when editing an existing sale, POST for new
       const apiBody = isEditing ? { ...saleData, id: editingSale.sale_id } : saleData;
@@ -2370,42 +2454,54 @@ function SalesPageContent() {
         const result = await response.json();
         notifyLedgerDataChanged('sale');
 
-        const billDataForPrint = {
-          sale_id: result.sale_id,
-          bill_number: result.bill_number ?? null,
-          cus_id: formSelectedCustomer.cus_id,
-          total_amount: grandTotal,
-          discount: parseFloat(paymentData.discount) || 0,
-          payment: finalPaymentTotal, // Cash + bank received (advance shown separately)
-          payment_type: splitPayments.length > 0 ? splitPayments[0].payment_type : 'CASH',
-          cash_payment: cashAmount, // Add cash payment details
-          bank_payment: bankAmount, // Add bank payment details
-          advance_payment: advancePayment, // Add advance payment details
-          previous_balance: parseFloat(formSelectedCustomer?.cus_balance || 0), // Customer's balance before this sale
-          bank_title: selectedBankAccount?.cus_name || null, // Add bank title
-          shipping_amount: totalShippingAmount,
-          bill_type: billType || 'BILL',
-          reference: paymentData.notes || null,
-          created_at: new Date().toISOString(),
-          customer: formSelectedCustomer,
-          sale_details: getCartItemsInAddOrder().map((product, index) => ({
-            sale_detail_id: index + 1,
-            pro_id: product.pro_id,
-            qnty: product.quantity,
-            unit: 'PCS',
-            unit_rate: product.rate,
-            total_amount: product.amount,
-            product: {
-              pro_title: product.pro_title || 'N/A'
+        const savedSaleId = result.sale_id ?? result.id ?? editingSale?.sale_id;
+        const billDataForPrint = buildSaleReceiptBill({
+          saleId: savedSaleId,
+          billNumber: result.bill_number ?? null,
+          formSelectedCustomer,
+          finalPaymentTotal,
+          grandTotal,
+          paymentData,
+          cashAmount,
+          bankAmount,
+          advancePayment,
+          selectedBankAccount,
+          totalShippingAmount,
+          billType,
+          cartItems,
+          createdAt: result.created_at,
+          labourChargesValue,
+        });
+
+        if (isEditing) {
+          setCurrentBillData(billDataForPrint);
+          setReceiptDialogOpen(true);
+          endSaving();
+        } else {
+          setCurrentBillData((prev) => ({
+            ...prev,
+            sale_id: savedSaleId,
+            bill_number: result.bill_number ?? prev?.bill_number,
+            created_at: result.created_at || prev?.created_at,
+          }));
+        }
+
+        void (async () => {
+          if (!savedSaleId) return;
+          try {
+            const detailRes = await fetch(`/api/sales?id=${savedSaleId}`);
+            if (detailRes.ok) {
+              const fullBill = await detailRes.json();
+              setCurrentBillData((prev) => (
+                prev?.sale_id === (fullBill.sale_id ?? savedSaleId)
+                  ? { ...prev, ...fullBill, previous_balance: prev.previous_balance ?? fullBill.previous_balance }
+                  : prev
+              ));
             }
-          })),
-          labour: parseFloat(paymentData.labour) || 0,
-          notes: paymentData.notes || ''
-        };
-        setCurrentBillData(billDataForPrint);
-        setReceiptDialogOpen(true);
-        endSaving();
-        showSnackbar('Bill saved successfully!', 'success');
+          } catch {
+            /* local receipt is enough */
+          }
+        })();
 
         const draftIdToDelete = currentDraftId;
         const orderIdToFinalize = loadedOrderId;
@@ -2491,13 +2587,21 @@ function SalesPageContent() {
           setCurrentScreenIndex(-1);
           showSnackbar('✅ Sale created! Form cleared for next entry', 'success');
         }
-      } else {
+      } else if (response) {
+        if (!isEditing) {
+          setReceiptDialogOpen(false);
+          setCurrentBillData(null);
+        }
         const errorData = await response.json();
         console.error('❌ API Error Response:', errorData);
         console.error('❌ Response Status:', response.status);
         showSnackbar(errorData.error || `Failed to save bill (${response.status})`, 'error');
       }
     } catch (error) {
+      if (!editingSale) {
+        setReceiptDialogOpen(false);
+        setCurrentBillData(null);
+      }
       console.error('❌ Error saving bill:', error);
       console.error('❌ Error details:', error.message);
       showSnackbar(`Failed to save bill: ${error.message}`, 'error');

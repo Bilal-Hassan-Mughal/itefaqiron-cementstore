@@ -121,6 +121,56 @@ function getOrderReceiptBalances(bill) {
   };
 }
 
+function buildOrderReceiptBill({
+  saleId = null,
+  billNumber = null,
+  formSelectedCustomer,
+  prevBalanceAtSave,
+  totalCashReceived,
+  grandTotal,
+  paymentData,
+  cashAmount,
+  bankAmount,
+  selectedBankAccount,
+  totalShippingAmount,
+  billType,
+  productTableData,
+  createdAt,
+}) {
+  return {
+    sale_id: saleId,
+    bill_number: billNumber,
+    cus_id: formSelectedCustomer?.cus_id,
+    total_amount: grandTotal,
+    discount: parseFloat(paymentData.discount) || 0,
+    payment: totalCashReceived,
+    payment_type: cashAmount > 0 && bankAmount > 0 ? 'SPLIT' : bankAmount > 0 ? 'BANK_TRANSFER' : 'CASH',
+    cash_payment: cashAmount,
+    bank_payment: bankAmount,
+    bank_title: selectedBankAccount?.cus_name || null,
+    shipping_amount: totalShippingAmount,
+    bill_type: billType || 'ORDER',
+    reference: paymentData.notes || null,
+    created_at: createdAt || new Date().toISOString(),
+    previous_balance: prevBalanceAtSave,
+    customer: formSelectedCustomer
+      ? { ...formSelectedCustomer, cus_balance: Number((prevBalanceAtSave - totalCashReceived).toFixed(2)) }
+      : null,
+    sale_details: productTableData.map((product, index) => ({
+      sale_detail_id: index + 1,
+      pro_id: product.pro_id,
+      qnty: product.quantity,
+      unit: 'PCS',
+      unit_rate: product.rate,
+      total_amount: product.amount,
+      product: { pro_title: product.pro_title || 'N/A' },
+    })),
+    labour: parseFloat(paymentData.labour) || 0,
+    labour_charges: parseFloat(paymentData.labour) || 0,
+    notes: paymentData.notes || '',
+  };
+}
+
 /** Use for MUI `type="number"` (editable) — no commas. Empty string for 0 keeps optional fields clear. */
 const toNumberInputValue = (val) => {
   const n = parseFloat(val);
@@ -1470,17 +1520,7 @@ function OrdersPageContent() {
         ? bankAccounts.find(acc => acc.cus_id === paymentData.bankAccountId)
         : null;
 
-      let prevBalanceAtSave = formCustomerPrevBalance;
-      try {
-        const freshRes = await fetch(`/api/customers?id=${formSelectedCustomer.cus_id}`);
-        if (freshRes.ok) {
-          const freshCustomer = await freshRes.json();
-          const freshBal = parseFloat(freshCustomer?.cus_balance);
-          if (Number.isFinite(freshBal)) prevBalanceAtSave = freshBal;
-        }
-      } catch (_) {
-        // use formCustomerPrevBalance
-      }
+      const prevBalanceAtSave = formCustomerPrevBalance;
 
       const saleData = {
         cus_id: formSelectedCustomer.cus_id,
@@ -1521,87 +1561,95 @@ function OrdersPageContent() {
         updated_by: 1 // Default user ID, should be from auth context
       };
 
-      setSavingBill(true);
+      const isEditing = Boolean(editSaleId);
+
+      if (!isEditing) {
+        setCurrentBillData(buildOrderReceiptBill({
+          formSelectedCustomer,
+          prevBalanceAtSave,
+          totalCashReceived,
+          grandTotal,
+          paymentData,
+          cashAmount,
+          bankAmount,
+          selectedBankAccount,
+          totalShippingAmount,
+          billType,
+          productTableData,
+        }));
+        setReceiptDialogOpen(true);
+      } else {
+        setSavingBill(true);
+      }
 
       console.log('🔍 Frontend - Sale data being sent:', saleData);
-      console.log('🔍 Frontend - Sale data JSON:', JSON.stringify(saleData, null, 2));
 
-      // Call API
       const response = await fetch('/api/sales', {
-        method: editSaleId ? 'PUT' : 'POST',
+        method: isEditing ? 'PUT' : 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(editSaleId ? { ...saleData, id: editSaleId } : saleData),
+        body: JSON.stringify(isEditing ? { ...saleData, id: editSaleId } : saleData),
       });
 
       if (response.ok) {
         const result = await response.json();
-        notifyLedgerDataChanged('order');
-        const successMessage = editSaleId ? 'Order updated successfully!' : 'Order saved successfully!';
-        showSnackbar(successMessage, 'success');
+        const successMessage = isEditing ? 'Order updated successfully!' : 'Order saved successfully!';
 
         const updatingSaleId = editSaleId;
-        // Clear edit mode
         setEditSaleId(null);
 
         const savedSaleId = result.sale_id ?? result.id ?? updatingSaleId;
-        let billForPrint = null;
 
-        if (savedSaleId) {
+        if (isEditing) {
+          setCurrentBillData(buildOrderReceiptBill({
+            saleId: savedSaleId,
+            billNumber: result.bill_number ?? null,
+            formSelectedCustomer,
+            prevBalanceAtSave,
+            totalCashReceived,
+            grandTotal,
+            paymentData,
+            cashAmount,
+            bankAmount,
+            selectedBankAccount,
+            totalShippingAmount,
+            billType,
+            productTableData,
+            createdAt: result.created_at,
+          }));
+          setReceiptDialogOpen(true);
+        } else {
+          setCurrentBillData((prev) => ({
+            ...prev,
+            sale_id: savedSaleId,
+            bill_number: result.bill_number ?? prev?.bill_number,
+            created_at: result.created_at || prev?.created_at,
+          }));
+        }
+
+        setSavingBill(false);
+        showSnackbar(successMessage, 'success');
+
+        void (async () => {
+          notifyLedgerDataChanged('order');
+          refreshSalesQuietly();
+          if (!savedSaleId) return;
           try {
             const detailRes = await fetch(`/api/sales?id=${savedSaleId}`);
             if (detailRes.ok) {
-              billForPrint = await detailRes.json();
+              const fullBill = await detailRes.json();
+              setCurrentBillData((prev) => (
+                prev?.sale_id === (fullBill.sale_id ?? savedSaleId)
+                  ? { ...prev, ...fullBill, previous_balance: prev.previous_balance ?? fullBill.previous_balance }
+                  : prev
+              ));
             }
-          } catch (fetchErr) {
-            console.warn('Could not fetch saved order for invoice preview:', fetchErr);
+          } catch {
+            /* local receipt is enough */
           }
-        }
+        })();
 
-        if (billForPrint && (billForPrint.previous_balance == null || billForPrint.previous_balance === '')) {
-          billForPrint.previous_balance = prevBalanceAtSave;
-        }
-
-        if (!billForPrint) {
-          billForPrint = {
-            sale_id: savedSaleId,
-            bill_number: result.bill_number ?? null,
-            cus_id: formSelectedCustomer.cus_id,
-            total_amount: grandTotal,
-            discount: parseFloat(paymentData.discount) || 0,
-            payment: totalCashReceived,
-            payment_type: splitPayments.length > 0 ? splitPayments[0].payment_type : 'CASH',
-            cash_payment: cashAmount,
-            bank_payment: bankAmount,
-            bank_title: selectedBankAccount?.cus_name || null,
-            shipping_amount: totalShippingAmount,
-            bill_type: billType || 'ORDER',
-            reference: paymentData.notes || null,
-            created_at: result.created_at || new Date().toISOString(),
-            previous_balance: prevBalanceAtSave,
-            customer: formSelectedCustomer,
-            sale_details: productTableData.map((product, index) => ({
-              sale_detail_id: index + 1,
-              pro_id: product.pro_id,
-              qnty: product.quantity,
-              unit: 'PCS',
-              unit_rate: product.rate,
-              total_amount: product.amount,
-              product: {
-                pro_title: product.pro_title || 'N/A'
-              }
-            })),
-            labour: parseFloat(paymentData.labour) || 0,
-            labour_charges: parseFloat(paymentData.labour) || 0,
-            notes: paymentData.notes || ''
-          };
-        }
-
-        setCurrentBillData(billForPrint);
-        setReceiptDialogOpen(true);
-
-        // Reset form
         setFormSelectedCustomer(null);
         setFormSelectedProduct(null);
         setFormSelectedStore(null);
@@ -1616,16 +1664,20 @@ function OrdersPageContent() {
           deliveryCharges: 0,
           notes: ''
         });
-
-        // Refresh list in background without hiding the invoice dialog
-        refreshSalesQuietly();
       } else {
+        if (!isEditing) {
+          setReceiptDialogOpen(false);
+          setCurrentBillData(null);
+        }
         const errorData = await response.json();
         console.error('❌ API Error Response:', errorData);
-        console.error('❌ Response Status:', response.status);
         showSnackbar(errorData.error || `Failed to save bill (${response.status})`, 'error');
       }
     } catch (error) {
+      if (!editSaleId) {
+        setReceiptDialogOpen(false);
+        setCurrentBillData(null);
+      }
       console.error('❌ Error saving bill:', error);
       console.error('❌ Error details:', error.message);
       showSnackbar(`Failed to save bill: ${error.message}`, 'error');
