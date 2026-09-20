@@ -210,6 +210,9 @@ export async function POST(request) {
           new_balance: adjLedgerEntry.closing_balance
         }
       };
+    }, {
+      timeout: 30000,
+      maxWait: 60000
     });
 
     return NextResponse.json(result);
