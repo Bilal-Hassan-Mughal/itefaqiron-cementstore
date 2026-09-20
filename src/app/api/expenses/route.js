@@ -2,8 +2,52 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { createLedgerEntry } from '@/lib/ledger-helper';
 import { getNextId } from '@/lib/id-helper';
-import { initBranchScope } from '@/lib/branch-server';
+import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
+
+const EXPENSE_TX_OPTIONS = { timeout: 60000, maxWait: 60000 };
+
+async function writeExpenseLedgerEntry(tx, {
+  account,
+  amount,
+  billNo,
+  trnxType,
+  details,
+  updatedBy,
+  lId,
+  cashPayment = 0,
+  bankPayment = 0,
+}) {
+  const currentBalance = parseFloat(account.cus_balance || 0);
+  const ledgerEntryData = createLedgerEntry({
+    cus_id: account.cus_id,
+    opening_balance: currentBalance,
+    debit_amount: 0,
+    credit_amount: amount,
+    bill_no: billNo,
+    trnx_type: trnxType,
+    ledger_type: 'Expense',
+    details,
+    payments: amount,
+    cash_payment: cashPayment,
+    bank_payment: bankPayment,
+    updated_by: updatedBy,
+  });
+
+  await tx.ledger.create({
+    data: {
+      l_id: lId,
+      ...ledgerEntryData,
+    },
+  });
+
+  await tx.customer.update({
+    where: { cus_id: account.cus_id },
+    data: { cus_balance: ledgerEntryData.closing_balance },
+  });
+
+  return ledgerEntryData.closing_balance;
+}
 
 // GET - Fetch all expenses with related data
 export async function GET(request) {
@@ -157,6 +201,8 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Invalid expense type' }, { status: 400 });
     }
 
+    const validatedUpdatedBy = await resolveUpdatedByUserId(request, updated_by, prisma);
+
     const result = await prisma.$transaction(async (tx) => {
       let cashAccount = null;
       let bankAccount = null;
@@ -192,7 +238,7 @@ export async function POST(request) {
           bank_amount: bankAmt,
           payment_date: new Date(),
           payment_reference: payment_reference || null,
-          updated_by
+          updated_by: validatedUpdatedBy
         },
         include: {
           expense_title: true,
@@ -205,78 +251,55 @@ export async function POST(request) {
         }
       });
 
-      // Create Cash ledger entry & update balance
+      const billNo = `EXP-${expense.exp_id}`;
+      const ledgerWriteCount = (cashAmt > 0 ? 1 : 0) + (bankAmt > 0 ? 1 : 0);
+      let nextLedgerId = ledgerWriteCount > 0 ? await getNextId('ledger', 'l_id', tx) : null;
+
       if (cashAmt > 0 && cashAccount) {
-        const currentBalance = parseFloat(cashAccount.cus_balance || 0);
-        const ledgerEntryData = createLedgerEntry({
-          cus_id: cashAccount.cus_id,
-          opening_balance: currentBalance,
-          debit_amount: 0,
-          credit_amount: cashAmt,
-          bill_no: `EXP-${expense.exp_id}`,
-          trnx_type: 'CASH_PAYMENT',
-          ledger_type: 'Expense',
+        await writeExpenseLedgerEntry(tx, {
+          account: cashAccount,
+          amount: cashAmt,
+          billNo,
+          trnxType: 'CASH_PAYMENT',
           details: `Payment for ${expense.expense_title?.title || 'Expense'}: ${expense.exp_title}${paymentMethod === 'PARTIAL' ? ' (Partial cash payment)' : ''}${payment_reference ? ` - Ref: ${payment_reference}` : ''}`,
-          payments: cashAmt,
-          updated_by: updated_by ? parseInt(updated_by) : null
+          updatedBy: validatedUpdatedBy,
+          lId: nextLedgerId,
+          cashPayment: cashAmt,
+          bankPayment: 0,
         });
-
-        const l_id = await getNextId('ledger', 'l_id', tx);
-        await tx.ledger.create({
-          data: {
-            l_id,
-            ...ledgerEntryData
-          }
-        });
-
-        await tx.customer.update({
-          where: { cus_id: cashAccount.cus_id },
-          data: { cus_balance: ledgerEntryData.closing_balance }
-        });
+        nextLedgerId += 1;
       }
 
-      // Create Bank ledger entry & update balance
       if (bankAmt > 0 && bankAccount) {
-        // If cash and bank use the same account, fetch it again to get updated balance
-        const activeBank = (cashAccount && cashAccount.cus_id === bankAccount.cus_id)
-          ? await tx.customer.findUnique({ where: { cus_id: bankAccount.cus_id } })
-          : bankAccount;
+        const activeBank =
+          cashAccount && cashAccount.cus_id === bankAccount.cus_id
+            ? await tx.customer.findUnique({ where: { cus_id: bankAccount.cus_id } })
+            : bankAccount;
+        if (!activeBank) throw new Error('Bank account not found');
 
-        const currentBalance = parseFloat(activeBank.cus_balance || 0);
-        const ledgerEntryData = createLedgerEntry({
-          cus_id: bankAccount.cus_id,
-          opening_balance: currentBalance,
-          debit_amount: 0,
-          credit_amount: bankAmt,
-          bill_no: `EXP-${expense.exp_id}`,
-          trnx_type: 'BANK_PAYMENT',
-          ledger_type: 'Expense',
+        await writeExpenseLedgerEntry(tx, {
+          account: activeBank,
+          amount: bankAmt,
+          billNo,
+          trnxType: 'BANK_PAYMENT',
           details: `Payment for ${expense.expense_title?.title || 'Expense'}: ${expense.exp_title}${paymentMethod === 'PARTIAL' ? ' (Partial bank payment)' : ''}${payment_reference ? ` - Ref: ${payment_reference}` : ''}`,
-          payments: bankAmt,
-          updated_by: updated_by ? parseInt(updated_by) : null
-        });
-
-        const bank_l_id = await getNextId('ledger', 'l_id', tx);
-        await tx.ledger.create({
-          data: {
-            l_id: bank_l_id,
-            ...ledgerEntryData
-          }
-        });
-
-        await tx.customer.update({
-          where: { cus_id: bankAccount.cus_id },
-          data: { cus_balance: ledgerEntryData.closing_balance }
+          updatedBy: validatedUpdatedBy,
+          lId: nextLedgerId,
+          cashPayment: 0,
+          bankPayment: bankAmt,
         });
       }
 
       return expense;
-    });
+    }, EXPENSE_TX_OPTIONS);
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     console.error('Error creating expense:', error);
-    return NextResponse.json({ error: 'Failed to create expense', details: error.message }, { status: 500 });
+    return NextResponse.json(
+      { error: `Failed to create expense: ${error.message}` },
+      { status: 500 }
+    );
   }
 }
 
@@ -367,6 +390,8 @@ export async function PUT(request) {
       return NextResponse.json({ error: 'Invalid expense type' }, { status: 400 });
     }
 
+    const validatedUpdatedBy = await resolveUpdatedByUserId(request, updated_by, prisma);
+
     const result = await prisma.$transaction(async (tx) => {
       // 1. Revert old account balances
       if (existingExpense.paid_from_account_id && parseFloat(existingExpense.cash_amount || 0) > 0) {
@@ -413,7 +438,7 @@ export async function PUT(request) {
           bank_amount: bankAmt,
           payment_date: new Date(),
           payment_reference: payment_reference || null,
-          updated_by
+          updated_by: validatedUpdatedBy
         },
         include: {
           expense_title: true,
@@ -444,77 +469,55 @@ export async function PUT(request) {
         if (!bankAccount) throw new Error('Bank account not found');
       }
 
-      // Create new Cash ledger entry & update balance
+      const billNo = `EXP-${id}`;
+      const ledgerWriteCount = (cashAmt > 0 ? 1 : 0) + (bankAmt > 0 ? 1 : 0);
+      let nextLedgerId = ledgerWriteCount > 0 ? await getNextId('ledger', 'l_id', tx) : null;
+
       if (cashAmt > 0 && cashAccount) {
-        const currentBalance = parseFloat(cashAccount.cus_balance || 0);
-        const ledgerEntryData = createLedgerEntry({
-          cus_id: cashAccount.cus_id,
-          opening_balance: currentBalance,
-          debit_amount: 0,
-          credit_amount: cashAmt,
-          bill_no: `EXP-${id}`,
-          trnx_type: 'CASH_PAYMENT',
-          ledger_type: 'Expense',
+        await writeExpenseLedgerEntry(tx, {
+          account: cashAccount,
+          amount: cashAmt,
+          billNo,
+          trnxType: 'CASH_PAYMENT',
           details: `Payment for ${updatedExpense.expense_title?.title || 'Expense'}: ${updatedExpense.exp_title}${paymentMethod === 'PARTIAL' ? ' (Partial cash payment)' : ''}${payment_reference ? ` - Ref: ${payment_reference}` : ''}`,
-          payments: cashAmt,
-          updated_by: updated_by ? parseInt(updated_by) : null
+          updatedBy: validatedUpdatedBy,
+          lId: nextLedgerId,
+          cashPayment: cashAmt,
+          bankPayment: 0,
         });
-
-        const l_id = await getNextId('ledger', 'l_id', tx);
-        await tx.ledger.create({
-          data: {
-            l_id,
-            ...ledgerEntryData
-          }
-        });
-
-        await tx.customer.update({
-          where: { cus_id: cashAccount.cus_id },
-          data: { cus_balance: ledgerEntryData.closing_balance }
-        });
+        nextLedgerId += 1;
       }
 
-      // Create new Bank ledger entry & update balance
       if (bankAmt > 0 && bankAccount) {
-        const activeBank = (cashAccount && cashAccount.cus_id === bankAccount.cus_id)
-          ? await tx.customer.findUnique({ where: { cus_id: bankAccount.cus_id } })
-          : bankAccount;
+        const activeBank =
+          cashAccount && cashAccount.cus_id === bankAccount.cus_id
+            ? await tx.customer.findUnique({ where: { cus_id: bankAccount.cus_id } })
+            : bankAccount;
+        if (!activeBank) throw new Error('Bank account not found');
 
-        const currentBalance = parseFloat(activeBank.cus_balance || 0);
-        const ledgerEntryData = createLedgerEntry({
-          cus_id: bankAccount.cus_id,
-          opening_balance: currentBalance,
-          debit_amount: 0,
-          credit_amount: bankAmt,
-          bill_no: `EXP-${id}`,
-          trnx_type: 'BANK_PAYMENT',
-          ledger_type: 'Expense',
+        await writeExpenseLedgerEntry(tx, {
+          account: activeBank,
+          amount: bankAmt,
+          billNo,
+          trnxType: 'BANK_PAYMENT',
           details: `Payment for ${updatedExpense.expense_title?.title || 'Expense'}: ${updatedExpense.exp_title}${paymentMethod === 'PARTIAL' ? ' (Partial bank payment)' : ''}${payment_reference ? ` - Ref: ${payment_reference}` : ''}`,
-          payments: bankAmt,
-          updated_by: updated_by ? parseInt(updated_by) : null
-        });
-
-        const bank_l_id = await getNextId('ledger', 'l_id', tx);
-        await tx.ledger.create({
-          data: {
-            l_id: bank_l_id,
-            ...ledgerEntryData
-          }
-        });
-
-        await tx.customer.update({
-          where: { cus_id: bankAccount.cus_id },
-          data: { cus_balance: ledgerEntryData.closing_balance }
+          updatedBy: validatedUpdatedBy,
+          lId: nextLedgerId,
+          cashPayment: 0,
+          bankPayment: bankAmt,
         });
       }
 
       return updatedExpense;
-    });
+    }, EXPENSE_TX_OPTIONS);
 
     return NextResponse.json(result);
   } catch (error) {
     console.error('Error updating expense:', error);
-    return NextResponse.json({ error: 'Failed to update expense', details: error.message }, { status: 500 });
+    return NextResponse.json(
+      { error: `Failed to update expense: ${error.message}` },
+      { status: 500 }
+    );
   }
 }
 
@@ -578,11 +581,14 @@ export async function DELETE(request) {
       await tx.expense.delete({
         where: { exp_id: id }
       });
-    });
+    }, EXPENSE_TX_OPTIONS);
 
     return NextResponse.json({ message: 'Expense deleted successfully' });
   } catch (error) {
     console.error('Error deleting expense:', error);
-    return NextResponse.json({ error: 'Failed to delete expense', details: error.message }, { status: 500 });
+    return NextResponse.json(
+      { error: `Failed to delete expense: ${error.message}` },
+      { status: 500 }
+    );
   }
 }

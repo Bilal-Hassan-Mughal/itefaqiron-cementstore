@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { createLedgerEntry } from '@/lib/ledger-helper';
 import { getNextId } from '@/lib/id-helper';
-import { initBranchScope } from '@/lib/branch-server';
+import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
+
+const EXPENSE_TX_OPTIONS = { timeout: 60000, maxWait: 60000 };
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
 
 // POST - Mark expense as paid
@@ -56,6 +58,8 @@ export async function POST(request) {
             return NextResponse.json({ error: 'Payment account not found' }, { status: 404 });
         }
 
+        const validatedUpdatedBy = await resolveUpdatedByUserId(request, updated_by, prisma);
+
         // Process payment in transaction
         const result = await prisma.$transaction(async (tx) => {
             const expenseAmount = parseFloat(expense.exp_amount);
@@ -78,7 +82,7 @@ export async function POST(request) {
                 ledger_type: 'Expense',
                 details: `Payment for ${expense.expense_title?.title || 'Expense'}: ${expense.exp_title}${payment_reference ? ` - Ref: ${payment_reference}` : ''}`,
                 payments: expenseAmount,
-                updated_by: updated_by ? parseInt(updated_by) : null
+                updated_by: validatedUpdatedBy
             });
 
             const l_id = await getNextId('ledger', 'l_id', tx);
@@ -125,10 +129,7 @@ export async function POST(request) {
 
             console.log(`✅ Expense ${expense_id} marked as paid. New balance: ${newBalance}`);
             return updatedExpense;
-        }, {
-            maxWait: 5000,
-            timeout: 10000
-        });
+        }, EXPENSE_TX_OPTIONS);
 
         return NextResponse.json(result);
     } catch (error) {
