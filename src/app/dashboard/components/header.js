@@ -1,6 +1,6 @@
 'use client';
 
-import { Menu, Mail, Bell, Home, Plus, LogOut, UserPlus } from 'lucide-react';
+import { Menu, Mail, Bell, Home, Plus, LogOut, UserPlus, BookOpen } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { getStaffRoleName, canStaffAccessPath, getRoleDisplayName } from '@/lib/staff-access';
@@ -54,6 +54,8 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
     pathname === '/dashboard/customers' &&
     actionParam === 'add';
 
+  const isLedgerActive = pathname === '/dashboard/finance';
+
   const handleAddCustomer = () => {
     if (pathname === '/dashboard/customers') {
       window.dispatchEvent(new CustomEvent('open-customer-form'));
@@ -78,9 +80,10 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
   const canNewSale = user && canStaffAccessPath(user, '/dashboard/sales');
   const canNewPurchase = user && canStaffAccessPath(user, '/dashboard/purchases');
   const canOrders = user && canStaffAccessPath(user, '/dashboard/orders');
+  const canLedger = user && canStaffAccessPath(user, '/dashboard/finance');
   const canAddCustomerBtn = user && canStaffAccessPath(user, '/dashboard/customers');
   const canAddProduct = user && canStaffAccessPath(user, '/dashboard/products');
-  const hasHeaderActions = canNewSale || canNewPurchase || canOrders || canAddCustomerBtn || canAddProduct;
+  const hasHeaderActions = canNewSale || canNewPurchase || canOrders || canLedger || canAddCustomerBtn || canAddProduct;
 
   return (
     <header className="sticky top-0 z-30">
@@ -183,6 +186,20 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
           </div>
 
           <div className="flex items-center gap-2 ml-auto">
+            {canLedger && (
+            <button
+              type="button"
+              onClick={() => router.push('/dashboard/finance')}
+              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200 ${
+                isLedgerActive
+                  ? 'text-white bg-[#4a57d4] border border-[#5E6EED]/40 shadow-[0_4px_12px_rgba(94,110,237,0.28)] ring-2 ring-[#5E6EED]/25 ring-offset-1'
+                  : 'text-white bg-[#5E6EED] border border-[#5E6EED]/30 shadow-[0_1px_2px_rgba(94,110,237,0.2)] hover:bg-[#4a57d4] hover:shadow-[0_4px_12px_rgba(94,110,237,0.28)] active:bg-[#4338ca]'
+              }`}
+            >
+              <BookOpen className="w-4 h-4" strokeWidth={2.25} />
+              <span className="hidden sm:inline">Ledger</span>
+            </button>
+            )}
             {canAddCustomerBtn && (
             <button
               type="button"
