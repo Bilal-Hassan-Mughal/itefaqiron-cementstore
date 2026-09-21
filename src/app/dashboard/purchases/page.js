@@ -1698,34 +1698,12 @@ function PurchasesPageContent() {
           } catch {
             /* local receipt is enough */
           }
-
-          try {
-            await Promise.all(formData.purchase_details.map(async (detail) => {
-              const pid = parseInt(detail.pro_id, 10);
-              const existingProduct = products.find(p => p.pro_id === pid);
-              const newSaleRate = parseFloat(detail.unit_rate || detail.rate || 0);
-              const newCostRate = parseFloat(detail.cost_rate ?? detail.original_cost_rate ?? existingProduct?.pro_cost_price ?? 0);
-
-              const payload = { id: pid };
-              if (!Number.isNaN(newSaleRate) && newSaleRate > 0) payload.pro_sale_price = newSaleRate;
-              if (!Number.isNaN(newCostRate) && newCostRate > 0) payload.pro_cost_price = newCostRate;
-
-              if (Object.keys(payload).length > 1) {
-                const resp = await fetch('/api/products', {
-                  method: 'PUT',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(payload)
-                });
-                if (resp.ok) {
-                  const updated = await resp.json();
-                  setProducts(prev => prev.map(p => p.pro_id === updated.pro_id ? updated : p));
-                }
-              }
-            }));
-          } catch (err) {
-            console.warn('Error persisting product price updates after purchase save', err);
-          }
         })();
+
+        if (editingPurchase && result?.pur_id) {
+          const merged = mergePurchaseBill(result);
+          setPurchases((prev) => prev.map((p) => (p.pur_id === merged.pur_id ? { ...p, ...merged } : p)));
+        }
 
         // After successful purchase creation, restore previous screen state if available
         if (currentScreenIndex > 0) {
@@ -4398,20 +4376,23 @@ function PurchasesPageContent() {
                                   }}
                                   renderTags={() => null}
                                   renderInput={(params) => <TextField {...params} inputRef={cargoInputRef} placeholder="Select Cargo Account" size="small" sx={{ width: 240 }} />}
-                                  renderOption={(props, option) => (
-                                    <Box component="li" {...props}>
-                                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', width: '100%' }}>
-                                        <Box sx={{ flex: 1 }}>
-                                          <Typography variant="body2" sx={{ fontWeight: (selectedCargoAccounts || []).some(s => s.cus_id === option.cus_id) ? 'bold' : 'medium' }}>
-                                            {option.cus_name}
-                                          </Typography>
-                                          <Typography variant="caption" color="text.secondary">
-                                            {option.cus_phone_no}
-                                          </Typography>
+                                  renderOption={(props, option) => {
+                                    const { key, ...optionProps } = props;
+                                    return (
+                                      <Box component="li" key={key} {...optionProps}>
+                                        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', width: '100%' }}>
+                                          <Box sx={{ flex: 1 }}>
+                                            <Typography variant="body2" sx={{ fontWeight: (selectedCargoAccounts || []).some(s => s.cus_id === option.cus_id) ? 'bold' : 'medium' }}>
+                                              {option.cus_name}
+                                            </Typography>
+                                            <Typography variant="caption" color="text.secondary">
+                                              {option.cus_phone_no}
+                                            </Typography>
+                                          </Box>
                                         </Box>
                                       </Box>
-                                    </Box>
-                                  )}
+                                    );
+                                  }}
                                 />
                                 <IconButton
                                   size="small"

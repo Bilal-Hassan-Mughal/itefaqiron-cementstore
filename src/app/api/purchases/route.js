@@ -145,8 +145,8 @@ async function recalculateLedgerBalances(tx, cus_id) {
   entries.sort((a, b) => {
     const timeDiff = a.created_at.getTime() - b.created_at.getTime();
     if (timeDiff !== 0) return timeDiff;
-    const billA = parseInt(a.bill_no) || 0;
-    const billB = parseInt(b.bill_no) || 0;
+    const billA = parseInt(String(a.bill_no || '').replace(/\D/g, '')) || 0;
+    const billB = parseInt(String(b.bill_no || '').replace(/\D/g, '')) || 0;
     if (billA !== billB) return billA - billB;
     return a.l_id - b.l_id;
   });
@@ -197,6 +197,44 @@ async function recalculateLedgerBalances(tx, cus_id) {
     data: { cus_balance: Number(runningBalance.toFixed(2)) }
   });
   console.log(`   📊 Recalculated ledger for ${customer.cus_name} (ID: ${cus_id}). Final balance: ${runningBalance.toFixed(2)} (${updates.length} entries updated in batch)`);
+}
+
+/** Run full ledger chain recalc without blocking the HTTP response (same pattern as sales PUT). */
+function scheduleLedgerRecalc(cusIds) {
+  const uniqueIds = [...new Set((cusIds || []).filter((id) => id != null))];
+  if (uniqueIds.length === 0) return;
+  void Promise.all(uniqueIds.map((cid) => recalculateLedgerBalances(prisma, cid))).catch((err) => {
+    console.error('Background ledger recalc after purchase operation failed:', err);
+  });
+}
+
+/** Persist ledger rows with one MAX(l_id) query instead of one per row. */
+async function persistLedgerEntries(tx, ledgerEntries, options = {}) {
+  const { entryCreatedAt = null } = options;
+  if (!ledgerEntries?.length) return;
+
+  let nextLId = await getNextId('ledger', 'l_id', tx);
+  for (const entry of ledgerEntries) {
+    await tx.ledger.create({
+      data: {
+        l_id: nextLId++,
+        cus_id: entry.cus_id,
+        opening_balance: entry.opening_balance,
+        debit_amount: entry.debit_amount,
+        credit_amount: entry.credit_amount,
+        closing_balance: entry.closing_balance,
+        bill_no: entry.bill_no,
+        trnx_type: entry.trnx_type,
+        details: entry.details,
+        payments: entry.payments,
+        cash_payment: entry.cash_payment,
+        bank_payment: entry.bank_payment,
+        updated_by: entry.updated_by,
+        ledger_type: entry.ledger_type,
+        ...(entryCreatedAt ? { created_at: entryCreatedAt } : {})
+      }
+    });
+  }
 }
 
 // ========================================
@@ -1167,34 +1205,7 @@ export async function POST(request) {
       }
 
       console.log(`📊 CREATING ${ledgerEntries.length} LEDGER ENTRIES IN DATABASE (POST)`);
-      for (let i = 0; i < ledgerEntries.length; i++) {
-        const entry = ledgerEntries[i];
-
-        console.log(`   Entry ${i + 1}: Customer=${entry.cus_id}, Debit=${entry.debit_amount}, Credit=${entry.credit_amount}`);
-
-        const nextLId = await getNextId('ledger', 'l_id', tx);
-        await tx.ledger.create({
-          data: {
-            l_id: nextLId,
-            cus_id: entry.cus_id,
-            opening_balance: entry.opening_balance,
-            debit_amount: entry.debit_amount,
-            credit_amount: entry.credit_amount,
-            closing_balance: entry.closing_balance,
-            bill_no: entry.bill_no,
-            trnx_type: entry.trnx_type,
-            details: entry.details,
-            payments: entry.payments,
-            cash_payment: entry.cash_payment,
-            bank_payment: entry.bank_payment,
-            updated_by: entry.updated_by,
-            ledger_type: entry.ledger_type
-          }
-        });
-
-        console.log(`   ✅ Entry ${i + 1} created in database`);
-      }
-
+      await persistLedgerEntries(tx, ledgerEntries);
       console.log(`📊 All ${ledgerEntries.length} ledger entries created successfully\n`);
 
       const affectedCusIds = [...new Set(ledgerEntries.map(e => e.cus_id))];
@@ -1205,12 +1216,6 @@ export async function POST(request) {
       };
     }, { maxWait: 20000, timeout: 60000 });
 
-    // Recalculate balances chronologically for all affected accounts (outside transaction)
-    for (const cid of result.affectedCusIds) {
-      await recalculateLedgerBalances(prisma, cid);
-    }
-
-    // Fetch the complete purchase with relations
     const completePurchase = await prisma.purchase.findUnique({
       where: { pur_id: result.purchase.pur_id },
       include: {
@@ -1235,6 +1240,8 @@ export async function POST(request) {
         }
       }
     });
+
+    scheduleLedgerRecalc(result.affectedCusIds);
 
     return NextResponse.json(completePurchase, { status: 201 });
   } catch (err) {
@@ -1338,6 +1345,9 @@ export async function PUT(request) {
 
     // Update purchase with details and ledger entries in a transaction
     const result = await prisma.$transaction(async (tx) => {
+      // Bill + ledger rows use edit time (not the original purchase date).
+      const ledgerEditedAt = new Date();
+
       // ── Step 1: Read old purchase details so we can reverse their stock ──
       const oldDetails = await tx.purchaseDetail.findMany({ where: { pur_id: id } });
 
@@ -1347,35 +1357,14 @@ export async function PUT(request) {
       });
       oldLedgerEntries.forEach(entry => affectedCusIds.add(entry.cus_id));
 
-      // Map to store pre-calculated opening balances from old ledger entries
-      const oldOpeningBalances = {};
-      for (const entry of oldLedgerEntries) {
-        const cid = entry.cus_id;
-        if (!oldOpeningBalances[cid]) {
-          oldOpeningBalances[cid] = entry;
-        } else {
-          // Keep the earliest one
-          const currentEarliest = oldOpeningBalances[cid];
-          const timeDiff = entry.created_at.getTime() - currentEarliest.created_at.getTime();
-          if (timeDiff < 0 || (timeDiff === 0 && entry.l_id < currentEarliest.l_id)) {
-            oldOpeningBalances[cid] = entry;
-          }
-        }
-      }
-
-      // Helper function to resolve opening balance using pre-calculated values
-      const getOpeningBalanceForAccount = async (accountId) => {
-        if (oldOpeningBalances[accountId]) {
-          return parseFloat(oldOpeningBalances[accountId].opening_balance || 0);
-        }
-        return await resolveOpeningBalance(tx, accountId, existingPurchase.created_at);
-      };
-
       // ── Call prepareLedgerDeletion to re-link subsequent entries of deleted items ──
       await prepareLedgerDeletion(tx, id);
 
       // ── Step 2: Delete old ledger entries for this bill ──
       await tx.ledger.deleteMany({ where: getPurchaseLedgerWhere(id) });
+
+      const getOpeningBalanceForAccount = async (accountId) =>
+        resolveOpeningBalance(tx, accountId, ledgerEditedAt);
 
       // ── Step 3: Reverse stock for old quantities ──
       for (const old of oldDetails) {
@@ -1417,7 +1406,8 @@ export async function PUT(request) {
           payment_type: normalizedPaymentType,
           vehicle_no: vehicle_no || null,
           invoice_number: invoice_number || null,
-          updated_by: updated_by || existingPurchase.updated_by
+          updated_by: updated_by || existingPurchase.updated_by,
+          created_at: ledgerEditedAt
         }
       });
 
@@ -1473,10 +1463,7 @@ export async function PUT(request) {
         await Promise.all(productUpdatePromises);
       }
 
-      // Create comprehensive ledger entries
       const ledgerEntries = [];
-      // Use the balance captured BEFORE the original purchase so the regenerated
-      // ledger chain starts from the correct pre-purchase position.
       let runningSupplierBalance = 0;
       if (cus_id) {
         runningSupplierBalance = await getOpeningBalanceForAccount(cus_id);
@@ -1751,47 +1738,15 @@ export async function PUT(request) {
         }
       }
 
-      // 5. Create all ledger entries
-      console.log(`📊 CREATING ${ledgerEntries.length} LEDGER ENTRIES IN DATABASE (PUT)`);
-
-      for (let i = 0; i < ledgerEntries.length; i++) {
-        const entry = ledgerEntries[i];
-        console.log(`   Entry ${i + 1}: Customer=${entry.cus_id}, Debit=${entry.debit_amount}, Credit=${entry.credit_amount}`);
-
-        const nextLId = await getNextId('ledger', 'l_id', tx);
-        await tx.ledger.create({
-          data: {
-            l_id: nextLId,
-            cus_id: entry.cus_id,
-            opening_balance: entry.opening_balance,
-            debit_amount: entry.debit_amount,
-            credit_amount: entry.credit_amount,
-            closing_balance: entry.closing_balance,
-            bill_no: entry.bill_no,
-            trnx_type: entry.trnx_type,
-            details: entry.details,
-            payments: entry.payments,
-            cash_payment: entry.cash_payment,
-            bank_payment: entry.bank_payment,
-            updated_by: entry.updated_by,
-            ledger_type: entry.ledger_type,
-            created_at: existingPurchase.created_at // PRESERVE TIMESTAMP!
-          }
-        });
-      }
+      console.log(`📊 CREATING ${ledgerEntries.length} LEDGER ENTRIES IN DATABASE (PUT) at ${ledgerEditedAt.toISOString()}`);
+      await persistLedgerEntries(tx, ledgerEntries, { entryCreatedAt: ledgerEditedAt });
 
       // Add new ledger entries accounts to affected set
       ledgerEntries.forEach(entry => affectedCusIds.add(entry.cus_id));
 
       return { purchase: updatedPurchase };
-    }, { maxWait: 10000, timeout: 30000 });
+    }, { maxWait: 20000, timeout: 90000 });
 
-    // Recalculate balances chronologically for all affected accounts (outside transaction)
-    for (const cid of affectedCusIds) {
-      await recalculateLedgerBalances(prisma, cid);
-    }
-
-    // Fetch the complete updated purchase with relations
     const completePurchase = await prisma.purchase.findUnique({
       where: { pur_id: result.purchase.pur_id },
       include: {
@@ -1816,6 +1771,8 @@ export async function PUT(request) {
         }
       }
     });
+
+    scheduleLedgerRecalc([...affectedCusIds]);
 
     return NextResponse.json(completePurchase);
   } catch (err) {
@@ -1885,12 +1842,9 @@ export async function DELETE(request) {
       await tx.purchase.delete({
         where: { pur_id: id }
       });
-    }, { maxWait: 10000, timeout: 30000 });
+    }, { maxWait: 20000, timeout: 90000 });
 
-    // Recalculate balances chronologically for all affected accounts (outside transaction)
-    for (const cid of affectedCusIds) {
-      await recalculateLedgerBalances(prisma, cid);
-    }
+    scheduleLedgerRecalc([...affectedCusIds]);
 
     return NextResponse.json({ message: 'Purchase deleted successfully' });
   } catch (err) {
