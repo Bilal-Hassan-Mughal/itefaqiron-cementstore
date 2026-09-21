@@ -1672,11 +1672,14 @@ function QuotationsPageContent() {
                         (o.pro_code || '').toLowerCase().startsWith(q)
                       );
                     }}
-                    renderOption={(props, option) => (
-                      <li {...props} key={option.pro_id}>
-                        <Typography sx={{ fontWeight: 500, fontSize: '0.875rem' }}>{option.pro_title}</Typography>
-                      </li>
-                    )}
+                    renderOption={(props, option) => {
+                      const { key, ...optionProps } = props;
+                      return (
+                        <li key={key} {...optionProps}>
+                          <Typography sx={{ fontWeight: 500, fontSize: '0.875rem' }}>{option.pro_title}</Typography>
+                        </li>
+                      );
+                    }}
                     value={formSelectedProduct}
                     onChange={(event, newValue) => handleProductSelect(newValue)}
                     isOptionEqualToValue={(option, value) => option.pro_id === value?.pro_id}

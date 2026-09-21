@@ -1,11 +1,41 @@
 /**
+ * Parse app datetime values consistently.
+ * MySQL DATE_FORMAT / raw SQL often returns naive "YYYY-MM-DD HH:mm:ss" stored in PK local time.
+ * Without an offset, JS may treat that as UTC or browser-local and shift the calendar day (21 → 20).
+ */
+export function parseAppDateTime(dateInput) {
+  if (!dateInput) return null;
+  if (dateInput instanceof Date) {
+    return isNaN(dateInput.getTime()) ? null : dateInput;
+  }
+
+  const raw = String(dateInput).trim();
+  if (!raw) return null;
+
+  if (/[zZ]|[+-]\d{2}:\d{2}$/.test(raw)) {
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  const mysqlMatch = raw.match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}:\d{2}))?$/);
+  if (mysqlMatch) {
+    const time = mysqlMatch[2] || '00:00:00';
+    const d = new Date(`${mysqlMatch[1]}T${time}${PK_OFFSET}`);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  const d = new Date(raw);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/**
  * Formats dates into Pakistani standard date format (DD/MM/YYYY).
  * E.g., 24/07/2026
  */
 export const formatDatePK = (dateInput, options = {}) => {
   if (!dateInput) return '';
-  const d = new Date(dateInput);
-  if (isNaN(d.getTime())) return '';
+  const d = parseAppDateTime(dateInput);
+  if (!d) return '';
   return d.toLocaleDateString('en-GB', {
     day: '2-digit',
     month: '2-digit',
@@ -17,8 +47,8 @@ export const formatDatePK = (dateInput, options = {}) => {
 
 export const formatDateTimePK = (dateInput) => {
   if (!dateInput) return '';
-  const d = new Date(dateInput);
-  if (isNaN(d.getTime())) return '';
+  const d = parseAppDateTime(dateInput);
+  if (!d) return '';
   const dateStr = d.toLocaleDateString('en-GB', {
     day: '2-digit',
     month: '2-digit',
@@ -36,8 +66,8 @@ export const formatDateTimePK = (dateInput) => {
 
 export const formatTimePK = (dateInput) => {
   if (!dateInput) return '';
-  const d = new Date(dateInput);
-  if (isNaN(d.getTime())) return '';
+  const d = parseAppDateTime(dateInput);
+  if (!d) return '';
   return d.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
@@ -48,8 +78,8 @@ export const formatTimePK = (dateInput) => {
 
 export const formatDatePKWithMonthName = (dateInput) => {
   if (!dateInput) return '';
-  const d = new Date(dateInput);
-  if (isNaN(d.getTime())) return '';
+  const d = parseAppDateTime(dateInput);
+  if (!d) return '';
   return d.toLocaleDateString('en-GB', {
     day: '2-digit',
     month: 'short',

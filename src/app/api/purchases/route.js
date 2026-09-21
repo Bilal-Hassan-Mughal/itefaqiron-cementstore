@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { getNextId } from '@/lib/id-helper';
-import { updateStoreStock } from '@/lib/storeStock';
-import { createLedgerEntry } from '@/lib/ledger-helper';
+import { updateStoreStock, bulkUpdateStoreStock } from '@/lib/storeStock';
+import {
+  createLedgerEntry,
+  syncAccountBalancesFromEntries,
+  syncAccountBalancesFromLatestLedger,
+} from '@/lib/ledger-helper';
 import { initBranchScope } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
 
@@ -46,8 +50,113 @@ async function resolveOpeningBalance(tx, cus_id, target_created_at) {
   return parseFloat(customer?.cus_balance || 0);
 }
 
-/** Helper to build a comprehensive WHERE clause matching all ledger entries associated with a purchase bill. */
-function getPurchaseLedgerWhere(id) {
+/** Latest closing balance per account (single grouped query). */
+async function fetchCurrentLedgerBalances(tx, accountIds) {
+  const unique = [...new Set(
+    (accountIds || []).map((id) => parseInt(id, 10)).filter((n) => !Number.isNaN(n) && n > 0)
+  )];
+  const balanceMap = new Map();
+  if (!unique.length) return balanceMap;
+
+  const idsStr = unique.join(', ');
+  const rows = await tx.$queryRawUnsafe(`
+    SELECT l.cus_id, l.closing_balance
+    FROM ledger l
+    INNER JOIN (
+      SELECT cus_id, MAX(l_id) AS max_l_id
+      FROM ledger
+      WHERE cus_id IN (${idsStr})
+      GROUP BY cus_id
+    ) latest ON l.l_id = latest.max_l_id
+  `);
+
+  for (const row of rows) {
+    balanceMap.set(row.cus_id, parseFloat(row.closing_balance || 0));
+  }
+
+  const missing = unique.filter((id) => !balanceMap.has(id));
+  if (missing.length) {
+    const customers = await tx.customer.findMany({
+      where: { cus_id: { in: missing } },
+      select: { cus_id: true, cus_balance: true },
+    });
+    for (const c of customers) {
+      balanceMap.set(c.cus_id, parseFloat(c.cus_balance || 0));
+    }
+  }
+
+  return balanceMap;
+}
+
+function purchaseDetailSignature(details, defaultStoreId) {
+  return [...(details || [])]
+    .map((d) => {
+      const storeId = d.store_id || defaultStoreId || '';
+      const qnty = parseFloat(d.qnty ?? d.quantity ?? 0);
+      const unitRate = parseFloat(d.unit_rate ?? d.rate ?? 0);
+      const crate = parseFloat(d.crate ?? 0);
+      const total = parseFloat(d.total_amount ?? 0);
+      return `${d.pro_id}|${storeId}|${qnty}|${unitRate}|${crate}|${total}`;
+    })
+    .sort()
+    .join(';');
+}
+
+/** Net stock change per store (one bulk SQL per store instead of 2× line loops). */
+function buildPurchaseStockDeltaByStore(oldDetails, newDetails, defaultStoreId) {
+  const deltaMap = new Map();
+  const bump = (storeId, proId, delta) => {
+    const sid = parseInt(storeId, 10);
+    const pid = parseInt(proId, 10);
+    if (!sid || !pid || !delta || Number.isNaN(delta)) return;
+    const key = `${sid}:${pid}`;
+    deltaMap.set(key, (deltaMap.get(key) || 0) + delta);
+  };
+
+  for (const o of oldDetails || []) {
+    bump(o.store_id || defaultStoreId, o.pro_id, -parseFloat(o.qnty || 0));
+  }
+  for (const n of newDetails || []) {
+    bump(n.store_id || defaultStoreId, n.pro_id, parseFloat(n.qnty ?? n.quantity ?? 0));
+  }
+
+  const byStore = new Map();
+  for (const [key, delta] of deltaMap) {
+    if (Math.abs(delta) < 1e-9) continue;
+    const [storeId, proId] = key.split(':');
+    if (!byStore.has(storeId)) byStore.set(storeId, []);
+    byStore.get(storeId).push({ pro_id: parseInt(proId, 10), qnty: delta });
+  }
+  return byStore;
+}
+
+async function applyPurchaseStockDeltas(byStore, updatedBy, tx) {
+  if (!byStore?.size) return;
+  await Promise.all(
+    [...byStore.entries()].map(([storeId, items]) =>
+      bulkUpdateStoreStock(storeId, items, 'increment', updatedBy, tx)
+    )
+  );
+}
+
+function collectPutLedgerAccountIds(body, extras = {}) {
+  const ids = new Set();
+  const add = (v) => {
+    const n = parseInt(v, 10);
+    if (!Number.isNaN(n) && n > 0) ids.add(n);
+  };
+  add(body.cus_id);
+  add(body.credit_account_id);
+  add(body.bank_account_id);
+  add(body.cargo_account_id);
+  if (Array.isArray(body.cargo_account_ids)) body.cargo_account_ids.forEach(add);
+  if (extras.labourAccountId) add(extras.labourAccountId);
+  if (extras.incityCashAccountId) add(extras.incityCashAccountId);
+  return ids;
+}
+
+/** Fast bill_no-only match (indexed); use for delete/find in write paths. */
+function getPurchaseLedgerBillWhere(id) {
   const purIdStr = String(id);
   return {
     OR: [
@@ -55,12 +164,64 @@ function getPurchaseLedgerWhere(id) {
       { bill_no: `PUR-${purIdStr}` },
       { bill_no: `PURCHASE-${purIdStr}` },
       { bill_no: `INC-${purIdStr}` },
-      { bill_no: `incity-${purIdStr}` },
-      { details: { contains: `Purchase #${purIdStr}` } },
-      { details: { contains: `Purchase Update #${purIdStr}` } },
-      { details: { contains: `Purchase Return #${purIdStr}` } }
+      { bill_no: `incity-${purIdStr}` }
     ]
   };
+}
+
+/** Helper to build a comprehensive WHERE clause matching all ledger entries associated with a purchase bill. */
+function getPurchaseLedgerWhere(id) {
+  const purIdStr = String(id);
+  return {
+    OR: [
+      ...getPurchaseLedgerBillWhere(id).OR,
+      { details: { contains: `Purchase #${purIdStr}` } },
+      { details: { contains: `Purchase Update #${purIdStr}` } },
+      { details: { contains: `Purchase Return #${purIdStr}` } },
+      // Lines like "Purchase Update from …" / payments without "#id" in details (still tagged by bill_no when present)
+      {
+        AND: [
+          { bill_no: purIdStr },
+          {
+            OR: [
+              { details: { contains: 'Purchase Update' } },
+              { details: { contains: 'Purchase from' } },
+              { details: { contains: 'Payment to' } },
+              { details: { contains: 'Cash Payment for Purchase' } },
+              { details: { contains: 'Bank Payment for Purchase' } },
+              { details: { contains: 'Out Delivery' } },
+              { details: { contains: 'Out Labour' } },
+              { details: { contains: 'Incity Charges' } },
+              { details: { contains: 'Cargo/Out Charges' } }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+}
+
+/** Remove every ledger row for this purchase once (avoids double-posting on edit). */
+async function purgePurchaseLedgerRows(tx, purId, options = {}) {
+  const { fast = false } = options;
+  const where = fast ? getPurchaseLedgerBillWhere(purId) : getPurchaseLedgerWhere(purId);
+
+  if (!fast) {
+    await prepareLedgerDeletion(tx, purId);
+  }
+
+  const rows = await tx.ledger.findMany({
+    where,
+    select: { l_id: true, cus_id: true }
+  });
+
+  if (rows.length > 0) {
+    await tx.ledger.deleteMany({
+      where: { l_id: { in: rows.map((r) => r.l_id) } }
+    });
+  }
+
+  return rows;
 }
 
 /** Prepares a list of ledger entries about to be deleted by re-linking any subsequent entries to preserve the starting opening balance. */
@@ -123,18 +284,25 @@ async function prepareLedgerDeletion(tx, bill_no) {
 async function recalculateLedgerBalances(tx, cus_id) {
   const customer = await tx.customer.findUnique({
     where: { cus_id },
-    include: { customer_category: true }
+    select: { cus_id: true, cus_name: true }
   });
   if (!customer) return;
-
-  const categoryTitle = (customer.customer_category?.cus_cat_title || '').toLowerCase();
 
   const entries = await tx.ledger.findMany({
     where: { cus_id },
     orderBy: [
       { created_at: 'asc' },
       { l_id: 'asc' }
-    ]
+    ],
+    select: {
+      l_id: true,
+      created_at: true,
+      bill_no: true,
+      opening_balance: true,
+      closing_balance: true,
+      debit_amount: true,
+      credit_amount: true
+    }
   });
 
   // Re-sort in JS: created_at ASC → bill_no (numeric) ASC → l_id ASC
@@ -152,60 +320,127 @@ async function recalculateLedgerBalances(tx, cus_id) {
   });
 
   let runningBalance = 0;
-  const updates = [];
+  const rowUpdates = [];
   if (entries.length > 0) {
     runningBalance = parseFloat(entries[0].opening_balance || 0);
-    
+
     for (const entry of entries) {
       const opening = runningBalance;
       const debit = parseFloat(entry.debit_amount || 0);
       const credit = parseFloat(entry.credit_amount || 0);
-      
-      let change = 0;
-      if (categoryTitle.includes('cash') || categoryTitle.includes('bank')) {
-        change = debit - credit;
-      } else {
-        change = debit - credit;
-      }
+      const change = debit - credit;
       const closing = opening + change;
 
       if (
         Math.abs(parseFloat(entry.opening_balance) - opening) > 0.01 ||
         Math.abs(parseFloat(entry.closing_balance) - closing) > 0.01
       ) {
-        updates.push(
-          tx.ledger.update({
-            where: { l_id: entry.l_id },
-            data: {
-              opening_balance: Number(opening.toFixed(2)),
-              closing_balance: Number(closing.toFixed(2))
-            }
-          })
-        );
+        rowUpdates.push({
+          l_id: entry.l_id,
+          opening_balance: Number(opening.toFixed(2)),
+          closing_balance: Number(closing.toFixed(2))
+        });
       }
       runningBalance = closing;
     }
   }
 
-  if (updates.length > 0) {
-    const client = typeof tx.$transaction === 'function' ? tx : prisma;
-    await client.$transaction(updates);
+  // Avoid one giant interactive transaction (MySQL 1205 lock wait on large accounts).
+  const CHUNK = 50;
+  for (let i = 0; i < rowUpdates.length; i += CHUNK) {
+    const chunk = rowUpdates.slice(i, i + CHUNK);
+    for (const row of chunk) {
+      await tx.ledger.update({
+        where: { l_id: row.l_id },
+        data: {
+          opening_balance: row.opening_balance,
+          closing_balance: row.closing_balance
+        }
+      });
+    }
   }
 
   await tx.customer.update({
     where: { cus_id },
     data: { cus_balance: Number(runningBalance.toFixed(2)) }
   });
-  console.log(`   📊 Recalculated ledger for ${customer.cus_name} (ID: ${cus_id}). Final balance: ${runningBalance.toFixed(2)} (${updates.length} entries updated in batch)`);
+  console.log(`   📊 Recalculated ledger for ${customer.cus_name} (ID: ${cus_id}). Final balance: ${runningBalance.toFixed(2)} (${rowUpdates.length} rows patched)`);
 }
 
-/** Run full ledger chain recalc without blocking the HTTP response (same pattern as sales PUT). */
+const ledgerRecalcPendingIds = new Set();
+let ledgerRecalcDrainScheduled = false;
+let activePurchaseWrites = 0;
+
+function isLockWaitError(err) {
+  const msg = String(err?.message || err || '');
+  return msg.includes('1205') || msg.includes('Lock wait timeout');
+}
+
+async function recalculateLedgerBalancesWithRetry(cus_id, maxAttempts = 4) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await recalculateLedgerBalances(prisma, cus_id);
+      return;
+    } catch (err) {
+      if (!isLockWaitError(err) || attempt === maxAttempts) throw err;
+      await new Promise((r) => setTimeout(r, 400 * attempt));
+    }
+  }
+}
+
+/** Brief pause only when a recalc is actively running (never block minutes on queue drain). */
+async function briefRecalcYield(maxMs = 1500) {
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    if (activePurchaseWrites > 0) return;
+    if (ledgerRecalcPendingIds.size === 0 && !ledgerRecalcDrainScheduled) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+function beginPurchaseWrite() {
+  activePurchaseWrites += 1;
+}
+
+function endPurchaseWrite() {
+  activePurchaseWrites = Math.max(0, activePurchaseWrites - 1);
+}
+
+async function drainLedgerRecalcQueue() {
+  try {
+    while (ledgerRecalcPendingIds.size > 0) {
+      while (activePurchaseWrites > 0) {
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      const cid = ledgerRecalcPendingIds.values().next().value;
+      ledgerRecalcPendingIds.delete(cid);
+      try {
+        await recalculateLedgerBalancesWithRetry(cid);
+      } catch (err) {
+        console.error(`Background ledger recalc failed for customer ${cid}:`, err);
+      }
+    }
+  } finally {
+    ledgerRecalcDrainScheduled = false;
+    if (ledgerRecalcPendingIds.size > 0) {
+      ledgerRecalcDrainScheduled = true;
+      setTimeout(() => {
+        void drainLedgerRecalcQueue();
+      }, 400);
+    }
+  }
+}
+
+/** Run ledger chain recalc after the HTTP response; one account at a time to reduce lock contention. */
 function scheduleLedgerRecalc(cusIds) {
   const uniqueIds = [...new Set((cusIds || []).filter((id) => id != null))];
   if (uniqueIds.length === 0) return;
-  void Promise.all(uniqueIds.map((cid) => recalculateLedgerBalances(prisma, cid))).catch((err) => {
-    console.error('Background ledger recalc after purchase operation failed:', err);
-  });
+  uniqueIds.forEach((id) => ledgerRecalcPendingIds.add(id));
+  if (ledgerRecalcDrainScheduled) return;
+  ledgerRecalcDrainScheduled = true;
+  setTimeout(() => {
+    void drainLedgerRecalcQueue();
+  }, 8000);
 }
 
 /** Persist ledger rows with one MAX(l_id) query instead of one per row. */
@@ -213,28 +448,25 @@ async function persistLedgerEntries(tx, ledgerEntries, options = {}) {
   const { entryCreatedAt = null } = options;
   if (!ledgerEntries?.length) return;
 
-  let nextLId = await getNextId('ledger', 'l_id', tx);
-  for (const entry of ledgerEntries) {
-    await tx.ledger.create({
-      data: {
-        l_id: nextLId++,
-        cus_id: entry.cus_id,
-        opening_balance: entry.opening_balance,
-        debit_amount: entry.debit_amount,
-        credit_amount: entry.credit_amount,
-        closing_balance: entry.closing_balance,
-        bill_no: entry.bill_no,
-        trnx_type: entry.trnx_type,
-        details: entry.details,
-        payments: entry.payments,
-        cash_payment: entry.cash_payment,
-        bank_payment: entry.bank_payment,
-        updated_by: entry.updated_by,
-        ledger_type: entry.ledger_type,
-        ...(entryCreatedAt ? { created_at: entryCreatedAt } : {})
-      }
-    });
-  }
+  const nextLId = await getNextId('ledger', 'l_id', tx);
+  const rows = ledgerEntries.map((entry, index) => ({
+    l_id: nextLId + index,
+    cus_id: entry.cus_id,
+    opening_balance: entry.opening_balance,
+    debit_amount: entry.debit_amount,
+    credit_amount: entry.credit_amount,
+    closing_balance: entry.closing_balance,
+    bill_no: entry.bill_no,
+    trnx_type: entry.trnx_type,
+    details: entry.details,
+    payments: entry.payments ?? 0,
+    cash_payment: entry.cash_payment ?? 0,
+    bank_payment: entry.bank_payment ?? 0,
+    updated_by: entry.updated_by,
+    ledger_type: entry.ledger_type ?? null,
+    ...(entryCreatedAt ? { created_at: entryCreatedAt } : {})
+  }));
+  await tx.ledger.createMany({ data: rows });
 }
 
 // ========================================
@@ -248,6 +480,8 @@ export async function GET(request) {
   const id = searchParams.get('id') ? parseInt(searchParams.get('id')) : null; // optional: ?id=1
   const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')) : null;
   const invoice = searchParams.get('invoice');
+  /** List/table view: header rows only (no line items) — much faster */
+  const isListSummary = searchParams.get('list') === 'true';
 
   try {
     if (id) {
@@ -453,9 +687,6 @@ export async function GET(request) {
             cus_phone_no: true
           }
         },
-        cargo_account: {
-          select: { cus_id: true, cus_name: true, cus_phone_no: true }
-        },
         store: {
           select: {
             storeid: true,
@@ -470,17 +701,24 @@ export async function GET(request) {
             role: true
           }
         },
-        purchase_details: {
-          include: {
-            product: {
-              select: {
-                pro_id: true,
-                pro_title: true,
-                pro_unit: true
+        ...(isListSummary
+          ? {}
+          : {
+              cargo_account: {
+                select: { cus_id: true, cus_name: true, cus_phone_no: true }
+              },
+              purchase_details: {
+                include: {
+                  product: {
+                    select: {
+                      pro_id: true,
+                      pro_title: true,
+                      pro_unit: true
+                    }
+                  }
+                }
               }
-            }
-          }
-        }
+            }),
       },
       orderBy: { created_at: 'desc' }
     };
@@ -1206,6 +1444,7 @@ export async function POST(request) {
 
       console.log(`📊 CREATING ${ledgerEntries.length} LEDGER ENTRIES IN DATABASE (POST)`);
       await persistLedgerEntries(tx, ledgerEntries);
+      await syncAccountBalancesFromEntries(tx, ledgerEntries);
       console.log(`📊 All ${ledgerEntries.length} ledger entries created successfully\n`);
 
       const affectedCusIds = [...new Set(ledgerEntries.map(e => e.cus_id))];
@@ -1342,40 +1581,35 @@ export async function PUT(request) {
     }
 
     const affectedCusIds = new Set();
+    const productRateUpdates = [];
+    const supplierName = customer.cus_name || 'Supplier';
 
-    // Update purchase with details and ledger entries in a transaction
-    const result = await prisma.$transaction(async (tx) => {
+    if (existingPurchase.cus_id) affectedCusIds.add(existingPurchase.cus_id);
+    if (existingPurchase.credit_account_id) affectedCusIds.add(existingPurchase.credit_account_id);
+
+    collectPutLedgerAccountIds({
+      cus_id,
+      credit_account_id,
+      bank_account_id,
+      cargo_account_id,
+      cargo_account_ids
+    }).forEach((cid) => affectedCusIds.add(cid));
+
+    let result;
+    const runPutTransaction = async () =>
+      prisma.$transaction(async (tx) => {
       // Bill + ledger rows use edit time (not the original purchase date).
       const ledgerEditedAt = new Date();
 
       // ── Step 1: Read old purchase details so we can reverse their stock ──
       const oldDetails = await tx.purchaseDetail.findMany({ where: { pur_id: id } });
 
-      // ── Collect affected account IDs for chronological recalculation ──
-      const oldLedgerEntries = await tx.ledger.findMany({
-        where: getPurchaseLedgerWhere(id)
-      });
-      oldLedgerEntries.forEach(entry => affectedCusIds.add(entry.cus_id));
+      const removedLedgerRows = await purgePurchaseLedgerRows(tx, id, { fast: true });
+      removedLedgerRows.forEach((row) => affectedCusIds.add(row.cus_id));
 
-      // ── Call prepareLedgerDeletion to re-link subsequent entries of deleted items ──
-      await prepareLedgerDeletion(tx, id);
-
-      // ── Step 2: Delete old ledger entries for this bill ──
-      await tx.ledger.deleteMany({ where: getPurchaseLedgerWhere(id) });
-
-      const getOpeningBalanceForAccount = async (accountId) =>
-        resolveOpeningBalance(tx, accountId, ledgerEditedAt);
-
-      // ── Step 3: Reverse stock for old quantities ──
-      for (const old of oldDetails) {
-        const oldStoreId = old.store_id || store_id;
-        if (oldStoreId && old.pro_id && old.qnty) {
-          await updateStoreStock(oldStoreId, old.pro_id, old.qnty, 'decrement', updated_by, tx);
-        }
-      }
-
-      // ── Step 4: Delete old purchase details ──
-      await tx.purchaseDetail.deleteMany({ where: { pur_id: id } });
+      const detailsUnchanged =
+        purchaseDetailSignature(oldDetails, store_id) ===
+        purchaseDetailSignature(purchase_details, store_id);
 
       // ── Step 5: Update the purchase record ──
       const updatedPurchase = await tx.purchase.update({
@@ -1411,9 +1645,10 @@ export async function PUT(request) {
         }
       });
 
-      // Create new purchase details if provided
+      let savedDetails = oldDetails;
+
       if (purchase_details && purchase_details.length > 0) {
-        const detailsData = purchase_details.map(detail => ({
+        const detailsData = purchase_details.map((detail) => ({
           pur_id: id,
           vehicle_no: vehicle_no || null,
           cus_id: parseInt(cus_id),
@@ -1425,60 +1660,118 @@ export async function PUT(request) {
           crate: parseFloat(detail.crate != null && detail.crate !== '' ? detail.crate : 0),
           total_amount: parseFloat(detail.total_amount),
           net_total: parseFloat(detail.total_amount),
-          updated_by: updated_by || existingPurchase.updated_by
+          updated_by: updated_by || existingPurchase.updated_by,
         }));
 
-        await tx.purchaseDetail.createMany({ data: detailsData });
+        if (!detailsUnchanged) {
+          await applyPurchaseStockDeltas(
+            buildPurchaseStockDeltaByStore(oldDetails, purchase_details, store_id),
+            updated_by,
+            tx
+          );
+          await tx.purchaseDetail.deleteMany({ where: { pur_id: id } });
+          await tx.purchaseDetail.createMany({ data: detailsData });
+          savedDetails = detailsData;
+        }
 
-        // Update store stock for each product using per-detail store_id (fallback to purchase-level store_id)
-        const storeStockUpdatePromises = purchase_details.map(async (detail, index) => {
-          const detailStoreId = detail.store_id || store_id;
-          if (!detailStoreId) return;
-          await updateStoreStock(detailStoreId, detailsData[index].pro_id, detailsData[index].qnty, 'increment', updated_by, tx);
-        });
-        await Promise.all(storeStockUpdatePromises);
+        if (!detailsUnchanged) {
+          for (const detail of purchase_details) {
+            const proId = safeParseInt(detail.pro_id, 0);
+            const saleRate = safeParseFloat(detail.unit_rate || detail.sale_rate || detail.pro_sale_price || detail.rate, 0);
+            const costRate = safeParseFloat(detail.cost_rate || detail.original_cost_rate, 0);
+            const purchaseRate = safeParseFloat(detail.crate != null && detail.crate !== '' ? detail.crate : 0, 0);
 
-        // Update product table sale rate (pro_sale_price), cost rate (pro_cost_price), and purchase rate (pro_crate)
-        const productUpdatePromises = purchase_details.map(async (detail) => {
-          const proId = safeParseInt(detail.pro_id, 0);
-          const saleRate = safeParseFloat(detail.unit_rate || detail.sale_rate || detail.pro_sale_price || detail.rate, 0);
-          const costRate = safeParseFloat(detail.cost_rate || detail.original_cost_rate, 0);
-          const purchaseRate = safeParseFloat(detail.crate != null && detail.crate !== '' ? detail.crate : 0, 0);
-
-          if (proId > 0) {
-            const updateData = {};
-            if (saleRate > 0) updateData.pro_sale_price = Number(saleRate.toFixed(2));
-            if (costRate > 0) updateData.pro_cost_price = Number(costRate.toFixed(2));
-            if (purchaseRate > 0) updateData.pro_crate = Number(purchaseRate.toFixed(2));
-
-            if (Object.keys(updateData).length > 0) {
-              await tx.product.update({
-                where: { pro_id: proId },
-                data: updateData
-              });
-              console.log(`🏷️ Updated product ${proId} rates in DB:`, updateData);
+            if (proId > 0) {
+              const updateData = {};
+              if (saleRate > 0) updateData.pro_sale_price = Number(saleRate.toFixed(2));
+              if (costRate > 0) updateData.pro_cost_price = Number(costRate.toFixed(2));
+              if (purchaseRate > 0) updateData.pro_crate = Number(purchaseRate.toFixed(2));
+              if (Object.keys(updateData).length > 0) {
+                productRateUpdates.push({ proId, updateData });
+              }
             }
           }
-        });
-        await Promise.all(productUpdatePromises);
+        }
       }
 
-      const ledgerEntries = [];
-      let runningSupplierBalance = 0;
-      if (cus_id) {
-        runningSupplierBalance = await getOpeningBalanceForAccount(cus_id);
+      const outLabourAmtPUT = safeParseFloat(out_labour_amount || 0);
+      const outDeliveryAmtPUT = safeParseFloat(out_delivery_amount || 0);
+      const totalOutChargesPUT = outLabourAmtPUT + outDeliveryAmtPUT;
+      const incityTotalPUT = safeParseFloat(incity_own_labour || 0) + safeParseFloat(incity_own_delivery || 0);
+      const bankAccIdForEntry = bankAccountIdInt || (normalizedPaymentType === 'BANK_TRANSFER' ? (credit_account_id || null) : null);
+
+      let cargoIdsPUT = [];
+      try {
+        if (cargo_account_ids) {
+          cargoIdsPUT = Array.isArray(cargo_account_ids) ? cargo_account_ids : JSON.parse(cargo_account_ids || '[]');
+        } else if (cargo_account_id) {
+          cargoIdsPUT = [cargo_account_id];
+        }
+      } catch {
+        cargoIdsPUT = cargo_account_id ? [cargo_account_id] : [];
       }
+      if (cargoIdsPUT.length === 0 && cargo_account_id) cargoIdsPUT = [cargo_account_id];
+
+      let labourAccountPUT = null;
+      if (outLabourAmtPUT > 0) {
+        labourAccountPUT = await tx.customer.findFirst({
+          where: {
+            OR: [
+              { cus_name: 'Labour' },
+              { cus_name: 'Labour Account' },
+              {
+                customer_category: { cus_cat_title: 'Labour' },
+                customer_type: { cus_type_title: 'labour' }
+              }
+            ]
+          },
+          select: { cus_id: true, cus_name: true }
+        });
+      }
+
+      let incityCashAccountPUT = null;
+      if (incityTotalPUT > 0) {
+        const cashAccPUT = await tx.customer.findFirst({
+          where: {
+            OR: [
+              { customer_category: { cus_cat_title: 'Cash Account' } },
+              { cus_name: 'Cash Account' },
+              { customer_category: { cus_cat_title: { contains: 'Cash Account' } } }
+            ],
+            NOT: [
+              { cus_name: { contains: 'Cash Sales' } },
+              { cus_name: { contains: 'cash purchase' } }
+            ]
+          },
+          select: { cus_id: true, cus_name: true }
+        });
+        incityCashAccountPUT = cashAccPUT;
+      }
+
+      const balanceMap = await fetchCurrentLedgerBalances(
+        tx,
+        [
+          ...collectPutLedgerAccountIds(
+            { cus_id, credit_account_id, bank_account_id: bankAccIdForEntry, cargo_account_id, cargo_account_ids: cargoIdsPUT },
+            { labourAccountId: labourAccountPUT?.cus_id, incityCashAccountId: incityCashAccountPUT?.cus_id }
+          )
+        ]
+      );
+
+      const ledgerEntries = [];
+      const openingForAccount = (accountId) => {
+        const prior = ledgerEntries.filter((e) => e.cus_id === accountId);
+        if (prior.length > 0) return prior[prior.length - 1].closing_balance;
+        return balanceMap.get(accountId) ?? 0;
+      };
+
+      let runningSupplierBalance = cus_id ? openingForAccount(parseInt(cus_id, 10)) : 0;
 
       // Calculate supplier amount — EXCLUDE OUT charges (Out labour/Out delivery are not billed to supplier)
       const supplierAmount = safeParseFloat(total_amount) - safeParseFloat(discount) + safeParseFloat(labour_amount) + safeParseFloat(transport_amount);
 
       // 1. Supplier Account Entry
       if (cus_id) {
-        const supplierData = await tx.customer.findUnique({
-          where: { cus_id: cus_id },
-          select: { cus_name: true }
-        });
-
         const supplierEntry = createLedgerEntry({
           cus_id: cus_id,
           opening_balance: runningSupplierBalance,
@@ -1486,7 +1779,7 @@ export async function PUT(request) {
           credit_amount: supplierAmount,
           bill_no: id.toString(),
           trnx_type: 'CREDIT',
-          details: `Purchase Update from ${supplierData?.cus_name || 'Supplier'}${invoice_number ? ` #${invoice_number}` : ''}${vehicle_no ? ` - Vehicle: ${vehicle_no}` : ''}`,
+          details: `Purchase Update from ${supplierName}${invoice_number ? ` #${invoice_number}` : ''}${vehicle_no ? ` - Vehicle: ${vehicle_no}` : ''}`,
           payments: 0,
           updated_by: updated_by ? parseInt(updated_by) : null
         });
@@ -1498,11 +1791,6 @@ export async function PUT(request) {
       // 2. Payment Entry on supplier account - only if payment > 0
       const paymentAmount = safeParseFloat(payment);
       if (paymentAmount > 0 && cus_id) {
-        const supplierData = await tx.customer.findUnique({
-          where: { cus_id: cus_id },
-          select: { cus_name: true }
-        });
-
         const paymentEntry = createLedgerEntry({
           cus_id: cus_id,
           opening_balance: runningSupplierBalance,
@@ -1510,7 +1798,7 @@ export async function PUT(request) {
           credit_amount: 0,
           bill_no: id.toString(),
           trnx_type: 'DEBIT',
-          details: `Payment to ${supplierData?.cus_name || 'Supplier'} - Purchase Update${vehicle_no ? ` - Vehicle: ${vehicle_no}` : ''}`,
+          details: `Payment to ${supplierName} - Purchase Update${vehicle_no ? ` - Vehicle: ${vehicle_no}` : ''}`,
           payments: paymentAmount,
           cash_payment: cashPaymentAmt,
           bank_payment: bankPaymentAmt,
@@ -1523,12 +1811,7 @@ export async function PUT(request) {
 
       // 3. Cash Account Entry (if cash was paid)
       if (cashPaymentAmt > 0 && credit_account_id) {
-        const cashAccountData = await tx.customer.findUnique({
-          where: { cus_id: credit_account_id },
-          select: { cus_name: true }
-        });
-        const cashOpeningBalance = await getOpeningBalanceForAccount(credit_account_id);
-        const supplierName = (await tx.customer.findUnique({ where: { cus_id }, select: { cus_name: true } }))?.cus_name || 'Supplier';
+        const cashOpeningBalance = openingForAccount(parseInt(credit_account_id, 10));
 
         const cashEntry = createLedgerEntry({
           cus_id: credit_account_id,
@@ -1548,18 +1831,10 @@ export async function PUT(request) {
       }
 
       // 4. Bank Account Entry (if bank was paid)
-      const bankAccIdForEntry = bankAccountIdInt || (normalizedPaymentType === 'BANK_TRANSFER' ? (credit_account_id || null) : null);
       if (bankPaymentAmt > 0 && bankAccIdForEntry) {
-        const bankAccountData = await tx.customer.findUnique({
-          where: { cus_id: bankAccIdForEntry },
-          select: { cus_name: true }
-        });
-        const bankOpeningBalance = await getOpeningBalanceForAccount(bankAccIdForEntry);
-        const supplierName = (await tx.customer.findUnique({ where: { cus_id }, select: { cus_name: true } }))?.cus_name || 'Supplier';
-
         const bankEntry = createLedgerEntry({
           cus_id: bankAccIdForEntry,
-          opening_balance: bankOpeningBalance,
+          opening_balance: openingForAccount(parseInt(bankAccIdForEntry, 10)),
           debit_amount: 0,
           credit_amount: bankPaymentAmt,
           bill_no: id.toString(),
@@ -1574,14 +1849,7 @@ export async function PUT(request) {
         ledgerEntries.push(bankEntry);
       }
 
-      // --- CARGO / OUT CHARGES LEDGER POSTINGS (PUT) ---
-      const outLabourAmtPUT = safeParseFloat(out_labour_amount || 0);
-      const outDeliveryAmtPUT = safeParseFloat(out_delivery_amount || 0);
-      const totalOutChargesPUT = outLabourAmtPUT + outDeliveryAmtPUT;
-
-      // Supplier DEBIT for out charges — cargo/delivery added to supplier payable balance.
       if (totalOutChargesPUT > 0 && cus_id) {
-        const supplierForOutPUT = await tx.customer.findUnique({ where: { cus_id }, select: { cus_name: true } });
         const outPartsPUT = [];
         if (outDeliveryAmtPUT > 0) outPartsPUT.push(`Delivery: ${outDeliveryAmtPUT}`);
         if (outLabourAmtPUT > 0) outPartsPUT.push(`Labour: ${outLabourAmtPUT}`);
@@ -1593,188 +1861,130 @@ export async function PUT(request) {
           credit_amount: 0,
           bill_no: id.toString(),
           trnx_type: 'DEBIT',
-          details: `Cargo/Out Charges added to ${supplierForOutPUT?.cus_name || 'Supplier'} — ${outPartsPUT.join(' + ')} - Purchase #${id}${invoice_number ? ` (Inv: ${invoice_number})` : ''}`,
+          details: `Cargo/Out Charges added to ${supplierName} — ${outPartsPUT.join(' + ')} - Purchase #${id}${invoice_number ? ` (Inv: ${invoice_number})` : ''}`,
           payments: 0,
           updated_by: updated_by ? parseInt(updated_by) : null
         });
         ledgerEntries.push(supplierOutDebitPUT);
         runningSupplierBalance = supplierOutDebitPUT.closing_balance;
-        console.log(`📦 Supplier cargo addition (PUT): ${supplierForOutPUT?.cus_name} credited ${totalOutChargesPUT}`);
       }
 
-      // Debit cargo accounts for out_delivery
-      if (outDeliveryAmtPUT > 0) {
-        let cargoIdsPUT = [];
-        try {
-          if (cargo_account_ids) {
-            cargoIdsPUT = Array.isArray(cargo_account_ids) ? cargo_account_ids : JSON.parse(cargo_account_ids || '[]');
-          } else if (cargo_account_id) {
-            cargoIdsPUT = [cargo_account_id];
-          }
-        } catch (err) {
-          cargoIdsPUT = cargo_account_ids ? (Array.isArray(cargo_account_ids) ? cargo_account_ids : [cargo_account_ids]) : (cargo_account_id ? [cargo_account_id] : []);
-        }
-        if (cargoIdsPUT.length === 0 && cargo_account_id) cargoIdsPUT = [cargo_account_id];
+      if (outDeliveryAmtPUT > 0 && cargoIdsPUT.length > 0) {
+        const perAccountPUT = parseFloat((outDeliveryAmtPUT / cargoIdsPUT.length).toFixed(2));
+        const remainderPUT = parseFloat((outDeliveryAmtPUT - (perAccountPUT * cargoIdsPUT.length)).toFixed(2));
 
-        if (cargoIdsPUT.length > 0) {
-          const perAccountPUT = parseFloat((outDeliveryAmtPUT / cargoIdsPUT.length).toFixed(2));
-          let remainderPUT = parseFloat((outDeliveryAmtPUT - (perAccountPUT * cargoIdsPUT.length)).toFixed(2));
+        for (let i = 0; i < cargoIdsPUT.length; i++) {
+          const aid = parseInt(cargoIdsPUT[i], 10);
+          if (Number.isNaN(aid)) continue;
 
-          for (let i = 0; i < cargoIdsPUT.length; i++) {
-            const aid = parseInt(cargoIdsPUT[i]);
-            const cargoAcc = await tx.customer.findUnique({ where: { cus_id: aid }, select: { cus_id: true, cus_name: true } });
-            if (!cargoAcc) { continue; }
+          let allocatePUT = perAccountPUT;
+          if (i === 0) allocatePUT = parseFloat((perAccountPUT + remainderPUT).toFixed(2));
 
-            let allocatePUT = perAccountPUT;
-            if (i === 0) allocatePUT = parseFloat((perAccountPUT + remainderPUT).toFixed(2));
-
-            const cargoOpeningBalance = await getOpeningBalanceForAccount(cargoAcc.cus_id);
-            const cargoEntry = createLedgerEntry({
-              cus_id: cargoAcc.cus_id,
-              opening_balance: cargoOpeningBalance,
-              debit_amount: 0,
-              credit_amount: allocatePUT,
-              bill_no: id.toString(),
-              trnx_type: 'CREDIT',
-              details: `Out Delivery - Purchase #${id}${invoice_number ? ` (Inv: ${invoice_number})` : ''}`,
-              payments: 0,
-              updated_by: updated_by ? parseInt(updated_by) : null
-            });
-            ledgerEntries.push(cargoEntry);
-          }
-        }
-      }
-
-      // Debit labour account for out_labour
-      if (outLabourAmtPUT > 0) {
-        const labourAccountPUT = await tx.customer.findFirst({
-          where: {
-            OR: [
-              { cus_name: 'Labour' },
-              { cus_name: 'Labour Account' },
-              {
-                customer_category: { cus_cat_title: 'Labour' },
-                customer_type: { cus_type_title: 'labour' }
-              }
-            ]
-          },
-          select: { cus_id: true, cus_name: true }
-        });
-
-        if (labourAccountPUT) {
-          const priorLabourEntriesPUT = ledgerEntries.filter(e => e.cus_id === labourAccountPUT.cus_id);
-          const labourOpeningBalancePUT = priorLabourEntriesPUT.length > 0
-            ? priorLabourEntriesPUT[priorLabourEntriesPUT.length - 1].closing_balance
-            : await getOpeningBalanceForAccount(labourAccountPUT.cus_id);
-
-          const labourEntryPUT = createLedgerEntry({
-            cus_id: labourAccountPUT.cus_id,
-            opening_balance: labourOpeningBalancePUT,
+          ledgerEntries.push(createLedgerEntry({
+            cus_id: aid,
+            opening_balance: openingForAccount(aid),
             debit_amount: 0,
-            credit_amount: outLabourAmtPUT,
+            credit_amount: allocatePUT,
             bill_no: id.toString(),
             trnx_type: 'CREDIT',
-            details: `Out Labour - Purchase #${id}${invoice_number ? ` (Inv: ${invoice_number})` : ''}`,
+            details: `Out Delivery - Purchase #${id}${invoice_number ? ` (Inv: ${invoice_number})` : ''}`,
             payments: 0,
             updated_by: updated_by ? parseInt(updated_by) : null
-          });
-          ledgerEntries.push(labourEntryPUT);
+          }));
         }
       }
 
-      // --- INCITY CHARGES: Deduct from cash account directly (PUT) ---
-      const incityTotalPUT = safeParseFloat(incity_own_labour || 0) + safeParseFloat(incity_own_delivery || 0);
+      if (outLabourAmtPUT > 0 && labourAccountPUT) {
+        ledgerEntries.push(createLedgerEntry({
+          cus_id: labourAccountPUT.cus_id,
+          opening_balance: openingForAccount(labourAccountPUT.cus_id),
+          debit_amount: 0,
+          credit_amount: outLabourAmtPUT,
+          bill_no: id.toString(),
+          trnx_type: 'CREDIT',
+          details: `Out Labour - Purchase #${id}${invoice_number ? ` (Inv: ${invoice_number})` : ''}`,
+          payments: 0,
+          updated_by: updated_by ? parseInt(updated_by) : null
+        }));
+      }
 
-      if (incityTotalPUT > 0) {
-        // Resolve Cash Account ALWAYS for Incity charges in PUT (Category: "Cash Account", ID: 2551)
-        const cashAccPUT = await tx.customer.findFirst({
-          where: {
-            OR: [
-              { customer_category: { cus_cat_title: 'Cash Account' } },
-              { cus_name: 'Cash Account' },
-              { customer_category: { cus_cat_title: { contains: 'Cash Account' } } }
-            ],
-            NOT: [
-              { cus_name: { contains: 'Cash Sales' } },
-              { cus_name: { contains: 'cash purchase' } }
-            ]
-          },
-          select: { cus_id: true }
-        });
-        const incityCashAccountIdPUT = cashAccPUT?.cus_id || null;
+      if (incityTotalPUT > 0 && incityCashAccountPUT) {
+        const incityPartsPUT = [];
+        if (safeParseFloat(incity_own_labour) > 0) incityPartsPUT.push(`Own Labour: ${incity_own_labour}`);
+        if (safeParseFloat(incity_own_delivery) > 0) incityPartsPUT.push(`Own Delivery: ${incity_own_delivery}`);
 
-        const incityCashAccountPUT = incityCashAccountIdPUT
-          ? await tx.customer.findUnique({ where: { cus_id: incityCashAccountIdPUT }, select: { cus_id: true, cus_name: true } })
-          : null;
-
-        if (incityCashAccountPUT) {
-          const priorCashEntriesPUT = ledgerEntries.filter(e => e.cus_id === incityCashAccountPUT.cus_id);
-          const incityOpeningBalancePUT = priorCashEntriesPUT.length > 0
-            ? priorCashEntriesPUT[priorCashEntriesPUT.length - 1].closing_balance
-            : await getOpeningBalanceForAccount(incityCashAccountPUT.cus_id);
-
-          const supplierForIncityPUT = cus_id ? await tx.customer.findUnique({ where: { cus_id: parseInt(cus_id) }, select: { cus_name: true } }) : null;
-          const incityPartsPUT = [];
-          if (safeParseFloat(incity_own_labour) > 0) incityPartsPUT.push(`Own Labour: ${incity_own_labour}`);
-          if (safeParseFloat(incity_own_delivery) > 0) incityPartsPUT.push(`Own Delivery: ${incity_own_delivery}`);
-
-          const incityCashEntryPUT = createLedgerEntry({
-            cus_id: incityCashAccountPUT.cus_id,
-            opening_balance: incityOpeningBalancePUT,
-            debit_amount: 0,
-            credit_amount: incityTotalPUT,
-            bill_no: id.toString(),
-            trnx_type: 'CREDIT',
-            details: `Incity Charges Payment (${incityPartsPUT.join(', ')}) - Purchase Update #${id}${supplierForIncityPUT?.cus_name ? ` - Supplier: ${supplierForIncityPUT.cus_name}` : ''}${invoice_number ? ` (Inv: ${invoice_number})` : ''}`,
-            payments: incityTotalPUT,
-            cash_payment: incityTotalPUT,
-            bank_payment: 0,
-            updated_by: updated_by ? parseInt(updated_by) : null
-          });
-          ledgerEntries.push(incityCashEntryPUT);
-          console.log(`🏙️ Incity cash entry (PUT): ${incityCashAccountPUT.cus_name} (ID: ${incityCashAccountPUT.cus_id}) credited ${incityTotalPUT} for Incity Charges`);
-        } else {
-          console.warn('⚠️ Incity charges present in PUT but cash account not found — skipping cash deduction');
-        }
+        ledgerEntries.push(createLedgerEntry({
+          cus_id: incityCashAccountPUT.cus_id,
+          opening_balance: openingForAccount(incityCashAccountPUT.cus_id),
+          debit_amount: 0,
+          credit_amount: incityTotalPUT,
+          bill_no: id.toString(),
+          trnx_type: 'CREDIT',
+          details: `Incity Charges Payment (${incityPartsPUT.join(', ')}) - Purchase Update #${id} - Supplier: ${supplierName}${invoice_number ? ` (Inv: ${invoice_number})` : ''}`,
+          payments: incityTotalPUT,
+          cash_payment: incityTotalPUT,
+          bank_payment: 0,
+          updated_by: updated_by ? parseInt(updated_by) : null
+        }));
+      } else if (incityTotalPUT > 0) {
+        console.warn('⚠️ Incity charges present in PUT but cash account not found — skipping cash deduction');
       }
 
       console.log(`📊 CREATING ${ledgerEntries.length} LEDGER ENTRIES IN DATABASE (PUT) at ${ledgerEditedAt.toISOString()}`);
       await persistLedgerEntries(tx, ledgerEntries, { entryCreatedAt: ledgerEditedAt });
+      ledgerEntries.forEach((entry) => affectedCusIds.add(entry.cus_id));
 
-      // Add new ledger entries accounts to affected set
-      ledgerEntries.forEach(entry => affectedCusIds.add(entry.cus_id));
-
-      return { purchase: updatedPurchase };
-    }, { maxWait: 20000, timeout: 90000 });
-
-    const completePurchase = await prisma.purchase.findUnique({
-      where: { pur_id: result.purchase.pur_id },
-      include: {
-        customer: true,
-        updated_by_user: {
-          select: {
-            user_id: true,
-            full_name: true,
-            role: true
-          }
-        },
-        purchase_details: {
-          include: {
-            product: {
-              select: {
-                pro_id: true,
-                pro_title: true,
-                pro_unit: true
-              }
-            }
-          }
-        }
+      await syncAccountBalancesFromEntries(tx, ledgerEntries);
+      const newEntryCusIds = new Set(ledgerEntries.map((e) => e.cus_id));
+      const removedOnlyCusIds = [...new Set(removedLedgerRows.map((r) => r.cus_id))].filter(
+        (cid) => !newEntryCusIds.has(cid)
+      );
+      if (removedOnlyCusIds.length) {
+        await syncAccountBalancesFromLatestLedger(tx, removedOnlyCusIds);
       }
-    });
+
+      return { purchase: updatedPurchase, purchase_details: savedDetails };
+      }, { maxWait: 20000, timeout: 90000 });
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      beginPurchaseWrite();
+      try {
+        result = await runPutTransaction();
+        break;
+      } catch (err) {
+        if (!isLockWaitError(err) || attempt === 3) throw err;
+        console.warn(`Purchase PUT lock wait (attempt ${attempt}/3), retrying…`);
+        await new Promise((r) => setTimeout(r, 600 * attempt));
+        await briefRecalcYield(800);
+      } finally {
+        endPurchaseWrite();
+      }
+    }
 
     scheduleLedgerRecalc([...affectedCusIds]);
 
-    return NextResponse.json(completePurchase);
+    void (async () => {
+      for (const { proId, updateData } of productRateUpdates) {
+        try {
+          await prisma.product.update({ where: { pro_id: proId }, data: updateData });
+        } catch (err) {
+          console.warn(`Failed to update product ${proId} rates after purchase PUT:`, err.message);
+        }
+      }
+    })();
+
+    const resolvedBankId =
+      bankAccountIdInt ||
+      (bankPaymentAmt > 0 && normalizedPaymentType === 'BANK_TRANSFER' ? credit_account_id : null);
+
+    return NextResponse.json({
+      ...result.purchase,
+      customer,
+      purchase_details: result.purchase_details || [],
+      bank_account_id: resolvedBankId,
+      cash_payment: cashPaymentAmt,
+      bank_payment: bankPaymentAmt,
+    });
   } catch (err) {
     console.error('❌ Error updating purchase:', err);
     return errorResponse('Failed to update purchase', 500);
@@ -1809,7 +2019,16 @@ export async function DELETE(request) {
 
     const affectedCusIds = new Set();
 
-    // Use transaction to ensure data consistency
+    await briefRecalcYield();
+
+    const deleteBillLedgerRows = await prisma.ledger.findMany({
+      where: getPurchaseLedgerBillWhere(id),
+      select: { cus_id: true }
+    });
+    deleteBillLedgerRows.forEach((entry) => affectedCusIds.add(entry.cus_id));
+
+    beginPurchaseWrite();
+    try {
     await prisma.$transaction(async (tx) => {
       // 1. Reverse store stock
       const storeId = existingPurchase.store_id;
@@ -1819,19 +2038,9 @@ export async function DELETE(request) {
         }
       }
 
-      // 2. Collect all affected accounts from ledger entries before deletion
-      const oldLedgerEntries = await tx.ledger.findMany({
-        where: getPurchaseLedgerWhere(id)
-      });
-      oldLedgerEntries.forEach(entry => affectedCusIds.add(entry.cus_id));
-
-      // Call prepareLedgerDeletion to re-link subsequent entries
-      await prepareLedgerDeletion(tx, id);
-
-      // 3. Delete ledger entries for this bill
-      await tx.ledger.deleteMany({
-        where: getPurchaseLedgerWhere(id)
-      });
+      const removedOnDelete = await purgePurchaseLedgerRows(tx, id);
+      removedOnDelete.forEach((row) => affectedCusIds.add(row.cus_id));
+      await syncAccountBalancesFromLatestLedger(tx, [...affectedCusIds]);
 
       // 5. Delete purchase details
       await tx.purchaseDetail.deleteMany({
@@ -1842,7 +2051,10 @@ export async function DELETE(request) {
       await tx.purchase.delete({
         where: { pur_id: id }
       });
-    }, { maxWait: 20000, timeout: 90000 });
+    }, { maxWait: 30000, timeout: 120000 });
+    } finally {
+      endPurchaseWrite();
+    }
 
     scheduleLedgerRecalc([...affectedCusIds]);
 

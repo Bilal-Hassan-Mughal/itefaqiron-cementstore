@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, Fragment, useMemo, useRef, useCallback, forwardRef } from 'react';
-import { getCreatedByName } from '@/lib/date-helper';
+import { getCreatedByName, parseAppDateTime } from '@/lib/date-helper';
 import {
   Plus,
   Edit,
@@ -816,15 +816,15 @@ function savePersistedLedgerTabs(openLedgers, activeLedgerId) {
 
 const getLocalDateString = (dateInput) => {
   if (!dateInput) return '';
-  const d = new Date(dateInput);
-  if (isNaN(d.getTime())) return '';
+  const d = parseAppDateTime(dateInput);
+  if (!d) return '';
   return d.toLocaleDateString('en-GB', { timeZone: 'Asia/Karachi' });
 };
 
 const getKarachiDateKey = (dateInput) => {
   if (!dateInput) return '';
-  const d = new Date(dateInput);
-  if (isNaN(d.getTime())) return '';
+  const d = parseAppDateTime(dateInput);
+  if (!d) return '';
   return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
 };
 
@@ -3810,7 +3810,11 @@ export default function FinancePage() {
                 getOptionLabel={(option) => option.cus_name}
                 getOptionKey={customerOptionKey}
                 isOptionEqualToValue={isSameCustomerOption}
-                value={selectedCustomer ? customers.find(c => Number(c.cus_id) === Number(selectedCustomer)) : null}
+                value={
+                  selectedCustomer
+                    ? (customers.find((c) => Number(c.cus_id) === Number(selectedCustomer)) ?? null)
+                    : null
+                }
                 onChange={(event, newValue) => {
                   if (newValue) openCustomerLedger(newValue.cus_id, newValue.cus_name);
                   else showAllAccountsView();
@@ -4596,7 +4600,11 @@ export default function FinancePage() {
                 getOptionLabel={(option) => option.cus_name}
                 getOptionKey={customerOptionKey}
                 isOptionEqualToValue={isSameCustomerOption}
-                value={formData.cus_id ? customers.find(c => Number(c.cus_id) === Number(formData.cus_id)) : null}
+                value={
+                  formData.cus_id
+                    ? (customers.find((c) => Number(c.cus_id) === Number(formData.cus_id)) ?? null)
+                    : null
+                }
                 onChange={(event, newValue) => {
                   if (newValue) {
                     setFormData(prev => ({ ...prev, cus_id: newValue.cus_id }));
@@ -4823,8 +4831,8 @@ export default function FinancePage() {
                         getOptionLabel={(option) => option.cus_name || ''}
                         getOptionKey={customerOptionKey}
                         isOptionEqualToValue={isSameCustomerOption}
-                        value={selectedLedgerBankAccount}
-                        onChange={(event, newValue) => setSelectedLedgerBankAccount(newValue)}
+                        value={selectedLedgerBankAccount ?? null}
+                        onChange={(event, newValue) => setSelectedLedgerBankAccount(newValue ?? null)}
                         disabled={parseFloat(formData.bank_amount || 0) <= 0}
                         filterOptions={(options, { inputValue }) =>
                           options.filter(o => o.cus_name?.toLowerCase().includes(inputValue.toLowerCase()))
@@ -5104,7 +5112,11 @@ export default function FinancePage() {
                           getOptionLabel={(option) => option.cus_name}
                           getOptionKey={customerOptionKey}
                           isOptionEqualToValue={isSameCustomerOption}
-                          value={line.account_id ? customers.find(c => c.cus_id === line.account_id) : null}
+                          value={
+                            line.account_id
+                              ? (customers.find((c) => c.cus_id === line.account_id) ?? null)
+                              : null
+                          }
                           onChange={(e, val) => {
                             handleJournalLineChange(index, 'account_id', val?.cus_id || '');
                             handleJournalLineChange(index, 'accountSearch', val?.cus_name || '');

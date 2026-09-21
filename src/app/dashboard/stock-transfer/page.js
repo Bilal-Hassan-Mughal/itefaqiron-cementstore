@@ -976,19 +976,22 @@ export default function StockTransferPage() {
                         setCurrentStock(null);
                       }}
                       isOptionEqualToValue={(option, value) => option?.pro_id === value?.pro_id}
-                      renderOption={(props, option) => (
-                        <li {...props} key={option.pro_id}>
-                          <Box>
-                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                              {option.pro_title}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              ID {option.pro_id}
-                              {option.pro_unit ? ` · ${option.pro_unit}` : ''}
-                            </Typography>
-                          </Box>
-                        </li>
-                      )}
+                      renderOption={(props, option) => {
+                        const { key, ...optionProps } = props;
+                        return (
+                          <li key={key} {...optionProps}>
+                            <Box>
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                {option.pro_title}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                ID {option.pro_id}
+                                {option.pro_unit ? ` · ${option.pro_unit}` : ''}
+                              </Typography>
+                            </Box>
+                          </li>
+                        );
+                      }}
                       renderInput={(params) => (
                         <TextField
                           {...params}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, Suspense, useRef, useCallback, forwardRef } from 'react';
-import { formatDatePK, formatDateTimePK, formatTimePK, getCreatedByName } from '@/lib/date-helper';
+import { formatDatePK, formatDateTimePK, formatTimePK, getCreatedByName, getPkDateString } from '@/lib/date-helper';
 import { useSearchParams, useRouter } from 'next/navigation';
 import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
@@ -1212,13 +1212,13 @@ function SalesPageContent() {
     setIsRestoringScreen(true);
 
     // Restore all state at once to ensure consistency
-    setFormSelectedCustomer(state.formSelectedCustomer);
-    setFormSelectedStore(state.formSelectedStore);
+    setFormSelectedCustomer(state.formSelectedCustomer ?? null);
+    setFormSelectedStore(state.formSelectedStore ?? null);
     setProductTableData(state.productTableData);
     setPaymentData(normalizePaymentData(state.paymentData));
-    setBillType(state.billType);
+    setBillType(state.billType || 'BILL');
     setLoadedOrderId(state.loadedOrderId || null);
-    setFormSelectedProduct(state.formSelectedProduct);
+    setFormSelectedProduct(state.formSelectedProduct ?? null);
     setProductFormData(normalizeProductFormData(state.productFormData));
     setNewTransport(state.newTransport);
     setTransportAccounts(state.transportAccounts || []);
@@ -5277,7 +5277,7 @@ function SalesPageContent() {
                   <Autocomplete
                     size="small"
                     options={['BILL', 'SALE_RETURN']}
-                    value={billType}
+                    value={billType ?? 'BILL'}
                     onChange={(e, newValue) => {
                       setBillType(newValue || 'BILL');
                       if (newValue !== 'SALE_RETURN') {
@@ -5326,9 +5326,9 @@ function SalesPageContent() {
                     sx={{ minWidth: 450 }}
                     options={salePageCustomerTypeOptions}
                     getOptionLabel={(option) => option.cus_type_title || ''}
-                    value={selectedCustomerTypeFilter}
+                    value={selectedCustomerTypeFilter ?? null}
                     onChange={(event, newValue) => {
-                      setSelectedCustomerTypeFilter(newValue);
+                      setSelectedCustomerTypeFilter(newValue ?? null);
                       if (newValue) {
                         const typeTitle = (newValue.cus_type_title || '').toLowerCase();
                         if (typeTitle.includes('walk')) {
@@ -5545,9 +5545,9 @@ function SalesPageContent() {
                         },
                       }}
                       filterOptions={filterSaleCustomers}
-                      value={formSelectedCustomer}
+                      value={formSelectedCustomer ?? null}
                       onChange={(event, newValue) => {
-                        setFormSelectedCustomer(newValue);
+                        setFormSelectedCustomer(newValue ?? null);
                         if (billType === 'SALE_RETURN') {
                           setSaleSearchResults([]);
                           setSelectedSaleForReturnMain(null);
@@ -5661,7 +5661,7 @@ function SalesPageContent() {
                           const cName = option.customer?.cus_name || (customers.find(c => c.cus_id === option.cus_id)?.cus_name) || 'Unknown';
                           return `#${option.sale_id} - ${cName} - ${option.reference || 'No Ref'} (${parseFloat(option.total_amount).toFixed(0)})`;
                         }}
-                        value={selectedSaleForReturnMain}
+                        value={selectedSaleForReturnMain ?? null}
                         onChange={(event, newValue) => {
                           if (newValue) handleLoadSaleForReturnMain(newValue);
                         }}
@@ -5725,7 +5725,7 @@ function SalesPageContent() {
                       fullWidth
                       type="date"
                       size="small"
-                      defaultValue={new Date().toISOString().split('T')[0]}
+                      defaultValue={getPkDateString()}
                       onFocus={(e) => e.target.select()}
                       sx={SALE_ENTRY_CONTROL_SX}
                     />
@@ -5811,7 +5811,7 @@ function SalesPageContent() {
                         </li>
                         );
                       }}
-                      value={formSelectedProduct}
+                      value={formSelectedProduct ?? null}
                       onChange={(event, newValue) => {
                         handleProductSelect(newValue);
                       }}
@@ -5872,7 +5872,7 @@ function SalesPageContent() {
                       sx={{ width: '100%', minWidth: 0 }}
                       options={stores || []}
                       getOptionLabel={(option) => option.store_name || ''}
-                      value={formSelectedStore}
+                      value={formSelectedStore ?? null}
                       onChange={(event, newValue) => {
                         setFormSelectedStore(newValue);
                       }}

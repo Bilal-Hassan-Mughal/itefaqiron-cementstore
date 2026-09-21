@@ -802,11 +802,11 @@ export async function GET(request) {
                 s.debit_account_id, s.credit_account_id, s.store_id,
                 CASE 
                   WHEN s.created_at IS NULL OR s.created_at = '0000-00-00 00:00:00' THEN NULL
-                  ELSE DATE_FORMAT(s.created_at, '%Y-%m-%d %H:%i:%s')
+                  ELSE CONCAT(DATE_FORMAT(s.created_at, '%Y-%m-%dT%H:%i:%s'), '.000+05:00')
                 END as created_at,
                 CASE 
                   WHEN s.updated_at IS NULL OR s.updated_at = '0000-00-00 00:00:00' THEN NULL
-                  ELSE DATE_FORMAT(s.updated_at, '%Y-%m-%d %H:%i:%s')
+                  ELSE CONCAT(DATE_FORMAT(s.updated_at, '%Y-%m-%dT%H:%i:%s'), '.000+05:00')
                 END as updated_at,
                 c.cus_id as customer_cus_id, c.cus_name as customer_cus_name, 
                 c.cus_phone_no as customer_cus_phone_no, c.cus_category as customer_cus_category,

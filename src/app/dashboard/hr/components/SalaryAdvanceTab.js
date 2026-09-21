@@ -362,8 +362,10 @@ export default function SalaryAdvanceTab() {
                       }}
                     />
                   )}
-                  renderOption={(props, option) => (
-                    <Box component="li" {...props} key={option.emp_id}>
+                  renderOption={(props, option) => {
+                    const { key, ...optionProps } = props;
+                    return (
+                    <Box component="li" key={key} {...optionProps}>
                       <Box>
                         <Typography sx={{ fontWeight: 700, fontSize: '0.875rem' }}>{option.emp_name}</Typography>
                         <Typography sx={{ fontSize: '0.72rem', color: '#64748b' }}>
@@ -376,7 +378,8 @@ export default function SalaryAdvanceTab() {
                         </Typography>
                       </Box>
                     </Box>
-                  )}
+                    );
+                  }}
                 />
 
                 {selectedEmployee && (

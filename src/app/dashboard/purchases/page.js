@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback, Suspense, useRef, useLayoutEffect } from 'react';
+import { useState, useEffect, useCallback, Suspense, useRef, useLayoutEffect, forwardRef } from 'react';
 import { getCreatedByName, formatTimePK, formatDatePK } from '@/lib/date-helper';
 import { useSearchParams, useRouter } from 'next/navigation';
 import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
 import { openAccountLedgerTab, FINANCE_LEDGER_PATH, notifyLedgerDataChanged } from '@/lib/ledger-tabs';
+import { BRAND } from '@/lib/brand-theme';
 
 // Material-UI imports
 import {
@@ -51,7 +52,10 @@ import {
   ListItemAvatar,
   Fab,
   Checkbox,
-  Menu
+  FormControlLabel,
+  Menu,
+  LinearProgress,
+  Pagination
 } from '@mui/material';
 
 // Material Icons
@@ -105,6 +109,620 @@ const normalizeProductFormData = (data) => ({
   cost_rate: data?.cost_rate ?? '',
 });
 
+const PURCHASE_PAGE_CARD_SX = {
+  borderRadius: '12px',
+  border: '1px solid #dce3ed',
+  boxShadow: '0 1px 4px rgba(15, 23, 42, 0.06)',
+  bgcolor: '#ffffff',
+  overflow: 'hidden',
+};
+
+const PURCHASE_EXCEL_TABLE_SX = {
+  minWidth: 1100,
+  borderCollapse: 'collapse',
+  '& .MuiTableCell-root': {
+    border: '1px solid #cbd5e1',
+    py: 0.65,
+    px: 1.1,
+    fontSize: '0.8125rem',
+    lineHeight: 1.35,
+  },
+};
+
+const PURCHASE_EXCEL_HEAD_SX = {
+  bgcolor: '#dce6f1',
+  color: '#1e293b',
+  fontWeight: 700,
+  fontSize: '0.72rem',
+  textTransform: 'uppercase',
+  letterSpacing: '0.05em',
+  whiteSpace: 'nowrap',
+  position: 'sticky',
+  top: 0,
+  zIndex: 2,
+  borderBottom: '2px solid #94a3b8 !important',
+};
+
+const PURCHASE_NUM_CELL_SX = {
+  textAlign: 'right',
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontVariantNumeric: 'tabular-nums',
+};
+
+const PURCHASE_FILTER_GRID = {
+  display: 'grid',
+  gridTemplateColumns: {
+    xs: '1fr',
+    sm: 'repeat(2, 1fr)',
+    md: 'repeat(4, 1fr)',
+  },
+  gap: { xs: 1.5, md: 2 },
+  width: '100%',
+};
+
+const PURCHASE_FILTER_FIELD_SX = {
+  '& .MuiOutlinedInput-root': {
+    borderRadius: '8px',
+    bgcolor: '#fff',
+    fontSize: '0.8125rem',
+    '& fieldset': { borderColor: '#cbd5e1' },
+    '&:hover fieldset': { borderColor: '#94a3b8' },
+    '&.Mui-focused fieldset': {
+      borderColor: BRAND.primary.blue,
+      borderWidth: '1.5px',
+    },
+  },
+  '& .MuiInputLabel-root': { fontSize: '0.8125rem', fontWeight: 500 },
+};
+
+const SUPPLIER_LIST_LIMIT = 120;
+
+function filterPurchaseSuppliers(options, { inputValue }) {
+  const q = String(inputValue || '').toLowerCase().trim();
+  const out = [];
+  for (let i = 0; i < options.length && out.length < SUPPLIER_LIST_LIMIT; i += 1) {
+    const o = options[i];
+    if (!q) {
+      out.push(o);
+      continue;
+    }
+    if (
+      (o.cus_name || '').toLowerCase().includes(q) ||
+      (o.cus_phone_no || '').toLowerCase().includes(q) ||
+      (o.cus_phone_no2 || '').toLowerCase().includes(q) ||
+      (o.cus_address || '').toLowerCase().includes(q) ||
+      (o.cus_reference || '').toLowerCase().includes(q) ||
+      (o.city?.city_name || '').toLowerCase().includes(q)
+    ) {
+      out.push(o);
+    }
+  }
+  return out;
+}
+
+function filterPurchaseBankAccounts(options, { inputValue }) {
+  const q = String(inputValue || '').toLowerCase().trim();
+  if (!q) return options;
+  return options.filter(
+    (o) =>
+      (o.cus_name || '').toLowerCase().includes(q) ||
+      (o.cus_phone_no || '').toLowerCase().includes(q) ||
+      (o.cus_phone_no2 || '').toLowerCase().includes(q)
+  );
+}
+
+function slimPurchaseDetailsForApi(details) {
+  return (details || []).map((d) => ({
+    pro_id: d.pro_id,
+    qnty: d.qnty ?? d.quantity,
+    unit: d.unit,
+    unit_rate: d.unit_rate ?? d.rate,
+    prate: d.prate,
+    crate: d.crate,
+    total_amount: d.total_amount,
+    store_id: d.store_id,
+    cost_rate: d.cost_rate,
+    original_cost_rate: d.original_cost_rate,
+  }));
+}
+
+function commitPurchaseDropdownOnTab(e, highlighted, applyValue, focusNext) {
+  if (e.shiftKey || (e.key !== 'Tab' && e.key !== 'Enter')) return false;
+  e.preventDefault();
+  e.stopPropagation();
+  if (highlighted) applyValue(highlighted);
+  window.setTimeout(() => {
+    const el = typeof focusNext === 'function' ? focusNext() : document.querySelector(focusNext);
+    if (!el) return;
+    el.focus();
+    if (typeof el.select === 'function') el.select();
+  }, 0);
+  return true;
+}
+
+const PURCHASE_DROPDOWN_LINE = '1px solid #c5c5c5';
+const PURCHASE_SUPPLIER_DROPDOWN_GRID = '28px minmax(140px, 1.6fr) 96px minmax(80px, 1.4fr)';
+const PURCHASE_SUPPLIER_DROPDOWN_WIDTH = 520;
+
+const PURCHASE_PRODUCT_DROPDOWN_GRID = '28px minmax(140px, 1.8fr) minmax(90px, 1fr) 72px';
+const PURCHASE_PRODUCT_DROPDOWN_WIDTH = 480;
+
+const PURCHASE_BANK_DROPDOWN_GRID = '28px minmax(72px, 118px) minmax(80px, 1fr)';
+const PURCHASE_BANK_DROPDOWN_WIDTH = 340;
+
+const purchaseDropdownRowStyle = (columns) => ({
+  display: 'grid',
+  gridTemplateColumns: columns,
+  alignItems: 'stretch',
+  width: '100%',
+  padding: 0,
+  margin: 0,
+  minHeight: 32,
+  borderBottom: PURCHASE_DROPDOWN_LINE,
+});
+
+const purchaseDropdownCellStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  padding: '4px 8px',
+  borderRight: PURCHASE_DROPDOWN_LINE,
+  minWidth: 0,
+  boxSizing: 'border-box',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  fontSize: 13,
+};
+
+function PurchaseDropdownListbox({ columns, headers, props, listRef }) {
+  const { children, ownerState, sx, className, style, slots, slotProps, ...other } = props;
+  return (
+    <ul
+      ref={listRef}
+      className={className}
+      style={{
+        listStyle: 'none',
+        margin: 0,
+        padding: 0,
+        maxHeight: 320,
+        overflow: 'auto',
+        border: PURCHASE_DROPDOWN_LINE,
+        background: '#fff',
+        ...style,
+      }}
+      {...other}
+    >
+      {headers.length > 0 && (
+        <li
+          role="presentation"
+          aria-hidden
+          style={{
+            ...purchaseDropdownRowStyle(columns),
+            position: 'sticky',
+            top: 0,
+            zIndex: 2,
+            pointerEvents: 'none',
+            background: '#d9e2f3',
+          }}
+        >
+          {headers.map((label, i) => (
+            <span
+              key={label || `h-${i}`}
+              style={{
+                ...purchaseDropdownCellStyle,
+                fontSize: 11,
+                fontWeight: 800,
+                color: '#1e3a5f',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+                borderRight: i === headers.length - 1 ? 'none' : PURCHASE_DROPDOWN_LINE,
+                justifyContent: label === '#' ? 'center' : 'flex-start',
+              }}
+            >
+              {label}
+            </span>
+          ))}
+        </li>
+      )}
+      {children}
+    </ul>
+  );
+}
+
+const PurchaseSupplierDropdownListbox = forwardRef(function PurchaseSupplierDropdownListbox(props, ref) {
+  return (
+    <PurchaseDropdownListbox
+      listRef={ref}
+      props={props}
+      columns={PURCHASE_SUPPLIER_DROPDOWN_GRID}
+      headers={['#', 'Name', 'Phone', 'Address']}
+    />
+  );
+});
+
+const PurchaseProductDropdownListbox = forwardRef(function PurchaseProductDropdownListbox(props, ref) {
+  return (
+    <PurchaseDropdownListbox
+      listRef={ref}
+      props={props}
+      columns={PURCHASE_PRODUCT_DROPDOWN_GRID}
+      headers={['#', 'Product', 'Stock', 'Cost']}
+    />
+  );
+});
+
+const PurchaseBankDropdownListbox = forwardRef(function PurchaseBankDropdownListbox(props, ref) {
+  return (
+    <PurchaseDropdownListbox
+      listRef={ref}
+      props={props}
+      columns={PURCHASE_BANK_DROPDOWN_GRID}
+      headers={['#', 'Name', 'Balance']}
+    />
+  );
+});
+
+const PURCHASE_DROPDOWN_POPPER_SX = {
+  zIndex: 1400,
+  '& .MuiPaper-root': {
+    borderRadius: 0,
+    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.18)',
+    overflow: 'hidden',
+  },
+  '& .MuiAutocomplete-option': {
+    padding: '0 !important',
+    minHeight: '32px !important',
+    alignItems: 'stretch',
+  },
+  '& .MuiAutocomplete-option:nth-of-type(even)': {
+    backgroundColor: '#f3f3f3',
+  },
+  '& .MuiAutocomplete-option.Mui-focused, & .MuiAutocomplete-option[aria-selected="true"]': {
+    backgroundColor: '#cde6f7 !important',
+  },
+};
+
+const PURCHASE_ENTRY_LABEL_SX = {
+  mb: 0.75,
+  fontWeight: 700,
+  fontSize: '0.72rem',
+  color: '#64748b',
+  textTransform: 'uppercase',
+  letterSpacing: '0.04em',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 1,
+  minHeight: 22,
+  whiteSpace: 'nowrap',
+};
+
+const PURCHASE_ENTRY_CONTROL_SX = {
+  width: '100%',
+  minWidth: 0,
+  bgcolor: '#fff',
+  '& .MuiInputBase-root': {
+    height: 40,
+    bgcolor: '#fff',
+  },
+  '& .MuiInputBase-input, & .MuiSelect-select': {
+    fontSize: '0.875rem',
+    py: 0,
+  },
+};
+
+const PURCHASE_ENTRY_CELL_SX = {
+  minWidth: 0,
+  width: '100%',
+};
+
+const PURCHASE_ENTRY_ROW1_SX = {
+  display: 'grid',
+  gridTemplateColumns: {
+    xs: '1fr',
+    sm: 'repeat(2, minmax(0, 1fr))',
+    md: 'minmax(0, 2.4fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.2fr)',
+  },
+  gap: { xs: 1.5, md: 1.75 },
+  alignItems: 'end',
+  width: '100%',
+  mb: 2,
+};
+
+const PURCHASE_ENTRY_ROW1_RETURN_SX = {
+  ...PURCHASE_ENTRY_ROW1_SX,
+  gridTemplateColumns: {
+    xs: '1fr',
+    sm: 'repeat(2, minmax(0, 1fr))',
+    md: 'minmax(0, 2fr) minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.15fr)',
+  },
+};
+
+const PURCHASE_ENTRY_ROW2_SX = {
+  display: 'grid',
+  gridTemplateColumns: {
+    xs: '1fr 1fr',
+    sm: 'repeat(3, minmax(0, 1fr))',
+    md: 'minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 0.55fr) minmax(0, 0.65fr) minmax(0, 0.65fr) minmax(0, 0.65fr) minmax(0, 0.6fr) minmax(0, 0.55fr) 44px',
+  },
+  gap: { xs: 1.5, md: 1.75 },
+  alignItems: 'end',
+  width: '100%',
+  mb: 2,
+};
+
+const PURCHASE_PAYMENT_ROW_SX = {
+  display: 'grid',
+  gridTemplateColumns: {
+    xs: '1fr',
+    sm: 'repeat(2, minmax(0, 1fr))',
+    md: 'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.35fr)',
+  },
+  gap: { xs: 1.5, md: 2 },
+  alignItems: 'end',
+  width: '100%',
+};
+
+const PURCHASE_PAYMENT_ROW2_SX = {
+  display: 'grid',
+  gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1fr) minmax(0, 2fr)' },
+  gap: { xs: 1.5, md: 2 },
+  alignItems: 'stretch',
+  width: '100%',
+};
+
+const PURCHASE_CHARGE_PANELS_SX = {
+  display: 'grid',
+  gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' },
+  gap: { xs: 1.5, md: 2 },
+  alignItems: 'stretch',
+  width: '100%',
+};
+
+const PURCHASE_CHARGE_BOX_SX = {
+  border: '1px solid #c5d4e8',
+  borderRadius: '10px',
+  overflow: 'hidden',
+  bgcolor: '#fff',
+  height: '100%',
+  display: 'flex',
+  flexDirection: 'column',
+  minHeight: { md: 220 },
+};
+
+const PURCHASE_CHARGE_BOX_TITLE_SX = {
+  fontWeight: 700,
+  fontSize: '0.8125rem',
+  color: '#1e293b',
+  px: 1.5,
+  py: 1,
+  bgcolor: '#eef4fc',
+  borderBottom: '1px solid #dce3ed',
+};
+
+const PURCHASE_INCLUDE_BAR_SX = {
+  display: 'flex',
+  alignItems: 'center',
+  px: 1.25,
+  py: 0.75,
+  bgcolor: BRAND.tint.blue,
+  borderBottom: '1px solid #dce3ed',
+  '& .MuiFormControlLabel-root': { m: 0, width: '100%' },
+  '& .MuiFormControlLabel-label': {
+    fontSize: '0.8125rem',
+    fontWeight: 600,
+    color: BRAND.text.blue,
+  },
+  '& .MuiCheckbox-root': { p: 0.5 },
+};
+
+const PURCHASE_CHARGE_BODY_SX = {
+  p: { xs: 1.25, md: 1.5 },
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 1.25,
+  flex: 1,
+};
+
+const PURCHASE_CHARGE_INNER_GRID_SX = {
+  display: 'grid',
+  gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' },
+  gap: 1.25,
+  width: '100%',
+};
+
+const PURCHASE_CARGO_AMOUNTS_GRID_SX = {
+  display: 'grid',
+  gridTemplateColumns: {
+    xs: '1fr',
+    sm: 'repeat(2, minmax(0, 1fr))',
+  },
+  gap: 1.25,
+  width: '100%',
+};
+
+const PURCHASE_NOTES_CONTROL_SX = {
+  width: '100%',
+  minWidth: 0,
+  bgcolor: '#fff',
+  '& .MuiInputBase-root': {
+    height: 'auto',
+    minHeight: 72,
+    alignItems: 'flex-start',
+    py: 1,
+    bgcolor: '#fff',
+  },
+  '& .MuiInputBase-input': {
+    fontSize: '0.875rem',
+  },
+};
+
+/** Read-only money display (not a TextField) — totals & summaries */
+const PURCHASE_AMOUNT_TOTAL_BASE_SX = {
+  width: '100%',
+  display: 'flex',
+  alignItems: 'center',
+  borderRadius: '8px',
+  border: `1px solid #b8ccf7`,
+  bgcolor: '#f8fbff',
+  boxShadow: 'inset 0 1px 0 #fff',
+  fontVariantNumeric: 'tabular-nums',
+};
+
+function PurchaseAmountTotal({ value, variant = 'default', label }) {
+  const n = parseFloat(value);
+  const display = Number.isFinite(n)
+    ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : '0.00';
+
+  if (label) {
+    return (
+      <Box
+        sx={{
+          ...PURCHASE_AMOUNT_TOTAL_BASE_SX,
+          justifyContent: 'space-between',
+          gap: 1.5,
+          minHeight: 40,
+          px: 1.5,
+          py: 0.75,
+          mt: 0.25,
+          bgcolor: BRAND.tint.blue,
+          borderColor: '#9eb8f5',
+        }}
+      >
+        <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          {label}
+        </Typography>
+        <Typography sx={{ fontWeight: 800, fontSize: '0.9375rem', color: BRAND.text.blue }}>
+          {display}
+        </Typography>
+      </Box>
+    );
+  }
+
+  const isLarge = variant === 'large';
+  return (
+    <Box
+      sx={{
+        ...PURCHASE_AMOUNT_TOTAL_BASE_SX,
+        justifyContent: 'flex-end',
+        minHeight: isLarge ? 46 : 40,
+        px: 1.5,
+        py: isLarge ? 1 : 0.75,
+        borderWidth: isLarge ? '1.5px' : '1px',
+        borderColor: isLarge ? BRAND.primary.blue : '#b8ccf7',
+        background: isLarge
+          ? `linear-gradient(180deg, #ffffff 0%, ${BRAND.tint.blue} 100%)`
+          : '#f8fbff',
+        boxShadow: isLarge ? `inset 0 1px 0 #fff, 0 1px 3px ${BRAND.primary.blue}18` : 'inset 0 1px 0 #fff',
+      }}
+    >
+      <Typography
+        component="span"
+        sx={{
+          fontWeight: 800,
+          fontSize: isLarge ? '1.25rem' : '0.9375rem',
+          color: BRAND.text.blue,
+          lineHeight: 1.2,
+        }}
+      >
+        {display}
+      </Typography>
+    </Box>
+  );
+}
+
+const PURCHASE_FIELD_LABEL_SX = {
+  fontSize: '0.75rem',
+  fontWeight: 600,
+  color: '#64748b',
+  mb: 0.5,
+  display: 'block',
+};
+
+const PURCHASE_ENTRY_HEADER_GRADIENT = `linear-gradient(180deg, ${BRAND.primary.blue} 0%, #3b6ff0 55%, #7ba3f0 100%)`;
+const PURCHASE_ENTRY_TABLE_HEAD_SX = {
+  bgcolor: '#dce6f1',
+  color: '#1e293b',
+  fontWeight: 700,
+  fontSize: '0.72rem',
+  textTransform: 'uppercase',
+  letterSpacing: '0.04em',
+  borderBottom: '2px solid #94a3b8',
+  py: 1,
+};
+
+const PURCHASE_TOOLBAR_BTN_PRIMARY_SX = {
+  textTransform: 'none',
+  fontWeight: 700,
+  fontSize: '0.8125rem',
+  bgcolor: BRAND.primary.blue,
+  borderRadius: '8px',
+  height: 36,
+  px: 1.75,
+  boxShadow: 'none',
+  whiteSpace: 'nowrap',
+  '&:hover': { bgcolor: '#1347c4', boxShadow: 'none' },
+};
+
+const PURCHASE_TOOLBAR_BTN_OUTLINED_SX = {
+  textTransform: 'none',
+  fontWeight: 600,
+  fontSize: '0.8125rem',
+  color: BRAND.text.blue,
+  borderColor: '#b8ccf7',
+  bgcolor: '#fff',
+  borderRadius: '8px',
+  height: 36,
+  px: 1.5,
+  whiteSpace: 'nowrap',
+  '&:hover': {
+    borderColor: BRAND.primary.blue,
+    bgcolor: BRAND.tint.blue,
+  },
+};
+
+/** Quick-action accents — distinct from primary blue, still on-brand */
+const purchaseToolbarAccentBtnSx = (main, text, tint, hoverTint) => ({
+  textTransform: 'none',
+  fontWeight: 600,
+  fontSize: '0.8125rem',
+  color: text,
+  borderColor: main,
+  borderWidth: '1.5px',
+  bgcolor: tint,
+  borderRadius: '8px',
+  height: 36,
+  px: 1.5,
+  whiteSpace: 'nowrap',
+  boxShadow: `0 1px 3px ${main}26`,
+  '& .MuiButton-startIcon': { color: main },
+  '&:hover': {
+    borderColor: main,
+    borderWidth: '1.5px',
+    bgcolor: hoverTint,
+    boxShadow: `0 2px 6px ${main}33`,
+  },
+});
+
+const PURCHASE_TOOLBAR_BTN_ADD_PRODUCT_SX = purchaseToolbarAccentBtnSx(
+  BRAND.supporting.periwinkle,
+  BRAND.text.periwinkle,
+  BRAND.tint.periwinkle,
+  '#e0e4fc',
+);
+const PURCHASE_TOOLBAR_BTN_CATEGORY_SX = purchaseToolbarAccentBtnSx(
+  BRAND.supporting.cyan,
+  BRAND.text.cyan,
+  BRAND.tint.cyan,
+  '#ccf2fc',
+);
+const PURCHASE_TOOLBAR_BTN_SUBCATEGORY_SX = purchaseToolbarAccentBtnSx(
+  BRAND.supporting.green,
+  BRAND.text.green,
+  BRAND.tint.green,
+  '#ccf7e8',
+);
+
 function PurchasesPageContent() {
   const router = useRouter();
   // PIN auth
@@ -116,7 +734,12 @@ function PurchasesPageContent() {
   const [products, setProducts] = useState([]);
   const [stores, setStores] = useState([]);
   const [customerCategories, setCustomerCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [listLoading, setListLoading] = useState(true);
+  const [formLookupsLoading, setFormLookupsLoading] = useState(false);
+  const [editPurchaseLoading, setEditPurchaseLoading] = useState(false);
+  const formLookupsLoadedRef = useRef(false);
+  const catalogLookupsLoadedRef = useRef(false);
+  const purchaseDetailCacheRef = useRef(new Map());
   const [currentUser, setCurrentUser] = useState(null);
 
   useEffect(() => {
@@ -276,6 +899,9 @@ function PurchasesPageContent() {
   const [customerTypeOpenPurchases, setCustomerTypeOpenPurchases] = useState(false);
   const customerTypeInputRefPurchases = useRef(null);
   const customerNameInputRefPurchases = useRef(null);
+  const supplierHighlightRef = useRef(null);
+  const purchaseSubmitInFlightRef = useRef(false);
+  const suppressDraftSaveRef = useRef(false);
   // Track highlighted option for each dropdown so Tab selects the focused item
   const highlightedTypeRef = useRef(null);
   const highlightedCategoryRef = useRef(null);
@@ -283,6 +909,7 @@ function PurchasesPageContent() {
 
   // Refs for keyboard accessibility
   const bankAccountInputRef = useRef(null);
+  const bankAccountHighlightRef = useRef(null);
   const cargoInputRef = useRef(null);
   const outLabourInputRef = useRef(null);
   const outDeliveryInputRef = useRef(null);
@@ -364,6 +991,9 @@ function PurchasesPageContent() {
   const [filterStore, setFilterStore] = useState('');
   const [filterMinAmount, setFilterMinAmount] = useState('');
   const [filterMaxAmount, setFilterMaxAmount] = useState('');
+  const [filterPaymentType, setFilterPaymentType] = useState('');
+  const [listPage, setListPage] = useState(1);
+  const [listPageSize, setListPageSize] = useState(25);
 
   // Selected product for preview
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -544,8 +1174,20 @@ function PurchasesPageContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount unless URL already requests create
   }, []);
 
-  // Auto-save draft whenever form state changes
+  // Auto-save draft whenever form state changes (skipped right after successful save / clear)
   useEffect(() => {
+    if (suppressDraftSaveRef.current) return;
+    const hasContent =
+      !!formData.cus_id ||
+      (formData.purchase_details?.length ?? 0) > 0 ||
+      !!formSelectedCustomer ||
+      !!formData.vehicle_no ||
+      !!formData.invoice_number;
+    if (!hasContent) {
+      localStorage.removeItem(DRAFT_KEY);
+      setHasDraft(false);
+      return;
+    }
     try {
       const draft = {
         formData,
@@ -564,10 +1206,109 @@ function PurchasesPageContent() {
   }, [formData, purchaseType, formSelectedCustomer, selectedBankAccount, selectedCargoAccounts, selectedPurchaseForReturn, currentView]);
   // ─────────────────────────────────────────────────────────────────────────
 
-  // Fetch data
-  useEffect(() => {
-    fetchData();
+  const fetchPurchaseList = useCallback(async () => {
+    setListLoading(true);
+    try {
+      const purchasesRes = await fetch('/api/purchases?list=true');
+      if (purchasesRes.ok) {
+        const purchasesData = await purchasesRes.json();
+        setPurchases(Array.isArray(purchasesData) ? purchasesData : []);
+      }
+    } catch (error) {
+      console.error('Error fetching purchase list:', error);
+      setSnackbar({
+        open: true,
+        message: 'Error loading purchase list',
+        severity: 'error',
+      });
+    } finally {
+      setListLoading(false);
+    }
   }, []);
+
+  const ensureFormLookups = useCallback(async () => {
+    if (formLookupsLoadedRef.current) return;
+    setFormLookupsLoading(true);
+    try {
+      const [customersRes, productsRes, storesRes, customerCategoriesRes, customerTypesRes] = await Promise.all([
+        fetch('/api/customers?dropdown=true'),
+        fetch('/api/products?dropdown=true&noStoreStock=true'),
+        fetch('/api/stores'),
+        fetch('/api/customer-category'),
+        fetch('/api/customer-types'),
+      ]);
+
+      if (customersRes.ok) {
+        setCustomers(await customersRes.json());
+      }
+      if (productsRes.ok) {
+        setProducts(await productsRes.json());
+      }
+      if (storesRes.ok) {
+        const storesResponse = await storesRes.json();
+        const storesData = storesResponse.success ? storesResponse.data : [];
+        setStores(Array.isArray(storesData) ? storesData : []);
+      }
+      if (customerCategoriesRes.ok) {
+        const customerCategoriesData = await customerCategoriesRes.json();
+        setCustomerCategories(Array.isArray(customerCategoriesData) ? customerCategoriesData : []);
+      }
+      if (customerTypesRes.ok) {
+        const customerTypesData = await customerTypesRes.json();
+        setCustomerTypes(Array.isArray(customerTypesData) ? customerTypesData : []);
+      }
+      formLookupsLoadedRef.current = true;
+    } catch (error) {
+      console.error('Error loading purchase form lookups:', error);
+    } finally {
+      setFormLookupsLoading(false);
+    }
+  }, []);
+
+  const ensureCatalogLookups = useCallback(async () => {
+    if (catalogLookupsLoadedRef.current) return;
+    try {
+      const [categoriesRes, subcategoriesRes, citiesRes] = await Promise.all([
+        fetch('/api/categories'),
+        fetch('/api/subcategories'),
+        fetch('/api/cities'),
+      ]);
+      if (categoriesRes.ok) setCategories(await categoriesRes.json());
+      if (subcategoriesRes.ok) setSubcategories(await subcategoriesRes.json());
+      if (citiesRes.ok) {
+        const citiesData = await citiesRes.json();
+        setCities(Array.isArray(citiesData) ? citiesData : []);
+      }
+      catalogLookupsLoadedRef.current = true;
+    } catch (error) {
+      console.warn('Error loading catalog lookups:', error);
+    }
+  }, []);
+
+  const refreshCustomersDropdown = useCallback(async () => {
+    try {
+      const customersRes = await fetch('/api/customers?dropdown=true');
+      if (customersRes.ok) setCustomers(await customersRes.json());
+    } catch (error) {
+      console.warn('Error refreshing customers:', error);
+    }
+  }, []);
+
+  const prefetchPurchaseForEdit = useCallback((purId) => {
+    if (!purId || purchaseDetailCacheRef.current.has(purId)) return;
+    void fetch(`/api/purchases?id=${purId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.pur_id) purchaseDetailCacheRef.current.set(data.pur_id, data);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    void fetchPurchaseList();
+    void ensureFormLookups();
+    void ensureCatalogLookups();
+  }, [fetchPurchaseList, ensureFormLookups, ensureCatalogLookups]);
 
   // Filter customers by category when both customers and customerCategories are loaded
   useEffect(() => {
@@ -631,9 +1372,11 @@ function PurchasesPageContent() {
         incity_own_labour: '',
         incity_own_delivery: '',
         incity_charges_total: '',
-        cargo_account_id: '',
         include_incity: false,
         include_labour: false,
+        include_cargo_in_costprice: false,
+        out_labour_amount: '',
+        out_delivery_amount: '',
         discount: '',
         cash_payment: '',
         bank_payment: '',
@@ -675,46 +1418,38 @@ function PurchasesPageContent() {
     setCustomerSearchTerm(state.formSelectedCustomer?.cus_name || '');
   };
 
-  // Clear form state
-  const clearFormState = () => {
-    setFormData({
-      cus_id: '',
-      store_id: stores[0]?.storeid?.toString() || '',
-      debit_account_id: '',
-      credit_account_id: '',
-      total_amount: '',
-      unloading_amount: '',
-      fare_amount: '',
-      transport_amount: '',
-      labour_amount: '',
-      out_labour_amount: '',
-      out_delivery_amount: '',
-      incity_own_labour: '',
-      incity_own_delivery: '',
-      incity_charges_total: '',
-      include_labour: false,
-      include_cargo_in_costprice: false,
-      discount: '',
-      cash_payment: '',
-      bank_payment: '',
-      payment_type: 'CASH',
-      vehicle_no: '',
-      invoice_number: '',
-      date: new Date().toISOString().split('T')[0],
-      purchase_details: []
-    });
+  const applyFreshPurchaseForm = useCallback((options = {}) => {
+    const { silent = false } = options;
+    suppressDraftSaveRef.current = true;
+    localStorage.removeItem(DRAFT_KEY);
+    setHasDraft(false);
+
+    const fresh = getFreshPurchaseState();
+    setFormData(fresh.formData);
+    setFormSelectedCustomer(null);
     setSelectedBankAccount(null);
     setSelectedCargoAccounts([]);
-    setFormSelectedCustomer(null);
     setPurchaseType('new');
     setSelectedPurchaseForReturn(null);
     setEditingPurchase(null);
     setProductFormData({ ...EMPTY_PRODUCT_FORM_DATA });
     setSelectedProduct(null);
     setCustomerSearchTerm('');
-    localStorage.removeItem(DRAFT_KEY);
-    setHasDraft(false);
-    setSnackbar({ open: true, message: '📋 Form cleared - ready for new entry', severity: 'info' });
+    setScreenStack([fresh]);
+    setCurrentScreenIndex(0);
+
+    window.setTimeout(() => {
+      suppressDraftSaveRef.current = false;
+    }, 500);
+
+    if (!silent) {
+      setSnackbar({ open: true, message: '📋 Form cleared — ready for new entry', severity: 'info' });
+    }
+  }, [getFreshPurchaseState]);
+
+  // Clear form state
+  const clearFormState = (options = {}) => {
+    applyFreshPurchaseForm(options);
   };
 
   // Open new screen (Ctrl+Right)
@@ -958,90 +1693,6 @@ function PurchasesPageContent() {
     }
   }, [formData.bank_payment]);
 
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const [purchasesRes, customersRes, productsRes, categoriesRes, subcategoriesRes, storesRes, customerCategoriesRes, customerTypesRes, citiesRes] = await Promise.all([
-        fetch('/api/purchases'),
-        fetch('/api/customers?dropdown=true'),
-        fetch('/api/products?dropdown=true'),
-        fetch('/api/categories'),
-        fetch('/api/subcategories'),
-        fetch('/api/stores'),
-        fetch('/api/customer-category'),
-        fetch('/api/customer-types'),
-        fetch('/api/cities')
-      ]);
-
-      if (purchasesRes.ok) {
-        const purchasesData = await purchasesRes.json();
-        setPurchases(purchasesData);
-      }
-      if (customersRes.ok) {
-        const customersData = await customersRes.json();
-        setCustomers(customersData);
-      }
-      if (productsRes.ok) {
-        const productsData = await productsRes.json();
-        setProducts(productsData);
-      }
-      if (categoriesRes.ok) {
-        const categoriesData = await categoriesRes.json();
-        setCategories(categoriesData);
-      }
-      if (subcategoriesRes.ok) {
-        const subcategoriesData = await subcategoriesRes.json();
-        setSubcategories(subcategoriesData);
-      }
-      if (storesRes.ok) {
-        const storesResponse = await storesRes.json();
-        const storesData = storesResponse.success ? storesResponse.data : [];
-        setStores(Array.isArray(storesData) ? storesData : []);
-      } else {
-        console.error('Stores API error:', storesRes.status, storesRes.statusText);
-        setStores([]);
-      }
-
-      if (customerCategoriesRes.ok) {
-        const customerCategoriesData = await customerCategoriesRes.json();
-        setCustomerCategories(Array.isArray(customerCategoriesData) ? customerCategoriesData : []);
-      } else {
-        console.error('Customer Categories API error:', customerCategoriesRes.status, customerCategoriesRes.statusText);
-        setCustomerCategories([]);
-      }
-
-      if (customerTypesRes.ok) {
-        const customerTypesData = await customerTypesRes.json();
-        setCustomerTypes(Array.isArray(customerTypesData) ? customerTypesData : []);
-      } else {
-        console.error('Customer Types API error:', customerTypesRes.status, customerTypesRes.statusText);
-        setCustomerTypes([]);
-      }
-
-      if (citiesRes.ok) {
-        const citiesData = await citiesRes.json();
-        setCities(Array.isArray(citiesData) ? citiesData : []);
-      } else {
-        console.error('Cities API error:', citiesRes.status, citiesRes.statusText);
-        setCities([]);
-      }
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      setSnackbar({
-        open: true,
-        message: 'Error fetching data',
-        severity: 'error'
-      });
-      // Ensure all dropdown data are always arrays even on error
-      setStores([]);
-      setCustomerCategories([]);
-      setCustomerTypes([]);
-      setCities([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // Helper function to get sort label
   const getSortLabel = (value) => {
     const labels = {
@@ -1057,15 +1708,18 @@ function PurchasesPageContent() {
 
   // Filter and sort logic
   const filteredPurchases = purchases.filter(purchase => {
-    const matchesSearch = purchase.customer?.cus_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      purchase.vehicle_no?.toLowerCase().includes(searchTerm.toLowerCase());
+    const term = searchTerm.trim().toLowerCase();
+    const matchesSearch = term === '' ||
+      purchase.customer?.cus_name?.toLowerCase().includes(term) ||
+      purchase.vehicle_no?.toLowerCase().includes(term) ||
+      String(purchase.pur_id).includes(term) ||
+      purchase.reference?.toLowerCase().includes(term);
     const matchesCustomer = !selectedCustomer || purchase.cus_id === selectedCustomer;
+    const matchesPaymentType = filterPaymentType === '' ||
+      (purchase.payment_type || '').toUpperCase() === filterPaymentType;
 
     const matchesStore = filterStore === '' ||
-      (purchase.store_id?.toString() === filterStore) ||
-      (purchase.purchase_details && purchase.purchase_details.some(detail =>
-        detail.store_id?.toString() === filterStore
-      ));
+      (purchase.store_id?.toString() === filterStore);
 
     const totalAmount = parseFloat(purchase.net_total || 0);
     const matchesMinAmount = filterMinAmount === '' ||
@@ -1079,7 +1733,7 @@ function PurchasesPageContent() {
     const matchesDateTo = dateTo === '' ||
       (dateTo && purchase.created_at && new Date(purchase.created_at) <= new Date(dateTo));
 
-    return matchesSearch && matchesCustomer && matchesStore && matchesMinAmount && matchesMaxAmount && matchesDateFrom && matchesDateTo;
+    return matchesSearch && matchesCustomer && matchesStore && matchesMinAmount && matchesMaxAmount && matchesDateFrom && matchesDateTo && matchesPaymentType;
   });
 
   // Product filtering logic
@@ -1127,10 +1781,27 @@ function PurchasesPageContent() {
     }
   });
 
-  const finalPurchases = sortedPurchases.map((purchase, index) => ({
-    ...purchase,
-    sequentialId: index + 1
-  }));
+  const listTotal = sortedPurchases.length;
+  const paginatedPurchases = sortedPurchases.slice(
+    (listPage - 1) * listPageSize,
+    listPage * listPageSize
+  );
+
+  useEffect(() => {
+    setListPage(1);
+  }, [
+    searchTerm,
+    selectedCustomer,
+    sortBy,
+    sortOrder,
+    dateFrom,
+    dateTo,
+    filterStore,
+    filterMinAmount,
+    filterMaxAmount,
+    filterPaymentType,
+    listPageSize,
+  ]);
 
   // Stats calculations
   const totalPurchases = purchases.length;
@@ -1504,12 +2175,18 @@ function PurchasesPageContent() {
     const hasBank = parseFloat(formData.bank_payment || 0) > 0;
     // Match sales: confirm when cash/bank is used, and always for purchase returns
     // (returns may have no cash/bank line but are still a sensitive action).
-    const needsStepUpAuth = hasCash || hasBank || purchaseType === 'return';
-    if (needsStepUpAuth) {
-      const authOk = await requireAuth();
-      if (!authOk) return;
+    if (purchaseSubmitInFlightRef.current || isSubmitting) {
+      return;
     }
+    purchaseSubmitInFlightRef.current = true;
+    setIsSubmitting(true);
+
     try {
+      const needsStepUpAuth = hasCash || hasBank || purchaseType === 'return';
+      if (needsStepUpAuth) {
+        const authOk = await requireAuth();
+        if (!authOk) return;
+      }
       const url = editingPurchase ? '/api/purchases' : '/api/purchases';
       const method = editingPurchase ? 'PUT' : 'POST';
 
@@ -1568,19 +2245,37 @@ function PurchasesPageContent() {
       const body = editingPurchase
         ? {
           id: editingPurchase.pur_id,
-          ...formData,
-          total_amount: calculatedTotalAmount.toString(),
+          cus_id: formData.cus_id,
+          store_id: formData.store_id,
           debit_account_id: debitAccountId,
           credit_account_id: creditAccountId,
           bank_account_id: selectedBankAccount ? selectedBankAccount.cus_id : null,
-          cargo_account_id: (selectedCargoAccounts && selectedCargoAccounts.length) ? selectedCargoAccounts[0].cus_id : (formData.cargo_account_id ? parseInt(formData.cargo_account_id) : null),
-          cargo_account_ids: (selectedCargoAccounts || []).map(a => a.cus_id),
+          cargo_account_id: (selectedCargoAccounts && selectedCargoAccounts.length)
+            ? selectedCargoAccounts[0].cus_id
+            : (formData.cargo_account_id ? parseInt(formData.cargo_account_id, 10) : null),
+          cargo_account_ids: (selectedCargoAccounts || []).map((a) => a.cus_id),
+          total_amount: calculatedTotalAmount.toString(),
+          unloading_amount: formData.unloading_amount,
+          fare_amount: formData.fare_amount,
+          transport_amount: formData.transport_amount,
+          labour_amount: formData.labour_amount,
+          out_labour_amount: formData.out_labour_amount,
+          out_delivery_amount: formData.out_delivery_amount,
+          incity_own_labour: formData.incity_own_labour,
+          incity_own_delivery: formData.incity_own_delivery,
+          incity_charges_total: formData.incity_charges_total,
+          include_incity: formData.include_incity,
+          include_labour: formData.include_labour,
+          include_cargo_in_costprice: formData.include_cargo_in_costprice,
+          discount: formData.discount,
           payment: totalPayment,
           payment_type: paymentType,
           cash_payment: cashPayment,
           bank_payment: bankPayment,
-          purchase_type: purchaseType,
-          return_for_purchase_id: purchaseType === 'return' ? selectedPurchaseForReturn?.pur_id : null
+          vehicle_no: formData.vehicle_no,
+          invoice_number: formData.invoice_number,
+          updated_by: currentUser?.user_id,
+          purchase_details: slimPurchaseDetailsForApi(formData.purchase_details),
         }
         : {
           ...formData,
@@ -1614,7 +2309,7 @@ function PurchasesPageContent() {
       const localNetTotal = calculateNetTotal();
       const localBill = {
         ...formData,
-        pur_id: null,
+        pur_id: editingPurchase?.pur_id ?? null,
         total_amount: calculatedTotalAmount,
         display_net_total: localNetTotal,
         cash_payment: cashPayment,
@@ -1626,15 +2321,11 @@ function PurchasesPageContent() {
         purchase_details: formData.purchase_details,
         previous_customer_balance: parseFloat(supplier?.cus_balance ?? 0),
         bill_type: purchaseType === 'return' ? 'PURCHASE_RETURN' : 'PURCHASE',
-        created_at: new Date().toISOString(),
+        created_at: editingPurchase?.created_at || new Date().toISOString(),
       };
 
-      if (!editingPurchase) {
-        setCurrentBillData(localBill);
-        setReceiptDialogOpen(true);
-      } else {
-        setIsSubmitting(true);
-      }
+      setCurrentBillData(localBill);
+      setReceiptDialogOpen(true);
 
       const response = await fetch(url, {
         method,
@@ -1644,6 +2335,9 @@ function PurchasesPageContent() {
 
       if (response.ok) {
         const result = await response.json();
+        const wasEditing = !!editingPurchase;
+        purchaseSubmitInFlightRef.current = false;
+        setIsSubmitting(false);
 
         const mergePurchaseBill = (freshData) => {
           const freshProductTotal = (freshData.purchase_details || []).reduce((s, d) => s + parseFloat(d.total_amount || 0), 0)
@@ -1676,91 +2370,65 @@ function PurchasesPageContent() {
           };
         };
 
-        if (editingPurchase) {
-          setCurrentBillData(mergePurchaseBill(result));
-          setReceiptDialogOpen(true);
-        } else {
-          setCurrentBillData((prev) => mergePurchaseBill({ ...prev, ...result }));
-        }
+        setCurrentBillData((prev) => mergePurchaseBill({ ...prev, ...result }));
 
-        setIsSubmitting(false);
         notifyLedgerDataChanged('purchase');
 
-        void (async () => {
-          try {
-            const freshResponse = await fetch(`/api/purchases?id=${result.pur_id}`);
-            if (freshResponse.ok) {
-              const freshData = await freshResponse.json();
-              setCurrentBillData((prev) => (
-                prev?.pur_id === freshData.pur_id ? mergePurchaseBill({ ...prev, ...freshData }) : prev
-              ));
+        const refreshReceiptFromServer = (purId) => {
+          void (async () => {
+            try {
+              const freshResponse = await fetch(`/api/purchases?id=${purId}`);
+              if (freshResponse.ok) {
+                const freshData = await freshResponse.json();
+                setCurrentBillData((prev) => (
+                  prev?.pur_id === freshData.pur_id ? mergePurchaseBill({ ...prev, ...freshData }) : prev
+                ));
+              }
+            } catch {
+              /* local receipt is enough */
             }
-          } catch {
-            /* local receipt is enough */
-          }
-        })();
+          })();
+        };
 
-        if (editingPurchase && result?.pur_id) {
-          const merged = mergePurchaseBill(result);
-          setPurchases((prev) => prev.map((p) => (p.pur_id === merged.pur_id ? { ...p, ...merged } : p)));
+        if (wasEditing && result?.pur_id) {
+          const merged = mergePurchaseBill({
+            ...result,
+            purchase_details: result.purchase_details?.length
+              ? result.purchase_details
+              : formData.purchase_details,
+          });
+          const { purchase_details: _lines, ...listHeader } = merged;
+          purchaseDetailCacheRef.current.set(result.pur_id, merged);
+          setPurchases((prev) => prev.map((p) => (p.pur_id === merged.pur_id ? { ...p, ...listHeader } : p)));
+          void refreshCustomersDropdown();
+          setEditingPurchase(null);
+          applyFreshPurchaseForm({ silent: true });
+          refreshReceiptFromServer(result.pur_id);
+          setSnackbar({
+            open: true,
+            message: `✅ Purchase #${result.pur_id} updated — invoice preview open`,
+            severity: 'success',
+          });
+        } else if (!wasEditing && result?.pur_id) {
+          const merged = mergePurchaseBill({ ...result, customer: supplier });
+          const { purchase_details: _lines, ...listHeader } = merged;
+          setPurchases((prev) => {
+            const without = prev.filter((p) => p.pur_id !== merged.pur_id);
+            return [{ ...listHeader, customer: supplier || merged.customer }, ...without];
+          });
+          void refreshCustomersDropdown();
+          applyFreshPurchaseForm({ silent: true });
+          refreshReceiptFromServer(result.pur_id);
+          setSnackbar({
+            open: true,
+            message: `✅ Purchase #${result.pur_id} saved — form cleared for next entry`,
+            severity: 'success',
+          });
         }
 
-        // After successful purchase creation, restore previous screen state if available
-        if (currentScreenIndex > 0) {
-          const previousIndex = currentScreenIndex - 1;
-          const previousState = screenStack[previousIndex];
-          const trimmedStack = screenStack.slice(0, currentScreenIndex);
-
-          setScreenStack(trimmedStack);
-          setCurrentScreenIndex(previousIndex);
-          restoreScreenState(previousState);
-          setSnackbar({ open: true, message: `✅ Purchase saved! Restored Screen ${previousIndex + 1}`, severity: 'success' });
-        } else {
-          clearFormState();
-          // Reset stack to single item
-          const emptyState = {
-            formData: {
-              cus_id: '',
-              store_id: stores[0]?.storeid?.toString() || '',
-              debit_account_id: '',
-              credit_account_id: '',
-              total_amount: '',
-              unloading_amount: '',
-              fare_amount: '',
-              transport_amount: '',
-              labour_amount: '',
-              incity_own_labour: '',
-              incity_own_delivery: '',
-              incity_charges_total: '',
-              include_incity: false,
-              include_labour: false,
-              discount: '',
-              cash_payment: '',
-              bank_payment: '',
-              payment_type: 'CASH',
-              vehicle_no: '',
-              invoice_number: '',
-              purchase_details: []
-            },
-            formSelectedCustomer: null,
-            selectedBankAccount: null,
-            purchaseType: 'new',
-            selectedPurchaseForReturn: null,
-            productFormData: { ...EMPTY_PRODUCT_FORM_DATA },
-            selectedProduct: null,
-            editingPurchase: null,
-            timestamp: new Date().toLocaleTimeString(),
-            customerName: 'New Purchase'
-          };
-          setScreenStack([emptyState]);
-          setCurrentScreenIndex(0);
-          setSnackbar({ open: true, message: '✅ Purchase saved! Form cleared', severity: 'success' });
-        }
       } else {
-        if (!editingPurchase) {
-          setReceiptDialogOpen(false);
-          setCurrentBillData(null);
-        }
+        setReceiptDialogOpen(false);
+        setCurrentBillData(null);
         const errorData = await response.json().catch(() => ({}));
         setSnackbar({
           open: true,
@@ -1769,25 +2437,20 @@ function PurchasesPageContent() {
         });
       }
     } catch (error) {
-      if (!editingPurchase) {
-        setReceiptDialogOpen(false);
-        setCurrentBillData(null);
-      }
+      setReceiptDialogOpen(false);
+      setCurrentBillData(null);
       console.error('Error saving purchase:', error);
       setSnackbar({ open: true, message: 'Failed to save purchase', severity: 'error' });
     } finally {
+      purchaseSubmitInFlightRef.current = false;
       setIsSubmitting(false);
     }
   };
 
-  const handleEdit = (purchase) => {
-    setEditingPurchase(purchase);
-
-    // Calculate actual cash and bank payment from the database fields, or fall back to payment_type / payment
+  const applyPurchaseToForm = useCallback((purchase, customerRows = customers) => {
     let cashPayment = parseFloat(purchase.cash_payment || 0);
     let bankPayment = parseFloat(purchase.bank_payment || 0);
 
-    // Fallback logic for older records without cash_payment/bank_payment fields
     if (cashPayment === 0 && bankPayment === 0 && parseFloat(purchase.payment || 0) > 0) {
       const totalPayment = parseFloat(purchase.payment || 0);
       if (purchase.payment_type === 'CASH') {
@@ -1807,9 +2470,9 @@ function PurchasesPageContent() {
       store_id: purchase.store_id?.toString() || '',
       debit_account_id: purchase.debit_account_id || '',
       credit_account_id: purchase.credit_account_id || '',
-      total_amount: purchase.total_amount.toString(),
-      unloading_amount: purchase.unloading_amount.toString(),
-      fare_amount: purchase.fare_amount.toString(),
+      total_amount: purchase.total_amount?.toString() ?? '',
+      unloading_amount: purchase.unloading_amount?.toString() ?? '',
+      fare_amount: purchase.fare_amount?.toString() ?? '',
       transport_amount: purchase.transport_amount?.toString() || '',
       labour_amount: purchase.labour_amount?.toString() || '',
       out_labour_amount: purchase.out_labour_amount?.toString() || '',
@@ -1820,50 +2483,79 @@ function PurchasesPageContent() {
       include_incity: purchase.include_incity || false,
       include_labour: purchase.include_labour || false,
       include_cargo_in_costprice: purchase.include_cargo_in_costprice || false,
-      discount: purchase.discount.toString(),
+      discount: purchase.discount?.toString() ?? '',
       cash_payment: cashPayment > 0 ? cashPayment.toString() : '',
       bank_payment: bankPayment > 0 ? bankPayment.toString() : '',
       payment_type: (cashPayment > 0 && bankPayment > 0) ? 'SPLIT' : purchase.payment_type,
       vehicle_no: purchase.vehicle_no || '',
       invoice_number: purchase.invoice_number || '',
-      purchase_details: (purchase.purchase_details || []).map(detail => ({
+      purchase_details: (purchase.purchase_details || []).map((detail) => ({
         ...detail,
-        store_id: detail.store_id || purchase.store_id?.toString() || ''
-      }))
+        store_id: detail.store_id || purchase.store_id?.toString() || '',
+      })),
     });
 
-    // Set selected bank account if bank_account_id (resolved from ledger/API) or credit_account_id exists
     const bankAccountIdToFind = purchase.bank_account_id || (purchase.payment_type === 'BANK_TRANSFER' ? purchase.credit_account_id : null);
     if (bankAccountIdToFind) {
-      const bankAccount = customers.find(customer => customer.cus_id === bankAccountIdToFind);
+      const bankAccount = customerRows.find((customer) => customer.cus_id === bankAccountIdToFind);
       setSelectedBankAccount(bankAccount || null);
     } else {
       setSelectedBankAccount(null);
     }
 
-    // Set selected cargo accounts if provided (supports multiple IDs)
     if (purchase.cargo_account_ids) {
       try {
-        const ids = Array.isArray(purchase.cargo_account_ids) ? purchase.cargo_account_ids : JSON.parse(purchase.cargo_account_ids || '[]');
-        const selected = (ids || []).map(id => customers.find(c => c.cus_id === parseInt(id))).filter(Boolean);
+        const ids = Array.isArray(purchase.cargo_account_ids)
+          ? purchase.cargo_account_ids
+          : JSON.parse(purchase.cargo_account_ids || '[]');
+        const selected = (ids || [])
+          .map((id) => customerRows.find((c) => c.cus_id === parseInt(id, 10)))
+          .filter(Boolean);
         setSelectedCargoAccounts(selected);
-      } catch (err) {
-        // fallback to single cargo_account_id
-        const cargoAcc = customers.find(customer => customer.cus_id === purchase.cargo_account_id);
+      } catch {
+        const cargoAcc = customerRows.find((customer) => customer.cus_id === purchase.cargo_account_id);
         setSelectedCargoAccounts(cargoAcc ? [cargoAcc] : []);
       }
     } else if (purchase.cargo_account_id) {
-      const cargoAcc = customers.find(customer => customer.cus_id === purchase.cargo_account_id);
+      const cargoAcc = customerRows.find((customer) => customer.cus_id === purchase.cargo_account_id);
       setSelectedCargoAccounts(cargoAcc ? [cargoAcc] : []);
     } else {
       setSelectedCargoAccounts([]);
     }
 
-    // Set selected customer for the form
-    const customer = customers.find(customer => customer.cus_id === purchase.cus_id);
-    setFormSelectedCustomer(customer || null);
+    const customer = customerRows.find((c) => c.cus_id === purchase.cus_id);
+    setFormSelectedCustomer(customer || purchase.customer || null);
+    setCustomerSearchTerm(customer?.cus_name || purchase.customer?.cus_name || '');
+  }, [customers]);
 
+  const handleEdit = async (purchase) => {
     setCurrentView('create');
+    setEditPurchaseLoading(true);
+    try {
+      await ensureFormLookups();
+      let full = purchaseDetailCacheRef.current.get(purchase.pur_id);
+      if (!full) {
+        const res = await fetch(`/api/purchases?id=${purchase.pur_id}`);
+        if (res.ok) {
+          full = await res.json();
+          purchaseDetailCacheRef.current.set(full.pur_id, full);
+        } else {
+          full = purchase;
+        }
+      }
+      setEditingPurchase(full);
+      applyPurchaseToForm(full);
+    } catch (error) {
+      console.error('Error loading purchase for edit:', error);
+      setSnackbar({
+        open: true,
+        message: 'Could not load purchase for edit',
+        severity: 'error',
+      });
+      setCurrentView('list');
+    } finally {
+      setEditPurchaseLoading(false);
+    }
   };
 
   const handleViewPurchase = async (purchase) => {
@@ -2224,7 +2916,7 @@ function PurchasesPageContent() {
           method: 'DELETE'
         });
         if (response.ok) {
-          await fetchData();
+          await fetchPurchaseList();
         }
       } catch (error) {
         console.error('Error deleting purchase:', error);
@@ -2242,6 +2934,38 @@ function PurchasesPageContent() {
     setFilterStore('');
     setFilterMinAmount('');
     setFilterMaxAmount('');
+    setFilterPaymentType('');
+    setListPage(1);
+  };
+
+  const handlePrintPurchaseList = () => {
+    if (!sortedPurchases.length) {
+      showSnackbar('No purchases to print.', 'warning');
+      return;
+    }
+    const printWindow = window.open('', '_blank', 'width=1100,height=800');
+    if (!printWindow) {
+      showSnackbar('Pop-up blocked. Allow pop-ups to print the list.', 'error');
+      return;
+    }
+    const rows = sortedPurchases.map((p) => `
+      <tr>
+        <td>#${p.pur_id}</td>
+        <td>${(p.customer?.cus_name || 'N/A').replace(/</g, '&lt;')}</td>
+        <td align="right">${Number(p.net_total || 0).toLocaleString()}</td>
+        <td>${p.payment_type || ''}</td>
+        <td>${p.vehicle_no || ''}</td>
+        <td>${formatDatePK(p.created_at) || ''}</td>
+      </tr>`).join('');
+    printWindow.document.write(`<!DOCTYPE html><html><head><title>Purchases List</title>
+      <style>body{font-family:Arial,sans-serif;padding:16px}table{width:100%;border-collapse:collapse;font-size:12px}
+      th,td{border:1px solid #ccc;padding:6px}th{background:#dce6f1}</style></head><body>
+      <h2>Purchases List</h2><p>${sortedPurchases.length} record(s)</p>
+      <table><thead><tr><th>ID</th><th>Supplier</th><th>Net Total</th><th>Payment</th><th>Vehicle</th><th>Date</th></tr></thead>
+      <tbody>${rows}</tbody></table></body></html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
   };
 
   // Customer form handlers
@@ -2353,8 +3077,7 @@ function PurchasesPageContent() {
           city_id: ''
         });
         setShowCustomerForm(false);
-        // Refresh customers list
-        await fetchData();
+        await refreshCustomersDropdown();
       } else {
         setSnackbar({
           open: true,
@@ -2411,101 +3134,45 @@ function PurchasesPageContent() {
     });
   };
 
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <Box
-          sx={{
-            minHeight: '100vh',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            bgcolor: 'background.default'
-          }}
-        >
-          <CircularProgress size={80} />
-        </Box>
-      </DashboardLayout>
-    );
-  }
-
   // Render Purchase List View
   const renderPurchaseListView = () => (
     <DashboardLayout>
-      <Container maxWidth="xl" sx={{ py: 4 }}>
+      {listLoading && <LinearProgress sx={{ position: 'sticky', top: 0, zIndex: 10 }} />}
+      <Container maxWidth={false} sx={{ py: 4 }}>
         <Stack spacing={4}>
-          {/* Header - Add New Purchase Button on the left */}
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', py: 2 }}>
             <Button
               variant="contained"
               startIcon={<AddIcon />}
-              onClick={() => setCurrentView('create')}
+              onClick={() => {
+                setCurrentView('create');
+                void ensureFormLookups();
+                void ensureCatalogLookups();
+              }}
               size="large"
               sx={{
-                background: 'linear-gradient(45deg, #1976d2 30%, #2196f3 90%)',
-                boxShadow: '0 4px 20px rgba(25, 118, 210, 0.3)',
+                background: `linear-gradient(180deg, ${BRAND.primary.blue} 0%, #1347c4 100%)`,
+                boxShadow: '0 8px 24px rgba(26, 85, 227, 0.28)',
                 px: 6,
-                py: 2,
-                fontSize: '1.2rem',
+                py: 2.5,
+                fontSize: '1.3rem',
                 fontWeight: 'bold',
+                borderRadius: '16px',
                 minWidth: '320px',
-                height: '70px',
-                borderRadius: 3,
-                position: 'relative',
-                '@keyframes float': {
-                  '0%, 100%': { transform: 'translateY(0px)' },
-                  '50%': { transform: 'translateY(-8px)' }
-                },
-                '@keyframes glow': {
-                  '0%, 100%': { boxShadow: '0 4px 20px rgba(25, 118, 210, 0.3)' },
-                  '50%': { boxShadow: '0 4px 35px rgba(25, 118, 210, 0.7)' }
-                },
-                '@keyframes shimmer': {
-                  '0%': { backgroundPosition: '-200% 0' },
-                  '100%': { backgroundPosition: '200% 0' }
-                },
-                '@keyframes pulse': {
-                  '0%, 100%': { transform: 'scale(1)' },
-                  '50%': { transform: 'scale(1.02)' }
-                },
-                '@keyframes plusGlow': {
-                  '0%, 100%': {
-                    textShadow: '0 0 5px rgba(255, 255, 255, 0.3)',
-                    filter: 'drop-shadow(0 0 3px rgba(255, 255, 255, 0.2))'
-                  },
-                  '50%': {
-                    textShadow: '0 0 15px rgba(255, 255, 255, 0.8), 0 0 25px rgba(255, 255, 255, 0.4)',
-                    filter: 'drop-shadow(0 0 8px rgba(255, 255, 255, 0.6))'
-                  }
-                },
-                animation: 'float 3s ease-in-out infinite, glow 2s ease-in-out infinite alternate, pulse 4s ease-in-out infinite',
-                backgroundSize: '200% 100%',
-                '& .MuiButton-startIcon': {
-                  animation: 'plusGlow 2s ease-in-out infinite alternate'
-                },
+                minHeight: '70px',
+                textTransform: 'none',
+                transition: 'transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.35s ease',
                 '&:hover': {
-                  background: 'linear-gradient(45deg, #1565c0 30%, #1976d2 90%)',
-                  transform: 'scale(1.08) translateY(-4px)',
-                  boxShadow: '0 10px 40px rgba(25, 118, 210, 0.6)',
-                  animation: 'shimmer 1.5s ease-in-out infinite, float 1s ease-in-out infinite',
-                  '& .MuiButton-startIcon': {
-                    animation: 'plusGlow 1s ease-in-out infinite alternate, float 0.5s ease-in-out infinite'
-                  }
+                  background: 'linear-gradient(180deg, #2563eb 0%, #1347c4 100%)',
+                  transform: 'translateY(-2px)',
+                  boxShadow: '0 12px 28px rgba(26, 85, 227, 0.36)',
                 },
                 '&:active': {
-                  transform: 'scale(0.95) translateY(0px)',
-                  transition: 'all 0.1s ease-in-out'
+                  transform: 'translateY(0)',
+                  boxShadow: '0 6px 16px rgba(26, 85, 227, 0.28)',
                 },
-                transition: 'all 0.3s ease-in-out'
               }}
             >
-              <span style={{
-                textShadow: '0 0 8px rgba(255, 255, 255, 0.5), 0 0 16px rgba(255, 255, 255, 0.3)',
-                filter: 'drop-shadow(0 0 4px rgba(255, 255, 255, 0.4))',
-                transition: 'all 0.3s ease-in-out'
-              }}>
-                ➕
-              </span>
               Add New Purchase
             </Button>
           </Box>
@@ -2597,189 +3264,223 @@ function PurchasesPageContent() {
             </Card>
           </Box>
 
-          {/* Filters & Sorting Section */}
-          <Box sx={{ flexShrink: 0, mb: 3, width: '100%' }}>
-            <Card sx={{
-              borderRadius: 2,
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
-              width: '100%',
-              border: '1px solid #e2e8f0',
-              bgcolor: '#f8fafc'
+          <Card sx={{ ...PURCHASE_PAGE_CARD_SX, mb: 3 }}>
+            <Box sx={{
+              px: { xs: 1.5, md: 2 },
+              py: 1.5,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 1.5,
+              borderBottom: '1px solid #e2e8f0',
+              bgcolor: '#fff',
             }}>
-              <CardContent sx={{ p: 3 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-                  <Typography variant="h6" sx={{ fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <FilterListIcon sx={{ color: '#64748b' }} />
-                    Filters & Sorting
-                  </Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 500 }}>
-                      Showing <strong>{filteredPurchases.length}</strong> of <strong>{purchases.length}</strong> purchases
-                    </Typography>
-                    <Button
-                      onClick={clearFilters}
-                      size="small"
-                      startIcon={<ClearIcon />}
-                      sx={{
-                        color: '#64748b',
-                        textTransform: 'none',
-                        fontWeight: 600,
-                        '&:hover': { color: '#ef4444', bgcolor: '#fee2e2' }
-                      }}
-                    >
-                      Clear All Filters
-                    </Button>
-                  </Box>
+              <Typography sx={{ fontWeight: 700, color: '#1e293b', fontSize: '0.9375rem', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <FilterListIcon sx={{ color: BRAND.primary.blue, fontSize: 20 }} />
+                Filters & Sorting
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.25 }}>
+                <Chip
+                  size="small"
+                  label={`${listTotal} of ${purchases.length}`}
+                  sx={{
+                    bgcolor: BRAND.tint.blue,
+                    color: BRAND.primary.blue,
+                    fontWeight: 700,
+                    height: 32,
+                    fontSize: '0.8125rem',
+                    borderRadius: '8px',
+                  }}
+                />
+                <Button
+                  onClick={handlePrintPurchaseList}
+                  size="small"
+                  variant="contained"
+                  startIcon={<PrintIcon sx={{ fontSize: 18 }} />}
+                  sx={{
+                    textTransform: 'none',
+                    fontWeight: 700,
+                    bgcolor: BRAND.primary.blue,
+                    borderRadius: '8px',
+                    height: 32,
+                    px: 1.5,
+                    '&:hover': { bgcolor: '#1347c4' },
+                  }}
+                >
+                  Print List
+                </Button>
+                <Button
+                  onClick={clearFilters}
+                  size="small"
+                  variant="outlined"
+                  startIcon={<ClearIcon sx={{ fontSize: 18 }} />}
+                  sx={{
+                    textTransform: 'none',
+                    fontWeight: 600,
+                    color: '#64748b',
+                    borderColor: '#cbd5e1',
+                    borderRadius: '8px',
+                    height: 32,
+                    px: 1.5,
+                    '&:hover': { borderColor: '#94a3b8', bgcolor: '#f8fafc' },
+                  }}
+                >
+                  Clear All
+                </Button>
+              </Box>
+            </Box>
+
+            <Box sx={{ px: { xs: 1.5, md: 2 }, py: 2, borderBottom: '1px solid #e2e8f0', bgcolor: '#fafbfc' }}>
+              <Box sx={PURCHASE_FILTER_GRID}>
+                <Box sx={{ gridColumn: { xs: '1', md: 'span 2' } }}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Search Purchases"
+                    placeholder="ID, Supplier, Reference, or Vehicle..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <SearchIcon sx={{ color: '#94a3b8', fontSize: 20 }} />
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={PURCHASE_FILTER_FIELD_SX}
+                  />
                 </Box>
 
-                <Box sx={{
-                  display: 'grid',
-                  gridTemplateColumns: {
-                    xs: '1fr',
-                    sm: 'repeat(2, 1fr)',
-                    md: 'repeat(4, 1fr)'
-                  },
-                  gap: 3,
-                  width: '100%'
-                }}>
-                  {/* Search */}
-                  <Box>
-                    <TextField
-                      fullWidth
-                      label="Search Purchases"
-                      placeholder="ID, Supplier, or Reference..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      onFocus={(e) => e.target.select()}
-                      InputProps={{
-                        startAdornment: (
-                          <InputAdornment position="start">
-                            <SearchIcon size={18} sx={{ color: '#94a3b8' }} />
-                          </InputAdornment>
-                        ),
-                      }}
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}
-                    />
-                  </Box>
-
-                  {/* Customer (Supplier) Filter */}
-                  <Box>
-                    <Autocomplete
-                      fullWidth
-                      autoSelect={true}
-                      autoHighlight={true}
-                      openOnFocus={true}
-                      selectOnFocus={true}
-                      options={customers.filter(customer =>
-                        customer.customer_category?.cus_cat_title?.toLowerCase().includes('supplier')
-                      )}
-                      getOptionLabel={(option) => option.cus_name || ''}
-                      value={customers.find(c => c.cus_id === selectedCustomer) || null}
-                      onChange={(event, newValue) => setSelectedCustomer(newValue ? newValue.cus_id : '')}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          label="Supplier"
-                          placeholder="All Suppliers"
-                          onFocus={(e) => e.target.select()}
-                          sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}
-                        />
-                      )}
-                    />
-                  </Box>
-
-                  {/* Date From */}
-                  <Box>
-                    <TextField
-                      fullWidth
-                      label="From Date"
-                      type="date"
-                      value={dateFrom}
-                      onChange={(e) => setDateFrom(e.target.value)}
-                      onFocus={(e) => e.target.select()}
-                      InputLabelProps={{ shrink: true }}
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}
-                    />
-                  </Box>
-
-                  {/* Date To */}
-                  <Box>
-                    <TextField
-                      fullWidth
-                      label="To Date"
-                      type="date"
-                      value={dateTo}
-                      onChange={(e) => setDateTo(e.target.value)}
-                      onFocus={(e) => e.target.select()}
-                      InputLabelProps={{ shrink: true }}
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}
-                    />
-                  </Box>
-
-                  {/* Store Filter */}
-                  <Box>
-                    <Autocomplete
-                      fullWidth
-                      autoSelect={true}
-                      autoHighlight={true}
-                      openOnFocus={true}
-                      selectOnFocus={true}
-                      options={stores}
-                      getOptionLabel={(option) => option.store_name || ''}
-                      value={stores.find(s => s.storeid.toString() === filterStore) || null}
-                      onChange={(event, newValue) => setFilterStore(newValue ? newValue.storeid.toString() : '')}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          label="Store"
-                          placeholder="All Stores"
-                          onFocus={(e) => e.target.select()}
-                          sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}
-                        />
-                      )}
-                    />
-                  </Box>
-
-                  {/* Min Amount */}
-                  <Box>
-                    <TextField
-                      fullWidth
-                      label="Min Amount"
-                      type="number"
-                      placeholder="e.g. 1000"
-                      value={filterMinAmount}
-                      onChange={(e) => setFilterMinAmount(e.target.value)}
-                      onFocus={(e) => e.target.select()}
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}
-                    />
-                  </Box>
-
-                  {/* Max Amount */}
-                  <Box>
-                    <TextField
-                      fullWidth
-                      label="Max Amount"
-                      type="number"
-                      placeholder="e.g. 50000"
-                      value={filterMaxAmount}
-                      onChange={(e) => setFilterMaxAmount(e.target.value)}
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}
-                    />
-                  </Box>
-
-                  {/* Sort */}
+                <Box>
                   <Autocomplete
                     fullWidth
-                    autoSelect={true}
-                    autoHighlight={true}
-                    openOnFocus={true}
+                    size="small"
+                    options={customers.filter((customer) =>
+                      customer.customer_category?.cus_cat_title?.toLowerCase().includes('supplier')
+                    )}
+                    getOptionLabel={(option) => option.cus_name || ''}
+                    value={customers.find((c) => c.cus_id === selectedCustomer) || null}
+                    onChange={(event, newValue) => setSelectedCustomer(newValue ? newValue.cus_id : '')}
+                    autoSelect
+                    autoHighlight
+                    openOnFocus
+                    selectOnFocus
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        label="Supplier"
+                        placeholder="All Suppliers"
+                        onFocus={(e) => e.target.select()}
+                        sx={PURCHASE_FILTER_FIELD_SX}
+                      />
+                    )}
+                  />
+                </Box>
+
+                <Box>
+                  <Autocomplete
+                    fullWidth
+                    size="small"
+                    options={stores}
+                    getOptionLabel={(option) => option.store_name || ''}
+                    value={stores.find((s) => s.storeid.toString() === filterStore) || null}
+                    onChange={(event, newValue) => setFilterStore(newValue ? newValue.storeid.toString() : '')}
+                    autoSelect
+                    autoHighlight
+                    openOnFocus
+                    selectOnFocus
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        label="Store"
+                        placeholder="All Stores"
+                        onFocus={(e) => e.target.select()}
+                        sx={PURCHASE_FILTER_FIELD_SX}
+                      />
+                    )}
+                  />
+                </Box>
+
+                <Box>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="From Date"
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                    sx={PURCHASE_FILTER_FIELD_SX}
+                  />
+                </Box>
+
+                <Box>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="To Date"
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                    sx={PURCHASE_FILTER_FIELD_SX}
+                  />
+                </Box>
+
+                <Box>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Min Amount"
+                    type="number"
+                    placeholder="e.g. 1000"
+                    value={filterMinAmount}
+                    onChange={(e) => setFilterMinAmount(e.target.value)}
+                    sx={PURCHASE_FILTER_FIELD_SX}
+                  />
+                </Box>
+
+                <Box>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Max Amount"
+                    type="number"
+                    placeholder="e.g. 50000"
+                    value={filterMaxAmount}
+                    onChange={(e) => setFilterMaxAmount(e.target.value)}
+                    sx={PURCHASE_FILTER_FIELD_SX}
+                  />
+                </Box>
+
+                <Box>
+                  <FormControl fullWidth size="small" sx={PURCHASE_FILTER_FIELD_SX}>
+                    <InputLabel>Payment Type</InputLabel>
+                    <Select
+                      value={filterPaymentType}
+                      onChange={(e) => setFilterPaymentType(e.target.value)}
+                      label="Payment Type"
+                    >
+                      <MenuItem value="">All Types</MenuItem>
+                      <MenuItem value="CASH">Cash</MenuItem>
+                      <MenuItem value="BANK">Bank</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Box>
+
+                <Box>
+                  <Autocomplete
+                    fullWidth
+                    size="small"
                     options={[
                       { value: 'created_at-desc', label: 'Newest First' },
                       { value: 'created_at-asc', label: 'Oldest First' },
                       { value: 'customer-asc', label: 'Supplier A-Z' },
                       { value: 'customer-desc', label: 'Supplier Z-A' },
                       { value: 'net_total-desc', label: 'Amount High-Low' },
-                      { value: 'net_total-asc', label: 'Amount Low-High' }
+                      { value: 'net_total-asc', label: 'Amount Low-High' },
                     ]}
                     getOptionLabel={(option) => option.label}
                     value={{ value: `${sortBy}-${sortOrder}`, label: getSortLabel(`${sortBy}-${sortOrder}`) }}
@@ -2790,177 +3491,215 @@ function PurchasesPageContent() {
                         setSortOrder(order);
                       }
                     }}
+                    autoSelect
+                    autoHighlight
+                    openOnFocus
+                    selectOnFocus
                     renderInput={(params) => (
                       <TextField
                         {...params}
                         label="Sort By"
-                        onFocus={(e) => e.target.select()}
                         placeholder="Select..."
-                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'white' } }}
+                        sx={PURCHASE_FILTER_FIELD_SX}
                       />
                     )}
                   />
                 </Box>
-              </CardContent>
-            </Card>
-          </Box>
+              </Box>
+            </Box>
 
-          {/* Purchases Table */}
-          <Card>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 3, borderBottom: 1, borderColor: 'divider' }}>
-              <Typography variant="h6" component="h3" sx={{ fontWeight: 'semibold' }}>
+            <Box sx={{
+              px: { xs: 1.5, md: 2 },
+              py: 1.25,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderBottom: '1px solid #cbd5e1',
+              bgcolor: '#f1f5f9',
+            }}>
+              <Typography sx={{ fontWeight: 700, color: '#1e293b', fontSize: '0.875rem' }}>
                 Purchases List
               </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Showing {finalPurchases.length} of {purchases.length} purchases
+              <Typography sx={{ fontSize: '0.8125rem', color: '#64748b', fontWeight: 600 }}>
+                {listTotal === 0
+                  ? '0 rows'
+                  : `${((listPage - 1) * listPageSize) + 1}–${Math.min(listPage * listPageSize, listTotal)} of ${listTotal}`}
               </Typography>
             </Box>
 
-            {finalPurchases.length === 0 ? (
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', py: 8 }}>
-                <Box sx={{ textAlign: 'center' }}>
-                  <ShoppingCartIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
-                  <Typography variant="h6" sx={{ mb: 1 }}>
-                    No purchases found
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {searchTerm || selectedCustomer
-                      ? 'Try adjusting your filters to see more results.'
-                      : 'Get started by adding your first purchase.'}
-                  </Typography>
-                </Box>
-              </Box>
-            ) : (
-              <div className="flex-1 flex flex-col min-h-0">
-                {/* Fixed Column Headers */}
-                <div className="flex-shrink-0 bg-gray-50 border-b border-gray-200">
-                  <div className="grid grid-cols-12 gap-4 px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    <div className="col-span-2">Purchase</div>
-                    <div className="col-span-2">Customer</div>
-                    <div className="col-span-2">Amounts</div>
-                    <div className="col-span-1">Payment</div>
-                    <div className="col-span-1">Vehicle</div>
-                    <div className="col-span-1">Created</div>
-                    <div className="col-span-2">Updated By</div>
-                    <div className="col-span-1">Actions</div>
-                  </div>
-                </div>
-
-                {/* Scrollable Table Body */}
-                <div className="flex-1 overflow-y-auto">
-                  <div className="divide-y divide-gray-200">
-                    {finalPurchases.map((purchase) => {
-                      return (
-                        <div
+            <TableContainer sx={{ overflowX: 'auto', maxWidth: '100%', bgcolor: '#fff', maxHeight: 'calc(100vh - 320px)' }}>
+              <Table stickyHeader sx={PURCHASE_EXCEL_TABLE_SX}>
+                <TableHead>
+                  <TableRow>
+                    {[
+                      { label: 'Purchase ID', align: 'left' },
+                      { label: 'Supplier', align: 'left' },
+                      { label: 'Net Total', align: 'right' },
+                      { label: 'Total / Unload / Fare', align: 'left' },
+                      { label: 'Payment', align: 'right' },
+                      { label: 'Type', align: 'center' },
+                      { label: 'Vehicle', align: 'left' },
+                      { label: 'Date', align: 'center' },
+                      { label: 'Updated By', align: 'left' },
+                      { label: 'Actions', align: 'center' },
+                    ].map((col) => (
+                      <TableCell key={col.label} align={col.align} sx={PURCHASE_EXCEL_HEAD_SX}>
+                        {col.label}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {listLoading && paginatedPurchases.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={10} align="center" sx={{ py: 6, border: '1px solid #cbd5e1' }}>
+                        <CircularProgress size={36} />
+                        <Typography sx={{ fontWeight: 600, color: '#64748b', fontSize: '0.875rem', mt: 1.5 }}>
+                          Loading purchases…
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : listTotal === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={10} align="center" sx={{ py: 6, border: '1px solid #cbd5e1' }}>
+                        <ShoppingCartIcon sx={{ fontSize: 48, color: '#cbd5e1', mb: 1 }} />
+                        <Typography sx={{ fontWeight: 600, color: '#64748b', fontSize: '0.875rem' }}>
+                          {purchases.length === 0 ? 'No purchases found' : 'No purchases match your filters'}
+                        </Typography>
+                        <Typography sx={{ fontSize: '0.8125rem', color: '#94a3b8', mt: 0.5 }}>
+                          {purchases.length === 0 ? 'Create your first purchase to get started.' : 'Try adjusting your filter criteria.'}
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    paginatedPurchases.map((purchase, rowIndex) => (
+                        <TableRow
                           key={purchase.pur_id}
                           onClick={() => handleOpenCustomerLedger(purchase)}
-                          className="grid grid-cols-12 gap-4 px-6 py-4 hover:bg-gray-50 transition-colors duration-200 cursor-pointer"
+                          sx={{
+                            bgcolor: rowIndex % 2 === 0 ? '#ffffff' : '#f8fafc',
+                            '&:hover': { bgcolor: '#eff6ff' },
+                            cursor: 'pointer',
+                          }}
                         >
-                          {/* Purchase */}
-                          <div className="col-span-2 flex items-center">
-                            <div>
-                              <div className="text-sm font-medium text-gray-900">Purchase #{purchase.sequentialId}</div>
-                              <div className="text-xs text-gray-500">ID: {purchase.pur_id.toString().slice(-8)}</div>
-                            </div>
-                          </div>
-
-                          {/* Customer */}
-                          <div className="col-span-2 flex items-center">
-                            <div>
-                              <div className="text-sm font-medium text-gray-900">{purchase.customer?.cus_name || 'N/A'}</div>
-                              <div className="text-xs text-gray-500">{purchase.customer?.cus_phone_no || 'N/A'}</div>
-                            </div>
-                          </div>
-
-                          {/* Amounts */}
-                          <div className="col-span-2">
-                            <div className="text-sm font-semibold text-green-600">{Number(purchase.net_total)}</div>
-                            <div className="text-xs text-gray-500">
-                              Total: {Number(purchase.total_amount)} |
-                              Unload: {Number(purchase.unloading_amount)} |
-                              Fare: {Number(purchase.fare_amount)}
-                            </div>
-                            {purchase.discount > 0 && (
-                              <div className="text-xs text-red-500">Discount: -{Number(purchase.discount)}</div>
+                          <TableCell sx={{ fontWeight: 700, color: BRAND.primary.blue, whiteSpace: 'nowrap' }}>
+                            #{purchase.pur_id}
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <Box>{purchase.customer?.cus_name || 'N/A'}</Box>
+                            <Typography component="span" sx={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                              {purchase.customer?.cus_phone_no || '—'}
+                            </Typography>
+                          </TableCell>
+                          <TableCell sx={{ ...PURCHASE_NUM_CELL_SX, fontWeight: 700, color: '#1e293b' }}>
+                            {fmtAmt(purchase.net_total)}
+                          </TableCell>
+                          <TableCell sx={{ fontSize: '0.75rem', color: '#64748b', maxWidth: 200 }}>
+                            T: {fmtAmt(purchase.total_amount)} · U: {fmtAmt(purchase.unloading_amount)} · F: {fmtAmt(purchase.fare_amount)}
+                            {parseFloat(purchase.discount || 0) > 0 && (
+                              <Box component="span" sx={{ display: 'block', color: BRAND.primary.pink, fontWeight: 600 }}>
+                                Disc: -{fmtAmt(purchase.discount)}
+                              </Box>
                             )}
-                          </div>
+                          </TableCell>
+                          <TableCell sx={{ ...PURCHASE_NUM_CELL_SX, fontWeight: 600, color: BRAND.text.green }}>
+                            {fmtAmt(purchase.payment)}
+                          </TableCell>
+                          <TableCell align="center">
+                            <Chip
+                              label={purchase.payment_type || '—'}
+                              size="small"
+                              sx={{
+                                height: 22,
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                borderRadius: '4px',
+                                bgcolor: '#f1f5f9',
+                                color: '#475569',
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell sx={{ color: '#64748b', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {purchase.vehicle_no || '—'}
+                          </TableCell>
+                          <TableCell align="center" sx={{ color: '#64748b', whiteSpace: 'nowrap' }}>
+                            {formatDatePK(purchase?.created_at) || '—'}
+                          </TableCell>
+                          <TableCell sx={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {purchase.updated_by_user?.full_name || '—'}
+                          </TableCell>
+                          <TableCell align="center" sx={{ p: 0.4, whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                            <Stack direction="row" spacing={0} justifyContent="center" flexWrap="nowrap">
+                              <Tooltip title="View Details">
+                                <IconButton size="small" color="primary" onClick={() => handleViewPurchase(purchase)} sx={{ p: 0.4 }}>
+                                  <EyeIcon sx={{ fontSize: 17 }} />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Edit Purchase">
+                                <IconButton
+                                  size="small"
+                                  sx={{ color: '#f59e0b', p: 0.4 }}
+                                  onMouseEnter={() => prefetchPurchaseForEdit(purchase.pur_id)}
+                                  onClick={() => handleEdit(purchase)}
+                                >
+                                  <EditIcon sx={{ fontSize: 17 }} />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Delete">
+                                <IconButton size="small" color="error" onClick={() => handleDelete(purchase.pur_id)} sx={{ p: 0.4 }}>
+                                  <DeleteIcon sx={{ fontSize: 17 }} />
+                                </IconButton>
+                              </Tooltip>
+                            </Stack>
+                          </TableCell>
+                        </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
 
-                          {/* Payment */}
-                          <div className="col-span-1 flex items-center">
-                            <div>
-                              <div className="text-sm font-medium text-gray-900">{purchase.payment_type}</div>
-                              <div className="text-xs text-gray-500">{Number(purchase.payment)}</div>
-                            </div>
-                          </div>
-
-                          {/* Vehicle */}
-                          <div className="col-span-1 flex items-center">
-                            <div className="text-sm text-gray-900">{purchase.vehicle_no || 'N/A'}</div>
-                          </div>
-
-                          {/* Created */}
-                          <div className="col-span-1 flex items-center">
-                            <div className="text-sm text-gray-900">
-                              {formatDatePK(purchase?.created_at) || 'N/A'}
-                            </div>
-                          </div>
-
-                          {/* Updated By */}
-                          <div className="col-span-2 flex items-center">
-                            {purchase.updated_by_user?.full_name ? (
-                              <div className="flex items-center">
-                                <div className="w-8 h-8 bg-gradient-to-r from-green-500 to-blue-500 rounded-full flex items-center justify-center mr-2">
-                                  <span className="text-white text-xs font-bold">
-                                    {purchase.updated_by_user.full_name.charAt(0).toUpperCase()}
-                                  </span>
-                                </div>
-                                <div>
-                                  <div className="text-sm font-medium text-gray-900">
-                                    {purchase.updated_by_user.full_name}
-                                  </div>
-                                  <div className="text-xs text-gray-500 capitalize">
-                                    {purchase.updated_by_user.role || 'User'}
-                                  </div>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="text-sm text-gray-400 italic">N/A</div>
-                            )}
-                          </div>
-
-                          {/* Actions */}
-                          <div className="col-span-1 flex items-center" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center space-x-2">
-                              <button
-                                onClick={() => handleViewPurchase(purchase)}
-                                className="p-2 text-green-600 hover:text-green-900 hover:bg-green-50 rounded-lg transition-colors duration-200"
-                                title="View Purchase Details"
-                              >
-                                <EyeIcon />
-                              </button>
-                              <button
-                                onClick={() => handleEdit(purchase)}
-                                className="p-2 text-blue-600 hover:text-blue-900 hover:bg-blue-50 rounded-lg transition-colors duration-200"
-                                title="Edit Purchase"
-                              >
-                                <EditIcon />
-                              </button>
-                              <button
-                                onClick={() => handleDelete(purchase.pur_id)}
-                                className="p-2 text-red-600 hover:text-red-900 hover:bg-red-50 rounded-lg transition-colors duration-200"
-                                title="Delete Purchase"
-                              >
-                                <DeleteIcon />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
+            <Box sx={{
+              borderTop: '1px solid #e2e8f0',
+              px: { xs: 1.5, md: 2 },
+              py: 1.5,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 1.5,
+              bgcolor: '#f8fafc',
+            }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                <FormControl variant="outlined" size="small" sx={{ minWidth: 140 }}>
+                  <InputLabel id="purchase-rows-per-page-label">Rows per page</InputLabel>
+                  <Select
+                    labelId="purchase-rows-per-page-label"
+                    value={listPageSize}
+                    onChange={(e) => setListPageSize(parseInt(e.target.value, 10))}
+                    label="Rows per page"
+                  >
+                    <MenuItem value={10}>10 per page</MenuItem>
+                    <MenuItem value={25}>25 per page</MenuItem>
+                    <MenuItem value={50}>50 per page</MenuItem>
+                    <MenuItem value={100}>100 per page</MenuItem>
+                  </Select>
+                </FormControl>
+                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
+                  {paginatedPurchases.length} on this page · {listTotal} total
+                </Typography>
+              </Box>
+              <Pagination
+                count={Math.max(1, Math.ceil(listTotal / listPageSize))}
+                page={listPage}
+                onChange={(_, value) => setListPage(value)}
+                color="primary"
+                shape="rounded"
+                size="medium"
+                showFirstButton
+                showLastButton
+              />
+            </Box>
           </Card>
         </Stack>
       </Container>
@@ -2970,6 +3709,9 @@ function PurchasesPageContent() {
   // Render Purchase Create View
   const renderPurchaseCreateView = () => (
     <DashboardLayout>
+      {(editPurchaseLoading || (formLookupsLoading && customers.length === 0)) && (
+        <LinearProgress sx={{ position: 'sticky', top: 0, zIndex: 20 }} />
+      )}
       <Container maxWidth={false} disableGutters sx={{ py: 1, px: { xs: 0, sm: 1 } }}>
         <Stack spacing={2} sx={{ width: '100%', pb: 4 }}>
         {/* Header */}
@@ -3017,74 +3759,105 @@ function PurchasesPageContent() {
           </div>
         </div>
 
-          {/* Header Section */}
-          <Card sx={{ p: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Typography variant="h6" sx={{ fontWeight: 'bold', color: 'text.primary' }}>
-                {purchaseType === 'return' && selectedPurchaseForReturn ? `Return for Purchase #${selectedPurchaseForReturn.pur_id}` : 'Purchase #'}
+          {/* Quick actions toolbar */}
+          <Box sx={{ ...PURCHASE_PAGE_CARD_SX, px: { xs: 1.5, md: 2 }, py: 1.25 }}>
+            <Box sx={{
+              display: 'flex',
+              flexDirection: { xs: 'column', lg: 'row' },
+              alignItems: { xs: 'stretch', lg: 'center' },
+              gap: { xs: 1.5, lg: 2 },
+            }}>
+              <Typography sx={{
+                fontWeight: 700,
+                fontSize: '0.9375rem',
+                color: '#1e293b',
+                whiteSpace: 'nowrap',
+                minWidth: { lg: 140 },
+                flexShrink: 0,
+              }}>
+                {purchaseType === 'return' && selectedPurchaseForReturn
+                  ? `Return #${selectedPurchaseForReturn.pur_id}`
+                  : 'Purchase entry'}
               </Typography>
-              <Box sx={{ display: 'flex', gap: 2 }}>
-                {purchaseType === 'new' && (
-                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+
+              {purchaseType === 'new' && (
+                <>
+                  <Stack
+                    direction="row"
+                    flexWrap="wrap"
+                    useFlexGap
+                    spacing={0}
+                    sx={{
+                      flex: 1,
+                      gap: 1,
+                      justifyContent: { xs: 'flex-start', lg: 'center' },
+                      alignItems: 'center',
+                    }}
+                  >
                     <Button
                       variant="contained"
-                      startIcon={<AddIcon />}
+                      size="small"
+                      startIcon={<AddIcon sx={{ fontSize: 18 }} />}
                       onClick={() => openCustomerForm('supplier')}
-                      sx={{
-                        bgcolor: 'primary.main',
-                        '&:hover': { bgcolor: 'primary.dark' }
-                      }}
+                      sx={PURCHASE_TOOLBAR_BTN_PRIMARY_SX}
                     >
-                      + New Supplier
+                      New Supplier
                     </Button>
                     <Button
                       variant="outlined"
-                      startIcon={<PackageIcon />}
-                      onClick={() => setShowAddProductPopup(true)}
-                      sx={{ borderColor: 'info.main', color: 'info.main', '&:hover': { borderColor: 'info.dark', backgroundColor: 'info.light', color: 'info.dark' } }}
+                      size="small"
+                      startIcon={<PackageIcon sx={{ fontSize: 18 }} />}
+                      onClick={() => {
+                        void ensureCatalogLookups();
+                        setShowAddProductPopup(true);
+                      }}
+                      sx={PURCHASE_TOOLBAR_BTN_ADD_PRODUCT_SX}
                     >
                       Add Product
                     </Button>
                     <Button
                       variant="outlined"
-                      startIcon={<FolderIcon />}
+                      size="small"
+                      startIcon={<FolderIcon sx={{ fontSize: 18 }} />}
                       onClick={() => setShowAddProductCategoryPopup(true)}
-                      sx={{ borderColor: 'success.main', color: 'success.main', '&:hover': { borderColor: 'success.dark', backgroundColor: 'success.light', color: 'success.dark' } }}
+                      sx={PURCHASE_TOOLBAR_BTN_CATEGORY_SX}
                     >
-                      Add Product Category
+                      Category
                     </Button>
                     <Button
                       variant="outlined"
-                      startIcon={<FolderOpenIcon />}
+                      size="small"
+                      startIcon={<FolderOpenIcon sx={{ fontSize: 18 }} />}
                       onClick={() => setShowAddProductSubCategoryPopup(true)}
-                      sx={{ borderColor: 'secondary.main', color: 'secondary.main', '&:hover': { borderColor: 'secondary.dark', backgroundColor: 'secondary.light', color: 'secondary.dark' } }}
+                      sx={PURCHASE_TOOLBAR_BTN_SUBCATEGORY_SX}
                     >
-                      Add Product Sub Category
+                      Subcategory
                     </Button>
-                  </Box>
-                )}
-                {purchaseType === 'new' && (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  </Stack>
+
+                  <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
                     <TextField
                       size="small"
                       placeholder="Invoice No"
-                      sx={{ width: 200 }}
+                      sx={{
+                        width: { xs: '100%', sm: 168 },
+                        ...PURCHASE_ENTRY_CONTROL_SX,
+                        '& .MuiInputBase-root': { height: 36 },
+                      }}
                     />
                     <Button
-                      variant="contained"
-                      sx={{
-                        bgcolor: 'secondary.main',
-                        '&:hover': { bgcolor: 'secondary.dark' },
-                        minWidth: 80
-                      }}
+                      variant="outlined"
+                      size="small"
+                      startIcon={<SearchIcon sx={{ fontSize: 18 }} />}
+                      sx={{ ...PURCHASE_TOOLBAR_BTN_OUTLINED_SX, minWidth: 88 }}
                     >
-                      Q Find
+                      Find
                     </Button>
-                  </Box>
-                )}
-              </Box>
+                  </Stack>
+                </>
+              )}
             </Box>
-          </Card>
+          </Box>
 
           {/* Screen Stack Indicator */}
           {(currentScreenIndex >= 0 || screenStack.length > 0) && (
@@ -3143,9 +3916,9 @@ function PurchasesPageContent() {
                       p: 2,
                       borderRadius: 2,
                       background: purchaseType === 'new'
-                        ? 'linear-gradient(45deg, #2e7d32 30%, #4caf50 90%)'
-                        : 'linear-gradient(45deg, #c62828 30%, #ef5350 90%)',
-                      boxShadow: '0 3px 5px 2px rgba(33, 203, 243, .3)',
+                        ? PURCHASE_ENTRY_HEADER_GRADIENT
+                        : 'linear-gradient(180deg, #c62828 0%, #ef5350 100%)',
+                      boxShadow: '0 4px 14px rgba(26, 85, 227, 0.22)',
                       color: 'white',
                       transition: 'all 0.3s ease',
                     }}>
@@ -3216,347 +3989,307 @@ function PurchasesPageContent() {
                 </Grid>
               </Box>
 
-              {/* Customer and Order Details Section */}
-              <Box sx={{ p: 3, borderBottom: 1, borderColor: 'divider' }}>
-                <Grid container spacing={3}>
-                  {/* Supplier Selection - Now visible for both New and Return */}
-                  <Grid size={{ xs: 12, md: 3 }}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          SUPPLIER
-                        </Typography>
-                        {formSelectedCustomer && (
-                          <Box sx={{
-                            bgcolor: 'success.light',
-                            color: 'success.contrastText',
+              {/* Supplier, date, invoice — sales-style row */}
+              <Box sx={{ px: 3, pt: 2, pb: 1, borderBottom: 1, borderColor: 'divider' }}>
+                <Box sx={
+                  purchaseType === 'return'
+                    ? PURCHASE_ENTRY_ROW1_RETURN_SX
+                    : {
+                        ...PURCHASE_ENTRY_ROW1_SX,
+                        gridTemplateColumns: {
+                          xs: '1fr',
+                          sm: 'repeat(2, minmax(0, 1fr))',
+                          md: 'minmax(0, 2.2fr) minmax(0, 0.85fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.1fr)',
+                        },
+                      }
+                }>
+                  <Box sx={PURCHASE_ENTRY_CELL_SX}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.75, gap: 1, minHeight: 22, flexWrap: 'wrap' }}>
+                      <Typography sx={{ ...PURCHASE_ENTRY_LABEL_SX, mb: 0 }}>
+                        SUPPLIER
+                      </Typography>
+                      {formSelectedCustomer && (
+                        <Typography
+                          component="span"
+                          sx={{
+                            bgcolor: BRAND.tint.blue,
+                            color: BRAND.text.blue,
+                            border: `1px solid ${BRAND.primary.blue}`,
                             px: 1.5,
                             py: 0.5,
+                            borderRadius: 1.5,
+                            fontSize: '0.8rem',
+                            fontWeight: 800,
+                          }}
+                        >
+                          Balance: {Number(formSelectedCustomer.cus_balance || 0).toLocaleString('en-PK')}
+                        </Typography>
+                      )}
+                    </Box>
+                    <Autocomplete
+                      fullWidth
+                      size="small"
+                      open={customerDropdownOpen}
+                      onOpen={() => setCustomerDropdownOpen(true)}
+                      onClose={() => setCustomerDropdownOpen(false)}
+                      options={suppliers}
+                      getOptionLabel={(option) => option.cus_name || ''}
+                      filterOptions={filterPurchaseSuppliers}
+                      value={formSelectedCustomer}
+                      isOptionEqualToValue={(option, value) => option.cus_id === value?.cus_id}
+                      slots={{ listbox: PurchaseSupplierDropdownListbox }}
+                      slotProps={{
+                        popper: {
+                          sx: { ...PURCHASE_DROPDOWN_POPPER_SX, minWidth: PURCHASE_SUPPLIER_DROPDOWN_WIDTH },
+                          modifiers: [{ name: 'flip', enabled: false }],
+                        },
+                        paper: { sx: { width: PURCHASE_SUPPLIER_DROPDOWN_WIDTH, maxWidth: '92vw', mt: 0.5 } },
+                      }}
+                      onHighlightChange={(_, option) => {
+                        if (option) supplierHighlightRef.current = option;
+                      }}
+                      onChange={(event, newValue) => {
+                        if (newValue) {
+                          selectCustomer(newValue);
+                          if (purchaseType === 'return') {
+                            setPurchaseSearchResults([]);
+                            setSelectedPurchaseForReturn(null);
+                            setPurchaseSearchOpen(false);
+                          }
+                        } else {
+                          setFormData(prev => ({ ...prev, cus_id: '' }));
+                          setCustomerSearchTerm('');
+                          setFormSelectedCustomer(null);
+                          if (purchaseType === 'return') {
+                            setPurchaseSearchResults([]);
+                            setSelectedPurchaseForReturn(null);
+                          }
+                        }
+                        setCustomerDropdownOpen(false);
+                      }}
+                      onKeyDown={(e) => {
+                        commitPurchaseDropdownOnTab(
+                          e,
+                          supplierHighlightRef.current || formSelectedCustomer,
+                          (val) => {
+                            selectCustomer(val);
+                            if (purchaseType === 'return') {
+                              setPurchaseSearchResults([]);
+                              setSelectedPurchaseForReturn(null);
+                            }
+                          },
+                          () => {
+                            if (purchaseType === 'return') {
+                              return document.querySelector('input[placeholder*="Search invoice"]');
+                            }
+                            return document.querySelector('input[type="date"]')
+                              || document.querySelector('input[placeholder*="Select product"]');
+                          }
+                        );
+                      }}
+                      autoSelect
+                      autoHighlight
+                      openOnFocus
+                      selectOnFocus
+                      clearOnBlur={false}
+                      handleHomeEndKeys
+                      renderOption={(props, option, { index }) => {
+                        const { key, ownerState, ...optionProps } = props;
+                        return (
+                          <li key={option.cus_id ?? key} {...optionProps} style={{ ...purchaseDropdownRowStyle(PURCHASE_SUPPLIER_DROPDOWN_GRID), ...optionProps.style }}>
+                            <span style={{ ...purchaseDropdownCellStyle, justifyContent: 'center', color: '#64748b', fontSize: 12, fontWeight: 700 }}>
+                              {index + 1}
+                            </span>
+                            <span title={option.cus_name || ''} style={{ ...purchaseDropdownCellStyle, fontWeight: 700, color: '#111827' }}>
+                              {option.cus_name || ''}
+                            </span>
+                            <span title={option.cus_phone_no || ''} style={{ ...purchaseDropdownCellStyle, fontVariantNumeric: 'tabular-nums' }}>
+                              {option.cus_phone_no || ''}
+                            </span>
+                            <span title={option.cus_address || ''} style={{ ...purchaseDropdownCellStyle, borderRight: 'none' }}>
+                              {option.cus_address || ''}
+                            </span>
+                          </li>
+                        );
+                      }}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          id="supplier-search-dropdown-input"
+                          placeholder="Search by name, phone, or address"
+                          onFocus={(e) => e.target.select()}
+                          sx={{
+                            bgcolor: BRAND.primary.blue,
+                            width: '100%',
+                            minWidth: 0,
                             borderRadius: 1,
-                            fontSize: '0.75rem',
-                            fontWeight: 'bold'
-                          }}>
-                            Balance: {Number(formSelectedCustomer.cus_balance || 0)}
-                          </Box>
-                        )}
-                      </Box>
+                            '& .MuiOutlinedInput-root': {
+                              height: 40,
+                              fontSize: '0.95rem',
+                              color: 'white !important',
+                              WebkitTextFillColor: 'white !important',
+                              '& fieldset': { borderColor: '#1347c4', borderWidth: '2px' },
+                              '&:hover fieldset': { borderColor: '#0f3aa8' },
+                              '&.Mui-focused fieldset': { borderColor: '#0f3aa8' },
+                            },
+                            '& .MuiInputBase-input': {
+                              fontWeight: 'bold',
+                              color: 'white !important',
+                              WebkitTextFillColor: 'white !important',
+                              '&::placeholder': {
+                                color: 'rgba(255, 255, 255, 0.75) !important',
+                                WebkitTextFillColor: 'rgba(255, 255, 255, 0.75) !important',
+                                opacity: 1,
+                              },
+                            },
+                            '& .MuiAutocomplete-popupIndicator, & .MuiAutocomplete-clearIndicator': { color: 'white' },
+                          }}
+                        />
+                      )}
+                    />
+                  </Box>
+
+                  {purchaseType === 'return' && (
+                    <Box sx={PURCHASE_ENTRY_CELL_SX}>
+                      <Typography sx={PURCHASE_ENTRY_LABEL_SX}>SELECT PURCHASE</Typography>
                       <Autocomplete
-                        size="medium"
-                        autoSelect={true}
-                        autoHighlight={true}
-                        openOnFocus={true}
-                        selectOnFocus={true}
-                        open={customerDropdownOpen}
+                        size="small"
+                        open={purchaseSearchOpen}
                         onOpen={() => {
-                          setCustomerDropdownOpen(true);
+                          setPurchaseSearchOpen(true);
+                          if (formSelectedCustomer) {
+                            setPurchaseSearchResults(purchases.filter(p => p.cus_id === formSelectedCustomer.cus_id));
+                          }
                         }}
-                        onClose={() => setCustomerDropdownOpen(false)}
-                        options={suppliers}
-                        getOptionLabel={(option) => option.cus_name || ''}
-                        ListboxProps={{ sx: { maxHeight: 180 } }}
-                        filterOptions={(options, { inputValue }) => {
-                          const q = inputValue.toLowerCase().trim();
-                          if (!q) return options;
-                          return options.filter(o =>
-                            (o.cus_name || '').toLowerCase().includes(q) ||
-                            (o.cus_phone_no || '').toLowerCase().includes(q) ||
-                            (o.cus_phone_no2 || '').toLowerCase().includes(q) ||
-                            (o.cus_address || '').toLowerCase().includes(q) ||
-                            (o.cus_reference || '').toLowerCase().includes(q) ||
-                            (o.city?.city_name || '').toLowerCase().includes(q)
-                          );
-                        }}
-                        value={formSelectedCustomer}
+                        onClose={() => setPurchaseSearchOpen(false)}
+                        options={purchaseSearchResults}
+                        getOptionLabel={(option) => `#${option.pur_id} - ${option.invoice_number || 'N/A'} (${Number(option.total_amount)})`}
+                        value={selectedPurchaseForReturn}
                         onChange={(event, newValue) => {
-                          if (newValue) {
-                            // Call the existing selection handler if exists, or do manual sets
-                            if (typeof selectCustomer === 'function') {
-                              selectCustomer(newValue);
-                            } else {
-                              setFormSelectedCustomer(newValue);
-                              setFormData(prev => ({ ...prev, cus_id: newValue.cus_id }));
-                            }
-
-                            // Additional cleanup for returns
-                            if (purchaseType === 'return') {
-                              setPurchaseSearchResults([]);
-                              setSelectedPurchaseForReturn(null);
-                              setPurchaseSearchOpen(false);
-                            }
-                          } else {
-                            setFormData(prev => ({ ...prev, cus_id: '' }));
-                            if (typeof setCustomerSearchTerm === 'function') setCustomerSearchTerm('');
-                            setFormSelectedCustomer(null);
-
-                            // Cleanup for returns
-                            if (purchaseType === 'return') {
-                              setPurchaseSearchResults([]);
-                              setSelectedPurchaseForReturn(null);
-                            }
-                          }
-                          setCustomerDropdownOpen(false);
+                          if (newValue) handleLoadPurchaseForReturn(newValue);
                         }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && formSelectedCustomer) {
-                            e.preventDefault();
-                            // Move focus to Store field
-                            const storeInputs = document.querySelectorAll('input[placeholder*="Select store"]');
-                            if (storeInputs.length > 0) {
-                              storeInputs[0]?.focus();
-                            }
-                          }
-                        }}
+                        onInputChange={(event, inputValue) => handlePurchaseSearch(inputValue)}
+                        autoSelect
+                        autoHighlight
+                        openOnFocus
+                        selectOnFocus
                         renderInput={(params) => (
                           <TextField
                             {...params}
-                            placeholder="Search by name, phone, address, city, reference"
+                            placeholder="Search invoice..."
                             onFocus={(e) => e.target.select()}
-                            sx={{
-                              width: '100%',
-                              minWidth: 200,
-                              minHeight: 56,
-                              '& .MuiInputBase-input': {
-                                fontWeight: formSelectedCustomer ? 'bold' : 'normal'
-                              }
+                            sx={PURCHASE_ENTRY_CONTROL_SX}
+                            InputProps={{
+                              ...params.InputProps,
+                              startAdornment: (
+                                <InputAdornment position="start">
+                                  <SearchIcon sx={{ color: 'text.secondary', fontSize: 20 }} />
+                                </InputAdornment>
+                              ),
                             }}
                           />
                         )}
-                        renderOption={(props, option) => {
-                          const { key, ...optionProps } = props;
-                          return (
-                            <Box component="li" key={option.cus_id} {...optionProps}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
-                                <PersonIcon sx={{ color: 'primary.main', fontSize: 20 }} />
-                                <Box sx={{ flex: 1 }}>
-                                  <Typography
-                                    variant="body2"
-                                    sx={{
-                                      fontWeight: formSelectedCustomer?.cus_id === option.cus_id ? 'bold' : 'medium',
-                                      color: formSelectedCustomer?.cus_id === option.cus_id ? 'primary.main' : 'text.primary'
-                                    }}
-                                  >
-                                    {option.cus_name}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    {[option.cus_phone_no, option.cus_address, option.city?.city_name, option.cus_reference].filter(Boolean).join(' • ')} • Balance: {Number(option.cus_balance || 0)}
-                                  </Typography>
-                                </Box>
-                              </Box>
-                            </Box>
-                          );
-                        }}
-                        sx={{ width: '100%' }}
-                        disablePortal={false}
-                        clearOnBlur={false}
-                        handleHomeEndKeys={true}
+                        noOptionsText={purchaseSearchResults.length === 0 ? 'No purchases found' : ''}
                       />
                     </Box>
-                  </Grid>
-
-                  {/* Select Purchase to Return (Only for Return) */}
-                  {purchaseType === 'return' && (
-                    <Grid size={{ xs: 12, md: 3 }}>
-                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, position: 'relative' }}>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          SELECT PURCHASE
-                        </Typography>
-                        <Autocomplete
-                          autoSelect={true}
-                          autoHighlight={true}
-                          openOnFocus={true}
-                          selectOnFocus={true}
-                          open={purchaseSearchOpen}
-                          onOpen={() => {
-                            setPurchaseSearchOpen(true);
-                            // Show all purchases when opening dropdown
-                            if (formSelectedCustomer) {
-                              const supplierPurchases = purchases.filter(p => p.cus_id === formSelectedCustomer.cus_id);
-                              setPurchaseSearchResults(supplierPurchases);
-                            }
-                          }}
-                          onClose={() => setPurchaseSearchOpen(false)}
-                          options={purchaseSearchResults}
-                          getOptionLabel={(option) => `#${option.pur_id} - ${option.invoice_number || 'N/A'} (${Number(option.total_amount)})`}
-                          value={selectedPurchaseForReturn}
-                          onChange={(event, newValue) => {
-                            if (newValue) {
-                              handleLoadPurchaseForReturn(newValue);
-                            }
-                          }}
-                          onInputChange={(event, inputValue) => {
-                            handlePurchaseSearch(inputValue);
-                          }}
-                          renderInput={(params) => (
-                            <TextField
-                              {...params}
-                              placeholder="Search invoice..."
-                              onFocus={(e) => e.target.select()}
-                              size="medium"
-                              sx={{
-                                width: '100%',
-                                minHeight: 56,
-                                '& .MuiOutlinedInput-root': {
-                                  borderRadius: 1,
-                                  '& fieldset': { borderColor: '#e5e7eb' },
-                                  '&:hover fieldset': { borderColor: '#dc2626' },
-                                  '&.Mui-focused fieldset': { borderColor: '#b91c1c' }
-                                }
-                              }}
-                              InputProps={{
-                                ...params.InputProps,
-                                startAdornment: (
-                                  <InputAdornment position="start">
-                                    <SearchIcon sx={{ color: 'text.secondary' }} />
-                                  </InputAdornment>
-                                )
-                              }}
-                            />
-                          )}
-                          renderOption={(props, option) => {
-                            const { key, ...optionProps } = props;
-                            return (
-                              <Box component="li" key={option.pur_id} {...optionProps}>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, width: '100%' }}>
-                                  <ReceiptIcon sx={{ color: 'primary.main', fontSize: 20 }} />
-                                  <Box sx={{ flex: 1 }}>
-                                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                      {option.invoice_number || 'N/A'}
-                                    </Typography>
-                                    <Typography variant="caption" color="text.secondary">
-                                      {Number(option.total_amount)} • {formatDatePK(option?.created_at) || 'N/A'}
-                                    </Typography>
-                                  </Box>
-                                </Box>
-                              </Box>
-                            );
-                          }}
-                          sx={{ width: '100%' }}
-                          disablePortal={false}
-                          clearOnBlur={true}
-                          noOptionsText={purchaseSearchResults.length === 0 ? "No purchases found" : ""}
-                        />
-                      </Box>
-                    </Grid>
                   )}
 
-                  {/* Date Field */}
-                  <Grid size={{ xs: 12, md: purchaseType === 'new' ? 2 : 3 }}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        DATE
-                      </Typography>
-                      <TextField
-                        size="medium"
-                        type="date"
-                        value={formData.date || new Date().toISOString().split('T')[0]}
-                        onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
-                        onFocus={(e) => e.target.select()}
-                        sx={{ width: '100%', minHeight: 56 }}
-                        InputProps={{
-                          endAdornment: (
-                            <InputAdornment position="end">
-                              <CalendarIcon sx={{ color: 'warning.main' }} />
-                            </InputAdornment>
-                          ),
-                        }}
-                      />
-                    </Box>
-                  </Grid>
+                  <Box sx={PURCHASE_ENTRY_CELL_SX}>
+                    <Typography sx={PURCHASE_ENTRY_LABEL_SX}>DATE</Typography>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      type="date"
+                      value={formData.date || new Date().toISOString().split('T')[0]}
+                      onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
+                      onFocus={(e) => e.target.select()}
+                      sx={PURCHASE_ENTRY_CONTROL_SX}
+                    />
+                  </Box>
 
-                  {/* Invoice Number Field */}
-                  <Grid size={{ xs: 12, md: 3 }}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {purchaseType === 'new' ? 'INVOICE NUMBER' : 'NEW INVOICE NUMBER (RETURN)'}
-                      </Typography>
-                      <TextField
-                        size="medium"
-                        placeholder={purchaseType === 'new' ? 'Enter invoice number' : 'Enter return invoice number'}
-                        value={formData.invoice_number || ''}
-                        onChange={(e) => setFormData(prev => ({ ...prev, invoice_number: e.target.value }))}
-                        onFocus={(e) => e.target.select()}
-                        sx={{ width: '100%', minHeight: 56 }}
-                      />
-                    </Box>
-                  </Grid>
+                  <Box sx={PURCHASE_ENTRY_CELL_SX}>
+                    <Typography sx={PURCHASE_ENTRY_LABEL_SX}>
+                      {purchaseType === 'new' ? 'INVOICE NUMBER' : 'NEW INVOICE (RETURN)'}
+                    </Typography>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      placeholder={purchaseType === 'new' ? 'Enter invoice number' : 'Enter return invoice number'}
+                      value={formData.invoice_number || ''}
+                      onChange={(e) => setFormData(prev => ({ ...prev, invoice_number: e.target.value }))}
+                      onFocus={(e) => e.target.select()}
+                      sx={PURCHASE_ENTRY_CONTROL_SX}
+                    />
+                  </Box>
 
-                  {/* Row 2 - Vehicle (only for new purchases) */}
                   {purchaseType === 'new' && (
-                    <Grid size={{ xs: 12, md: 4 }}>
-                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                            VEHICLE
-                          </Typography>
-                          <Typography variant="body2" sx={{ color: 'error.main', fontWeight: 'bold' }}>
-                            *
-                          </Typography>
-                        </Box>
-                        <TextField
-                          fullWidth
-                          size="medium"
-                          placeholder="Enter vehicle number..."
-                          value={formData.vehicle_no}
-                          onChange={(e) => setFormData(prev => ({ ...prev, vehicle_no: e.target.value }))}
-                          onFocus={(e) => e.target.select()}
-                          sx={{ minWidth: 250, minHeight: 56 }}
-                          required
-                        />
-                      </Box>
-                    </Grid>
+                    <Box sx={PURCHASE_ENTRY_CELL_SX}>
+                      <Typography sx={PURCHASE_ENTRY_LABEL_SX}>
+                        VEHICLE <Box component="span" sx={{ color: 'error.main' }}>*</Box>
+                      </Typography>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        placeholder="Enter vehicle number..."
+                        value={formData.vehicle_no}
+                        onChange={(e) => setFormData(prev => ({ ...prev, vehicle_no: e.target.value }))}
+                        onFocus={(e) => e.target.select()}
+                        required
+                        sx={PURCHASE_ENTRY_CONTROL_SX}
+                      />
+                    </Box>
                   )}
+                </Box>
 
-                  {/* Vehicle Menu */}
-                  <Menu
-                    anchorEl={vehicleMenuAnchor}
-                    open={Boolean(vehicleMenuAnchor)}
-                    onClose={handleVehicleMenuClose}
-                    anchorOrigin={{
-                      vertical: 'bottom',
-                      horizontal: 'right',
-                    }}
-                    transformOrigin={{
-                      vertical: 'top',
-                      horizontal: 'right',
-                    }}
-                  >
-                    <MenuItem onClick={handleEditSelectedVehicle}>
-                      <EditIcon sx={{ mr: 1, fontSize: 18 }} />
-                      Edit Vehicle
-                    </MenuItem>
-                    <MenuItem onClick={handleDeleteSelectedVehicle} sx={{ color: 'error.main' }}>
-                      <DeleteIcon sx={{ mr: 1, fontSize: 18 }} />
-                      Delete Vehicle
-                    </MenuItem>
-                  </Menu>
-
-
-
-
-                </Grid>
+                <Menu
+                  anchorEl={vehicleMenuAnchor}
+                  open={Boolean(vehicleMenuAnchor)}
+                  onClose={handleVehicleMenuClose}
+                  anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                  transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                >
+                  <MenuItem onClick={handleEditSelectedVehicle}>
+                    <EditIcon sx={{ mr: 1, fontSize: 18 }} />
+                    Edit Vehicle
+                  </MenuItem>
+                  <MenuItem onClick={handleDeleteSelectedVehicle} sx={{ color: 'error.main' }}>
+                    <DeleteIcon sx={{ mr: 1, fontSize: 18 }} />
+                    Delete Vehicle
+                  </MenuItem>
+                </Menu>
               </Box>
 
 
-              {/* Product Selection Section */}
-              <Box sx={{ p: 3, borderBottom: 1, borderColor: 'divider' }}>
-                <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 2 }}>
-                  SELECT PRODUCT
-                </Typography>
-
-                <Grid container spacing={1} sx={{ flexWrap: 'nowrap', alignItems: 'flex-end' }}>
-                  <Grid item sx={{ flex: '0 0 300px', minWidth: 0 }}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        PRODUCT
-                      </Typography>
+              {/* Product entry row — sales-style grid */}
+              <Box sx={{ px: 3, py: 2, borderBottom: 1, borderColor: 'divider' }}>
+                {(() => {
+                  const storeStockEntry = selectedProduct && formData.store_id
+                    ? selectedProduct.store_stocks?.find(s => s.store_id === parseInt(formData.store_id, 10))
+                    : null;
+                  const stockDisplay = storeStockEntry
+                    ? `${parseFloat(storeStockEntry.stock_quantity || 0).toLocaleString()} ${selectedProduct?.pro_unit || ''}`.trim()
+                    : '';
+                  return (
+                <Box sx={PURCHASE_ENTRY_ROW2_SX}>
+                  <Box sx={PURCHASE_ENTRY_CELL_SX}>
+                      <Typography sx={PURCHASE_ENTRY_LABEL_SX}>SELECT PRODUCT</Typography>
                       <Autocomplete
+                        size="small"
+                        fullWidth
                         autoSelect={true}
                         autoHighlight={true}
                         openOnFocus={true}
                         selectOnFocus={true}
                         options={products}
                         getOptionLabel={(option) => option.pro_title}
-                        ListboxProps={{ sx: { maxHeight: 130 } }}
+                        slots={{ listbox: PurchaseProductDropdownListbox }}
+                        slotProps={{
+                          popper: {
+                            sx: { ...PURCHASE_DROPDOWN_POPPER_SX, minWidth: PURCHASE_PRODUCT_DROPDOWN_WIDTH },
+                            modifiers: [{ name: 'flip', enabled: false }],
+                          },
+                          paper: { sx: { width: PURCHASE_PRODUCT_DROPDOWN_WIDTH, maxWidth: '92vw', mt: 0.5 } },
+                        }}
                         value={selectedProduct}
                         onChange={(event, newValue) => {
                           if (newValue) {
@@ -3583,67 +4316,53 @@ function PurchasesPageContent() {
                         renderInput={(params) => (
                           <TextField
                             {...params}
+                            id="product-select-dropdown-input"
                             placeholder="Select product..."
                             onFocus={(e) => e.target.select()}
-                            sx={{ width: '100%', minWidth: 0 }}
+                            sx={{ ...PURCHASE_ENTRY_CONTROL_SX, '& .MuiInputBase-input': { fontWeight: selectedProduct ? 'bold' : 'normal' } }}
                           />
                         )}
-                        renderOption={(props, option) => {
-                          const { key, ...optionProps } = props;
-                          const storeStockEntry = formData.store_id
-                            ? option.store_stocks?.find(s => s.store_id === parseInt(formData.store_id))
+                        renderOption={(props, option, { index }) => {
+                          const { key, ownerState, ...optionProps } = props;
+                          const storeId = formData.store_id ? parseInt(formData.store_id, 10) : null;
+                          const storeStockEntry = storeId
+                            ? option.store_stocks?.find((s) => s.store_id === storeId)
                             : null;
-                          const stockQty = storeStockEntry ? parseFloat(storeStockEntry.stock_quantity) : null;
+                          const stockQty = storeStockEntry != null
+                            ? parseFloat(storeStockEntry.stock_quantity || 0)
+                            : (option.store_stocks?.length
+                              ? option.store_stocks.reduce((sum, s) => sum + parseFloat(s.stock_quantity || 0), 0)
+                              : null);
+                          const stockLabel = stockQty != null && Number.isFinite(stockQty)
+                            ? `${stockQty.toLocaleString()}${option.pro_unit ? ` ${option.pro_unit}` : ''}`
+                            : '—';
                           return (
-                            <Box component="li" key={option.pro_id} {...optionProps}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
-                                <Box sx={{ flex: 1 }}>
-                                  <Typography
-                                    variant="body2"
-                                    sx={{
-                                      fontWeight: selectedProduct?.pro_id === option.pro_id ? 'bold' : 'medium',
-                                      color: selectedProduct?.pro_id === option.pro_id ? 'primary.main' : 'text.primary'
-                                    }}
-                                  >
-                                    {option.pro_title}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    {option.category?.cat_name} • {option.sub_category?.sub_cat_name}
-                                  </Typography>
-                                </Box>
-                                <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
-                                  {stockQty !== null && (
-                                    <Chip
-                                      label={`Stock: ${stockQty.toLocaleString()}`}
-                                      size="small"
-                                      color={stockQty <= 0 ? 'error' : stockQty <= (option.low_stock_quantity || 10) ? 'warning' : 'success'}
-                                      variant="outlined"
-                                    />
-                                  )}
-                                  <Chip
-                                    label={`PKR ${fmtAmt(option.pro_cost_price)}`}
-                                    size="small"
-                                    color="primary"
-                                    variant="outlined"
-                                  />
-                                </Box>
-                              </Box>
-                            </Box>
+                            <li key={option.pro_id ?? key} {...optionProps} style={{ ...purchaseDropdownRowStyle(PURCHASE_PRODUCT_DROPDOWN_GRID), ...optionProps.style }}>
+                              <span style={{ ...purchaseDropdownCellStyle, justifyContent: 'center', color: '#64748b', fontSize: 12, fontWeight: 700 }}>
+                                {index + 1}
+                              </span>
+                              <span title={option.pro_title || ''} style={{ ...purchaseDropdownCellStyle, fontWeight: 600, color: '#111827' }}>
+                                {option.pro_title || ''}
+                              </span>
+                              <span title={stockLabel} style={{ ...purchaseDropdownCellStyle, fontVariantNumeric: 'tabular-nums', justifyContent: 'flex-end' }}>
+                                {stockLabel}
+                              </span>
+                              <span style={{ ...purchaseDropdownCellStyle, borderRight: 'none', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>
+                                {fmtAmt(option.pro_cost_price)}
+                              </span>
+                            </li>
                           );
                         }}
                         disablePortal={false}
                         sx={{ width: '100%', minWidth: 0 }}
                       />
-                    </Box>
-                  </Grid>
+                  </Box>
 
-                  <Grid item sx={{ flex: '0 0 100px', minWidth: 0 }}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        STORE
-                      </Typography>
+                  <Box sx={PURCHASE_ENTRY_CELL_SX}>
+                      <Typography sx={PURCHASE_ENTRY_LABEL_SX}>STORE</Typography>
                       <Autocomplete
                         size="small"
+                        fullWidth
                         autoSelect={true}
                         autoHighlight={true}
                         openOnFocus={true}
@@ -3676,51 +4395,18 @@ function PurchasesPageContent() {
                         renderInput={(params) => (
                           <TextField
                             {...params}
-                            placeholder={formData.store_id ? "Store Selected" : "Select store"}
+                            placeholder={formData.store_id ? 'Store Selected' : 'Select store'}
                             onFocus={(e) => e.target.select()}
-                            sx={{
-                              width: '100%',
-                              minWidth: 0,
-                              '& .MuiInputBase-input': {
-                                fontWeight: formData.store_id ? 'bold' : 'normal',
-                                color: formData.store_id ? 'primary.main' : 'text.primary'
-                              }
-                            }}
+                            sx={{ ...PURCHASE_ENTRY_CONTROL_SX, '& .MuiInputBase-input': { fontWeight: formData.store_id ? 'bold' : 'normal' } }}
                           />
                         )}
-                        sx={{ width: '100%', minWidth: 0 }}
                       />
-                    </Box>
-                  </Grid>
+                  </Box>
 
-                  {/* Available Stock Display */}
-                  {selectedProduct && formData.store_id && (() => {
-                    const storeStock = selectedProduct.store_stocks?.find(s => s.store_id === parseInt(formData.store_id));
-                    const qty = storeStock ? parseFloat(storeStock.stock_quantity) : 0;
-                    return (
-                      <Grid item sx={{ flex: '0 0 100px', minWidth: 0 }}>
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                          <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                            STOCK
-                          </Typography>
-                          <Chip
-                            label={`${qty.toLocaleString()} ${selectedProduct.pro_unit || ''}`}
-                            color={qty <= 0 ? 'error' : qty <= (selectedProduct.low_stock_quantity || 10) ? 'warning' : 'success'}
-                            variant="outlined"
-                            size="small"
-                            sx={{ fontWeight: 'bold', fontSize: 13, height: 38, borderRadius: 1 }}
-                          />
-                        </Box>
-                      </Grid>
-                    );
-                  })()}
-
-                  <Grid item sx={{ flex: '0 0 80px', minWidth: 0 }}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        QTY
-                      </Typography>
+                  <Box sx={PURCHASE_ENTRY_CELL_SX}>
+                      <Typography sx={PURCHASE_ENTRY_LABEL_SX}>QTY</Typography>
                       <TextField
+                        fullWidth
                         size="small"
                         type="number"
                         value={productFormData.qnty ?? ''}
@@ -3751,18 +4437,15 @@ function PurchasesPageContent() {
                             }
                           }
                         }}
-                        inputProps={{ min: 0, step: "any" }}
-                        sx={{ width: '100%', minWidth: 0 }}
+                        inputProps={{ min: 0, step: 'any' }}
+                        sx={PURCHASE_ENTRY_CONTROL_SX}
                       />
-                    </Box>
-                  </Grid>
+                  </Box>
 
-                  <Grid item sx={{ flex: '1 1 90px', minWidth: 0 }}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        PURCHASE RATE
-                      </Typography>
+                  <Box sx={PURCHASE_ENTRY_CELL_SX}>
+                      <Typography sx={PURCHASE_ENTRY_LABEL_SX}>PURCHASE RATE</Typography>
                       <TextField
+                        fullWidth
                         size="small"
                         type="number"
                         value={productFormData.crate || productFormData.unit_rate || ''}
@@ -3789,18 +4472,15 @@ function PurchasesPageContent() {
                             if (addBtnFallback) addBtnFallback.focus();
                           }
                         }}
-                        inputProps={{ min: 0, step: "any" }}
-                        sx={{ width: '100%', minWidth: 0 }}
+                        inputProps={{ min: 0, step: 'any' }}
+                        sx={PURCHASE_ENTRY_CONTROL_SX}
                       />
-                    </Box>
-                  </Grid>
+                  </Box>
 
-                  <Grid item sx={{ flex: '1 1 90px', minWidth: 0 }}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        COST RATE
-                      </Typography>
+                  <Box sx={PURCHASE_ENTRY_CELL_SX}>
+                      <Typography sx={PURCHASE_ENTRY_LABEL_SX}>COST RATE</Typography>
                       <TextField
+                        fullWidth
                         size="small"
                         type="number"
                         value={productFormData.cost_rate ?? ''}
@@ -3841,18 +4521,15 @@ function PurchasesPageContent() {
                             }
                           }
                         }}
-                        inputProps={{ min: 0, step: "any" }}
-                        sx={{ width: '100%', minWidth: 0 }}
+                        inputProps={{ min: 0, step: 'any' }}
+                        sx={PURCHASE_ENTRY_CONTROL_SX}
                       />
-                    </Box>
-                  </Grid>
+                  </Box>
 
-                  <Grid item sx={{ flex: '1 1 90px', minWidth: 0 }}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        SALE RATE
-                      </Typography>
+                  <Box sx={PURCHASE_ENTRY_CELL_SX}>
+                      <Typography sx={PURCHASE_ENTRY_LABEL_SX}>SALE RATE</Typography>
                       <TextField
+                        fullWidth
                         size="small"
                         type="number"
                         value={productFormData.unit_rate ?? ''}
@@ -3872,63 +4549,74 @@ function PurchasesPageContent() {
                             }
                           }
                         }}
-                        inputProps={{ min: 0, step: "any" }}
-                        sx={{ width: '100%', minWidth: 0 }}
+                        inputProps={{ min: 0, step: 'any' }}
+                        sx={PURCHASE_ENTRY_CONTROL_SX}
                       />
-                    </Box>
-                  </Grid>
+                  </Box>
 
-
-
-                  <Grid item sx={{ flex: '1 1 90px', minWidth: 0 }}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        AMOUNT
-                      </Typography>
+                  <Box sx={PURCHASE_ENTRY_CELL_SX}>
+                      <Typography sx={PURCHASE_ENTRY_LABEL_SX}>AMOUNT</Typography>
                       <TextField
+                        fullWidth
                         size="small"
                         value={parseFloat(productFormData.qnty || 0) * parseFloat(productFormData.crate || productFormData.unit_rate || 0)}
                         InputProps={{ readOnly: true }}
-                        sx={{ width: '100%', minWidth: 0 }}
+                        sx={PURCHASE_ENTRY_CONTROL_SX}
                       />
-                    </Box>
-                  </Grid>
+                  </Box>
 
-                  <Grid item sx={{ flex: '0 0 auto' }}>
+                  <Box sx={PURCHASE_ENTRY_CELL_SX}>
+                      <Typography sx={PURCHASE_ENTRY_LABEL_SX}>STOCK</Typography>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        value={stockDisplay}
+                        disabled
+                        sx={{ ...PURCHASE_ENTRY_CONTROL_SX, bgcolor: '#f8f9fa', '& .MuiInputBase-root': { ...PURCHASE_ENTRY_CONTROL_SX['& .MuiInputBase-root'], bgcolor: '#f8f9fa' } }}
+                      />
+                  </Box>
+
+                  <Box sx={{ minWidth: 0, width: '100%', display: 'flex', alignItems: 'end' }}>
                     <Button
                       variant="contained"
                       id="add-product-btn"
                       onClick={addProductToPurchase}
                       disabled={!productFormData.qnty || !productFormData.unit_rate}
                       sx={{
-                        bgcolor: 'secondary.main',
-                        '&:hover': { bgcolor: 'secondary.dark' },
+                        bgcolor: BRAND.primary.blue,
+                        color: 'white',
+                        borderRadius: 1,
                         minWidth: 40,
-                        height: 40
+                        width: 44,
+                        height: 40,
+                        p: 0,
+                        '&:hover': { bgcolor: '#1347c4' },
                       }}
                     >
                       +
                     </Button>
-                  </Grid>
-                </Grid>
+                  </Box>
+                </Box>
+                  );
+                })()}
               </Box>
 
 
               {/* Product List Table */}
-              <Box sx={{ p: 3, borderBottom: 1, borderColor: 'divider' }}>
-                <TableContainer component={Paper} sx={{ maxHeight: 300 }}>
-                  <Table stickyHeader>
+              <Box sx={{ px: 3, pb: 2, borderBottom: 1, borderColor: 'divider' }}>
+                <TableContainer component={Paper} sx={{ maxHeight: 300, border: '1px solid #e9ecef' }}>
+                  <Table stickyHeader size="small">
                     <TableHead>
-                      <TableRow>
-                        <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>S. No</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Product</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Store</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Qty</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>PURCHASE RATE</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>COST RATE</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Sale Rate</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Amount</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Actions</TableCell>
+                      <TableRow sx={{ bgcolor: '#dce6f1', '& th': { bgcolor: '#dce6f1 !important' } }}>
+                        <TableCell sx={PURCHASE_ENTRY_TABLE_HEAD_SX}>S. No</TableCell>
+                        <TableCell sx={PURCHASE_ENTRY_TABLE_HEAD_SX}>Product</TableCell>
+                        <TableCell sx={PURCHASE_ENTRY_TABLE_HEAD_SX}>Store</TableCell>
+                        <TableCell sx={PURCHASE_ENTRY_TABLE_HEAD_SX}>Qty</TableCell>
+                        <TableCell sx={PURCHASE_ENTRY_TABLE_HEAD_SX}>PURCHASE RATE</TableCell>
+                        <TableCell sx={PURCHASE_ENTRY_TABLE_HEAD_SX}>COST RATE</TableCell>
+                        <TableCell sx={PURCHASE_ENTRY_TABLE_HEAD_SX}>Sale Rate</TableCell>
+                        <TableCell sx={PURCHASE_ENTRY_TABLE_HEAD_SX}>Amount</TableCell>
+                        <TableCell sx={PURCHASE_ENTRY_TABLE_HEAD_SX}>Actions</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -3937,7 +4625,14 @@ function PurchasesPageContent() {
                           {formData.purchase_details.map((detail, index) => {
                             const product = products.find(p => p.pro_id === detail.pro_id);
                             return (
-                              <TableRow key={index} hover>
+                              <TableRow
+                                key={index}
+                                hover
+                                sx={{
+                                  bgcolor: index % 2 === 0 ? '#ffffff' : '#f8fafc',
+                                  '&:hover': { bgcolor: '#eff6ff' },
+                                }}
+                              >
                                 <TableCell>{index + 1}</TableCell>
                                 <TableCell>
                                   <Typography variant="body2" sx={{ fontWeight: 'medium' }}>
@@ -4056,7 +4751,7 @@ function PurchasesPageContent() {
                                   />
                                 </TableCell>
                                 <TableCell>
-                                  <Typography variant="body2" sx={{ fontWeight: 'semibold', color: 'success.main' }}>
+                                  <Typography variant="body2" sx={{ fontWeight: 'semibold', color: BRAND.text.blue }}>
                                     {detail.total_amount}
                                   </Typography>
                                 </TableCell>
@@ -4081,15 +4776,15 @@ function PurchasesPageContent() {
                             <TableCell />
                             <TableCell />
                             <TableCell />
-                            <TableCell sx={{ fontWeight: 'bold', color: 'success.main' }}>{calculateTotalAmount().toFixed(2)}</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: BRAND.primary.blue }}>{calculateTotalAmount().toFixed(2)}</TableCell>
                             <TableCell />
                           </TableRow>
                         </>
                       ) : (
                         <TableRow>
-                          <TableCell colSpan={6} align="center">
+                          <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
                             <Typography variant="body2" color="text.secondary">
-                              No data found
+                              No products added yet
                             </Typography>
                           </TableCell>
                         </TableRow>
@@ -4100,22 +4795,31 @@ function PurchasesPageContent() {
               </Box>
 
               {/* Payment and Summary Section */}
-              <Box sx={{ p: 3 }}>
-                <Box sx={{ display: 'flex', gap: 4 }}>
-                  {/* Left Section - Payment Fields */}
-                  <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {/* Split Payment Section */}
-                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
-                      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                          <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                            CASH PAYMENT
-                          </Typography>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              <Box sx={{ px: 3, py: 2, borderTop: '1px solid #e2e8f0' }}>
+                <Typography
+                  sx={{
+                    fontWeight: 700,
+                    fontSize: '0.8125rem',
+                    color: BRAND.text.blue,
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                    mb: 2,
+                  }}
+                >
+                  Payment & charges
+                </Typography>
+                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 3, alignItems: 'flex-start' }}>
+                  <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <Box sx={PURCHASE_PAYMENT_ROW_SX}>
+                      <Box sx={PURCHASE_ENTRY_CELL_SX}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.75, minHeight: 22, gap: 1 }}>
+                          <Typography sx={{ ...PURCHASE_ENTRY_LABEL_SX, mb: 0 }}>CASH PAYMENT</Typography>
+                          <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600, whiteSpace: 'nowrap' }}>
                             Bal: {fmtAmt(customers.find(c => c.cus_name === 'Cash Account')?.cus_balance ?? 0)}
                           </Typography>
                         </Box>
                         <TextField
+                          fullWidth
                           size="small"
                           type="number"
                           value={formData.cash_payment}
@@ -4123,15 +4827,14 @@ function PurchasesPageContent() {
                             setFormData(prev => ({ ...prev, cash_payment: e.target.value }));
                           }}
                           inputProps={{ min: 0 }}
-                          sx={{ width: '100%' }}
                           placeholder="Enter amount"
+                          sx={PURCHASE_ENTRY_CONTROL_SX}
                         />
                       </Box>
-                      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          BANK PAYMENT
-                        </Typography>
+                      <Box sx={PURCHASE_ENTRY_CELL_SX}>
+                        <Typography sx={PURCHASE_ENTRY_LABEL_SX}>BANK PAYMENT</Typography>
                         <TextField
+                          fullWidth
                           size="small"
                           type="number"
                           value={formData.bank_payment}
@@ -4150,38 +4853,49 @@ function PurchasesPageContent() {
                             }
                           }}
                           inputProps={{ min: 0 }}
-                          sx={{ width: '100%' }}
                           placeholder="Enter amount"
+                          sx={PURCHASE_ENTRY_CONTROL_SX}
                         />
                       </Box>
-                      <Box sx={{ flex: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                          <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                            BANK ACCOUNT
-                          </Typography>
+                      <Box sx={PURCHASE_ENTRY_CELL_SX}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.75, minHeight: 22, gap: 1 }}>
+                          <Typography sx={{ ...PURCHASE_ENTRY_LABEL_SX, mb: 0 }}>BANK ACCOUNT</Typography>
                           {selectedBankAccount && (
-                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600, whiteSpace: 'nowrap' }}>
                               Bal: {fmtAmt(selectedBankAccount.cus_balance ?? 0)}
                             </Typography>
                           )}
                         </Box>
                         <Autocomplete
+                          fullWidth
                           size="small"
-                          autoSelect={true}
-                          autoHighlight={true}
-                          openOnFocus={true}
-                          selectOnFocus={true}
+                          autoSelect
+                          autoHighlight
+                          openOnFocus
+                          selectOnFocus
                           disabled={parseFloat(formData.bank_payment || 0) <= 0}
                           open={bankAccountDropdownOpen}
                           onOpen={() => {
-                            // only open when bank payment is present
                             if (parseFloat(formData.bank_payment || 0) <= 0) return;
                             setBankAccountDropdownOpen(true);
                           }}
                           onClose={() => setBankAccountDropdownOpen(false)}
                           options={bankAccounts.length > 0 ? bankAccounts : customers}
-                          getOptionLabel={(option) => option.cus_name}
+                          getOptionLabel={(option) => option.cus_name || ''}
+                          isOptionEqualToValue={(option, value) => option.cus_id === value?.cus_id}
+                          filterOptions={filterPurchaseBankAccounts}
                           value={selectedBankAccount}
+                          slots={{ listbox: PurchaseBankDropdownListbox }}
+                          slotProps={{
+                            popper: {
+                              sx: { ...PURCHASE_DROPDOWN_POPPER_SX, minWidth: PURCHASE_BANK_DROPDOWN_WIDTH },
+                              modifiers: [{ name: 'flip', enabled: false }],
+                            },
+                            paper: { sx: { width: PURCHASE_BANK_DROPDOWN_WIDTH, maxWidth: '92vw', mt: 0.5 } },
+                          }}
+                          onHighlightChange={(_, option) => {
+                            if (option) bankAccountHighlightRef.current = option;
+                          }}
                           onChange={(event, newValue) => {
                             setSelectedBankAccount(newValue);
                             setFormData(prev => ({
@@ -4191,30 +4905,22 @@ function PurchasesPageContent() {
                             setBankAccountDropdownOpen(false);
                           }}
                           onKeyDown={(e) => {
-                            if (e.key === 'Tab') {
-                              e.preventDefault();
-                              // Auto-select first bank account option on Tab
-                              const accountsToUse = bankAccounts.length > 0 ? bankAccounts : customers;
-                              if (accountsToUse.length > 0 && !selectedBankAccount) {
-                                const firstAccount = accountsToUse[0];
-                                setSelectedBankAccount(firstAccount);
+                            commitPurchaseDropdownOnTab(
+                              e,
+                              bankAccountHighlightRef.current || selectedBankAccount,
+                              (val) => {
+                                setSelectedBankAccount(val);
                                 setFormData(prev => ({
                                   ...prev,
-                                  credit_account_id: firstAccount.cus_id.toString()
+                                  credit_account_id: val.cus_id.toString()
                                 }));
+                                setBankAccountDropdownOpen(false);
+                              },
+                              () => {
+                                setBankAccountDropdownOpen(false);
+                                return document.querySelector('textarea[placeholder*="Additional notes"]')
+                                  || document.querySelector('input[placeholder*="Select Cargo Account"]');
                               }
-
-                              // Close dropdown and blur the input (use ref)
-                              setBankAccountDropdownOpen(false);
-                              setTimeout(() => {
-                                bankAccountInputRef.current?.blur();
-                              }, 0);
-                            }
-                          }}
-                          filterOptions={(options, { inputValue }) => {
-                            return options.filter(option =>
-                              option.cus_name.toLowerCase().includes(inputValue.toLowerCase()) ||
-                              option.cus_phone_no?.toLowerCase().includes(inputValue.toLowerCase())
                             );
                           }}
                           renderInput={(params) => (
@@ -4223,144 +4929,154 @@ function PurchasesPageContent() {
                               inputRef={bankAccountInputRef}
                               placeholder="Select Bank Account"
                               onFocus={(e) => e.target.select()}
-                              sx={
-                                {
-                                  '& .MuiInputBase-input': {
-                                    fontWeight: selectedBankAccount ? 'bold' : 'normal'
-                                  }
-                                }
-                              }
+                              sx={{
+                                ...PURCHASE_ENTRY_CONTROL_SX,
+                                '& .MuiInputBase-input': {
+                                  fontWeight: selectedBankAccount ? 'bold' : 'normal',
+                                },
+                              }}
                             />
                           )}
-                          renderOption={(props, option) => {
+                          renderOption={(props, option, { index }) => {
                             const { key, ...optionProps } = props;
+                            const balance = parseFloat(option.cus_balance ?? 0);
+                            const balanceColor = balance < 0 ? '#b91c1c' : balance > 0 ? BRAND.text.green : '#64748b';
                             return (
-                              <Box component="li" key={option.cus_id} {...optionProps}>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
-                                  <AttachMoneyIcon sx={{ color: 'primary.main', fontSize: 20 }} />
-                                  <Box sx={{ flex: 1 }}>
-                                    <Typography
-                                      variant="body2"
-                                      sx={{
-                                        fontWeight: selectedBankAccount?.cus_id === option.cus_id ? 'bold' : 'medium',
-                                        color: selectedBankAccount?.cus_id === option.cus_id ? 'primary.main' : 'text.primary'
-                                      }}
-                                    >
-                                      {option.cus_name}
-                                    </Typography>
-                                    <Typography variant="caption" color="text.secondary">
-                                      {option.cus_phone_no} • Balance: {Number(option.cus_balance || 0)}
-                                    </Typography>
-                                  </Box>
-                                </Box>
-                              </Box>
+                              <li
+                                key={option.cus_id ?? key}
+                                {...optionProps}
+                                style={{ ...purchaseDropdownRowStyle(PURCHASE_BANK_DROPDOWN_GRID), ...optionProps.style }}
+                              >
+                                <span style={{ ...purchaseDropdownCellStyle, justifyContent: 'center', color: '#64748b', fontSize: 12, fontWeight: 700 }}>
+                                  {index + 1}
+                                </span>
+                                <span title={option.cus_name || ''} style={{ ...purchaseDropdownCellStyle, fontWeight: 700, color: '#111827' }}>
+                                  {option.cus_name || ''}
+                                </span>
+                                <span
+                                  title={String(balance)}
+                                  style={{
+                                    ...purchaseDropdownCellStyle,
+                                    borderRight: 'none',
+                                    justifyContent: 'flex-end',
+                                    fontVariantNumeric: 'tabular-nums',
+                                    fontWeight: 700,
+                                    color: balanceColor,
+                                  }}
+                                >
+                                  {fmtAmt(balance)}
+                                </span>
+                              </li>
                             );
                           }}
-                          sx={{ width: '100%' }}
                           disablePortal={false}
                           clearOnBlur={false}
-                          handleHomeEndKeys={true}
+                          handleHomeEndKeys
                         />
                       </Box>
                     </Box>
 
-                    {/* Row 2: TOTAL PAYMENT (left) with Incity below, NOTES (right) */}
-                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
-                      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          TOTAL PAYMENT
-                        </Typography>
-                        <TextField
-                          size="small"
-                          value={Number((parseFloat(formData.cash_payment || 0) + parseFloat(formData.bank_payment || 0)).toFixed(2))}
-                          InputProps={{ readOnly: true }}
-                          sx={{ width: '100%', backgroundColor: 'action.hover' }}
+                    {/* Row 2: Total + Incity (left) | Notes + Cargo (right) */}
+                    <Box sx={PURCHASE_PAYMENT_ROW2_SX}>
+                      <Box sx={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1, height: '100%' }}>
+                        <Typography sx={PURCHASE_ENTRY_LABEL_SX}>TOTAL PAYMENT</Typography>
+                        <PurchaseAmountTotal
+                          variant="large"
+                          value={parseFloat(formData.cash_payment || 0) + parseFloat(formData.bank_payment || 0)}
                         />
 
-                        {/* Incity box placed below Total Payment */}
-                        <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1, mt: 1, backgroundColor: 'background.paper' }}>
-                          <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>Incity</Typography>
-                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <Checkbox
-                                checked={formData.include_incity || false}
-                                onChange={(e) => {
-                                  const newInclude = e.target.checked;
-                                  setFormData(prev => {
-                                    const incityAmount = parseFloat(prev.incity_own_labour || 0) + parseFloat(prev.incity_own_delivery || 0);
-                                    const updatedDetails = handleIncityDistribution(newInclude, incityAmount, prev.purchase_details, prev);
-                                    return { ...prev, include_incity: newInclude, purchase_details: updatedDetails };
-                                  });
-                                }}
-                                size="small"
-                              />
-                              <Typography variant="body2">Include Incity Charges</Typography>
+                        <Box sx={{ ...PURCHASE_CHARGE_BOX_SX, mt: 0.5, flex: 1 }}>
+                          <Typography sx={PURCHASE_CHARGE_BOX_TITLE_SX}>Incity</Typography>
+                          <Box sx={PURCHASE_INCLUDE_BAR_SX}>
+                            <FormControlLabel
+                              control={
+                                <Checkbox
+                                  checked={formData.include_incity || false}
+                                  onChange={(e) => {
+                                    const newInclude = e.target.checked;
+                                    setFormData(prev => {
+                                      const incityAmount = parseFloat(prev.incity_own_labour || 0) + parseFloat(prev.incity_own_delivery || 0);
+                                      const updatedDetails = handleIncityDistribution(newInclude, incityAmount, prev.purchase_details, prev);
+                                      return { ...prev, include_incity: newInclude, purchase_details: updatedDetails };
+                                    });
+                                  }}
+                                  size="small"
+                                  sx={{ color: BRAND.primary.blue }}
+                                />
+                              }
+                              label="Include Incity Charges"
+                            />
+                          </Box>
+                          <Box sx={PURCHASE_CHARGE_BODY_SX}>
+                            <Box sx={PURCHASE_CHARGE_INNER_GRID_SX}>
+                              <Box>
+                                <Typography component="label" sx={PURCHASE_FIELD_LABEL_SX}>Own Labour</Typography>
+                                <TextField
+                                  fullWidth
+                                  size="small"
+                                  type="number"
+                                  value={formData.incity_own_labour || ''}
+                                  onChange={(e) => {
+                                    const newVal = e.target.value;
+                                    setFormData(prev => {
+                                      const incityAmount = parseFloat(newVal || 0) + parseFloat(prev.incity_own_delivery || 0);
+                                      const updatedDetails = handleIncityDistribution(prev.include_incity, incityAmount, prev.purchase_details, prev);
+                                      return { ...prev, incity_own_labour: newVal, purchase_details: updatedDetails };
+                                    });
+                                  }}
+                                  inputProps={{ min: 0 }}
+                                  sx={PURCHASE_ENTRY_CONTROL_SX}
+                                />
+                              </Box>
+                              <Box>
+                                <Typography component="label" sx={PURCHASE_FIELD_LABEL_SX}>Own Delivery</Typography>
+                                <TextField
+                                  fullWidth
+                                  size="small"
+                                  type="number"
+                                  value={formData.incity_own_delivery || ''}
+                                  onChange={(e) => {
+                                    const newVal = e.target.value;
+                                    setFormData(prev => {
+                                      const incityAmount = parseFloat(prev.incity_own_labour || 0) + parseFloat(newVal || 0);
+                                      const updatedDetails = handleIncityDistribution(prev.include_incity, incityAmount, prev.purchase_details, prev);
+                                      return { ...prev, incity_own_delivery: newVal, purchase_details: updatedDetails };
+                                    });
+                                  }}
+                                  inputProps={{ min: 0 }}
+                                  sx={PURCHASE_ENTRY_CONTROL_SX}
+                                />
+                              </Box>
                             </Box>
-
-                            <TextField
-                              label="Own Labour"
-                              size="small"
-                              type="number"
-                              value={formData.incity_own_labour || ''}
-                              onChange={(e) => {
-                                const newVal = e.target.value;
-                                setFormData(prev => {
-                                  const incityAmount = parseFloat(newVal || 0) + parseFloat(prev.incity_own_delivery || 0);
-                                  const updatedDetails = handleIncityDistribution(prev.include_incity, incityAmount, prev.purchase_details, prev);
-                                  return { ...prev, incity_own_labour: newVal, purchase_details: updatedDetails };
-                                });
-                              }}
-                              inputProps={{ min: 0 }}
-                            />
-
-                            <TextField
-                              label="Own Delivery"
-                              size="small"
-                              type="number"
-                              value={formData.incity_own_delivery || ''}
-                              onChange={(e) => {
-                                const newVal = e.target.value;
-                                setFormData(prev => {
-                                  const incityAmount = parseFloat(prev.incity_own_labour || 0) + parseFloat(newVal || 0);
-                                  const updatedDetails = handleIncityDistribution(prev.include_incity, incityAmount, prev.purchase_details, prev);
-                                  return { ...prev, incity_own_delivery: newVal, purchase_details: updatedDetails };
-                                });
-                              }}
-                              inputProps={{ min: 0 }}
-                            />
-
-                            <TextField
+                            <PurchaseAmountTotal
                               label="Charges Total"
-                              size="small"
-                              value={parseFloat(formData.incity_charges_total || 0).toFixed(2)}
-                              InputProps={{ readOnly: true }}
+                              value={parseFloat(formData.incity_charges_total || 0)}
                             />
                           </Box>
                         </Box>
                       </Box>
 
-                      <Box sx={{ flex: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          NOTES
-                        </Typography>
+                      <Box sx={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1, height: '100%' }}>
+                        <Typography sx={PURCHASE_ENTRY_LABEL_SX}>NOTES</Typography>
                         <TextField
+                          fullWidth
                           size="small"
                           multiline
-                          rows={2}
+                          minRows={2}
                           placeholder="Additional notes"
-                          sx={{ width: '100%' }}
+                          sx={PURCHASE_NOTES_CONTROL_SX}
                         />
 
-                        {/* Cargo — placed directly below NOTES */}
-                        <Box sx={{ mt: 1 }}>
-                          <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1, backgroundColor: 'background.paper' }}>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>Cargo</Typography>
-
-                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        <Box sx={{ ...PURCHASE_CHARGE_BOX_SX, mt: 0.5, flex: 1 }}>
+                          <Typography sx={PURCHASE_CHARGE_BOX_TITLE_SX}>Cargo</Typography>
+                          <Box sx={PURCHASE_CHARGE_BODY_SX}>
+                            <Box>
+                              <Typography component="label" sx={PURCHASE_FIELD_LABEL_SX}>Cargo Account</Typography>
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                 <Autocomplete
                                   size="small"
                                   multiple
+                                  sx={{ flex: 1, minWidth: 0 }}
                                   openOnFocus
                                   options={cargoAccounts.filter(a => !(selectedCargoAccounts || []).some(s => s.cus_id === a.cus_id))}
                                   getOptionLabel={(option) => option.cus_name}
@@ -4375,7 +5091,15 @@ function PurchasesPageContent() {
                                     }
                                   }}
                                   renderTags={() => null}
-                                  renderInput={(params) => <TextField {...params} inputRef={cargoInputRef} placeholder="Select Cargo Account" size="small" sx={{ width: 240 }} />}
+                                  renderInput={(params) => (
+                                    <TextField
+                                      {...params}
+                                      inputRef={cargoInputRef}
+                                      placeholder="Select Cargo Account"
+                                      size="small"
+                                      sx={PURCHASE_ENTRY_CONTROL_SX}
+                                    />
+                                  )}
                                   renderOption={(props, option) => {
                                     const { key, ...optionProps } = props;
                                     return (
@@ -4398,21 +5122,23 @@ function PurchasesPageContent() {
                                   size="small"
                                   onClick={() => openCustomerForm('cargo')}
                                   sx={{
-                                    bgcolor: 'primary.main',
+                                    bgcolor: BRAND.primary.blue,
                                     color: 'white',
-                                    '&:hover': { bgcolor: 'primary.dark' },
+                                    '&:hover': { bgcolor: '#1347c4' },
                                     borderRadius: 1,
-                                    width: 38,
-                                    height: 38
+                                    width: 40,
+                                    height: 40,
+                                    flexShrink: 0,
                                   }}
                                   title="Add New Cargo Account"
                                 >
                                   <AddIcon />
                                 </IconButton>
                               </Box>
+                            </Box>
 
-                              {/* Selected cargo accounts displayed as red chips */}
-                              <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
+                            {(selectedCargoAccounts || []).length > 0 && (
+                              <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
                                 {(selectedCargoAccounts || []).map(acc => (
                                   <Chip
                                     key={acc.cus_id}
@@ -4429,10 +5155,13 @@ function PurchasesPageContent() {
                                   />
                                 ))}
                               </Box>
+                            )}
 
-                              <Box sx={{ display: 'flex', gap: 1, mt: 1, alignItems: 'center' }}>
+                            <Box sx={PURCHASE_CARGO_AMOUNTS_GRID_SX}>
+                              <Box>
+                                <Typography component="label" sx={PURCHASE_FIELD_LABEL_SX}>Out Labour</Typography>
                                 <TextField
-                                  label="Out Labour"
+                                  fullWidth
                                   size="small"
                                   type="number"
                                   inputRef={outLabourInputRef}
@@ -4446,10 +5175,13 @@ function PurchasesPageContent() {
                                   }}
                                   onFocus={(e) => e.target.select()}
                                   inputProps={{ min: 0 }}
-                                  sx={{ width: 110 }}
+                                  sx={PURCHASE_ENTRY_CONTROL_SX}
                                 />
+                              </Box>
+                              <Box>
+                                <Typography component="label" sx={PURCHASE_FIELD_LABEL_SX}>Out Delivery</Typography>
                                 <TextField
-                                  label="Out Delivery"
+                                  fullWidth
                                   size="small"
                                   type="number"
                                   value={formData.out_delivery_amount || ''}
@@ -4462,18 +5194,18 @@ function PurchasesPageContent() {
                                   }}
                                   onFocus={(e) => e.target.select()}
                                   inputProps={{ min: 0 }}
-                                  sx={{ width: 110 }}
-                                />
-                                <TextField
-                                  label="Total Charges"
-                                  size="small"
-                                  value={(parseFloat(formData.out_labour_amount || 0) + parseFloat(formData.out_delivery_amount || 0)).toFixed(2)}
-                                  InputProps={{ readOnly: true }}
-                                  sx={{ width: 160 }}
+                                  sx={PURCHASE_ENTRY_CONTROL_SX}
                                 />
                               </Box>
-
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+                            </Box>
+                            <PurchaseAmountTotal
+                              label="Total Charges"
+                              value={parseFloat(formData.out_labour_amount || 0) + parseFloat(formData.out_delivery_amount || 0)}
+                            />
+                          </Box>
+                          <Box sx={{ ...PURCHASE_INCLUDE_BAR_SX, borderBottom: 'none', borderTop: '1px solid #dce3ed', mt: 'auto' }}>
+                            <FormControlLabel
+                              control={
                                 <Checkbox
                                   checked={formData.include_cargo_in_costprice || false}
                                   onChange={(e) => {
@@ -4484,11 +5216,11 @@ function PurchasesPageContent() {
                                     });
                                   }}
                                   size="small"
+                                  sx={{ color: BRAND.primary.blue }}
                                 />
-                                <Typography variant="body2">Include in costprice</Typography>
-                              </Box>
-
-                            </Box>
+                              }
+                              label="Include in cost price"
+                            />
                           </Box>
                         </Box>
                       </Box>
@@ -4496,7 +5228,7 @@ function PurchasesPageContent() {
                   </Box>
 
                   {/* Right Section - Summary Fields */}
-                  <Box sx={{ width: 350, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  <Box sx={{ width: { xs: '100%', lg: 320 }, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                     {/* SUBTOTAL */}
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Typography variant="body2" sx={{ fontWeight: 'bold', flex: 1, textAlign: 'right' }}>
@@ -4713,10 +5445,17 @@ function PurchasesPageContent() {
                   disabled={isSubmitting}
                   variant="contained"
                   startIcon={isSubmitting ? <CircularProgress size={20} /> : null}
+                  onClick={(ev) => {
+                    if (purchaseSubmitInFlightRef.current || isSubmitting) {
+                      ev.preventDefault();
+                      ev.stopPropagation();
+                    }
+                  }}
                   sx={{
                     px: 4,
                     py: 1.5,
                     bgcolor: 'secondary.main',
+                    pointerEvents: isSubmitting ? 'none' : 'auto',
                     '&:hover': { bgcolor: 'secondary.dark' }
                   }}
                 >
@@ -5571,7 +6310,7 @@ function PurchasesPageContent() {
         fullWidth
       >
         <DialogTitle sx={{
-          background: 'linear-gradient(45deg, #4caf50 30%, #2e7d32 90%)',
+          background: PURCHASE_ENTRY_HEADER_GRADIENT,
           color: 'white',
           display: 'flex',
           alignItems: 'center',
@@ -5630,7 +6369,7 @@ function PurchasesPageContent() {
             onClick={handleAddCustomerCategory}
             disabled={isAddingCustomerCategory}
             sx={{
-              background: 'linear-gradient(45deg, #4caf50 30%, #2e7d32 90%)',
+              background: PURCHASE_ENTRY_HEADER_GRADIENT,
               textTransform: 'none',
               '&:hover': {
                 background: 'linear-gradient(45deg, #388e3c 30%, #1b5e20 90%)',
@@ -5731,8 +6470,8 @@ function PurchasesPageContent() {
             </Box>
             {/* Pricing Information */}
             <Box sx={{ mb: 4 }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#1e293b', mb: 2, pb: 1.5, borderBottom: '2px solid #16a34a', display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Box sx={{ width: 4, height: 4, borderRadius: '50%', bgcolor: '#16a34a' }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#1e293b', mb: 2, pb: 1.5, borderBottom: `2px solid ${BRAND.primary.blue}`, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Box sx={{ width: 4, height: 4, borderRadius: '50%', bgcolor: BRAND.primary.blue }} />
                 Pricing Information
               </Typography>
               <Grid container spacing={2.5}>
@@ -5816,7 +6555,7 @@ function PurchasesPageContent() {
 
       {/* Add Product Category Popup */}
       <Dialog open={showAddProductCategoryPopup} onClose={() => setShowAddProductCategoryPopup(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ background: 'linear-gradient(45deg, #16a34a 30%, #15803d 90%)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <DialogTitle sx={{ background: PURCHASE_ENTRY_HEADER_GRADIENT, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', mr: 2, width: 36, height: 36 }}><FolderIcon /></Avatar>
             <Typography variant="h6" sx={{ fontWeight: 'bold' }}>Add Product Category</Typography>
@@ -5838,7 +6577,7 @@ function PurchasesPageContent() {
         <DialogActions sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
           <Button onClick={() => setShowAddProductCategoryPopup(false)} sx={{ textTransform: 'none' }}>Cancel</Button>
           <Button variant="contained" onClick={handleAddProductCategory} disabled={isAddingProductCategory}
-            sx={{ background: 'linear-gradient(45deg, #16a34a 30%, #15803d 90%)', textTransform: 'none' }}>
+            sx={{ background: PURCHASE_ENTRY_HEADER_GRADIENT, textTransform: 'none' }}>
             {isAddingProductCategory ? 'Adding...' : 'Add Category'}
           </Button>
         </DialogActions>

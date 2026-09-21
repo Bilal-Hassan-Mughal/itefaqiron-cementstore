@@ -213,6 +213,89 @@ export function createPayableLedgerEntry(config) {
   return createLedgerEntry({ ...config, account_nature: ACCOUNT_NATURE.PAYABLE });
 }
 
+/**
+ * Set customer.cus_balance from the last closing in a batch of new ledger rows (same request).
+ * Keeps Accounts / Bank list in sync without waiting for background ledger recalc.
+ */
+export async function syncAccountBalancesFromEntries(tx, ledgerEntries) {
+  if (!ledgerEntries?.length) return;
+  const closingByCusId = new Map();
+  for (const entry of ledgerEntries) {
+    closingByCusId.set(entry.cus_id, parseFloat(entry.closing_balance || 0));
+  }
+  const entries = [...closingByCusId.entries()];
+  if (!entries.length) return;
+
+  if (entries.length === 1) {
+    const [cusId, closingBal] = entries[0];
+    await tx.customer.update({
+      where: { cus_id: cusId },
+      data: { cus_balance: Number(closingBal.toFixed(2)) },
+    });
+    return;
+  }
+
+  const caseClauses = entries
+    .map(([cusId, closingBal]) => `WHEN ${cusId} THEN ${Number(closingBal.toFixed(2))}`)
+    .join(' ');
+  const cusIdsStr = entries.map(([cusId]) => cusId).join(', ');
+
+  const sql = `
+    UPDATE customers
+    SET cus_balance = CASE cus_id ${caseClauses} END,
+        updated_at = NOW()
+    WHERE cus_id IN (${cusIdsStr})
+  `;
+  await tx.$executeRawUnsafe(sql);
+}
+
+/** Refresh cus_balance from each account's most recent ledger closing (after delete/rebuild). */
+export async function syncAccountBalancesFromLatestLedger(tx, cusIds) {
+  const ids = [...new Set((cusIds || []).map((id) => parseInt(id, 10)).filter((n) => !Number.isNaN(n) && n > 0))];
+  if (!ids.length) return;
+
+  const idsStr = ids.join(', ');
+  const rows = await tx.$queryRawUnsafe(`
+    SELECT l.cus_id, l.closing_balance
+    FROM ledger l
+    INNER JOIN (
+      SELECT cus_id, MAX(l_id) AS max_l_id
+      FROM ledger
+      WHERE cus_id IN (${idsStr})
+      GROUP BY cus_id
+    ) latest ON l.l_id = latest.max_l_id
+  `);
+
+  const closingByCusId = new Map();
+  for (const row of rows) {
+    closingByCusId.set(row.cus_id, parseFloat(row.closing_balance || 0));
+  }
+
+  const updates = ids.map((cusId) => [
+    cusId,
+    closingByCusId.has(cusId) ? closingByCusId.get(cusId) : 0,
+  ]);
+
+  if (updates.length === 1) {
+    const [cusId, closing] = updates[0];
+    await tx.customer.update({
+      where: { cus_id: cusId },
+      data: { cus_balance: Number(closing.toFixed(2)) },
+    });
+    return;
+  }
+
+  const caseClauses = updates
+    .map(([cusId, closingBal]) => `WHEN ${cusId} THEN ${Number(closingBal.toFixed(2))}`)
+    .join(' ');
+  await tx.$executeRawUnsafe(`
+    UPDATE customers
+    SET cus_balance = CASE cus_id ${caseClauses} END,
+        updated_at = NOW()
+    WHERE cus_id IN (${idsStr})
+  `);
+}
+
 export default {
   ACCOUNT_NATURE,
   calculateClosingBalance,
@@ -220,5 +303,7 @@ export default {
   createPayableLedgerEntry,
   createChainedLedgerEntries,
   validateLedgerEntry,
-  getLedgerSummary
+  getLedgerSummary,
+  syncAccountBalancesFromEntries,
+  syncAccountBalancesFromLatestLedger,
 };
