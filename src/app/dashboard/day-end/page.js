@@ -323,6 +323,33 @@ export default function DayEndPage() {
     closeReadiness && !closeReadiness.ok && closeReadiness.code !== 'ALREADY_CLOSED'
   );
 
+  const effectiveOpeningCash = useMemo(() => {
+    if (isClosed) return summary?.openingCash ?? 0;
+    const val = parseFloat(openingCash);
+    return !isNaN(val) ? val : (summary?.openingCash ?? 0);
+  }, [isClosed, openingCash, summary?.openingCash]);
+
+  const effectiveExpectedCash = useMemo(() => {
+    if (isClosed) return summary?.expectedCashInHand ?? 0;
+    const cashIn = summary?.totalCashInflow ?? 0;
+    const cashOut = summary?.totalCashOutflow ?? 0;
+    return Math.round((effectiveOpeningCash + cashIn - cashOut) * 100) / 100;
+  }, [isClosed, effectiveOpeningCash, summary?.expectedCashInHand, summary?.totalCashInflow, summary?.totalCashOutflow]);
+
+  const effectiveClosingCash = useMemo(() => {
+    if (isClosed) return summary?.actualClosingCash;
+    if (closingCash === '' || closingCash === null || closingCash === undefined) return null;
+    const val = parseFloat(closingCash);
+    return !isNaN(val) ? val : null;
+  }, [isClosed, closingCash, summary?.actualClosingCash]);
+
+  const effectiveVariance = useMemo(() => {
+    if (effectiveClosingCash === null || effectiveClosingCash === undefined) {
+      return isClosed ? (summary?.variance ?? 0) : null;
+    }
+    return Math.round((effectiveClosingCash - effectiveExpectedCash) * 100) / 100;
+  }, [effectiveClosingCash, effectiveExpectedCash, isClosed, summary?.variance]);
+
   // SVG Chart Maximum calculation for Sales vs Purchases line chart
   const maxTrendVal = useMemo(() => {
     if (!last7DaysTrend.length) return 100;
@@ -532,9 +559,13 @@ export default function DayEndPage() {
             <div>
               <p className="text-xs font-semibold text-slate-500">Closing Balance</p>
               <h3 className="text-lg font-black text-slate-900 mt-0.5">
-                Rs. {formatCurrency(summary?.closingBalance || summary?.expectedCashInHand)}
+                Rs. {formatCurrency(effectiveExpectedCash)}
               </h3>
-              <p className="text-[11px] text-slate-400 font-medium">Cash in hand · matches Cash Report</p>
+              <p className="text-[11px] text-slate-400 font-medium">
+                {summary?.openingCashSource === 'PREV_CLOSED'
+                  ? 'Cash in hand · carried from last close'
+                  : 'Cash in hand · matches Cash Report'}
+              </p>
             </div>
           </div>
 
@@ -608,7 +639,7 @@ export default function DayEndPage() {
                       ? ` (${summary.openingCashSource === 'FROZEN' ? 'frozen' : 'last close'} ${summary.openingCashFromDate})`
                       : ''}
                 </span>
-                <span className="font-bold text-slate-900">Rs. {formatCurrency(summary?.openingCash)}</span>
+                <span className="font-bold text-slate-900">Rs. {formatCurrency(effectiveOpeningCash)}</span>
               </div>
               <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
                 <span className="font-semibold text-slate-600">Cash In (Cash Report / Ledger)</span>
@@ -619,20 +650,20 @@ export default function DayEndPage() {
                 <span className="font-bold text-rose-600">Rs. {formatCurrency(summary?.totalCashOutflow)}</span>
               </div>
               <div className="flex justify-between items-center text-xs py-2 bg-blue-50/80 px-3 rounded-xl border border-blue-200/60 mt-2">
-                  <span className="font-extrabold text-blue-900">Expected Cash In Hand</span>
-                <span className="font-black text-sm text-blue-700">Rs. {formatCurrency(summary?.expectedCashInHand)}</span>
+                <span className="font-extrabold text-blue-900">Expected Cash In Hand</span>
+                <span className="font-black text-sm text-blue-700">Rs. {formatCurrency(effectiveExpectedCash)}</span>
               </div>
               <p className="text-[11px] text-slate-500">
                 Sales and purchases are invoice totals. Cash in/out is only from the cash ledger, same as Cash Report. Credit bills are not treated as cash.
               </p>
-              {summary?.actualClosingCash != null && (
+              {effectiveVariance !== null && (
                 <div className={`flex justify-between items-center text-xs py-2 px-3 rounded-xl border ${
-                  Math.abs(summary?.variance || 0) > 0.01
+                  Math.abs(effectiveVariance || 0) > 0.01
                     ? 'bg-amber-50 border-amber-200'
                     : 'bg-emerald-50 border-emerald-200'
                 }`}>
                   <span className="font-extrabold">Variance</span>
-                  <span className="font-black text-sm">Rs. {formatCurrency(summary?.variance)}</span>
+                  <span className="font-black text-sm">Rs. {formatCurrency(effectiveVariance)}</span>
                 </div>
               )}
             </div>
@@ -821,9 +852,11 @@ export default function DayEndPage() {
                 <p className="text-[11px] text-slate-500">
                   {summary?.openingCashLocked
                     ? `Frozen opening cash for this closed day.`
-                    : summary?.openingCashSource === 'LEDGER'
-                      ? `Auto-filled from Cash Report ledger (Rs. ${formatCurrency(summary?.ledgerOpeningCash)}). Edit only if drawer differs.`
-                      : 'Enter the drawer opening if it differs from the ledger.'}
+                    : summary?.openingCashSource === 'PREV_CLOSED'
+                      ? `Brought forward from previous day's closing cash (${summary?.openingCashFromDate}).`
+                      : summary?.openingCashSource === 'LEDGER'
+                        ? `Auto-filled from Cash Report ledger (Rs. ${formatCurrency(summary?.ledgerOpeningCash)}). Edit only if drawer differs.`
+                        : 'Enter the drawer opening if it differs from the ledger.'}
                 </p>
               </div>
 

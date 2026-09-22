@@ -118,7 +118,7 @@ function classifyLedgerEntry(entry) {
   return { isBank, entryAmt, isReceipt, isPayment, debit: d, credit: c };
 }
 
-export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride, dayEndRecord }) {
+export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride, dayEndRecord, branchId }) {
   const range = pkDayRange(dateStr);
   const customerInclude = {
     customer_type: { select: { cus_type_title: true } },
@@ -319,14 +319,24 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
   bankReceipts = totalBankInflow;
   bankPayments = totalBankOutflow;
 
+  const effectiveBranchId = branchId !== undefined ? branchId : dayEndRecord?.branch_id;
+  const prevClosedWhere = {
+    business_date: { lt: pkBusinessDate(dateStr) },
+    status: 'CLOSED',
+  };
+  if (effectiveBranchId !== undefined && effectiveBranchId !== null) {
+    prevClosedWhere.branch_id = effectiveBranchId;
+  }
   const prevClosed = await prisma.dayEnd.findFirst({
-    where: {
-      business_date: { lt: pkBusinessDate(dateStr) },
-      status: 'CLOSED',
-    },
+    where: prevClosedWhere,
     orderBy: { business_date: 'desc' },
   });
   const prevClosedDate = prevClosed?.business_date ? getPkDateString(prevClosed.business_date) : null;
+  const prevClosedClosingCash = prevClosed
+    ? (prevClosed.closing_cash != null
+        ? n(prevClosed.closing_cash)
+        : (prevClosed.cash_in_hand != null ? n(prevClosed.cash_in_hand) : null))
+    : null;
 
   const [ledgerOpeningCash, ledgerOpeningBank] = await Promise.all([
     getLedgerOpeningBefore(prisma, cashCategoryIds, range.gte),
@@ -341,6 +351,9 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
   } else if (openingCashOverride !== undefined && openingCashOverride !== null && openingCashOverride !== '') {
     openingCash = n(openingCashOverride);
     openingCashSource = 'ENTERED';
+  } else if (prevClosed && prevClosedClosingCash !== null) {
+    openingCash = prevClosedClosingCash;
+    openingCashSource = 'PREV_CLOSED';
   } else {
     openingCash = ledgerOpeningCash;
     openingCashSource = 'LEDGER';

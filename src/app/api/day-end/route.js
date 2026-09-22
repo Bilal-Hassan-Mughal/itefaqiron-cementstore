@@ -33,7 +33,9 @@ function freezeClosedSummary(summary, dayEnd) {
     variance: actual != null ? money(actual - expected) : 0,
     savedClosingBank: dayEnd.bank_balance != null ? bank : summary.savedClosingBank,
     expectedClosingBank: dayEnd.bank_balance != null ? bank : summary.expectedClosingBank,
-    closingBalance: money(expected + bank),
+    closingBalance: expected,
+    closingCashBalance: expected,
+    closingCombinedBalance: money(expected + bank),
     frozen: true,
   };
 }
@@ -77,6 +79,7 @@ export async function GET(request) {
     const snapshot = await loadDayEndSnapshot(prisma, {
       dateStr,
       dayEndRecord: dayEnd,
+      branchId,
     });
     const summary = freezeClosedSummary(snapshot.summary, dayEnd);
     const closeReadiness = dayEnd?.status === 'CLOSED'
@@ -258,6 +261,7 @@ export async function POST(request) {
       dateStr,
       openingCashOverride: opening_cash,
       dayEndRecord: existingDayEnd,
+      branchId,
     });
     const { summary } = snapshot;
 
