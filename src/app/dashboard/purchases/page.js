@@ -129,6 +129,8 @@ const PURCHASE_EXCEL_TABLE_SX = {
   },
 };
 
+const getTodayDateStr = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
+
 const PURCHASE_EXCEL_HEAD_SX = {
   bgcolor: '#dce6f1',
   color: '#1e293b',
@@ -773,7 +775,7 @@ function PurchasesPageContent() {
       payment_type: 'CASH',
       vehicle_no: '',
       invoice_number: '',
-      date: new Date().toISOString().split('T')[0],
+      date: getTodayDateStr(),
       purchase_details: []
     },
     formSelectedCustomer: null,
@@ -1027,8 +1029,8 @@ function PurchasesPageContent() {
         return;
       }
 
-      // If printing from dialog for A4, copy receipt preview content (do NOT overwrite thermal template)
-      if (fromDialog && !isThermal) {
+      // If printing from dialog, copy receipt preview content
+      if (fromDialog) {
         const receiptPreview = document.getElementById('receipt-preview');
         if (receiptPreview && printableContainer) {
           printableContainer.innerHTML = receiptPreview.innerHTML;
@@ -1383,7 +1385,7 @@ function PurchasesPageContent() {
         payment_type: 'CASH',
         vehicle_no: '',
         invoice_number: '',
-        date: new Date().toISOString().split('T')[0],
+        date: getTodayDateStr(),
         purchase_details: []
       },
       formSelectedCustomer: null,
@@ -2245,6 +2247,8 @@ function PurchasesPageContent() {
       const body = editingPurchase
         ? {
           id: editingPurchase.pur_id,
+          date: formData.date,
+          created_at: editingPurchase.created_at,
           cus_id: formData.cus_id,
           store_id: formData.store_id,
           debit_account_id: debitAccountId,
@@ -2324,9 +2328,6 @@ function PurchasesPageContent() {
         created_at: editingPurchase?.created_at || new Date().toISOString(),
       };
 
-      setCurrentBillData(localBill);
-      setReceiptDialogOpen(true);
-
       const response = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -2357,20 +2358,35 @@ function PurchasesPageContent() {
             else freshCashPayment = totalPay;
           }
 
+          const resolvedPrevBalance = freshData.previous_customer_balance !== undefined && freshData.previous_customer_balance !== null
+            ? parseFloat(freshData.previous_customer_balance)
+            : (wasEditing && editingPurchase?.previous_customer_balance !== undefined && editingPurchase?.previous_customer_balance !== null
+                ? parseFloat(editingPurchase.previous_customer_balance)
+                : parseFloat(supplier?.cus_balance ?? 0));
+
           return {
             ...freshData,
             display_net_total: freshNetTotal,
             cash_payment: freshCashPayment,
             bank_payment: freshBankPayment,
             bank_title: selectedBankAccount?.cus_name || null,
-            customer: freshData.customer || customers.find(c => c.cus_id === freshData.cus_id),
+            customer: freshData.customer || customers.find(c => c.cus_id === freshData.cus_id) || supplier,
             purchase_details: freshData.purchase_details || formData.purchase_details,
-            previous_customer_balance: parseFloat(freshData.previous_customer_balance ?? supplier?.cus_balance ?? 0),
+            previous_customer_balance: resolvedPrevBalance,
             bill_type: purchaseType === 'return' ? 'PURCHASE_RETURN' : 'PURCHASE',
           };
         };
 
-        setCurrentBillData((prev) => mergePurchaseBill({ ...prev, ...result }));
+        const finalMerged = mergePurchaseBill({
+          ...result,
+          purchase_details: result.purchase_details?.length
+            ? result.purchase_details
+            : formData.purchase_details,
+          customer: result.customer || supplier,
+        });
+
+        setCurrentBillData(finalMerged);
+        setReceiptDialogOpen(true);
 
         notifyLedgerDataChanged('purchase');
 
@@ -2391,15 +2407,9 @@ function PurchasesPageContent() {
         };
 
         if (wasEditing && result?.pur_id) {
-          const merged = mergePurchaseBill({
-            ...result,
-            purchase_details: result.purchase_details?.length
-              ? result.purchase_details
-              : formData.purchase_details,
-          });
-          const { purchase_details: _lines, ...listHeader } = merged;
-          purchaseDetailCacheRef.current.set(result.pur_id, merged);
-          setPurchases((prev) => prev.map((p) => (p.pur_id === merged.pur_id ? { ...p, ...listHeader } : p)));
+          const { purchase_details: _lines, ...listHeader } = finalMerged;
+          purchaseDetailCacheRef.current.set(result.pur_id, finalMerged);
+          setPurchases((prev) => prev.map((p) => (p.pur_id === finalMerged.pur_id ? { ...p, ...listHeader } : p)));
           void refreshCustomersDropdown();
           setEditingPurchase(null);
           applyFreshPurchaseForm({ silent: true });
@@ -2410,11 +2420,10 @@ function PurchasesPageContent() {
             severity: 'success',
           });
         } else if (!wasEditing && result?.pur_id) {
-          const merged = mergePurchaseBill({ ...result, customer: supplier });
-          const { purchase_details: _lines, ...listHeader } = merged;
+          const { purchase_details: _lines, ...listHeader } = finalMerged;
           setPurchases((prev) => {
-            const without = prev.filter((p) => p.pur_id !== merged.pur_id);
-            return [{ ...listHeader, customer: supplier || merged.customer }, ...without];
+            const without = prev.filter((p) => p.pur_id !== finalMerged.pur_id);
+            return [{ ...listHeader, customer: supplier || finalMerged.customer }, ...without];
           });
           void refreshCustomersDropdown();
           applyFreshPurchaseForm({ silent: true });
@@ -2465,7 +2474,16 @@ function PurchasesPageContent() {
       }
     }
 
+    let purchaseDateStr = '';
+    if (purchase.created_at) {
+      const d = new Date(purchase.created_at);
+      if (!isNaN(d.getTime())) {
+        purchaseDateStr = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
+      }
+    }
+
     setFormData({
+      date: purchaseDateStr || getTodayDateStr(),
       cus_id: purchase.cus_id,
       store_id: purchase.store_id?.toString() || '',
       debit_account_id: purchase.debit_account_id || '',
@@ -4200,7 +4218,7 @@ function PurchasesPageContent() {
                       fullWidth
                       size="small"
                       type="date"
-                      value={formData.date || new Date().toISOString().split('T')[0]}
+                      value={formData.date || getTodayDateStr()}
                       onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
                       onFocus={(e) => e.target.select()}
                       sx={PURCHASE_ENTRY_CONTROL_SX}

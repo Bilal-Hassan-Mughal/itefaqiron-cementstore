@@ -50,6 +50,114 @@ async function resolveOpeningBalance(tx, cus_id, target_created_at) {
   return parseFloat(customer?.cus_balance || 0);
 }
 
+/** Parse date string preserving time in Karachi timezone (+05:00) */
+function parseLocalDateInKarachi(dateStr, timeSource = new Date()) {
+  if (!dateStr) return null;
+  if (dateStr instanceof Date) return isNaN(dateStr.getTime()) ? null : dateStr;
+  const str = String(dateStr).trim();
+
+  let datePart = '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    datePart = str;
+  } else {
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+      datePart = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
+    } else {
+      return null;
+    }
+  }
+
+  const parts = datePart.split('-');
+  if (parts.length !== 3) return null;
+  const [year, month, day] = parts.map(Number);
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
+
+  const now = timeSource instanceof Date && !isNaN(timeSource.getTime()) ? timeSource : new Date();
+  const timeFormatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Karachi',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+  const timeFormatted = timeFormatter.format(now);
+  const iso = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${timeFormatted}.000+05:00`;
+  const result = new Date(iso);
+  return isNaN(result.getTime()) ? new Date(str) : result;
+}
+
+/**
+ * Calculates previous customer balance for a purchase receipt:
+ * Closing balance of the last ledger entry for this customer strictly before this purchase bill.
+ */
+async function getPreviousCustomerBalance(tx, cus_id, pur_id, target_created_at) {
+  const parsedCusId = parseInt(cus_id, 10);
+  const purIdStr = String(pur_id || '');
+  const billNoMatches = purIdStr ? [
+    purIdStr,
+    `PUR-${purIdStr}`,
+    `PURCHASE-${purIdStr}`,
+    `INC-${purIdStr}`,
+    `incity-${purIdStr}`
+  ] : [];
+
+  // 1. If this bill has an existing ledger entry for this customer, its opening_balance is the exact pre-bill balance!
+  if (billNoMatches.length) {
+    const billFirstEntry = await tx.ledger.findFirst({
+      where: {
+        cus_id: parsedCusId,
+        bill_no: { in: billNoMatches }
+      },
+      orderBy: [
+        { created_at: 'asc' },
+        { l_id: 'asc' }
+      ],
+      select: { opening_balance: true }
+    });
+    if (billFirstEntry) {
+      return parseFloat(billFirstEntry.opening_balance || 0);
+    }
+  }
+
+  // 2. Otherwise find the last entry strictly before target_created_at
+  const lastEntryBefore = await tx.ledger.findFirst({
+    where: {
+      cus_id: parsedCusId,
+      ...(billNoMatches.length ? { bill_no: { notIn: billNoMatches } } : {}),
+      created_at: { lt: target_created_at }
+    },
+    orderBy: [
+      { created_at: 'desc' },
+      { l_id: 'desc' }
+    ],
+    select: { closing_balance: true }
+  });
+
+  if (lastEntryBefore) {
+    return parseFloat(lastEntryBefore.closing_balance || 0);
+  }
+
+  // 3. Fallback: entries at exact same timestamp before this bill
+  const sameTimeEntryBefore = await tx.ledger.findFirst({
+    where: {
+      cus_id: parsedCusId,
+      ...(billNoMatches.length ? { bill_no: { notIn: billNoMatches } } : {}),
+      created_at: target_created_at
+    },
+    orderBy: [
+      { l_id: 'desc' }
+    ],
+    select: { closing_balance: true }
+  });
+
+  if (sameTimeEntryBefore) {
+    return parseFloat(sameTimeEntryBefore.closing_balance || 0);
+  }
+
+  return 0;
+}
+
 /** Latest closing balance per account (single grouped query). */
 async function fetchCurrentLedgerBalances(tx, accountIds) {
   const unique = [...new Set(
@@ -212,7 +320,14 @@ async function purgePurchaseLedgerRows(tx, purId, options = {}) {
 
   const rows = await tx.ledger.findMany({
     where,
-    select: { l_id: true, cus_id: true }
+    select: {
+      l_id: true,
+      cus_id: true,
+      opening_balance: true,
+      closing_balance: true,
+      created_at: true,
+      bill_no: true
+    }
   });
 
   if (rows.length > 0) {
@@ -280,16 +395,39 @@ async function prepareLedgerDeletion(tx, bill_no) {
 }
 
 
-/** Chronologically recalculates all ledger entry opening/closing balances for a customer/supplier/account and updates their customer table balance. */
-async function recalculateLedgerBalances(tx, cus_id) {
+/** Chronologically recalculates ledger entry opening/closing balances for an account starting from startFromDate onwards (or all entries if startFromDate is null), and updates customer table balance. */
+async function recalculateLedgerBalances(tx, cus_id, startFromDate = null) {
   const customer = await tx.customer.findUnique({
     where: { cus_id },
     select: { cus_id: true, cus_name: true }
   });
   if (!customer) return;
 
+  let prior = null;
+  if (startFromDate) {
+    prior = await tx.ledger.findFirst({
+      where: {
+        cus_id,
+        created_at: { lt: startFromDate }
+      },
+      orderBy: [
+        { created_at: 'desc' },
+        { l_id: 'desc' }
+      ],
+      select: {
+        l_id: true,
+        closing_balance: true
+      }
+    });
+  }
+
+  let runningBalance = prior ? parseFloat(prior.closing_balance || 0) : 0;
+
   const entries = await tx.ledger.findMany({
-    where: { cus_id },
+    where: {
+      cus_id,
+      ...(prior ? { created_at: { gte: startFromDate } } : {})
+    },
     orderBy: [
       { created_at: 'asc' },
       { l_id: 'asc' }
@@ -305,6 +443,10 @@ async function recalculateLedgerBalances(tx, cus_id) {
     }
   });
 
+  if (!prior && entries.length > 0) {
+    runningBalance = parseFloat(entries[0].opening_balance || 0);
+  }
+
   // Re-sort in JS: created_at ASC → bill_no (numeric) ASC → l_id ASC
   // This is critical for PUT (edit) operations: when entries are deleted and
   // re-created, the new auto-increment l_id values are higher than subsequent
@@ -319,44 +461,48 @@ async function recalculateLedgerBalances(tx, cus_id) {
     return a.l_id - b.l_id;
   });
 
-  let runningBalance = 0;
   const rowUpdates = [];
-  if (entries.length > 0) {
-    runningBalance = parseFloat(entries[0].opening_balance || 0);
+  for (const entry of entries) {
+    const opening = runningBalance;
+    const debit = parseFloat(entry.debit_amount || 0);
+    const credit = parseFloat(entry.credit_amount || 0);
+    const change = debit - credit;
+    const closing = opening + change;
 
-    for (const entry of entries) {
-      const opening = runningBalance;
-      const debit = parseFloat(entry.debit_amount || 0);
-      const credit = parseFloat(entry.credit_amount || 0);
-      const change = debit - credit;
-      const closing = opening + change;
-
-      if (
-        Math.abs(parseFloat(entry.opening_balance) - opening) > 0.01 ||
-        Math.abs(parseFloat(entry.closing_balance) - closing) > 0.01
-      ) {
-        rowUpdates.push({
-          l_id: entry.l_id,
-          opening_balance: Number(opening.toFixed(2)),
-          closing_balance: Number(closing.toFixed(2))
-        });
-      }
-      runningBalance = closing;
+    if (
+      Math.abs(parseFloat(entry.opening_balance) - opening) > 0.009 ||
+      Math.abs(parseFloat(entry.closing_balance) - closing) > 0.009
+    ) {
+      rowUpdates.push({
+        l_id: entry.l_id,
+        opening_balance: Number(opening.toFixed(2)),
+        closing_balance: Number(closing.toFixed(2))
+      });
     }
+    runningBalance = closing;
   }
 
-  // Avoid one giant interactive transaction (MySQL 1205 lock wait on large accounts).
-  const CHUNK = 50;
-  for (let i = 0; i < rowUpdates.length; i += CHUNK) {
-    const chunk = rowUpdates.slice(i, i + CHUNK);
-    for (const row of chunk) {
-      await tx.ledger.update({
-        where: { l_id: row.l_id },
-        data: {
-          opening_balance: row.opening_balance,
-          closing_balance: row.closing_balance
-        }
-      });
+  if (rowUpdates.length === 1) {
+    await tx.ledger.update({
+      where: { l_id: rowUpdates[0].l_id },
+      data: {
+        opening_balance: rowUpdates[0].opening_balance,
+        closing_balance: rowUpdates[0].closing_balance
+      }
+    });
+  } else if (rowUpdates.length > 1) {
+    const CHUNK_SIZE = 100;
+    for (let i = 0; i < rowUpdates.length; i += CHUNK_SIZE) {
+      const chunk = rowUpdates.slice(i, i + CHUNK_SIZE);
+      const openCases = chunk.map((u) => `WHEN ${u.l_id} THEN ${u.opening_balance}`).join(' ');
+      const closeCases = chunk.map((u) => `WHEN ${u.l_id} THEN ${u.closing_balance}`).join(' ');
+      const idsStr = chunk.map((u) => u.l_id).join(', ');
+      await tx.$executeRawUnsafe(`
+        UPDATE ledger
+        SET opening_balance = CASE l_id ${openCases} END,
+            closing_balance = CASE l_id ${closeCases} END
+        WHERE l_id IN (${idsStr})
+      `);
     }
   }
 
@@ -364,10 +510,10 @@ async function recalculateLedgerBalances(tx, cus_id) {
     where: { cus_id },
     data: { cus_balance: Number(runningBalance.toFixed(2)) }
   });
-  console.log(`   📊 Recalculated ledger for ${customer.cus_name} (ID: ${cus_id}). Final balance: ${runningBalance.toFixed(2)} (${rowUpdates.length} rows patched)`);
+  console.log(`   📊 Recalculated ledger for ${customer.cus_name} (ID: ${cus_id}) from ${startFromDate ? startFromDate.toISOString() : 'start'}. Final balance: ${runningBalance.toFixed(2)} (${rowUpdates.length} rows patched)`);
 }
 
-const ledgerRecalcPendingIds = new Set();
+const ledgerRecalcPendingMap = new Map();
 let ledgerRecalcDrainScheduled = false;
 let activePurchaseWrites = 0;
 
@@ -376,14 +522,14 @@ function isLockWaitError(err) {
   return msg.includes('1205') || msg.includes('Lock wait timeout');
 }
 
-async function recalculateLedgerBalancesWithRetry(cus_id, maxAttempts = 4) {
+async function recalculateLedgerBalancesWithRetry(cus_id, maxAttempts = 3, startFromDate = null) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      await recalculateLedgerBalances(prisma, cus_id);
+      await recalculateLedgerBalances(prisma, cus_id, startFromDate);
       return;
     } catch (err) {
       if (!isLockWaitError(err) || attempt === maxAttempts) throw err;
-      await new Promise((r) => setTimeout(r, 400 * attempt));
+      await new Promise((r) => setTimeout(r, 200 * attempt));
     }
   }
 }
@@ -393,7 +539,7 @@ async function briefRecalcYield(maxMs = 1500) {
   const start = Date.now();
   while (Date.now() - start < maxMs) {
     if (activePurchaseWrites > 0) return;
-    if (ledgerRecalcPendingIds.size === 0 && !ledgerRecalcDrainScheduled) return;
+    if (ledgerRecalcPendingMap.size === 0 && !ledgerRecalcDrainScheduled) return;
     await new Promise((r) => setTimeout(r, 100));
   }
 }
@@ -408,21 +554,23 @@ function endPurchaseWrite() {
 
 async function drainLedgerRecalcQueue() {
   try {
-    while (ledgerRecalcPendingIds.size > 0) {
+    while (ledgerRecalcPendingMap.size > 0) {
       while (activePurchaseWrites > 0) {
         await new Promise((r) => setTimeout(r, 150));
       }
-      const cid = ledgerRecalcPendingIds.values().next().value;
-      ledgerRecalcPendingIds.delete(cid);
+      const entry = ledgerRecalcPendingMap.entries().next().value;
+      if (!entry) break;
+      const [cid, startFromDate] = entry;
+      ledgerRecalcPendingMap.delete(cid);
       try {
-        await recalculateLedgerBalancesWithRetry(cid);
+        await recalculateLedgerBalancesWithRetry(cid, 3, startFromDate);
       } catch (err) {
         console.error(`Background ledger recalc failed for customer ${cid}:`, err);
       }
     }
   } finally {
     ledgerRecalcDrainScheduled = false;
-    if (ledgerRecalcPendingIds.size > 0) {
+    if (ledgerRecalcPendingMap.size > 0) {
       ledgerRecalcDrainScheduled = true;
       setTimeout(() => {
         void drainLedgerRecalcQueue();
@@ -432,15 +580,24 @@ async function drainLedgerRecalcQueue() {
 }
 
 /** Run ledger chain recalc after the HTTP response; one account at a time to reduce lock contention. */
-function scheduleLedgerRecalc(cusIds) {
+function scheduleLedgerRecalc(cusIds, startFromDate = null) {
   const uniqueIds = [...new Set((cusIds || []).filter((id) => id != null))];
   if (uniqueIds.length === 0) return;
-  uniqueIds.forEach((id) => ledgerRecalcPendingIds.add(id));
+  uniqueIds.forEach((id) => {
+    if (startFromDate && ledgerRecalcPendingMap.has(id)) {
+      const existing = ledgerRecalcPendingMap.get(id);
+      if (!existing || startFromDate < existing) {
+        ledgerRecalcPendingMap.set(id, startFromDate);
+      }
+    } else if (!ledgerRecalcPendingMap.has(id)) {
+      ledgerRecalcPendingMap.set(id, startFromDate);
+    }
+  });
   if (ledgerRecalcDrainScheduled) return;
   ledgerRecalcDrainScheduled = true;
   setTimeout(() => {
     void drainLedgerRecalcQueue();
-  }, 8000);
+  }, 200);
 }
 
 /** Persist ledger rows with one MAX(l_id) query instead of one per row. */
@@ -548,12 +705,12 @@ export async function GET(request) {
       // Calculate previous customer balance (closing balance of the last ledger entry before this purchase)
       let previousCustomerBalance = 0;
       try {
-        const lastLedgerBefore = await prisma.ledger.findFirst({
-          where: { cus_id: purchase.cus_id, created_at: { lt: purchase.created_at } },
-          orderBy: { created_at: 'desc' },
-          select: { closing_balance: true }
-        });
-        previousCustomerBalance = lastLedgerBefore ? parseFloat(lastLedgerBefore.closing_balance || 0) : 0;
+        previousCustomerBalance = await getPreviousCustomerBalance(
+          prisma,
+          purchase.cus_id,
+          purchase.pur_id,
+          purchase.created_at
+        );
       } catch (err) {
         console.warn('Could not compute previous customer balance for purchase', purchase.pur_id, err.message);
       }
@@ -808,7 +965,9 @@ export async function POST(request) {
       purchase_type = 'new',
       return_for_purchase_id = null,
       purchase_details = [],
-      bank_account_id = null
+      bank_account_id = null,
+      date = null,
+      created_at: body_created_at = null
     } = body;
 
     // Ensure bank_account_id is always a proper integer (or null)
@@ -985,6 +1144,19 @@ export async function POST(request) {
         updated_by
       });
 
+      let postCreatedAt = undefined;
+      if (date) {
+        const parsed = parseLocalDateInKarachi(date);
+        if (parsed && !isNaN(parsed.getTime())) {
+          postCreatedAt = parsed;
+        }
+      } else if (body_created_at) {
+        const parsed = new Date(body_created_at);
+        if (!isNaN(parsed.getTime())) {
+          postCreatedAt = parsed;
+        }
+      }
+
       // Prepare the data object for purchase creation
       const purchaseData = {
         cus_id: parseInt(cus_id),
@@ -1014,7 +1186,8 @@ export async function POST(request) {
         bank_title: isSplitPayment && bankPaymentAmount > 0 ? 'Bank Payment' : null,
         vehicle_no: vehicle_no || null,
         invoice_number: invoice_number || null,
-        updated_by: updated_by ? safeParseInt(updated_by) : null
+        updated_by: updated_by ? safeParseInt(updated_by) : null,
+        ...(postCreatedAt ? { created_at: postCreatedAt } : {})
       };
 
       console.log('🔍 Processed purchase data:', purchaseData);
@@ -1443,7 +1616,7 @@ export async function POST(request) {
       }
 
       console.log(`📊 CREATING ${ledgerEntries.length} LEDGER ENTRIES IN DATABASE (POST)`);
-      await persistLedgerEntries(tx, ledgerEntries);
+      await persistLedgerEntries(tx, ledgerEntries, { entryCreatedAt: newPurchase.created_at });
       await syncAccountBalancesFromEntries(tx, ledgerEntries);
       console.log(`📊 All ${ledgerEntries.length} ledger entries created successfully\n`);
 
@@ -1480,9 +1653,31 @@ export async function POST(request) {
       }
     });
 
-    scheduleLedgerRecalc(result.affectedCusIds);
+    const recalcStartDate = result.purchase.created_at || new Date();
+    for (const cid of result.affectedCusIds) {
+      try {
+        await recalculateLedgerBalancesWithRetry(cid, 3, recalcStartDate);
+      } catch (err) {
+        console.error(`Ledger recalc failed for customer ${cid}:`, err);
+      }
+    }
 
-    return NextResponse.json(completePurchase, { status: 201 });
+    let previousCustomerBalance = 0;
+    try {
+      previousCustomerBalance = await getPreviousCustomerBalance(
+        prisma,
+        parseInt(result.purchase.cus_id),
+        result.purchase.pur_id,
+        result.purchase.created_at
+      );
+    } catch (err) {
+      console.warn('Could not compute previous customer balance for purchase', result.purchase.pur_id, err.message);
+    }
+
+    return NextResponse.json({
+      ...completePurchase,
+      previous_customer_balance: previousCustomerBalance
+    }, { status: 201 });
   } catch (err) {
     console.error('❌ Error creating purchase:', err);
     return errorResponse('Failed to create purchase', 500);
@@ -1529,7 +1724,9 @@ export async function PUT(request) {
       vehicle_no,
       invoice_number,
       updated_by,
-      purchase_details = []
+      purchase_details = [],
+      date = null,
+      created_at: body_created_at = null
     } = body;
 
     const bankAccountIdInt = bank_account_id ? parseInt(bank_account_id) : null;
@@ -1571,6 +1768,34 @@ export async function PUT(request) {
       return errorResponse('Purchase not found', 404);
     }
 
+    // Determine target purchase date:
+    // If user explicitly changed the date to a different day, use the new date.
+    // Otherwise, preserve the original created_at timestamp of the existing purchase.
+    let targetCreatedAt = existingPurchase.created_at;
+    if (date) {
+      const existingDateStr = new Date(existingPurchase.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
+      let bodyDateStr = '';
+      if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
+        bodyDateStr = date.trim();
+      } else {
+        const d = new Date(date);
+        if (!isNaN(d.getTime())) {
+          bodyDateStr = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
+        }
+      }
+      if (bodyDateStr && bodyDateStr !== existingDateStr) {
+        const parsed = parseLocalDateInKarachi(bodyDateStr, existingPurchase.created_at);
+        if (parsed && !isNaN(parsed.getTime())) {
+          targetCreatedAt = parsed;
+        }
+      }
+    } else if (body_created_at) {
+      const parsed = new Date(body_created_at);
+      if (!isNaN(parsed.getTime())) {
+        targetCreatedAt = parsed;
+      }
+    }
+
     // Check if customer exists
     const customer = await prisma.customer.findUnique({
       where: { cus_id }
@@ -1598,14 +1823,28 @@ export async function PUT(request) {
     let result;
     const runPutTransaction = async () =>
       prisma.$transaction(async (tx) => {
-      // Bill + ledger rows use edit time (not the original purchase date).
-      const ledgerEditedAt = new Date();
+      // Preserve the purchase date and timestamp (or user-modified date)
+      const ledgerCreatedAt = targetCreatedAt;
 
       // ── Step 1: Read old purchase details so we can reverse their stock ──
       const oldDetails = await tx.purchaseDetail.findMany({ where: { pur_id: id } });
 
       const removedLedgerRows = await purgePurchaseLedgerRows(tx, id, { fast: true });
       removedLedgerRows.forEach((row) => affectedCusIds.add(row.cus_id));
+
+      const oldOpeningBalances = {};
+      for (const entry of removedLedgerRows) {
+        const cid = entry.cus_id;
+        if (!oldOpeningBalances[cid]) {
+          oldOpeningBalances[cid] = entry;
+        } else {
+          const currentEarliest = oldOpeningBalances[cid];
+          const timeDiff = entry.created_at.getTime() - currentEarliest.created_at.getTime();
+          if (timeDiff < 0 || (timeDiff === 0 && entry.l_id < currentEarliest.l_id)) {
+            oldOpeningBalances[cid] = entry;
+          }
+        }
+      }
 
       const detailsUnchanged =
         purchaseDetailSignature(oldDetails, store_id) ===
@@ -1641,7 +1880,7 @@ export async function PUT(request) {
           vehicle_no: vehicle_no || null,
           invoice_number: invoice_number || null,
           updated_by: updated_by || existingPurchase.updated_by,
-          created_at: ledgerEditedAt
+          created_at: ledgerCreatedAt
         }
       });
 
@@ -1748,21 +1987,26 @@ export async function PUT(request) {
         incityCashAccountPUT = cashAccPUT;
       }
 
-      const balanceMap = await fetchCurrentLedgerBalances(
-        tx,
-        [
-          ...collectPutLedgerAccountIds(
-            { cus_id, credit_account_id, bank_account_id: bankAccIdForEntry, cargo_account_id, cargo_account_ids: cargoIdsPUT },
-            { labourAccountId: labourAccountPUT?.cus_id, incityCashAccountId: incityCashAccountPUT?.cus_id }
-          )
-        ]
+      const accountIdsToResolve = collectPutLedgerAccountIds(
+        { cus_id, credit_account_id, bank_account_id: bankAccIdForEntry, cargo_account_id, cargo_account_ids: cargoIdsPUT },
+        { labourAccountId: labourAccountPUT?.cus_id, incityCashAccountId: incityCashAccountPUT?.cus_id }
       );
+
+      const openingBalanceMap = new Map();
+      for (const aid of accountIdsToResolve) {
+        if (oldOpeningBalances[aid]) {
+          openingBalanceMap.set(aid, parseFloat(oldOpeningBalances[aid].opening_balance || 0));
+        } else {
+          const resolved = await resolveOpeningBalance(tx, aid, ledgerCreatedAt);
+          openingBalanceMap.set(aid, resolved);
+        }
+      }
 
       const ledgerEntries = [];
       const openingForAccount = (accountId) => {
         const prior = ledgerEntries.filter((e) => e.cus_id === accountId);
         if (prior.length > 0) return prior[prior.length - 1].closing_balance;
-        return balanceMap.get(accountId) ?? 0;
+        return openingBalanceMap.get(accountId) ?? 0;
       };
 
       let runningSupplierBalance = cus_id ? openingForAccount(parseInt(cus_id, 10)) : 0;
@@ -1930,8 +2174,8 @@ export async function PUT(request) {
         console.warn('⚠️ Incity charges present in PUT but cash account not found — skipping cash deduction');
       }
 
-      console.log(`📊 CREATING ${ledgerEntries.length} LEDGER ENTRIES IN DATABASE (PUT) at ${ledgerEditedAt.toISOString()}`);
-      await persistLedgerEntries(tx, ledgerEntries, { entryCreatedAt: ledgerEditedAt });
+      console.log(`📊 CREATING ${ledgerEntries.length} LEDGER ENTRIES IN DATABASE (PUT) at ${ledgerCreatedAt.toISOString()}`);
+      await persistLedgerEntries(tx, ledgerEntries, { entryCreatedAt: ledgerCreatedAt });
       ledgerEntries.forEach((entry) => affectedCusIds.add(entry.cus_id));
 
       await syncAccountBalancesFromEntries(tx, ledgerEntries);
@@ -1961,7 +2205,29 @@ export async function PUT(request) {
       }
     }
 
-    scheduleLedgerRecalc([...affectedCusIds]);
+    const recalcStartDate = existingPurchase.created_at && targetCreatedAt
+      ? (existingPurchase.created_at < targetCreatedAt ? existingPurchase.created_at : targetCreatedAt)
+      : (existingPurchase.created_at || targetCreatedAt || new Date());
+
+    for (const cid of affectedCusIds) {
+      try {
+        await recalculateLedgerBalancesWithRetry(cid, 3, recalcStartDate);
+      } catch (err) {
+        console.error(`Ledger recalc failed for customer ${cid}:`, err);
+      }
+    }
+
+    let previousCustomerBalance = 0;
+    try {
+      previousCustomerBalance = await getPreviousCustomerBalance(
+        prisma,
+        parseInt(cus_id),
+        id,
+        targetCreatedAt
+      );
+    } catch (err) {
+      console.warn('Could not compute previous customer balance for purchase', id, err.message);
+    }
 
     void (async () => {
       for (const { proId, updateData } of productRateUpdates) {
@@ -1984,6 +2250,7 @@ export async function PUT(request) {
       bank_account_id: resolvedBankId,
       cash_payment: cashPaymentAmt,
       bank_payment: bankPaymentAmt,
+      previous_customer_balance: previousCustomerBalance,
     });
   } catch (err) {
     console.error('❌ Error updating purchase:', err);
@@ -2056,7 +2323,14 @@ export async function DELETE(request) {
       endPurchaseWrite();
     }
 
-    scheduleLedgerRecalc([...affectedCusIds]);
+    const recalcStartDate = existingPurchase.created_at || new Date();
+    for (const cid of affectedCusIds) {
+      try {
+        await recalculateLedgerBalancesWithRetry(cid, 3, recalcStartDate);
+      } catch (err) {
+        console.error(`Ledger recalc failed for customer ${cid}:`, err);
+      }
+    }
 
     return NextResponse.json({ message: 'Purchase deleted successfully' });
   } catch (err) {

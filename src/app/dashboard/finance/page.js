@@ -856,6 +856,11 @@ const LEDGER_DATE_PRESETS = [
     },
   },
   {
+    id: 'all',
+    label: 'All Time',
+    getRange: () => ({ start: '', end: '' }),
+  },
+  {
     id: '7d',
     label: '7 Days',
     getRange: () => ({
@@ -1097,6 +1102,33 @@ export default function FinancePage() {
   }, []);
 
   const applyLedgerDatePreset = useCallback((presetId) => {
+    // If clicking the active preset, toggle it:
+    // If 'today' or any other preset is active and clicked, unclick it -> switch to All Time ('all')
+    if (presetId === ledgerDatePreset) {
+      if (presetId === 'all') {
+        // If clicking All Time when already All Time, switch back to Today
+        const today = getTodayKarachiDateKey();
+        setStartDate(today);
+        setEndDate(today);
+        setLedgerDatePreset('today');
+        setAllAccountsFullLedger(false);
+        return;
+      }
+      setStartDate('');
+      setEndDate('');
+      setLedgerDatePreset('all');
+      setAllAccountsFullLedger(true);
+      return;
+    }
+
+    if (presetId === 'all') {
+      setStartDate('');
+      setEndDate('');
+      setLedgerDatePreset('all');
+      setAllAccountsFullLedger(true);
+      return;
+    }
+
     const preset = LEDGER_DATE_PRESETS.find((p) => p.id === presetId);
     if (!preset) return;
     const { start, end } = preset.getRange();
@@ -1104,7 +1136,7 @@ export default function FinancePage() {
     setEndDate(end);
     setLedgerDatePreset(presetId);
     setAllAccountsFullLedger(false);
-  }, []);
+  }, [ledgerDatePreset]);
 
   // Customer dropdown filter states
   const [customerSearchTerm, setCustomerSearchTerm] = useState('');
@@ -3927,6 +3959,7 @@ export default function FinancePage() {
                     size="small"
                     variant={active ? 'contained' : 'outlined'}
                     onClick={() => applyLedgerDatePreset(preset.id)}
+                    title={active ? `Click to unselect ${preset.label} and show All Time` : `Show ${preset.label}`}
                     sx={{
                       textTransform: 'none',
                       fontWeight: 700,
@@ -3936,6 +3969,8 @@ export default function FinancePage() {
                       borderRadius: '999px',
                       fontSize: '0.75rem',
                       boxShadow: 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease-in-out',
                       ...(active
                         ? {
                           bgcolor: BRAND.primary.blue,
@@ -3961,10 +3996,30 @@ export default function FinancePage() {
             <Box sx={{ px: { xs: 2, md: 2.5 }, pb: 2, pt: 0.5 }}>
               <Box sx={{ ...LEDGER_FILTER_GRID, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' } }}>
                 <TextField fullWidth size="small" label="From Date" type="date" value={startDate}
-                  onChange={(e) => { setStartDate(e.target.value); setLedgerDatePreset('custom'); }}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setStartDate(val);
+                    if (!val && !endDate) {
+                      setLedgerDatePreset('all');
+                      setAllAccountsFullLedger(true);
+                    } else {
+                      setLedgerDatePreset('custom');
+                      setAllAccountsFullLedger(false);
+                    }
+                  }}
                   InputLabelProps={{ shrink: true }} sx={LEDGER_FILTER_FIELD_SX} />
                 <TextField fullWidth size="small" label="To Date" type="date" value={endDate}
-                  onChange={(e) => { setEndDate(e.target.value); setLedgerDatePreset('custom'); }}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setEndDate(val);
+                    if (!startDate && !val) {
+                      setLedgerDatePreset('all');
+                      setAllAccountsFullLedger(true);
+                    } else {
+                      setLedgerDatePreset('custom');
+                      setAllAccountsFullLedger(false);
+                    }
+                  }}
                   InputLabelProps={{ shrink: true }} sx={LEDGER_FILTER_FIELD_SX} />
                 <FormControl fullWidth size="small" sx={LEDGER_FILTER_FIELD_SX}>
                   <InputLabel>Type</InputLabel>
@@ -3991,23 +4046,27 @@ export default function FinancePage() {
           )}
         </Card>
 
-        {(startDate || endDate) && (
+        {(startDate || endDate) ? (
           <Alert severity="info" sx={{ borderRadius: '12px', py: 0.75, alignItems: 'center' }}>
             {ledgerDatePreset === 'today' && (
-              <>Showing <strong>today&apos;s ledger entries</strong> ({startDate}).</>
+              <>Showing <strong>today&apos;s ledger entries</strong> ({startDate}). Click <strong>Today</strong> again or <strong>All Time</strong> to see all-time ledger.</>
             )}
             {ledgerDatePreset === '7d' && (
-              <>Showing <strong>last 7 days</strong> ({startDate} – {endDate}).</>
+              <>Showing <strong>last 7 days</strong> ({startDate} – {endDate}). Click <strong>7 Days</strong> to unselect.</>
             )}
             {ledgerDatePreset === '15d' && (
-              <>Showing <strong>last 15 days</strong> ({startDate} – {endDate}).</>
+              <>Showing <strong>last 15 days</strong> ({startDate} – {endDate}). Click <strong>15 Days</strong> to unselect.</>
             )}
             {ledgerDatePreset === 'month' && (
-              <>Showing <strong>this month</strong> ({startDate} – {endDate}).</>
+              <>Showing <strong>this month</strong> ({startDate} – {endDate}). Click <strong>Month</strong> to unselect.</>
             )}
             {ledgerDatePreset === 'custom' && (
               <>Showing <strong>custom period</strong> ({startDate || '…'} – {endDate || '…'}).</>
             )}
+          </Alert>
+        ) : (
+          <Alert severity="info" sx={{ borderRadius: '12px', py: 0.75, alignItems: 'center' }}>
+            Showing <strong>all-time ledger entries</strong> (no date filter). Click <strong>Today</strong> to filter by today.
           </Alert>
         )}
 

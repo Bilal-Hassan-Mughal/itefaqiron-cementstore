@@ -121,8 +121,11 @@ function buildSaleReceiptBill({
   cartItems,
   createdAt,
   labourChargesValue,
+  previousBalance = null,
 }) {
-  const prevBalance = parseFloat(formSelectedCustomer?.cus_balance || 0);
+  const prevBalance = previousBalance !== null && previousBalance !== undefined
+    ? parseFloat(previousBalance)
+    : parseFloat(formSelectedCustomer?.cus_balance || 0);
   return {
     sale_id: saleId,
     bill_number: billNumber,
@@ -135,6 +138,7 @@ function buildSaleReceiptBill({
     bank_payment: bankAmount,
     advance_payment: advancePayment,
     previous_balance: prevBalance,
+    previous_customer_balance: prevBalance,
     bank_title: selectedBankAccount?.cus_name || null,
     shipping_amount: totalShippingAmount,
     bill_type: billType || 'BILL',
@@ -154,6 +158,21 @@ function buildSaleReceiptBill({
     labour_charges: labourChargesValue,
     notes: paymentData.notes || '',
   };
+}
+
+/** Accurately resolves previous balance, current bill due, and running total balance without double counting */
+function resolveSaleReceiptBalances(bill) {
+  const currentDue = parseFloat(bill?.total_amount || 0) - parseFloat(bill?.payment || 0);
+  if (bill?.previous_balance !== undefined && bill?.previous_balance !== null) {
+    const prev = parseFloat(bill.previous_balance);
+    return { prevBal: prev, currentDue, totalBal: prev + currentDue };
+  }
+  if (bill?.previous_customer_balance !== undefined && bill?.previous_customer_balance !== null) {
+    const prev = parseFloat(bill.previous_customer_balance);
+    return { prevBal: prev, currentDue, totalBal: prev + currentDue };
+  }
+  const postBal = parseFloat(bill?.customer?.cus_balance || 0);
+  return { prevBal: postBal - currentDue, currentDue, totalBal: postBal };
 }
 
 /** Match order invoice print styling — darker header/borders for print */
@@ -1072,8 +1091,12 @@ function SalesPageContent() {
   const [ledgerDialogOpen, setLedgerDialogOpen] = useState(false);
   const [ledgerData, setLedgerData] = useState(null);
   const [ledgerLoading, setLedgerLoading] = useState(false);
-  const [ledgerStartDate, setLedgerStartDate] = useState(new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().split('T')[0]);
-  const [ledgerEndDate, setLedgerEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [ledgerStartDate, setLedgerStartDate] = useState(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 1);
+    return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
+  });
+  const [ledgerEndDate, setLedgerEndDate] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' }));
 
   const fetchLedgerData = async (customerId) => {
     if (!customerId) return;
@@ -2365,28 +2388,17 @@ function SalesPageContent() {
       const isEditing = !!editingSale;
       const cartItems = getCartItemsInAddOrder();
 
-      if (!isEditing) {
-        setCurrentBillData(buildSaleReceiptBill({
-          formSelectedCustomer,
-          finalPaymentTotal,
-          grandTotal,
-          paymentData,
-          cashAmount,
-          bankAmount,
-          advancePayment,
-          selectedBankAccount,
-          totalShippingAmount,
-          billType,
-          cartItems,
-          labourChargesValue,
-        }));
-        setReceiptDialogOpen(true);
-      } else {
-        beginSaving();
-      }
+      beginSaving();
 
       // Use PUT when editing an existing sale, POST for new
-      const apiBody = isEditing ? { ...saleData, id: editingSale.sale_id } : saleData;
+      const apiBody = isEditing
+        ? {
+            ...saleData,
+            id: editingSale.sale_id,
+            created_at: editingSale.created_at,
+            date: editingSale.date || editingSale.created_at,
+          }
+        : saleData;
       let response;
       let isNetworkFailure = typeof navigator !== 'undefined' && !navigator.onLine;
 
@@ -2466,10 +2478,18 @@ function SalesPageContent() {
         notifyLedgerDataChanged('sale');
 
         const savedSaleId = result.sale_id ?? result.id ?? editingSale?.sale_id;
+        const resolvedPrevBalance = result.previous_balance !== undefined && result.previous_balance !== null
+          ? parseFloat(result.previous_balance)
+          : (result.previous_customer_balance !== undefined && result.previous_customer_balance !== null
+              ? parseFloat(result.previous_customer_balance)
+              : (isEditing && editingSale?.previous_balance !== undefined
+                  ? parseFloat(editingSale.previous_balance)
+                  : parseFloat(formSelectedCustomer?.cus_balance || 0)));
+
         const billDataForPrint = buildSaleReceiptBill({
           saleId: savedSaleId,
           billNumber: result.bill_number ?? null,
-          formSelectedCustomer,
+          formSelectedCustomer: result.customer || formSelectedCustomer,
           finalPaymentTotal,
           grandTotal,
           paymentData,
@@ -2482,20 +2502,12 @@ function SalesPageContent() {
           cartItems,
           createdAt: result.created_at,
           labourChargesValue,
+          previousBalance: resolvedPrevBalance,
         });
 
-        if (isEditing) {
-          setCurrentBillData(billDataForPrint);
-          setReceiptDialogOpen(true);
-          endSaving();
-        } else {
-          setCurrentBillData((prev) => ({
-            ...prev,
-            sale_id: savedSaleId,
-            bill_number: result.bill_number ?? prev?.bill_number,
-            created_at: result.created_at || prev?.created_at,
-          }));
-        }
+        setCurrentBillData(billDataForPrint);
+        setReceiptDialogOpen(true);
+        endSaving();
 
         void (async () => {
           if (!savedSaleId) return;
@@ -2560,6 +2572,7 @@ function SalesPageContent() {
           setTransportOptions([]);
           setBillType('BILL');
           setCurrentView('list');
+          fetchData({ mode: 'list', silent: true });
           showSnackbar('Sale updated successfully! Ledger adjusted.', 'success');
           return;
         }
@@ -7143,825 +7156,7 @@ function SalesPageContent() {
           </Card>
         </Stack>
 
-        {/* Printable Bill Content - Hidden but accessible for printing */}
-        {
-          currentBillData && (
-            <Box sx={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '21cm', overflow: 'hidden' }}>
-              {/* A4 Printable Container */}
-              <Box id="printable-invoice-a4" sx={{ width: '100%', bgcolor: '#ffffff', color: SALE_INVOICE_PRINT.bodyText, '& .MuiTypography-root': { color: SALE_INVOICE_PRINT.bodyText }, '& .MuiTableCell-root': { color: SALE_INVOICE_PRINT.bodyText } }}>
-                {/* Company Header */}
-                <Box sx={{ textAlign: 'center', py: 3, borderBottom: '2px solid #000' }}>
-                  <Typography variant="h4" sx={{
-                    fontWeight: 'bold',
-                    mb: 1,
-                    fontFamily: 'Arial, sans-serif',
-                    fontSize: { xs: '1.5rem', md: '2rem' },
-                    direction: 'rtl'
-                  }}>
-                    اتفاق آئرن اینڈ سیمنٹ سٹور
-                  </Typography>
-                  <Typography variant="body2" sx={{
-                    mb: 1,
-                    fontSize: { xs: '0.75rem', md: '0.9rem' },
-                    direction: 'rtl'
-                  }}>
-                    گجرات سرگودھا روڈ، پاہڑیانوالی
-                  </Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
-                    <PhoneIcon sx={{ color: '#25D366', fontSize: '1rem' }} />
-                    <Typography variant="body2">
-                      Ph:- 0346-7560306, 0300-7560306
-                    </Typography>
-                  </Box>
-                  <Typography variant="h6" sx={{
-                    fontWeight: 'bold',
-                    textTransform: 'uppercase',
-                    letterSpacing: 1,
-                    mt: 2
-                  }}>
-                    {currentBillData?.is_return ? 'SALE RETURN INVOICE' : 'SALE INVOICE'}
-                  </Typography>
-                </Box>
 
-                {/* Customer and Invoice Details */}
-                <Box sx={{ px: 3, py: 2, borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between' }}>
-                  <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column' }}>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Customer Name:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }}>
-                        {currentBillData.customer ? `${currentBillData.customer.cus_name}${currentBillData.customer.name_urdu ? ' ' + currentBillData.customer.name_urdu : ''}` : 'N/A'}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Phone No:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {currentBillData.customer?.cus_phone_no || 'N/A'}
-                      </Typography>
-                    </Box>
-                    {currentBillData.customer?.cus_address && (
-                      <Box sx={{ display: 'flex' }}>
-                        <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Address:</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          {currentBillData.customer.cus_address}
-                        </Typography>
-                      </Box>
-                    )}
-                  </Box>
-                  <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column', pl: 4 }}>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Invoice No:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {getBillDisplayNo(currentBillData)}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>
-                        {currentBillData?.is_return ? 'Return ID:' : 'Sale ID:'}
-                      </Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {currentBillData?.is_return ? currentBillData.return_id : currentBillData.sale_id}
-                      </Typography>
-                    </Box>
-                    {currentBillData?.is_return && currentBillData.sale_id && (
-                      <Box sx={{ display: 'flex', mb: 0.5 }}>
-                        <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Sale ID:</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          {currentBillData.sale_id}
-                        </Typography>
-                      </Box>
-                    )}
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Date:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {formatDatePK(currentBillData?.created_at) || '—'}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Time:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {formatTimePK(currentBillData?.created_at) || '—'}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Created By:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {getCreatedByName(currentBillData, currentUser)}
-                      </Typography>
-                    </Box>
-                    {currentBillData.reference && (
-                      <Box sx={{ display: 'flex' }}>
-                        <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Reference:</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          {currentBillData.reference}
-                        </Typography>
-                      </Box>
-                    )}
-                  </Box>
-                </Box>
-
-                {/* Product Table */}
-                <Box sx={{ px: 3, py: 2 }}>
-                  <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #000', boxShadow: 'none' }}>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.headerBg }}>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>S#</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>Product Name</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Qty</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Rate</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Amount</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {currentBillData.sale_details && currentBillData.sale_details.length > 0 ? (
-                          getSaleDetailsInAddOrder(currentBillData.sale_details).map((detail, index) => (
-                            <TableRow key={detail.sale_detail_id || index}>
-                              <TableCell sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.85rem', fontWeight: 'bold', color: SALE_INVOICE_PRINT.bodyText }}>{index + 1}</TableCell>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }}>{detail.product?.pro_title || 'N/A'}</TableCell>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtRateQty(detail.qnty)}</TableCell>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtRateQty(detail.unit_rate)}</TableCell>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtAmt(detail.total_amount)}</TableCell>
-                            </TableRow>
-                          ))
-                        ) : (
-                          <TableRow>
-                            <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                              No items found
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-
-                  {/* Payment Summary */}
-                  <Box sx={{ mt: 2, width: '100%', display: 'flex', justifyContent: 'space-between', gap: 2 }}>
-                    <Box sx={{ flex: '0 0 48%' }}>
-                      {!isWalkinCustomer(currentBillData.customer) && (
-                        <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #000', width: '100%' }}>
-                          <Table size="small">
-                            <TableBody>
-                              <TableRow>
-                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>سابقہ بقایا</TableCell>
-                                <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>
-                                  {fmtAmt(currentBillData.customer?.cus_balance)}
-                                </TableCell>
-                              </TableRow>
-                              <TableRow>
-                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>موجوده بقايا</TableCell>
-                                <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>
-                                  {fmtAmt(parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0))}
-                                </TableCell>
-                              </TableRow>
-                              <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.balanceTotalBg }}>
-                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>كل بقايا</TableCell>
-                                <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>
-                                  {fmtAmt(parseFloat(currentBillData.customer?.cus_balance || 0) + parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0))}
-                                </TableCell>
-                              </TableRow>
-                            </TableBody>
-                          </Table>
-                        </TableContainer>
-                      )}
-                      {(currentBillData.notes || currentBillData.reference) && (
-                        <Box sx={{ mt: 1 }}>
-                          <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>
-                            <strong>Notes:</strong> {currentBillData.notes || currentBillData.reference}
-                          </Typography>
-                        </Box>
-                      )}
-                    </Box>
-                    <Box sx={{ flex: '0 0 48%', display: 'flex', justifyContent: 'flex-end' }}>
-                      <TableContainer component={Paper} variant="outlined" sx={{ border: '1px solid #000', width: '100%', maxWidth: '100%' }}>
-                        <Table size="small">
-                          <TableBody>
-                            <TableRow>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رقم بل</TableCell>
-                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                {fmtAmt(parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.labour_charges || currentBillData.labour || 0) - parseFloat(currentBillData.shipping_amount || 0) + parseFloat(currentBillData.discount || 0))}
-                              </TableCell>
-                            </TableRow>
-                            <TableRow>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>مزدوری</TableCell>
-                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                {fmtAmt(currentBillData.labour_charges || currentBillData.labour)}
-                              </TableCell>
-                            </TableRow>
-                            <TableRow>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>کرایہ</TableCell>
-                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                {fmtAmt(currentBillData.shipping_amount)}
-                              </TableCell>
-                            </TableRow>
-                            <TableRow>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رعایت</TableCell>
-                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                {fmtAmt(currentBillData.discount)}
-                              </TableCell>
-                            </TableRow>
-                            <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.grandTotalBg }}>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>كل رقم</TableCell>
-                              <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>
-                                {fmtAmt(currentBillData.total_amount)}
-                              </TableCell>
-                            </TableRow>
-                            {/* Always show cash payment */}
-                            <TableRow>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>نقد كيش</TableCell>
-                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                {fmtAmt(currentBillData.cash_payment)}
-                              </TableCell>
-                            </TableRow>
-                            {/* Show bank payment with account name if bank payment exists */}
-                            {currentBillData.bank_payment > 0 && (
-                              <TableRow>
-                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                  {currentBillData.bank_title || 'بینک'}
-                                </TableCell>
-                                <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                  {fmtAmt(currentBillData.bank_payment)}
-                                </TableCell>
-                              </TableRow>
-                            )}
-
-                            <TableRow sx={{ bgcolor: '#d0d0d0' }}>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>بقايا رقم</TableCell>
-                              <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                {fmtAmt(parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0))}
-                              </TableCell>
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
-                    </Box>
-                  </Box>
-                </Box>
-              </Box>
-
-              </Box>
-          )
-        }
-
-        {/* Receipt Dialog */}
-        <Dialog
-          open={receiptDialogOpen}
-          onClose={() => setReceiptDialogOpen(false)}
-          maxWidth="md"
-          fullWidth
-          PaperProps={{
-            sx: {
-              bgcolor: 'white',
-              borderRadius: 2
-            }
-          }}
-        >
-          <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="h6" component="span" sx={{ fontWeight: 'bold' }}>
-              {currentBillData?.is_return ? 'Sale Return Invoice' : 'Receipt'} - {getBillDisplayNo(currentBillData)}
-            </Typography>
-            <IconButton
-              onClick={() => setReceiptDialogOpen(false)}
-              size="small"
-              sx={{ color: 'white', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}
-            >
-              <CloseIcon />
-            </IconButton>
-          </DialogTitle>
-          <DialogContent sx={{ p: 0, bgcolor: 'white' }}>
-            {currentBillData && (
-              <>
-                {/* Off-screen: WhatsApp image = receipt-style summary (no product line list) */}
-                <Box
-                  id="receipt-whatsapp-capture"
-                  aria-hidden
-                  sx={{
-                    // Kept off-screen; capture uses clone to document.body in handleSendWhatsApp.
-                    position: 'fixed',
-                    left: '-10000px',
-                    top: 0,
-                    width: '80mm',
-                    minWidth: 302,
-                    maxWidth: 360,
-                    bgcolor: '#ffffff',
-                    p: 1.25,
-                    fontFamily: 'Arial, sans-serif',
-                    boxSizing: 'border-box',
-                    color: '#000',
-                    fontWeight: 'bold',
-                    '& *': { fontWeight: 'bold !important', color: '#000 !important' }
-                  }}
-                >
-                  <Box sx={{ textAlign: 'center', pb: 1, borderBottom: '1px solid #000' }}>
-                    <Typography sx={{ fontSize: '12px', fontWeight: 'bold' }}>اتفاق آئرن اینڈ سیمنٹ سٹور</Typography>
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>گجرات سرگودھا روڈ، پاہڑیانوالی</Typography>
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Ph: 0346-7560306, 0300-7560306</Typography>
-                    <Typography
-                      sx={{
-                        mt: 0.5,
-                        fontSize: '11px',
-                        fontWeight: 'bold',
-                        color: currentBillData?.is_return ? '#c62828' : '#000',
-                      }}
-                    >
-                      {currentBillData?.is_return ? 'SALE RETURN' : 'SALE RECEIPT'}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ py: 1 }}>
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Inv#: {getBillDisplayNo(currentBillData)}</Typography>
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
-                      {currentBillData?.is_return ? `Return ID: ${currentBillData.return_id}` : `Sale ID: ${currentBillData.sale_id}`}
-                    </Typography>
-                    {currentBillData?.is_return && currentBillData.sale_id && (
-                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Sale ID: {currentBillData.sale_id}</Typography>
-                    )}
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Type: {currentBillData.bill_type || 'BILL'}</Typography>
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
-                      Date: {formatDatePK(currentBillData?.created_at) || '—'}
-                    </Typography>
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
-                      Time:{' '}
-                      {formatTimePK(currentBillData?.created_at) || '—'}
-                    </Typography>
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Cust: {currentBillData.customer?.cus_name || 'N/A'}</Typography>
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
-                      Created By: {getCreatedByName(currentBillData, currentUser)}
-                    </Typography>
-                  </Box>
-                  <Box
-                    sx={{
-                      borderTop: '1px dashed #000',
-                      borderBottom: '1px dashed #000',
-                      py: 0.75,
-                      textAlign: 'center',
-                    }}
-                  >
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
-                      {currentBillData?.is_return ? 'Return lines' : 'Line items'}:{' '}
-                      {Array.isArray(currentBillData.sale_details) ? currentBillData.sale_details.length : 0}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ pt: 1 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Subtotal</Typography>
-                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
-                        {fmtAmt(
-                          parseFloat(currentBillData.total_amount || 0) -
-                            parseFloat(currentBillData.labour_charges || currentBillData.labour || 0) -
-                            parseFloat(currentBillData.shipping_amount || 0) +
-                            parseFloat(currentBillData.discount || 0)
-                        )}
-                      </Typography>
-                    </Box>
-                    {parseFloat(currentBillData.discount || 0) > 0 && (
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Discount</Typography>
-                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.discount)}</Typography>
-                      </Box>
-                    )}
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Shipping</Typography>
-                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.shipping_amount)}</Typography>
-                    </Box>
-                    <Box
-                      sx={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        fontWeight: 'bold',
-                        borderTop: '1px dashed #000',
-                        mt: 0.5,
-                        pt: 0.5,
-                      }}
-                    >
-                      <Typography sx={{ fontSize: '11px', fontWeight: 'bold' }}>Grand Total</Typography>
-                      <Typography sx={{ fontSize: '11px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.total_amount)}</Typography>
-                    </Box>
-                    {parseFloat(currentBillData.cash_payment || 0) > 0 && (
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Cash Payment</Typography>
-                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.cash_payment)}</Typography>
-                      </Box>
-                    )}
-                    {parseFloat(currentBillData.bank_payment || 0) > 0 && (
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
-                          Bank ({currentBillData.bank_title || 'Bank'})
-                        </Typography>
-                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.bank_payment)}</Typography>
-                      </Box>
-                    )}
-                    {currentBillData.previous_balance !== undefined && (
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Prev Balance</Typography>
-                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.previous_balance)}</Typography>
-                      </Box>
-                    )}
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Balance</Typography>
-                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
-                        {fmtAmt(
-                          parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0)
-                        )}
-                      </Typography>
-                    </Box>
-                  </Box>
-                  <Box sx={{ textAlign: 'center', borderTop: '1px solid #000', mt: 1, pt: 1 }}>
-                    <Typography sx={{ fontSize: '9px', fontWeight: 'bold' }}>Thank you for your business!</Typography>
-                  </Box>
-                </Box>
-
-              <Box id="receipt-preview" className="thermal-receipt" sx={{ width: '100%', bgcolor: 'white', p: 3, color: '#000', fontWeight: 'bold', '& *': { fontWeight: 'bold !important', color: '#000 !important' } }}>
-                {/* Company Header */}
-                <Box sx={{ textAlign: 'center', py: 2, borderBottom: '2px solid #000' }}>
-                  <Typography variant="h5" sx={{
-                    fontWeight: 'bold',
-                    mb: 1,
-                    fontFamily: 'Arial, sans-serif',
-                    direction: 'rtl'
-                  }}>
-                    اتفاق آئرن اینڈ سیمنٹ سٹور
-                  </Typography>
-                  <Typography variant="body2" sx={{
-                    mb: 1,
-                    direction: 'rtl'
-                  }}>
-                    گجرات سرگودھا روڈ، پاہڑیانوالی
-                  </Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
-                    <PhoneIcon sx={{ color: '#25D366', fontSize: '1rem' }} />
-                    <Typography variant="body2">
-                      Ph:- 0346-7560306, 0300-7560306
-                    </Typography>
-                  </Box>
-                  <Typography variant="h6" sx={{
-                    fontWeight: 'bold',
-                    textTransform: 'uppercase',
-                    letterSpacing: 1,
-                    mt: 1,
-                    color: currentBillData?.is_return ? '#d32f2f' : '#000'
-                  }}>
-                    {currentBillData?.is_return ? 'SALE RETURN INVOICE' : 'SALE INVOICE'}
-                  </Typography>
-                </Box>
-
-                {/* Customer and Invoice Details */}
-                <Box sx={{ px: 2, py: 2, borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between' }}>
-                  <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column' }}>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Customer Name:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }}>
-                        {currentBillData.customer ? `${currentBillData.customer.cus_name}${currentBillData.customer.name_urdu ? ' ' + currentBillData.customer.name_urdu : ''}` : 'N/A'}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Phone No:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {currentBillData.customer?.cus_phone_no || 'N/A'}
-                      </Typography>
-                    </Box>
-                    {currentBillData.customer?.cus_address && (
-                      <Box sx={{ display: 'flex' }}>
-                        <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Address:</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          {currentBillData.customer.cus_address}
-                        </Typography>
-                      </Box>
-                    )}
-                  </Box>
-                  <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column', pl: 4 }}>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Invoice No:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {getBillDisplayNo(currentBillData)}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Date:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {formatDatePK(currentBillData?.created_at) || '—'}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Time:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {formatTimePK(currentBillData?.created_at) || '—'}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Created By:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {getCreatedByName(currentBillData, currentUser)}
-                      </Typography>
-                    </Box>
-                  </Box>
-                </Box>
-
-                {/* Product Table */}
-                <Box sx={{ px: 2, py: 2 }}>
-                  <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.headerBg }}>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>S#</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>Product Name</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Qty</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Rate</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Amount</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {currentBillData.sale_details && currentBillData.sale_details.length > 0 ? (
-                          getSaleDetailsInAddOrder(currentBillData.sale_details).map((detail, index) => (
-                            <TableRow key={detail.sale_detail_id || index}>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{index + 1}</TableCell>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{detail.product?.pro_title || 'N/A'}</TableCell>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">{fmtRateQty(detail.qnty)}</TableCell>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">{fmtRateQty(detail.unit_rate)}</TableCell>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">{fmtAmt(detail.total_amount)}</TableCell>
-                            </TableRow>
-                          ))
-                        ) : (
-                          <TableRow>
-                            <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                              No items found
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-
-                  {/* Payment Summary */}
-                  <Box sx={{ mt: 2, width: '100%', display: 'flex', justifyContent: 'space-between', gap: 2 }}>
-                    <Box sx={{ flex: '0 0 48%' }}>
-                      {!isWalkinCustomer(currentBillData?.customer) && (
-                        <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #000', width: '100%' }}>
-                          <Table size="small">
-                            <TableBody>
-                              {currentBillData?.is_return ? (
-                                (() => {
-                                  const totalRefund = parseFloat(currentBillData.payment || 0);
-                                  const prevBal = parseFloat(currentBillData.customer?.cus_balance ?? currentBillData.previous_customer_balance ?? 0);
-                                  const productTotal = (currentBillData.sale_details || []).reduce((sum, item) => sum + (parseFloat(item.total_amount) || 0), 0);
-                                  const discount = parseFloat(currentBillData.discount || 0);
-                                  const labour = parseFloat(currentBillData.labour_charges || currentBillData.labour || 0);
-                                  const shipping = parseFloat(currentBillData.shipping_amount || 0);
-                                  const netReturn = productTotal - discount - labour - shipping;
-                                  const newBal = prevBal - netReturn + totalRefund;
-                                  return (
-                                    <>
-                                      <TableRow>
-                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>منسوخ کردہ رقم</TableCell>
-                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{fmtAmt(productTotal)}</TableCell>
-                                      </TableRow>
-                                      {discount > 0 && (
-                                        <TableRow>
-                                          <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>رعایت</TableCell>
-                                          <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>-{fmtAmt(discount)}</TableCell>
-                                        </TableRow>
-                                      )}
-                                      <TableRow>
-                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>مزدوری</TableCell>
-                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>-{fmtAmt(labour)}</TableCell>
-                                      </TableRow>
-                                      <TableRow>
-                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>کرایہ</TableCell>
-                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>-{fmtAmt(shipping)}</TableCell>
-                                      </TableRow>
-                                      <TableRow sx={{ bgcolor: '#e8f5e9' }}>
-                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>کل منسوخی</TableCell>
-                                        <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: '#2e7d32' }}>
-                                          {fmtAmt(netReturn)}
-                                        </TableCell>
-                                      </TableRow>
-                                      <TableRow sx={{ bgcolor: '#ffe0b2' }}>
-                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>کل واپسی</TableCell>
-                                        <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: '#e65100', fontSize: '1rem' }}>{fmtAmt(totalRefund)}</TableCell>
-                                      </TableRow>
-                                      <TableRow>
-                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>سابقہ بقایا</TableCell>
-                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{fmtAmt(prevBal)}</TableCell>
-                                      </TableRow>
-                                      <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.balanceTotalBg }}>
-                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>موجودہ بقایا</TableCell>
-                                        <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>{fmtAmt(newBal)}</TableCell>
-                                      </TableRow>
-                                    </>
-                                  );
-                                })()
-                              ) : (
-                                <>
-                                  <TableRow>
-                                    <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>سابقہ بقایا</TableCell>
-                                    <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>
-                                      {fmtAmt(currentBillData.customer?.cus_balance)}
-                                    </TableCell>
-                                  </TableRow>
-                                  <TableRow>
-                                    <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>موجوده بقايا</TableCell>
-                                    <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>
-                                      {fmtAmt(parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0))}
-                                    </TableCell>
-                                  </TableRow>
-                                  <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.balanceTotalBg }}>
-                                    <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>كل بقايا</TableCell>
-                                    <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>
-                                      {fmtAmt(parseFloat(currentBillData.customer?.cus_balance || 0) + parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0))}
-                                    </TableCell>
-                                  </TableRow>
-                                </>
-                              )}
-                            </TableBody>
-                          </Table>
-                        </TableContainer>
-                      )}
-                      {(currentBillData.notes || currentBillData.reference) && (
-                        <Box sx={{ mt: 1 }}>
-                          <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>
-                            <strong>تبصرے:</strong> {currentBillData.notes || currentBillData.reference}
-                          </Typography>
-                        </Box>
-                      )}
-                    </Box>
-                    <Box sx={{ flex: '0 0 48%', display: 'flex', justifyContent: 'flex-end' }}>
-                      <TableContainer component={Paper} variant="outlined" sx={{ border: '1px solid #000', width: '100%', maxWidth: '100%' }}>
-                        <Table size="small">
-                          <TableBody>
-                            {currentBillData?.is_return ? (
-                              // ── SALE RETURN right panel (Urdu) ──
-                              (() => {
-                                const productTotal = parseFloat(currentBillData.total_amount || 0);
-                                const labour = parseFloat(currentBillData.labour_charges || 0);
-                                const delivery = parseFloat(currentBillData.shipping_amount || 0);
-                                const discount = parseFloat(currentBillData.discount || 0);
-                                // netReturn = items - labour - delivery - discount
-                                const netReturn = productTotal - labour - delivery - discount;
-                                const cash = parseFloat(currentBillData.cash_refund || currentBillData.cash_payment || 0);
-                                const bank = parseFloat(currentBillData.bank_refund || currentBillData.bank_payment || 0);
-                                // remaining = net return not yet refunded
-                                const remaining = netReturn - (cash + bank);
-                                return (
-                                  <>
-                                    <TableRow>
-                                      <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رقم بل</TableCell>
-                                      <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>{fmtAmt(productTotal)}</TableCell>
-                                    </TableRow>
-                                    {labour > 0 && (
-                                      <TableRow>
-                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>مزدوری</TableCell>
-                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>-{fmtAmt(labour)}</TableCell>
-                                      </TableRow>
-                                    )}
-                                    {delivery > 0 && (
-                                      <TableRow>
-                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>کرایہ</TableCell>
-                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>-{fmtAmt(delivery)}</TableCell>
-                                      </TableRow>
-                                    )}
-                                    {discount > 0 && (
-                                      <TableRow>
-                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رعایت</TableCell>
-                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>-{fmtAmt(discount)}</TableCell>
-                                      </TableRow>
-                                    )}
-                                    <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.grandTotalBg }}>
-                                      <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>کل واپسی رقم</TableCell>
-                                      <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>{fmtAmt(netReturn)}</TableCell>
-                                    </TableRow>
-                                    <TableRow>
-                                      <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>نقد</TableCell>
-                                      <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>{fmtAmt(cash)}</TableCell>
-                                    </TableRow>
-                                    {bank > 0 && (
-                                      <TableRow>
-                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>{currentBillData.bank_title || 'بینک ادائیگی'}</TableCell>
-                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>{fmtAmt(bank)}</TableCell>
-                                      </TableRow>
-                                    )}
-                                    <TableRow sx={{ bgcolor: remaining > 0 ? '#ffe0b2' : '#e8f5e9' }}>
-                                      <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>باقی واجب الادا</TableCell>
-                                      <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: remaining > 0 ? '#e65100' : '#2e7d32' }}>{fmtAmt(remaining)}</TableCell>
-                                    </TableRow>
-                                  </>
-                                );
-                              })()
-                            ) : (
-                              // ── REGULAR SALE right panel ──
-                              <>
-                                <TableRow>
-                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رقم بل</TableCell>
-                                  <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                    {fmtAmt(parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.labour_charges || currentBillData.labour || 0) - parseFloat(currentBillData.shipping_amount || 0) + parseFloat(currentBillData.discount || 0))}
-                                  </TableCell>
-                                </TableRow>
-                                <TableRow>
-                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>مزدوری</TableCell>
-                                  <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                    {fmtAmt(currentBillData.labour_charges || currentBillData.labour)}
-                                  </TableCell>
-                                </TableRow>
-                                <TableRow>
-                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>کرایہ</TableCell>
-                                  <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                    {fmtAmt(currentBillData.shipping_amount)}
-                                  </TableCell>
-                                </TableRow>
-                                {parseFloat(currentBillData.discount || 0) > 0 && (
-                                  <TableRow>
-                                    <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رعایت</TableCell>
-                                    <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                      {fmtAmt(currentBillData.discount)}
-                                    </TableCell>
-                                  </TableRow>
-                                )}
-                                <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.grandTotalBg }}>
-                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>كل رقم</TableCell>
-                                  <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>
-                                    {fmtAmt(currentBillData.total_amount)}
-                                  </TableCell>
-                                </TableRow>
-                                <TableRow>
-                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>نقد كيش</TableCell>
-                                  <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                    {fmtAmt(currentBillData.cash_payment)}
-                                  </TableCell>
-                                </TableRow>
-                                {currentBillData.bank_payment > 0 && (
-                                  <TableRow>
-                                    <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                      {currentBillData.bank_title || 'بینک'}
-                                    </TableCell>
-                                    <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                      {fmtAmt(currentBillData.bank_payment)}
-                                    </TableCell>
-                                  </TableRow>
-                                )}
-                                <TableRow sx={{ bgcolor: '#d0d0d0' }}>
-                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>بقايا رقم</TableCell>
-                                  <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                    {fmtAmt(parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0))}
-                                  </TableCell>
-                                </TableRow>
-                              </>
-                            )}
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
-                    </Box>
-                  </Box>
-                </Box>
-              </Box>
-              </>
-            )}
-          </DialogContent>
-          <DialogActions sx={{ p: 3, bgcolor: 'grey.50', borderTop: '1px solid #e0e0e0' }} className="no-print">
-            <Button
-              onClick={() => setReceiptDialogOpen(false)}
-              variant="outlined"
-              sx={{ minWidth: 100 }}
-            >
-              Close
-            </Button>
-            <Button
-              variant="contained"
-              startIcon={isSendingWhatsApp ? <CircularProgress size={16} sx={{ color: 'white' }} /> : null}
-              sx={{
-                minWidth: 150,
-                bgcolor: '#25D366',
-                '&:hover': { bgcolor: '#1ebe5d' },
-                color: 'white'
-              }}
-              onClick={() => handleSendWhatsApp(currentBillData)}
-              disabled={isSendingWhatsApp}
-              title="Copy invoice to clipboard and open WhatsApp Desktop"
-            >
-              {isSendingWhatsApp ? 'Copying...' : '📲 WhatsApp'}
-            </Button>
-            <Button
-              variant="contained"
-              startIcon={<PrintIcon />}
-              sx={{
-                minWidth: 150,
-                bgcolor: 'primary.main',
-                '&:hover': { bgcolor: 'primary.dark' }
-              }}
-              onClick={() => handlePrintBill('A4', true)}
-            >
-              Print A4
-            </Button>
-            <Button
-              variant="contained"
-              startIcon={<PrintIcon />}
-              sx={{
-                minWidth: 150,
-                bgcolor: '#fd7e14',
-                '&:hover': { bgcolor: '#e8690b' }
-              }}
-              onClick={() => handlePrintBill('THERMAL', true)}
-            >
-              Print Thermal
-            </Button>
-          </DialogActions>
-        </Dialog>
 
         {/* Load Quotation Dialog */}
         <Dialog
@@ -8921,6 +8116,832 @@ function SalesPageContent() {
           {snackbar.message}
         </Alert>
       </Snackbar>
+
+        {/* Printable Bill Content - Hidden but accessible for printing */}
+        {
+          currentBillData && (
+            <Box sx={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '21cm', overflow: 'hidden' }}>
+              {/* A4 Printable Container */}
+              <Box id="printable-invoice-a4" sx={{ width: '100%', bgcolor: '#ffffff', color: SALE_INVOICE_PRINT.bodyText, '& .MuiTypography-root': { color: SALE_INVOICE_PRINT.bodyText }, '& .MuiTableCell-root': { color: SALE_INVOICE_PRINT.bodyText } }}>
+                {/* Company Header */}
+                <Box sx={{ textAlign: 'center', py: 3, borderBottom: '2px solid #000' }}>
+                  <Typography variant="h4" sx={{
+                    fontWeight: 'bold',
+                    mb: 1,
+                    fontFamily: 'Arial, sans-serif',
+                    fontSize: { xs: '1.5rem', md: '2rem' },
+                    direction: 'rtl'
+                  }}>
+                    اتفاق آئرن اینڈ سیمنٹ سٹور
+                  </Typography>
+                  <Typography variant="body2" sx={{
+                    mb: 1,
+                    fontSize: { xs: '0.75rem', md: '0.9rem' },
+                    direction: 'rtl'
+                  }}>
+                    گجرات سرگودھا روڈ، پاہڑیانوالی
+                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
+                    <PhoneIcon sx={{ color: '#25D366', fontSize: '1rem' }} />
+                    <Typography variant="body2">
+                      Ph:- 0346-7560306, 0300-7560306
+                    </Typography>
+                  </Box>
+                  <Typography variant="h6" sx={{
+                    fontWeight: 'bold',
+                    textTransform: 'uppercase',
+                    letterSpacing: 1,
+                    mt: 2
+                  }}>
+                    {currentBillData?.is_return ? 'SALE RETURN INVOICE' : 'SALE INVOICE'}
+                  </Typography>
+                </Box>
+
+                {/* Customer and Invoice Details */}
+                <Box sx={{ px: 3, py: 2, borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between' }}>
+                  <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column' }}>
+                    <Box sx={{ display: 'flex', mb: 0.5 }}>
+                      <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Customer Name:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }}>
+                        {currentBillData.customer ? `${currentBillData.customer.cus_name}${currentBillData.customer.name_urdu ? ' ' + currentBillData.customer.name_urdu : ''}` : 'N/A'}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', mb: 0.5 }}>
+                      <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Phone No:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                        {currentBillData.customer?.cus_phone_no || 'N/A'}
+                      </Typography>
+                    </Box>
+                    {currentBillData.customer?.cus_address && (
+                      <Box sx={{ display: 'flex' }}>
+                        <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Address:</Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                          {currentBillData.customer.cus_address}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                  <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column', pl: 4 }}>
+                    <Box sx={{ display: 'flex', mb: 0.5 }}>
+                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Invoice No:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                        {getBillDisplayNo(currentBillData)}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', mb: 0.5 }}>
+                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>
+                        {currentBillData?.is_return ? 'Return ID:' : 'Sale ID:'}
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                        {currentBillData?.is_return ? currentBillData.return_id : currentBillData.sale_id}
+                      </Typography>
+                    </Box>
+                    {currentBillData?.is_return && currentBillData.sale_id && (
+                      <Box sx={{ display: 'flex', mb: 0.5 }}>
+                        <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Sale ID:</Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                          {currentBillData.sale_id}
+                        </Typography>
+                      </Box>
+                    )}
+                    <Box sx={{ display: 'flex', mb: 0.5 }}>
+                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Date:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                        {formatDatePK(currentBillData?.created_at) || '—'}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', mb: 0.5 }}>
+                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Time:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                        {formatTimePK(currentBillData?.created_at) || '—'}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', mb: 0.5 }}>
+                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Created By:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                        {getCreatedByName(currentBillData, currentUser)}
+                      </Typography>
+                    </Box>
+                    {currentBillData.reference && (
+                      <Box sx={{ display: 'flex' }}>
+                        <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Reference:</Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                          {currentBillData.reference}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                </Box>
+
+                {/* Product Table */}
+                <Box sx={{ px: 3, py: 2 }}>
+                  <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #000', boxShadow: 'none' }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.headerBg }}>
+                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>S#</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>Product Name</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Qty</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Rate</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Amount</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {currentBillData.sale_details && currentBillData.sale_details.length > 0 ? (
+                          getSaleDetailsInAddOrder(currentBillData.sale_details).map((detail, index) => (
+                            <TableRow key={detail.sale_detail_id || index}>
+                              <TableCell sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.85rem', fontWeight: 'bold', color: SALE_INVOICE_PRINT.bodyText }}>{index + 1}</TableCell>
+                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }}>{detail.product?.pro_title || 'N/A'}</TableCell>
+                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtRateQty(detail.qnty)}</TableCell>
+                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtRateQty(detail.unit_rate)}</TableCell>
+                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtAmt(detail.total_amount)}</TableCell>
+                            </TableRow>
+                          ))
+                        ) : (
+                          <TableRow>
+                            <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                              No items found
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+
+                  {/* Payment Summary */}
+                  <Box sx={{ mt: 2, width: '100%', display: 'flex', justifyContent: 'space-between', gap: 2 }}>
+                    <Box sx={{ flex: '0 0 48%' }}>
+                      {!isWalkinCustomer(currentBillData.customer) && (() => {
+                        const { prevBal, currentDue, totalBal } = resolveSaleReceiptBalances(currentBillData);
+                        return (
+                          <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #000', width: '100%' }}>
+                            <Table size="small">
+                              <TableBody>
+                                <TableRow>
+                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>سابقہ بقایا</TableCell>
+                                  <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>
+                                    {fmtAmt(prevBal)}
+                                  </TableCell>
+                                </TableRow>
+                                <TableRow>
+                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>موجوده بقايا</TableCell>
+                                  <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>
+                                    {fmtAmt(currentDue)}
+                                  </TableCell>
+                                </TableRow>
+                                <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.balanceTotalBg }}>
+                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>كل بقايا</TableCell>
+                                  <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>
+                                    {fmtAmt(totalBal)}
+                                  </TableCell>
+                                </TableRow>
+                              </TableBody>
+                            </Table>
+                          </TableContainer>
+                        );
+                      })()}
+                      {(currentBillData.notes || currentBillData.reference) && (
+                        <Box sx={{ mt: 1 }}>
+                          <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>
+                            <strong>Notes:</strong> {currentBillData.notes || currentBillData.reference}
+                          </Typography>
+                        </Box>
+                      )}
+                    </Box>
+                    <Box sx={{ flex: '0 0 48%', display: 'flex', justifyContent: 'flex-end' }}>
+                      <TableContainer component={Paper} variant="outlined" sx={{ border: '1px solid #000', width: '100%', maxWidth: '100%' }}>
+                        <Table size="small">
+                          <TableBody>
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رقم بل</TableCell>
+                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                {fmtAmt(parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.labour_charges || currentBillData.labour || 0) - parseFloat(currentBillData.shipping_amount || 0) + parseFloat(currentBillData.discount || 0))}
+                              </TableCell>
+                            </TableRow>
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>مزدوری</TableCell>
+                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                {fmtAmt(currentBillData.labour_charges || currentBillData.labour)}
+                              </TableCell>
+                            </TableRow>
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>کرایہ</TableCell>
+                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                {fmtAmt(currentBillData.shipping_amount)}
+                              </TableCell>
+                            </TableRow>
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رعایت</TableCell>
+                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                {fmtAmt(currentBillData.discount)}
+                              </TableCell>
+                            </TableRow>
+                            <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.grandTotalBg }}>
+                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>كل رقم</TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>
+                                {fmtAmt(currentBillData.total_amount)}
+                              </TableCell>
+                            </TableRow>
+                            {/* Always show cash payment */}
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>نقد كيش</TableCell>
+                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                {fmtAmt(currentBillData.cash_payment)}
+                              </TableCell>
+                            </TableRow>
+                            {/* Show bank payment with account name if bank payment exists */}
+                            {currentBillData.bank_payment > 0 && (
+                              <TableRow>
+                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                  {currentBillData.bank_title || 'بینک'}
+                                </TableCell>
+                                <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                  {fmtAmt(currentBillData.bank_payment)}
+                                </TableCell>
+                              </TableRow>
+                            )}
+
+                            <TableRow sx={{ bgcolor: '#d0d0d0' }}>
+                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>بقايا رقم</TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                {fmtAmt(parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0))}
+                              </TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    </Box>
+                  </Box>
+                </Box>
+              </Box>
+
+              </Box>
+          )
+        }
+
+        {/* Receipt Dialog */}
+        <Dialog
+          open={receiptDialogOpen}
+          onClose={() => setReceiptDialogOpen(false)}
+          maxWidth="md"
+          fullWidth
+          PaperProps={{
+            sx: {
+              bgcolor: 'white',
+              borderRadius: 2
+            }
+          }}
+        >
+          <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6" component="span" sx={{ fontWeight: 'bold' }}>
+              {currentBillData?.is_return ? 'Sale Return Invoice' : 'Receipt'} - {getBillDisplayNo(currentBillData)}
+            </Typography>
+            <IconButton
+              onClick={() => setReceiptDialogOpen(false)}
+              size="small"
+              sx={{ color: 'white', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </DialogTitle>
+          <DialogContent sx={{ p: 0, bgcolor: 'white' }}>
+            {currentBillData && (
+              <>
+                {/* Off-screen: WhatsApp image = receipt-style summary (no product line list) */}
+                <Box
+                  id="receipt-whatsapp-capture"
+                  aria-hidden
+                  sx={{
+                    // Kept off-screen; capture uses clone to document.body in handleSendWhatsApp.
+                    position: 'fixed',
+                    left: '-10000px',
+                    top: 0,
+                    width: '80mm',
+                    minWidth: 302,
+                    maxWidth: 360,
+                    bgcolor: '#ffffff',
+                    p: 1.25,
+                    fontFamily: 'Arial, sans-serif',
+                    boxSizing: 'border-box',
+                    color: '#000',
+                    fontWeight: 'bold',
+                    '& *': { fontWeight: 'bold !important', color: '#000 !important' }
+                  }}
+                >
+                  <Box sx={{ textAlign: 'center', pb: 1, borderBottom: '1px solid #000' }}>
+                    <Typography sx={{ fontSize: '12px', fontWeight: 'bold' }}>اتفاق آئرن اینڈ سیمنٹ سٹور</Typography>
+                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>گجرات سرگودھا روڈ، پاہڑیانوالی</Typography>
+                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Ph: 0346-7560306, 0300-7560306</Typography>
+                    <Typography
+                      sx={{
+                        mt: 0.5,
+                        fontSize: '11px',
+                        fontWeight: 'bold',
+                        color: currentBillData?.is_return ? '#c62828' : '#000',
+                      }}
+                    >
+                      {currentBillData?.is_return ? 'SALE RETURN' : 'SALE RECEIPT'}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ py: 1 }}>
+                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Inv#: {getBillDisplayNo(currentBillData)}</Typography>
+                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                      {currentBillData?.is_return ? `Return ID: ${currentBillData.return_id}` : `Sale ID: ${currentBillData.sale_id}`}
+                    </Typography>
+                    {currentBillData?.is_return && currentBillData.sale_id && (
+                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Sale ID: {currentBillData.sale_id}</Typography>
+                    )}
+                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Type: {currentBillData.bill_type || 'BILL'}</Typography>
+                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                      Date: {formatDatePK(currentBillData?.created_at) || '—'}
+                    </Typography>
+                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                      Time:{' '}
+                      {formatTimePK(currentBillData?.created_at) || '—'}
+                    </Typography>
+                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Cust: {currentBillData.customer?.cus_name || 'N/A'}</Typography>
+                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                      Created By: {getCreatedByName(currentBillData, currentUser)}
+                    </Typography>
+                  </Box>
+                  <Box
+                    sx={{
+                      borderTop: '1px dashed #000',
+                      borderBottom: '1px dashed #000',
+                      py: 0.75,
+                      textAlign: 'center',
+                    }}
+                  >
+                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                      {currentBillData?.is_return ? 'Return lines' : 'Line items'}:{' '}
+                      {Array.isArray(currentBillData.sale_details) ? currentBillData.sale_details.length : 0}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ pt: 1 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Subtotal</Typography>
+                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                        {fmtAmt(
+                          parseFloat(currentBillData.total_amount || 0) -
+                            parseFloat(currentBillData.labour_charges || currentBillData.labour || 0) -
+                            parseFloat(currentBillData.shipping_amount || 0) +
+                            parseFloat(currentBillData.discount || 0)
+                        )}
+                      </Typography>
+                    </Box>
+                    {parseFloat(currentBillData.discount || 0) > 0 && (
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Discount</Typography>
+                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.discount)}</Typography>
+                      </Box>
+                    )}
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Shipping</Typography>
+                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.shipping_amount)}</Typography>
+                    </Box>
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        fontWeight: 'bold',
+                        borderTop: '1px dashed #000',
+                        mt: 0.5,
+                        pt: 0.5,
+                      }}
+                    >
+                      <Typography sx={{ fontSize: '11px', fontWeight: 'bold' }}>Grand Total</Typography>
+                      <Typography sx={{ fontSize: '11px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.total_amount)}</Typography>
+                    </Box>
+                    {parseFloat(currentBillData.cash_payment || 0) > 0 && (
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Cash Payment</Typography>
+                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.cash_payment)}</Typography>
+                      </Box>
+                    )}
+                    {parseFloat(currentBillData.bank_payment || 0) > 0 && (
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                          Bank ({currentBillData.bank_title || 'Bank'})
+                        </Typography>
+                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.bank_payment)}</Typography>
+                      </Box>
+                    )}
+                    {currentBillData.previous_balance !== undefined && (
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Prev Balance</Typography>
+                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.previous_balance)}</Typography>
+                      </Box>
+                    )}
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Balance</Typography>
+                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                        {fmtAmt(
+                          parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0)
+                        )}
+                      </Typography>
+                    </Box>
+                  </Box>
+                  <Box sx={{ textAlign: 'center', borderTop: '1px solid #000', mt: 1, pt: 1 }}>
+                    <Typography sx={{ fontSize: '9px', fontWeight: 'bold' }}>Thank you for your business!</Typography>
+                  </Box>
+                </Box>
+
+              <Box id="receipt-preview" className="thermal-receipt" sx={{ width: '100%', bgcolor: 'white', p: 3, color: '#000', fontWeight: 'bold', '& *': { fontWeight: 'bold !important', color: '#000 !important' } }}>
+                {/* Company Header */}
+                <Box sx={{ textAlign: 'center', py: 2, borderBottom: '2px solid #000' }}>
+                  <Typography variant="h5" sx={{
+                    fontWeight: 'bold',
+                    mb: 1,
+                    fontFamily: 'Arial, sans-serif',
+                    direction: 'rtl'
+                  }}>
+                    اتفاق آئرن اینڈ سیمنٹ سٹور
+                  </Typography>
+                  <Typography variant="body2" sx={{
+                    mb: 1,
+                    direction: 'rtl'
+                  }}>
+                    گجرات سرگودھا روڈ، پاہڑیانوالی
+                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
+                    <PhoneIcon sx={{ color: '#25D366', fontSize: '1rem' }} />
+                    <Typography variant="body2">
+                      Ph:- 0346-7560306, 0300-7560306
+                    </Typography>
+                  </Box>
+                  <Typography variant="h6" sx={{
+                    fontWeight: 'bold',
+                    textTransform: 'uppercase',
+                    letterSpacing: 1,
+                    mt: 1,
+                    color: currentBillData?.is_return ? '#d32f2f' : '#000'
+                  }}>
+                    {currentBillData?.is_return ? 'SALE RETURN INVOICE' : 'SALE INVOICE'}
+                  </Typography>
+                </Box>
+
+                {/* Customer and Invoice Details */}
+                <Box sx={{ px: 2, py: 2, borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between' }}>
+                  <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column' }}>
+                    <Box sx={{ display: 'flex', mb: 0.5 }}>
+                      <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Customer Name:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }}>
+                        {currentBillData.customer ? `${currentBillData.customer.cus_name}${currentBillData.customer.name_urdu ? ' ' + currentBillData.customer.name_urdu : ''}` : 'N/A'}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', mb: 0.5 }}>
+                      <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Phone No:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                        {currentBillData.customer?.cus_phone_no || 'N/A'}
+                      </Typography>
+                    </Box>
+                    {currentBillData.customer?.cus_address && (
+                      <Box sx={{ display: 'flex' }}>
+                        <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Address:</Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                          {currentBillData.customer.cus_address}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                  <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column', pl: 4 }}>
+                    <Box sx={{ display: 'flex', mb: 0.5 }}>
+                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Invoice No:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                        {getBillDisplayNo(currentBillData)}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', mb: 0.5 }}>
+                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Date:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                        {formatDatePK(currentBillData?.created_at) || '—'}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', mb: 0.5 }}>
+                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Time:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                        {formatTimePK(currentBillData?.created_at) || '—'}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', mb: 0.5 }}>
+                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Created By:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                        {getCreatedByName(currentBillData, currentUser)}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Box>
+
+                {/* Product Table */}
+                <Box sx={{ px: 2, py: 2 }}>
+                  <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.headerBg }}>
+                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>S#</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>Product Name</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Qty</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Rate</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Amount</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {currentBillData.sale_details && currentBillData.sale_details.length > 0 ? (
+                          getSaleDetailsInAddOrder(currentBillData.sale_details).map((detail, index) => (
+                            <TableRow key={detail.sale_detail_id || index}>
+                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{index + 1}</TableCell>
+                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{detail.product?.pro_title || 'N/A'}</TableCell>
+                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">{fmtRateQty(detail.qnty)}</TableCell>
+                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">{fmtRateQty(detail.unit_rate)}</TableCell>
+                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">{fmtAmt(detail.total_amount)}</TableCell>
+                            </TableRow>
+                          ))
+                        ) : (
+                          <TableRow>
+                            <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                              No items found
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+
+                  {/* Payment Summary */}
+                  <Box sx={{ mt: 2, width: '100%', display: 'flex', justifyContent: 'space-between', gap: 2 }}>
+                    <Box sx={{ flex: '0 0 48%' }}>
+                      {!isWalkinCustomer(currentBillData?.customer) && (
+                        <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #000', width: '100%' }}>
+                          <Table size="small">
+                            <TableBody>
+                              {currentBillData?.is_return ? (
+                                (() => {
+                                  const totalRefund = parseFloat(currentBillData.payment || 0);
+                                  const prevBal = parseFloat(currentBillData.previous_balance ?? currentBillData.previous_customer_balance ?? currentBillData.customer?.cus_balance ?? 0);
+                                  const productTotal = (currentBillData.sale_details || []).reduce((sum, item) => sum + (parseFloat(item.total_amount) || 0), 0);
+                                  const discount = parseFloat(currentBillData.discount || 0);
+                                  const labour = parseFloat(currentBillData.labour_charges || currentBillData.labour || 0);
+                                  const shipping = parseFloat(currentBillData.shipping_amount || 0);
+                                  const netReturn = productTotal - discount - labour - shipping;
+                                  const newBal = prevBal - netReturn + totalRefund;
+                                  return (
+                                    <>
+                                      <TableRow>
+                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>منسوخ کردہ رقم</TableCell>
+                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{fmtAmt(productTotal)}</TableCell>
+                                      </TableRow>
+                                      {discount > 0 && (
+                                        <TableRow>
+                                          <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>رعایت</TableCell>
+                                          <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>-{fmtAmt(discount)}</TableCell>
+                                        </TableRow>
+                                      )}
+                                      <TableRow>
+                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>مزدوری</TableCell>
+                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>-{fmtAmt(labour)}</TableCell>
+                                      </TableRow>
+                                      <TableRow>
+                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>کرایہ</TableCell>
+                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>-{fmtAmt(shipping)}</TableCell>
+                                      </TableRow>
+                                      <TableRow sx={{ bgcolor: '#e8f5e9' }}>
+                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>کل منسوخی</TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: '#2e7d32' }}>
+                                          {fmtAmt(netReturn)}
+                                        </TableCell>
+                                      </TableRow>
+                                      <TableRow sx={{ bgcolor: '#ffe0b2' }}>
+                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>کل واپسی</TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: '#e65100', fontSize: '1rem' }}>{fmtAmt(totalRefund)}</TableCell>
+                                      </TableRow>
+                                      <TableRow>
+                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>سابقہ بقایا</TableCell>
+                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{fmtAmt(prevBal)}</TableCell>
+                                      </TableRow>
+                                      <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.balanceTotalBg }}>
+                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>موجودہ بقایا</TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>{fmtAmt(newBal)}</TableCell>
+                                      </TableRow>
+                                    </>
+                                  );
+                                })()
+                              ) : (() => {
+                                const { prevBal, currentDue, totalBal } = resolveSaleReceiptBalances(currentBillData);
+                                return (
+                                  <>
+                                    <TableRow>
+                                      <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>سابقہ بقایا</TableCell>
+                                      <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>
+                                        {fmtAmt(prevBal)}
+                                      </TableCell>
+                                    </TableRow>
+                                    <TableRow>
+                                      <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>موجوده بقايا</TableCell>
+                                      <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>
+                                        {fmtAmt(currentDue)}
+                                      </TableCell>
+                                    </TableRow>
+                                    <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.balanceTotalBg }}>
+                                      <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>كل بقايا</TableCell>
+                                      <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>
+                                        {fmtAmt(totalBal)}
+                                      </TableCell>
+                                    </TableRow>
+                                  </>
+                                );
+                              })()}
+                            </TableBody>
+                          </Table>
+                        </TableContainer>
+                      )}
+                      {(currentBillData.notes || currentBillData.reference) && (
+                        <Box sx={{ mt: 1 }}>
+                          <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>
+                            <strong>تبصرے:</strong> {currentBillData.notes || currentBillData.reference}
+                          </Typography>
+                        </Box>
+                      )}
+                    </Box>
+                    <Box sx={{ flex: '0 0 48%', display: 'flex', justifyContent: 'flex-end' }}>
+                      <TableContainer component={Paper} variant="outlined" sx={{ border: '1px solid #000', width: '100%', maxWidth: '100%' }}>
+                        <Table size="small">
+                          <TableBody>
+                            {currentBillData?.is_return ? (
+                              // ── SALE RETURN right panel (Urdu) ──
+                              (() => {
+                                const productTotal = parseFloat(currentBillData.total_amount || 0);
+                                const labour = parseFloat(currentBillData.labour_charges || 0);
+                                const delivery = parseFloat(currentBillData.shipping_amount || 0);
+                                const discount = parseFloat(currentBillData.discount || 0);
+                                // netReturn = items - labour - delivery - discount
+                                const netReturn = productTotal - labour - delivery - discount;
+                                const cash = parseFloat(currentBillData.cash_refund || currentBillData.cash_payment || 0);
+                                const bank = parseFloat(currentBillData.bank_refund || currentBillData.bank_payment || 0);
+                                // remaining = net return not yet refunded
+                                const remaining = netReturn - (cash + bank);
+                                return (
+                                  <>
+                                    <TableRow>
+                                      <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رقم بل</TableCell>
+                                      <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>{fmtAmt(productTotal)}</TableCell>
+                                    </TableRow>
+                                    {labour > 0 && (
+                                      <TableRow>
+                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>مزدوری</TableCell>
+                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>-{fmtAmt(labour)}</TableCell>
+                                      </TableRow>
+                                    )}
+                                    {delivery > 0 && (
+                                      <TableRow>
+                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>کرایہ</TableCell>
+                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>-{fmtAmt(delivery)}</TableCell>
+                                      </TableRow>
+                                    )}
+                                    {discount > 0 && (
+                                      <TableRow>
+                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رعایت</TableCell>
+                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>-{fmtAmt(discount)}</TableCell>
+                                      </TableRow>
+                                    )}
+                                    <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.grandTotalBg }}>
+                                      <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>کل واپسی رقم</TableCell>
+                                      <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>{fmtAmt(netReturn)}</TableCell>
+                                    </TableRow>
+                                    <TableRow>
+                                      <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>نقد</TableCell>
+                                      <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>{fmtAmt(cash)}</TableCell>
+                                    </TableRow>
+                                    {bank > 0 && (
+                                      <TableRow>
+                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>{currentBillData.bank_title || 'بینک ادائیگی'}</TableCell>
+                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>{fmtAmt(bank)}</TableCell>
+                                      </TableRow>
+                                    )}
+                                    <TableRow sx={{ bgcolor: remaining > 0 ? '#ffe0b2' : '#e8f5e9' }}>
+                                      <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>باقی واجب الادا</TableCell>
+                                      <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: remaining > 0 ? '#e65100' : '#2e7d32' }}>{fmtAmt(remaining)}</TableCell>
+                                    </TableRow>
+                                  </>
+                                );
+                              })()
+                            ) : (
+                              // ── REGULAR SALE right panel ──
+                              <>
+                                <TableRow>
+                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رقم بل</TableCell>
+                                  <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                    {fmtAmt(parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.labour_charges || currentBillData.labour || 0) - parseFloat(currentBillData.shipping_amount || 0) + parseFloat(currentBillData.discount || 0))}
+                                  </TableCell>
+                                </TableRow>
+                                <TableRow>
+                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>مزدوری</TableCell>
+                                  <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                    {fmtAmt(currentBillData.labour_charges || currentBillData.labour)}
+                                  </TableCell>
+                                </TableRow>
+                                <TableRow>
+                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>کرایہ</TableCell>
+                                  <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                    {fmtAmt(currentBillData.shipping_amount)}
+                                  </TableCell>
+                                </TableRow>
+                                {parseFloat(currentBillData.discount || 0) > 0 && (
+                                  <TableRow>
+                                    <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رعایت</TableCell>
+                                    <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                      {fmtAmt(currentBillData.discount)}
+                                    </TableCell>
+                                  </TableRow>
+                                )}
+                                <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.grandTotalBg }}>
+                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>كل رقم</TableCell>
+                                  <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>
+                                    {fmtAmt(currentBillData.total_amount)}
+                                  </TableCell>
+                                </TableRow>
+                                <TableRow>
+                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>نقد كيش</TableCell>
+                                  <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                    {fmtAmt(currentBillData.cash_payment)}
+                                  </TableCell>
+                                </TableRow>
+                                {currentBillData.bank_payment > 0 && (
+                                  <TableRow>
+                                    <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                      {currentBillData.bank_title || 'بینک'}
+                                    </TableCell>
+                                    <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                      {fmtAmt(currentBillData.bank_payment)}
+                                    </TableCell>
+                                  </TableRow>
+                                )}
+                                <TableRow sx={{ bgcolor: '#d0d0d0' }}>
+                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>بقايا رقم</TableCell>
+                                  <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                    {fmtAmt(parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0))}
+                                  </TableCell>
+                                </TableRow>
+                              </>
+                            )}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    </Box>
+                  </Box>
+                </Box>
+              </Box>
+              </>
+            )}
+          </DialogContent>
+          <DialogActions sx={{ p: 3, bgcolor: 'grey.50', borderTop: '1px solid #e0e0e0' }} className="no-print">
+            <Button
+              onClick={() => setReceiptDialogOpen(false)}
+              variant="outlined"
+              sx={{ minWidth: 100 }}
+            >
+              Close
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={isSendingWhatsApp ? <CircularProgress size={16} sx={{ color: 'white' }} /> : null}
+              sx={{
+                minWidth: 150,
+                bgcolor: '#25D366',
+                '&:hover': { bgcolor: '#1ebe5d' },
+                color: 'white'
+              }}
+              onClick={() => handleSendWhatsApp(currentBillData)}
+              disabled={isSendingWhatsApp}
+              title="Copy invoice to clipboard and open WhatsApp Desktop"
+            >
+              {isSendingWhatsApp ? 'Copying...' : '📲 WhatsApp'}
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<PrintIcon />}
+              sx={{
+                minWidth: 150,
+                bgcolor: 'primary.main',
+                '&:hover': { bgcolor: 'primary.dark' }
+              }}
+              onClick={() => handlePrintBill('A4', true)}
+            >
+              Print A4
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<PrintIcon />}
+              sx={{
+                minWidth: 150,
+                bgcolor: '#fd7e14',
+                '&:hover': { bgcolor: '#e8690b' }
+              }}
+              onClick={() => handlePrintBill('THERMAL', true)}
+            >
+              Print Thermal
+            </Button>
+          </DialogActions>
+        </Dialog>
 
       {/* Load Order Dialog */}
       <Dialog

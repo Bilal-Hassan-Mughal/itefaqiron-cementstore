@@ -245,23 +245,164 @@ async function prepareLedgerDeletion(tx, bill_no) {
   }
 }
 
+/** Parse date string preserving time in Karachi timezone (+05:00) */
+function parseLocalDateInKarachi(dateStr, timeSource = new Date()) {
+  if (!dateStr) return null;
+  if (dateStr instanceof Date) return isNaN(dateStr.getTime()) ? null : dateStr;
+  const str = String(dateStr).trim();
+
+  let datePart = '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    datePart = str;
+  } else {
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+      datePart = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
+    } else {
+      return null;
+    }
+  }
+
+  const parts = datePart.split('-');
+  if (parts.length !== 3) return null;
+  const [year, month, day] = parts.map(Number);
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
+
+  const now = timeSource instanceof Date && !isNaN(timeSource.getTime()) ? timeSource : new Date();
+  const timeFormatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Karachi',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+  const timeFormatted = timeFormatter.format(now);
+  const iso = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${timeFormatted}.000+05:00`;
+  const result = new Date(iso);
+  return isNaN(result.getTime()) ? new Date(str) : result;
+}
+
+/**
+ * Calculates previous customer balance for a sale receipt / invoice:
+ * Closing balance of the last ledger entry for this customer strictly before this sale bill.
+ */
+async function getPreviousCustomerBalance(tx, cus_id, sale_id, target_created_at) {
+  const parsedCusId = parseInt(cus_id, 10);
+  const saleIdStr = String(sale_id || '');
+  const billNoMatches = saleIdStr ? [
+    saleIdStr,
+    `SALE-${saleIdStr}`,
+    `BILL-${saleIdStr}`,
+    `ORDER-${saleIdStr}`
+  ] : [];
+
+  // 1. If this bill has an existing ledger entry for this customer, its opening_balance is the exact pre-bill balance!
+  if (billNoMatches.length) {
+    const billFirstEntry = await tx.ledger.findFirst({
+      where: {
+        cus_id: parsedCusId,
+        bill_no: { in: billNoMatches }
+      },
+      orderBy: [
+        { created_at: 'asc' },
+        { l_id: 'asc' }
+      ],
+      select: { opening_balance: true }
+    });
+    if (billFirstEntry) {
+      return parseFloat(billFirstEntry.opening_balance || 0);
+    }
+  }
+
+  // 2. Otherwise find the last entry strictly before target_created_at
+  const lastEntryBefore = await tx.ledger.findFirst({
+    where: {
+      cus_id: parsedCusId,
+      ...(billNoMatches.length ? { bill_no: { notIn: billNoMatches } } : {}),
+      created_at: { lt: target_created_at }
+    },
+    orderBy: [
+      { created_at: 'desc' },
+      { l_id: 'desc' }
+    ],
+    select: { closing_balance: true }
+  });
+
+  if (lastEntryBefore) {
+    return parseFloat(lastEntryBefore.closing_balance || 0);
+  }
+
+  // 3. Fallback: entries at exact same timestamp before this bill
+  const sameTimeEntryBefore = await tx.ledger.findFirst({
+    where: {
+      cus_id: parsedCusId,
+      ...(billNoMatches.length ? { bill_no: { notIn: billNoMatches } } : {}),
+      created_at: target_created_at
+    },
+    orderBy: [
+      { l_id: 'desc' }
+    ],
+    select: { closing_balance: true }
+  });
+
+  if (sameTimeEntryBefore) {
+    return parseFloat(sameTimeEntryBefore.closing_balance || 0);
+  }
+
+  return 0;
+}
+
 /** Chronologically recalculates all ledger entry opening/closing balances for a customer and updates their customer table balance. */
-async function recalculateLedgerBalances(tx, cus_id) {
+async function recalculateLedgerBalances(tx, cus_id, startFromDate = null) {
   const customer = await tx.customer.findUnique({
     where: { cus_id },
-    include: { customer_category: true }
+    select: { cus_id: true, cus_name: true }
   });
   if (!customer) return;
 
-  const categoryTitle = (customer.customer_category?.cus_cat_title || '').toLowerCase();
+  let prior = null;
+  if (startFromDate) {
+    prior = await tx.ledger.findFirst({
+      where: {
+        cus_id,
+        created_at: { lt: startFromDate }
+      },
+      orderBy: [
+        { created_at: 'desc' },
+        { l_id: 'desc' }
+      ],
+      select: {
+        l_id: true,
+        closing_balance: true
+      }
+    });
+  }
+
+  let runningBalance = prior ? parseFloat(prior.closing_balance || 0) : 0;
 
   const entries = await tx.ledger.findMany({
-    where: { cus_id },
+    where: {
+      cus_id,
+      ...(prior ? { created_at: { gte: startFromDate } } : {})
+    },
     orderBy: [
       { created_at: 'asc' },
       { l_id: 'asc' }
-    ]
+    ],
+    select: {
+      l_id: true,
+      created_at: true,
+      bill_no: true,
+      opening_balance: true,
+      closing_balance: true,
+      debit_amount: true,
+      credit_amount: true
+    }
   });
+
+  if (!prior && entries.length > 0) {
+    runningBalance = parseFloat(entries[0].opening_balance || 0);
+  }
 
   // Re-sort in JS: created_at ASC → bill_no (numeric) ASC → l_id ASC
   // This is critical for PUT (edit) operations: when entries are deleted and
@@ -277,52 +418,73 @@ async function recalculateLedgerBalances(tx, cus_id) {
     return a.l_id - b.l_id;
   });
 
-  let runningBalance = 0;
-  const updates = [];
-  if (entries.length > 0) {
-    runningBalance = parseFloat(entries[0].opening_balance || 0);
-    
-    for (const entry of entries) {
-      const opening = runningBalance;
-      const debit = parseFloat(entry.debit_amount || 0);
-      const credit = parseFloat(entry.credit_amount || 0);
-      
-      let change = 0;
-      if (categoryTitle.includes('cash') || categoryTitle.includes('bank')) {
-        change = debit - credit;
-      } else {
-        change = debit - credit;
-      }
-      const closing = opening + change;
+  const rowUpdates = [];
+  for (const entry of entries) {
+    const opening = runningBalance;
+    const debit = parseFloat(entry.debit_amount || 0);
+    const credit = parseFloat(entry.credit_amount || 0);
+    const change = debit - credit;
+    const closing = opening + change;
 
-      if (
-        Math.abs(parseFloat(entry.opening_balance) - opening) > 0.01 ||
-        Math.abs(parseFloat(entry.closing_balance) - closing) > 0.01
-      ) {
-        updates.push(
-          tx.ledger.update({
-            where: { l_id: entry.l_id },
-            data: {
-              opening_balance: Number(opening.toFixed(2)),
-              closing_balance: Number(closing.toFixed(2))
-            }
-          })
-        );
-      }
-      runningBalance = closing;
+    if (
+      Math.abs(parseFloat(entry.opening_balance) - opening) > 0.009 ||
+      Math.abs(parseFloat(entry.closing_balance) - closing) > 0.009
+    ) {
+      rowUpdates.push({
+        l_id: entry.l_id,
+        opening_balance: Number(opening.toFixed(2)),
+        closing_balance: Number(closing.toFixed(2))
+      });
     }
+    runningBalance = closing;
   }
 
-  if (updates.length > 0) {
-    const client = typeof tx.$transaction === 'function' ? tx : prisma;
-    await client.$transaction(updates);
+  if (rowUpdates.length === 1) {
+    await tx.ledger.update({
+      where: { l_id: rowUpdates[0].l_id },
+      data: {
+        opening_balance: rowUpdates[0].opening_balance,
+        closing_balance: rowUpdates[0].closing_balance
+      }
+    });
+  } else if (rowUpdates.length > 1) {
+    const CHUNK_SIZE = 100;
+    for (let i = 0; i < rowUpdates.length; i += CHUNK_SIZE) {
+      const chunk = rowUpdates.slice(i, i + CHUNK_SIZE);
+      const openCases = chunk.map((u) => `WHEN ${u.l_id} THEN ${u.opening_balance}`).join(' ');
+      const closeCases = chunk.map((u) => `WHEN ${u.l_id} THEN ${u.closing_balance}`).join(' ');
+      const idsStr = chunk.map((u) => u.l_id).join(', ');
+      await tx.$executeRawUnsafe(`
+        UPDATE ledger
+        SET opening_balance = CASE l_id ${openCases} END,
+            closing_balance = CASE l_id ${closeCases} END
+        WHERE l_id IN (${idsStr})
+      `);
+    }
   }
 
   await tx.customer.update({
     where: { cus_id },
     data: { cus_balance: Number(runningBalance.toFixed(2)) }
   });
-  saleLog(`   📊 Recalculated ledger for ${customer.cus_name} (ID: ${cus_id}). Final balance: ${runningBalance.toFixed(2)} (${updates.length} entries updated in batch)`);
+  saleLog(`   📊 Recalculated ledger for ${customer.cus_name} (ID: ${cus_id}) from ${startFromDate ? startFromDate.toISOString() : 'start'}. Final balance: ${runningBalance.toFixed(2)} (${rowUpdates.length} rows patched)`);
+}
+
+function isLockWaitError(err) {
+  const msg = String(err?.message || err || '');
+  return msg.includes('1205') || msg.includes('Lock wait timeout');
+}
+
+async function recalculateLedgerBalancesWithRetry(cus_id, maxAttempts = 3, startFromDate = null) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await recalculateLedgerBalances(prisma, cus_id, startFromDate);
+      return;
+    } catch (err) {
+      if (!isLockWaitError(err) || attempt === maxAttempts) throw err;
+      await new Promise((r) => setTimeout(r, 200 * attempt));
+    }
+  }
 }
 
 // GET - Fetch all sales with related data
@@ -499,11 +661,25 @@ export async function GET(request) {
             account: entry.customer
           }));
 
+        let previousCustomerBalance = 0;
+        try {
+          previousCustomerBalance = await getPreviousCustomerBalance(
+            prisma,
+            sale.cus_id,
+            sale.sale_id,
+            sale.created_at
+          );
+        } catch (err) {
+          console.warn('Could not compute previous customer balance for sale in GET', sale.sale_id, err.message);
+        }
+
         const saleWithBillNumber = { 
           ...sale, 
           notes: sale.notes || sale.reference || null,
           bill_number: sale.bill_number ?? null,
-          transport_details: transportDetails
+          transport_details: transportDetails,
+          previous_customer_balance: previousCustomerBalance,
+          previous_balance: previousCustomerBalance
         };
 
         return NextResponse.json(saleWithBillNumber);
@@ -610,6 +786,18 @@ export async function GET(request) {
               }
             }));
 
+          let previousCustomerBalance = 0;
+          try {
+            previousCustomerBalance = await getPreviousCustomerBalance(
+              prisma,
+              Number(sale[0].cus_id),
+              sale[0].sale_id,
+              sale[0].created_at
+            );
+          } catch (err) {
+            console.warn('Could not compute previous customer balance for sale in raw GET fallback', err.message);
+          }
+
           const result = {
             ...sale[0],
             notes: sale[0].notes || sale[0].reference || null,
@@ -624,7 +812,9 @@ export async function GET(request) {
             } : null,
             sale_details: saleDetails || [],
             split_payments: transformedSplitPayments || [],
-            transport_details: transportDetailsFallback
+            transport_details: transportDetailsFallback,
+            previous_customer_balance: previousCustomerBalance,
+            previous_balance: previousCustomerBalance
           };
 
           return NextResponse.json(result);
@@ -1114,7 +1304,9 @@ export async function POST(request) {
       is_loaded_order, // Flag to indicate if this is a loaded order
       order_id,
       loaded_order_id,
-      updated_by
+      updated_by,
+      date = null,
+      created_at: body_created_at = null
     } = body;
 
     // Debug: Log received labour_charges
@@ -1237,7 +1429,14 @@ export async function POST(request) {
 
       saleLog(`   Customer name: ${customer.cus_name}`);
 
-      const saleCreatedAt = new Date();
+      let saleCreatedAt = new Date();
+      if (date) {
+        const parsed = parseLocalDateInKarachi(date);
+        if (parsed && !isNaN(parsed.getTime())) saleCreatedAt = parsed;
+      } else if (body_created_at) {
+        const parsed = new Date(body_created_at);
+        if (!isNaN(parsed.getTime())) saleCreatedAt = parsed;
+      }
       const customerOpeningBalance = await resolveOpeningBalance(tx, cusIdNum, saleCreatedAt);
       saleLog(`   Customer opening balance (pre-sale): ${customerOpeningBalance}`);
 
@@ -1287,6 +1486,7 @@ export async function POST(request) {
             bill_type: bill_type || 'BILL',
             bill_number: nextBillNumber,
             reference: reference || null,
+            created_at: saleCreatedAt,
             updated_by: validatedUpdatedBy
           }
         });
@@ -1790,7 +1990,8 @@ export async function POST(request) {
               cash_payment: entry.cash_payment || 0,
               bank_payment: entry.bank_payment || 0,
               updated_by: entry.updated_by,
-              ledger_type: entry.ledger_type || null
+              ledger_type: entry.ledger_type || null,
+              created_at: saleCreatedAt
             }))
           });
 
@@ -1943,7 +2144,39 @@ export async function POST(request) {
       maxWait: 60000
     });
 
-    return NextResponse.json(result, { status: 201 });
+    const targetCreatedAt = result.created_at || new Date();
+    if (result.affectedCusIds?.length > 0) {
+      for (const cid of result.affectedCusIds) {
+        try {
+          await recalculateLedgerBalancesWithRetry(cid, 3, targetCreatedAt);
+        } catch (err) {
+          console.error(`Ledger recalc failed for customer ${cid} after POST:`, err);
+        }
+      }
+    }
+
+    let previousCustomerBalance = 0;
+    try {
+      previousCustomerBalance = await getPreviousCustomerBalance(
+        prisma,
+        result.cus_id,
+        result.sale_id,
+        targetCreatedAt
+      );
+    } catch (err) {
+      console.warn('Could not compute previous customer balance in POST:', err.message);
+    }
+
+    const freshCustomer = await prisma.customer.findUnique({
+      where: { cus_id: result.cus_id }
+    });
+
+    return NextResponse.json({
+      ...result,
+      customer: freshCustomer || result.customer,
+      previous_balance: previousCustomerBalance,
+      previous_customer_balance: previousCustomerBalance
+    }, { status: 201 });
   } catch (error) {
     console.error('Error creating sale:', error);
     const errorMessage = error.message || 'Failed to create sale';
@@ -2024,7 +2257,9 @@ export async function PUT(request) {
       sale_details,
       transport_details,
       split_payments,
-      updated_by
+      updated_by,
+      date = null,
+      created_at: body_created_at = null
     } = body;
 
     if (!id) {
@@ -2057,18 +2292,48 @@ export async function PUT(request) {
 
     const affectedCusIds = new Set();
     const oldOpeningBalances = {};
+    let existingSale = null;
+    let targetCreatedAt = new Date();
 
     const result = await prisma.$transaction(async (tx) => {
       // ═══════════════════════════════════════════
       // 1. FETCH EXISTING DATA
       // ═══════════════════════════════════════════
-      const existingSale = await tx.sale.findUnique({
+      existingSale = await tx.sale.findUnique({
         where: { sale_id: id },
         include: { sale_details: true }
       });
 
       if (!existingSale) {
         throw new Error('Sale not found');
+      }
+
+      // Determine target sale date:
+      // If user explicitly changed the date to a different day, use the new date.
+      // Otherwise, preserve the original created_at timestamp of the existing sale.
+      targetCreatedAt = existingSale.created_at;
+      if (date) {
+        const existingDateStr = new Date(existingSale.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
+        let bodyDateStr = '';
+        if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
+          bodyDateStr = date.trim();
+        } else {
+          const d = new Date(date);
+          if (!isNaN(d.getTime())) {
+            bodyDateStr = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
+          }
+        }
+        if (bodyDateStr && bodyDateStr !== existingDateStr) {
+          const parsed = parseLocalDateInKarachi(bodyDateStr, existingSale.created_at);
+          if (parsed && !isNaN(parsed.getTime())) {
+            targetCreatedAt = parsed;
+          }
+        }
+      } else if (body_created_at) {
+        const parsed = new Date(body_created_at);
+        if (!isNaN(parsed.getTime())) {
+          targetCreatedAt = parsed;
+        }
       }
 
       const customer = await tx.customer.findUnique({
@@ -2224,6 +2489,7 @@ export async function PUT(request) {
           labour_charges: Number(parseFloat(labour_charges || 0).toFixed(2)),
           bill_type: bill_type || 'BILL',
           reference: reference || null,
+          created_at: targetCreatedAt,
           updated_by: validatedUpdatedBy
         }
       });
@@ -2295,7 +2561,7 @@ export async function PUT(request) {
           if (oldOpeningBalances[accountId]) {
             return parseFloat(oldOpeningBalances[accountId].opening_balance || 0);
           }
-          return await resolveOpeningBalance(tx, accountId, existingSale.created_at);
+          return await resolveOpeningBalance(tx, accountId, targetCreatedAt);
         };
 
         // Re-fetch customer balance AFTER reversals to get the clean pre-sale state
@@ -2663,7 +2929,7 @@ export async function PUT(request) {
               bank_payment: entry.bank_payment || 0,
               updated_by: entry.updated_by,
               ledger_type: entry.ledger_type,
-              created_at: existingSale.created_at // PRESERVE TIMESTAMP!
+              created_at: targetCreatedAt // PRESERVE TIMESTAMP!
             }
           });
           saleLog(`   ✅ Entry ${i + 1}/${ledgerEntries.length}: ${entry.trnx_type} on account ${entry.cus_id}`);
@@ -2731,15 +2997,42 @@ export async function PUT(request) {
       timeout: 120000 // 120 seconds timeout
     });
 
-    // Recalculate in background — sale update already wrote ledger lines; don't block the response.
-    if (affectedCusIds?.length > 0) {
-      const uniqueIds = [...new Set(affectedCusIds)];
-      void Promise.all(uniqueIds.map((cid) => recalculateLedgerBalances(prisma, cid))).catch((err) => {
-        console.error('Background ledger recalc after sale update failed:', err);
-      });
+    // Recalculate balances chronologically for all affected accounts synchronously with retry
+    const recalcStartDate = existingSale?.created_at && existingSale.created_at < targetCreatedAt
+      ? existingSale.created_at
+      : targetCreatedAt;
+
+    const uniqueIds = [...new Set(Array.from(affectedCusIds).filter(Boolean))];
+    for (const cid of uniqueIds) {
+      try {
+        await recalculateLedgerBalancesWithRetry(cid, 3, recalcStartDate);
+      } catch (err) {
+        console.error(`Ledger recalc failed for account ${cid}:`, err);
+      }
     }
 
-    return NextResponse.json(result);
+    let previousCustomerBalance = 0;
+    try {
+      previousCustomerBalance = await getPreviousCustomerBalance(
+        prisma,
+        parseInt(cus_id),
+        id,
+        targetCreatedAt
+      );
+    } catch (err) {
+      console.warn('Could not compute previous customer balance for sale', id, err.message);
+    }
+
+    const freshCustomer = await prisma.customer.findUnique({
+      where: { cus_id: parseInt(cus_id) }
+    });
+
+    return NextResponse.json({
+      ...result,
+      customer: freshCustomer || result.customer,
+      previous_balance: previousCustomerBalance,
+      previous_customer_balance: previousCustomerBalance,
+    });
   } catch (error) {
     console.error('Error updating sale:', error);
     return NextResponse.json({ error: 'Failed to update sale', details: error.message }, { status: 500 });
@@ -2810,11 +3103,12 @@ export async function DELETE(request) {
     const specialAccounts = await getSpecialAccountsForSale();
 
     const affectedCusIds = new Set();
+    let existingSale = null;
 
     // Use transaction to ensure data consistency
     await prisma.$transaction(async (tx) => {
       // Get existing sale with details
-      const existingSale = await tx.sale.findUnique({
+      existingSale = await tx.sale.findUnique({
         where: { sale_id: id },
         include: {
           sale_details: true
@@ -2886,8 +3180,13 @@ export async function DELETE(request) {
     });
 
     // Recalculate balances chronologically for all affected accounts (outside transaction)
+    const recalcStartDate = existingSale?.created_at || new Date();
     for (const cid of affectedCusIds) {
-      await recalculateLedgerBalances(prisma, cid);
+      try {
+        await recalculateLedgerBalancesWithRetry(cid, 3, recalcStartDate);
+      } catch (err) {
+        console.error(`Ledger recalc failed for customer ${cid} after DELETE:`, err);
+      }
     }
 
     return NextResponse.json({ message: 'Sale deleted successfully' });
