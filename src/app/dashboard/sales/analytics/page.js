@@ -634,15 +634,19 @@ export default function SalesAnalyticsPage() {
                           >
                             <td className={tdCls}>{i + 1}</td>
                             <td
-                              className={`${tdCls} font-mono font-semibold text-indigo-700`}
+                              className={`${tdCls} font-mono font-semibold ${r.billType === 'SALE_RETURN' ? 'text-amber-700' : 'text-indigo-700'}`}
                             >
-                              #{r.saleId}
+                              {String(r.saleId).startsWith('SR-') ? r.saleId : `#${r.saleId}`}
                             </td>
                             <td className={`${tdCls} whitespace-nowrap`}>{fmtDate(r.date)}</td>
                             <td className={`${tdCls} font-medium`}>{r.customer}</td>
                             <td className={tdCls}>
-                              <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-xs">
-                                {r.billType}
+                              <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                                r.billType === 'SALE_RETURN'
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-slate-100 text-slate-600'
+                              }`}>
+                                {r.billType === 'SALE_RETURN' ? 'RETURN' : r.billType}
                               </span>
                             </td>
                             <td className={tdRCls}>{r.items}</td>

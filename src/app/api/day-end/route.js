@@ -171,7 +171,7 @@ export async function GET(request) {
     });
   } catch (error) {
     console.error('Error fetching day end data:', error);
-    return NextResponse.json({ error: 'Failed to fetch day end data' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to fetch day end data: ' + error.message, stack: error.stack }, { status: 500 });
   }
 }
 

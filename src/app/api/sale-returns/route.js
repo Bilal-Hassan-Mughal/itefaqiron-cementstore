@@ -867,6 +867,348 @@ export async function POST(request) {
   }
 }
 
+// PUT - Update an existing sale return
+export async function PUT(request) {
+  const __branchScope = await initBranchScope(request);
+  if (__branchScope.error) return __branchScope.error;
+  const dayClosed = await rejectIfDayClosed();
+  if (dayClosed) return dayClosed;
+
+  try {
+    const body = await request.json();
+    const {
+      id,
+      return_id,
+      sale_id,
+      cus_id,
+      total_amount,
+      discount,
+      payment,
+      payment_type,
+      cash_return,
+      bank_return,
+      bank_account_id,
+      debit_account_id,
+      credit_account_id,
+      loader_id,
+      labour_charges,
+      shipping_amount,
+      bill_type,
+      reason,
+      reference,
+      return_details,
+      manual_sale_inv,
+      updated_by
+    } = body;
+
+    const targetReturnId = id ? parseInt(id) : (return_id ? parseInt(return_id) : null);
+    if (!targetReturnId || isNaN(targetReturnId)) {
+      return NextResponse.json({ error: 'Sale return ID is required' }, { status: 400 });
+    }
+
+    if (!cus_id || !return_details || return_details.length === 0) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    const computedTotal = Array.isArray(return_details)
+      ? return_details.reduce((sum, d) => sum + (parseFloat(d.total_amount) || (parseFloat(d.qnty || 0) * parseFloat(d.unit_rate || 0)) || 0), 0)
+      : 0;
+    const discountAmount = parseFloat(discount || 0);
+    const labourChargesAmount = parseFloat(labour_charges || 0);
+    const shippingAmount = parseFloat(shipping_amount || 0);
+    const grandTotal = computedTotal - labourChargesAmount - shippingAmount - discountAmount;
+    const refundAmount = parseFloat(payment || 0);
+    const cashRefund = parseFloat(cash_return || 0);
+    const bankRefund = parseFloat(bank_return || 0);
+
+    const validatedUpdatedBy = await resolveUpdatedByUserId(request, updated_by, prisma);
+
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Fetch existing return
+      const existingReturn = await tx.saleReturn.findUnique({
+        where: { return_id: targetReturnId },
+        include: {
+          return_details: true,
+          sale: true
+        }
+      });
+
+      if (!existingReturn) {
+        throw new Error('Sale return not found');
+      }
+
+      // Collect affected account IDs
+      const oldEntries = await tx.ledger.findMany({
+        where: { bill_no: targetReturnId.toString() },
+        select: { cus_id: true }
+      });
+      const affectedCusIds = new Set(oldEntries.map(e => e.cus_id));
+      affectedCusIds.add(cus_id);
+      affectedCusIds.add(existingReturn.cus_id);
+
+      // 2. Reverse previous store stock
+      for (const d of existingReturn.return_details) {
+        const rawStoreId = d.store_id || existingReturn.sale?.store_id;
+        const targetStoreId = rawStoreId ? parseInt(rawStoreId) : null;
+        if (targetStoreId && !isNaN(targetStoreId)) {
+          await updateStoreStock(targetStoreId, d.pro_id, parseInt(d.qnty), 'decrement', validatedUpdatedBy, tx);
+        }
+      }
+
+      // 3. If loader was involved previously, restore loader balance
+      if (existingReturn.loader_id && parseFloat(existingReturn.shipping_amount || 0) > 0) {
+        await tx.loader.update({
+          where: { loader_id: existingReturn.loader_id },
+          data: {
+            loader_balance: {
+              increment: parseFloat(existingReturn.shipping_amount)
+            }
+          }
+        });
+      }
+
+      // 4. Delete old ledger entries & return details
+      await tx.ledger.deleteMany({
+        where: { bill_no: targetReturnId.toString() }
+      });
+      await tx.saleReturnDetail.deleteMany({
+        where: { return_id: targetReturnId }
+      });
+
+      // 5. Update SaleReturn record
+      const parsedSaleId = (sale_id && typeof sale_id === 'string' && !sale_id.startsWith('SR-'))
+        ? parseInt(sale_id, 10)
+        : (typeof sale_id === 'number' && !isNaN(sale_id) ? sale_id : (existingReturn.sale_id || null));
+
+      const updatedReturn = await tx.saleReturn.update({
+        where: { return_id: targetReturnId },
+        data: {
+          sale_id: parsedSaleId,
+          cus_id,
+          total_amount: computedTotal,
+          discount: discountAmount,
+          payment: refundAmount,
+          payment_type: payment_type || existingReturn.payment_type || 'CASH',
+          debit_account_id: debit_account_id || null,
+          credit_account_id: credit_account_id || null,
+          loader_id: loader_id || null,
+          labour_charges: labourChargesAmount,
+          shipping_amount: shippingAmount,
+          reason: reason || existingReturn.reason || null,
+          reference: reference || existingReturn.reference || null,
+          manual_sale_inv: manual_sale_inv || existingReturn.manual_sale_inv || null,
+          updated_by: validatedUpdatedBy
+        }
+      });
+
+      // 6. Create new return details and increment store stock
+      for (const detail of return_details) {
+        let unit = 'PCS';
+        if (existingReturn.sale) {
+          const originalDetail = existingReturn.sale.sale_details?.find(sd => sd.pro_id === detail.pro_id);
+          if (originalDetail) unit = originalDetail.unit;
+        } else if (detail.unit) {
+          unit = detail.unit;
+        }
+
+        const rawStoreId = detail.store_id || detail.storeid || existingReturn.sale?.store_id;
+        const targetStoreId = rawStoreId ? parseInt(rawStoreId) : null;
+        const qntyNum = parseInt(detail.qnty || detail.return_quantity || 0);
+        const rateNum = parseFloat(detail.unit_rate || 0);
+        const lineTotal = parseFloat(detail.total_amount || detail.return_amount || (qntyNum * rateNum) || 0);
+        const lineDiscount = parseFloat(detail.discount || 0);
+
+        await tx.saleReturnDetail.create({
+          data: {
+            return_id: targetReturnId,
+            pro_id: detail.pro_id,
+            qnty: qntyNum,
+            unit: unit,
+            unit_rate: rateNum,
+            total_amount: lineTotal,
+            discount: lineDiscount,
+            net_total: lineTotal - lineDiscount,
+            cus_id,
+            store_id: targetStoreId && !isNaN(targetStoreId) ? targetStoreId : null,
+            updated_by: validatedUpdatedBy
+          }
+        });
+
+        if (targetStoreId && !isNaN(targetStoreId) && qntyNum > 0) {
+          await updateStoreStock(targetStoreId, detail.pro_id, qntyNum, 'increment', validatedUpdatedBy, tx);
+        }
+      }
+
+      // 7. Get fresh customer balance for ledger
+      const customer = await tx.customer.findUnique({ where: { cus_id } });
+      const cusBal = parseFloat(customer?.cus_balance || 0);
+
+      // Ledger Entry 1: Customer Credit for Return
+      const l_id_sr = await getNextId('ledger', 'l_id', tx);
+      await tx.ledger.create({
+        data: {
+          l_id: l_id_sr,
+          cus_id,
+          opening_balance: cusBal,
+          debit_amount: 0,
+          credit_amount: grandTotal,
+          closing_balance: cusBal - grandTotal,
+          bill_no: targetReturnId.toString(),
+          trnx_type: 'CREDIT',
+          ledger_type: 'Sale Return',
+          details: `Sale Return - Product: ${computedTotal}, Delivery: -${shippingAmount}, Labour: -${labourChargesAmount}, Discount: -${discountAmount}, Net: ${grandTotal}`,
+          payments: 0,
+          updated_by: validatedUpdatedBy
+        }
+      });
+
+      // Special accounts for refund
+      const specialAccounts = await getSpecialAccounts(tx);
+
+      // Ledger Entry 2: Cash Refund
+      if (cashRefund > 0) {
+        const cashAccount = specialAccounts.cash;
+        if (cashAccount) {
+          affectedCusIds.add(cashAccount.cus_id);
+
+          const l_id_cash_out = await getNextId('ledger', 'l_id', tx);
+          await tx.ledger.create({
+            data: {
+              l_id: l_id_cash_out,
+              cus_id: cashAccount.cus_id,
+              opening_balance: cashAccount.cus_balance,
+              debit_amount: 0,
+              credit_amount: cashRefund,
+              closing_balance: cashAccount.cus_balance - cashRefund,
+              bill_no: targetReturnId.toString(),
+              trnx_type: 'CREDIT',
+              ledger_type: 'Sale Return',
+              details: `Refund Paid Out (CASH) - Sale Return #${targetReturnId} - Amount: ${cashRefund}`,
+              payments: cashRefund,
+              updated_by: validatedUpdatedBy
+            }
+          });
+
+          await tx.customer.update({
+            where: { cus_id: cashAccount.cus_id },
+            data: { cus_balance: cashAccount.cus_balance - cashRefund }
+          });
+
+          const l_id_cus_cash = await getNextId('ledger', 'l_id', tx);
+          await tx.ledger.create({
+            data: {
+              l_id: l_id_cus_cash,
+              cus_id,
+              opening_balance: cusBal - grandTotal,
+              debit_amount: cashRefund,
+              credit_amount: 0,
+              closing_balance: cusBal - grandTotal + cashRefund,
+              bill_no: targetReturnId.toString(),
+              trnx_type: 'DEBIT',
+              ledger_type: 'Sale Return',
+              details: `Customer Balance Update - CASH Refund Received: ${cashRefund} for Sale Return #${targetReturnId}`,
+              payments: 0,
+              updated_by: validatedUpdatedBy
+            }
+          });
+        }
+      }
+
+      // Ledger Entry 3: Bank Refund
+      if (bankRefund > 0) {
+        let bankAccount = null;
+        if (bank_account_id) {
+          bankAccount = await tx.customer.findUnique({
+            where: { cus_id: parseInt(bank_account_id) }
+          });
+        }
+        if (!bankAccount) {
+          bankAccount = specialAccounts.bank;
+        }
+
+        if (bankAccount) {
+          affectedCusIds.add(bankAccount.cus_id);
+
+          const l_id_bank_out = await getNextId('ledger', 'l_id', tx);
+          await tx.ledger.create({
+            data: {
+              l_id: l_id_bank_out,
+              cus_id: bankAccount.cus_id,
+              opening_balance: bankAccount.cus_balance,
+              debit_amount: 0,
+              credit_amount: bankRefund,
+              closing_balance: bankAccount.cus_balance - bankRefund,
+              bill_no: targetReturnId.toString(),
+              trnx_type: 'CREDIT',
+              ledger_type: 'Sale Return',
+              details: `Refund Paid Out (BANK) - Sale Return #${targetReturnId} - Amount: ${bankRefund}`,
+              payments: bankRefund,
+              updated_by: validatedUpdatedBy
+            }
+          });
+
+          await tx.customer.update({
+            where: { cus_id: bankAccount.cus_id },
+            data: { cus_balance: bankAccount.cus_balance - bankRefund }
+          });
+
+          const customerAfterBank = cusBal - grandTotal + cashRefund + bankRefund;
+          const l_id_cus_bank = await getNextId('ledger', 'l_id', tx);
+          await tx.ledger.create({
+            data: {
+              l_id: l_id_cus_bank,
+              cus_id,
+              opening_balance: cusBal - grandTotal + cashRefund,
+              debit_amount: bankRefund,
+              credit_amount: 0,
+              closing_balance: customerAfterBank,
+              bill_no: targetReturnId.toString(),
+              trnx_type: 'DEBIT',
+              ledger_type: 'Sale Return',
+              details: `Customer Balance Update - BANK Refund Received: ${bankRefund} for Sale Return #${targetReturnId}`,
+              payments: 0,
+              updated_by: validatedUpdatedBy
+            }
+          });
+        }
+      }
+
+      // Customer balance net update
+      await tx.customer.update({
+        where: { cus_id },
+        data: {
+          cus_balance: cusBal - grandTotal + refundAmount
+        }
+      });
+
+      // Loader update
+      if (loader_id && shippingAmount > 0) {
+        await tx.loader.update({
+          where: { loader_id },
+          data: { loader_balance: { decrement: shippingAmount } }
+        });
+      }
+
+      return { saleReturn: updatedReturn, affectedCusIds: Array.from(affectedCusIds) };
+    }, {
+      timeout: 60000,
+      maxWait: 60000
+    });
+
+    if (result.affectedCusIds?.length > 0) {
+      const uniqueIds = [...new Set(result.affectedCusIds)];
+      void Promise.all(uniqueIds.map((cid) => recalculateLedgerBalances(prisma, cid))).catch((err) => {
+        console.error('Background ledger recalc after sale return PUT failed:', err);
+      });
+    }
+
+    return NextResponse.json(result.saleReturn, { status: 200 });
+  } catch (error) {
+    console.error('Error updating sale return:', error);
+    return NextResponse.json({ error: 'Failed to update sale return: ' + error.message }, { status: 500 });
+  }
+}
+
 // DELETE - Delete sale return
 export async function DELETE(request) {
   const __branchScope = await initBranchScope(request);

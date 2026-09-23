@@ -724,13 +724,26 @@ export default function SaleReturnsPage() {
 
   // Handle edit
   const handleEdit = async (saleReturn) => {
-    setEditingReturn(saleReturn);
+    let fullReturn = saleReturn;
+    try {
+      setLoading(true);
+      const res = await fetch(`/api/sale-returns?id=${saleReturn.return_id}`);
+      if (res.ok) {
+        fullReturn = await res.json();
+      }
+    } catch (err) {
+      console.error('Failed to fetch full return details:', err);
+    } finally {
+      setLoading(false);
+    }
+
+    setEditingReturn(fullReturn);
 
     let customerType = null;
     let loadedFormCustomers = [];
     
-    if (saleReturn.customer) {
-      const typeId = saleReturn.customer.cus_type;
+    if (fullReturn.customer) {
+      const typeId = fullReturn.customer.cus_type;
       const matchingType = customerTypes.find(t => t.cus_type_id === typeId);
       if (matchingType) {
         customerType = matchingType;
@@ -743,9 +756,9 @@ export default function SaleReturnsPage() {
           console.error(err);
         }
       }
-    } else if (saleReturn.cus_id) {
+    } else if (fullReturn.cus_id) {
       try {
-        const resCus = await fetch(`/api/customers?id=${saleReturn.cus_id}`);
+        const resCus = await fetch(`/api/customers?id=${fullReturn.cus_id}`);
         if (resCus.ok) {
           const customer = await resCus.json();
           const typeId = customer.cus_type;
@@ -767,11 +780,11 @@ export default function SaleReturnsPage() {
     setFormCustomers(loadedFormCustomers);
 
     setFormData({
-      sale_id: saleReturn.sale_id || '',
-      cus_id: saleReturn.cus_id,
-      return_date: saleReturn.return_date?.split('T')[0] || new Date().toISOString().split('T')[0],
-      return_reason: saleReturn.reason || '',
-      return_details: saleReturn.return_details?.map(d => ({
+      sale_id: fullReturn.sale_id || '',
+      cus_id: fullReturn.cus_id,
+      return_date: (fullReturn.return_date || fullReturn.created_at)?.split('T')[0] || new Date().toISOString().split('T')[0],
+      return_reason: fullReturn.reason || '',
+      return_details: fullReturn.return_details?.map(d => ({
         ...d,
         pro_id: d.pro_id,
         unit_rate: d.unit_rate,
@@ -780,14 +793,14 @@ export default function SaleReturnsPage() {
         max_quantity: null,
         is_manual: true
       })) || [],
-      total_return_amount: parseFloat(saleReturn.total_amount) || 0,
-      payment: parseFloat(saleReturn.payment) || 0,
-      payment_type: saleReturn.payment_type || 'CASH',
-      loader_id: saleReturn.loader_id || '',
-      shipping_amount: parseFloat(saleReturn.shipping_amount) || 0,
-      labour_charges: parseFloat(saleReturn.labour_charges) || 0,
-      notes: saleReturn.reference || '',
-      manual_sale_inv: saleReturn.manual_sale_inv || ''
+      total_return_amount: parseFloat(fullReturn.total_amount) || 0,
+      payment: parseFloat(fullReturn.payment) || 0,
+      payment_type: fullReturn.payment_type || 'CASH',
+      loader_id: fullReturn.loader_id || '',
+      shipping_amount: parseFloat(fullReturn.shipping_amount) || 0,
+      labour_charges: parseFloat(fullReturn.labour_charges) || 0,
+      notes: fullReturn.reference || '',
+      manual_sale_inv: fullReturn.manual_sale_inv || ''
     });
     setCurrentView('create');
   };

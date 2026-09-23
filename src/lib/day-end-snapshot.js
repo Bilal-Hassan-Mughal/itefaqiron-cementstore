@@ -31,7 +31,7 @@ export function mapTrnxToPaymentType(transactionType) {
 }
 
 export function saleNetTotal(sale) {
-  return n(sale.total_amount) - n(sale.discount) + n(sale.shipping_amount);
+  return n(sale.total_amount);
 }
 
 export function splitPaidAmounts(doc, netTotal) {
@@ -178,7 +178,14 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     }),
     prisma.saleReturn.findMany({
       where: { created_at: range },
-      include: { customer: { select: { cus_name: true } } },
+      include: {
+        customer: { select: { cus_name: true } },
+        return_details: {
+          include: {
+            product: { select: { pro_title: true, pro_cost_price: true } }
+          }
+        }
+      },
       orderBy: { created_at: 'desc' },
     }),
     prisma.purchaseReturn.findMany({
@@ -261,7 +268,7 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
   let cashSaleReturns = 0;
   let bankSaleReturns = 0;
   saleReturns.forEach((ret) => {
-    const netTotal = n(ret.total_amount) - n(ret.discount) + n(ret.shipping_amount);
+    const netTotal = n(ret.total_amount) - n(ret.discount) - n(ret.shipping_amount) - n(ret.labour_charges);
     totalSaleReturns += netTotal;
     const split = splitPaidAmounts(ret, n(ret.payment) || netTotal);
     cashSaleReturns += split.cash;
@@ -367,23 +374,35 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
   const expectedClosingBank = money(openingBank + netBankFlow);
   const savedClosingBank = dayEndRecord?.bank_balance != null ? n(dayEndRecord.bank_balance) : null;
 
-  let totalCOGS = 0;
+  let totalSalesCOGS = 0;
   const itemMap = {};
   saleDetails.forEach((sd) => {
     const title = sd.product?.pro_title || `Product #${sd.pro_id}`;
     const amt = n(sd.net_total || sd.total_amount);
     const qty = n(sd.qnty);
     const cost = n(sd.product?.pro_cost_price);
-    totalCOGS += qty * cost;
+    totalSalesCOGS += qty * cost;
     if (!itemMap[title]) itemMap[title] = { name: title, amount: 0, qty: 0 };
     itemMap[title].amount += amt;
     itemMap[title].qty += qty;
   });
   const topSellingItems = Object.values(itemMap).sort((a, b) => b.amount - a.amount).slice(0, 5);
 
-  const grossProfit = totalSales - totalSaleReturns - totalCOGS;
+  let returnCOGS = 0;
+  saleReturns.forEach((ret) => {
+    (ret.return_details || []).forEach((rd) => {
+      const qty = n(rd.qnty);
+      const cost = n(rd.product?.pro_cost_price);
+      returnCOGS += qty * cost;
+    });
+  });
+
+  const totalCOGS = totalSalesCOGS;
+  const netSales = totalSales - totalSaleReturns;
+  const netCOGS = totalSalesCOGS - returnCOGS;
+  const grossProfit = netSales - netCOGS;
   const netProfit = grossProfit - totalExpenses;
-  const profitMargin = totalSales > 0 ? parseFloat(((netProfit / totalSales) * 100).toFixed(2)) : 0;
+  const profitMargin = netSales > 0 ? parseFloat(((netProfit / netSales) * 100).toFixed(2)) : 0;
 
   const currentStockValue = products.reduce(
     (sum, p) => sum + n(p.pro_stock_qnty) * n(p.pro_cost_price),
@@ -483,7 +502,9 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     savedClosingBank: savedClosingBank != null ? money(savedClosingBank) : null,
     totalCashAccountsBalance: money(totalCashAccountsBalance),
     totalBankAccountsBalance: money(totalBankAccountsBalance),
-    totalCOGS: money(totalCOGS),
+    totalCOGS: money(totalSalesCOGS),
+    returnCOGS: money(returnCOGS),
+    netCOGS: money(netCOGS),
     grossProfit: money(grossProfit),
     netProfit: money(netProfit),
     profitMargin,
@@ -520,9 +541,9 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     topSellingItems,
     last7DaysTrend: trend,
     stockSummary: {
-      openingStockValue: currentStockValue - totalPurchases + totalPurchaseReturns + totalCOGS,
+      openingStockValue: currentStockValue - totalPurchases + totalPurchaseReturns + netCOGS,
       inwardValue: totalPurchases - totalPurchaseReturns,
-      outwardValue: totalCOGS,
+      outwardValue: netCOGS,
       closingStockValue: currentStockValue,
       method: 'Current quantity × current product cost',
     },

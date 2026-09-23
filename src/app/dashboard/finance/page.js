@@ -93,6 +93,7 @@ import {
   CardHeader,
   CardActions,
   TablePagination,
+  Pagination,
   Chip as MuiChip,
   LinearProgress
 } from '@mui/material';
@@ -1092,6 +1093,9 @@ export default function FinancePage() {
   const [staticDataLoaded, setStaticDataLoaded] = useState(false);
   /** All Accounts: default recent rows; Clear shows full ledger */
   const [allAccountsFullLedger, setAllAccountsFullLedger] = useState(false);
+  // Ledger table pagination (prevents DOM freeze when loading accounts with thousands of entries)
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const [ledgerRowsPerPage, setLedgerRowsPerPage] = useState(100);
 
   const resetLedgerDatesToToday = useCallback(() => {
     const today = getTodayKarachiDateKey();
@@ -2214,6 +2218,20 @@ export default function FinancePage() {
     ...entry,
     sequentialId: index + 1
   }));
+
+  // Reset to page 1 whenever filters or customer change
+  useEffect(() => {
+    setLedgerPage(1);
+  }, [selectedCustomer, selectedCategory, selectedSubCategory, startDate, endDate, searchTerm, filterAmount, selectedLedgerType, sortBy, sortOrder]);
+
+  // Sliced ledger entries for instant, non-blocking table rendering
+  const displayedLedgerEntries = useMemo(() => {
+    if (ledgerRowsPerPage === -1) {
+      return finalLedgerEntries;
+    }
+    const start = (ledgerPage - 1) * ledgerRowsPerPage;
+    return finalLedgerEntries.slice(start, start + ledgerRowsPerPage);
+  }, [finalLedgerEntries, ledgerPage, ledgerRowsPerPage]);
 
   // Bill amount per bill_no = sum of SALE-type debit entries only (excludes CASH/BANK_TRANSFER account entries)
   const billAmountMap = useMemo(() => {
@@ -4267,7 +4285,7 @@ export default function FinancePage() {
                   <Table size="small" sx={{ ...LEDGER_UI.tableGrid, borderTop: 'none', mt: '-1px' }}>
                     <LedgerTableColGroup />
                     <TableBody>
-                      {finalLedgerEntries.map((entry, index) => {
+                      {displayedLedgerEntries.map((entry, index) => {
                         const displayAmts = getLedgerEntryDisplayAmounts(entry);
                         const isDebit = displayAmts.debit > 0;
                         const isCredit = displayAmts.credit > 0;
@@ -4552,6 +4570,64 @@ export default function FinancePage() {
                     </TableBody>
                   </Table>
                 </TableContainer>
+
+                {/* Ledger View Pagination Controls */}
+                {finalLedgerEntries.length > 0 && (
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 2,
+                      px: 2,
+                      py: 1.25,
+                      borderTop: '1px solid #e2e8f0',
+                      bgcolor: '#f8fafc',
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                      <FormControl size="small" variant="outlined" sx={{ minWidth: 125 }}>
+                        <Select
+                          value={ledgerRowsPerPage}
+                          onChange={(e) => {
+                            setLedgerRowsPerPage(Number(e.target.value));
+                            setLedgerPage(1);
+                          }}
+                          size="small"
+                          sx={{ height: 32, fontSize: '0.8125rem', bgcolor: '#ffffff' }}
+                        >
+                          <MenuItem value={50}>50 per page</MenuItem>
+                          <MenuItem value={100}>100 per page</MenuItem>
+                          <MenuItem value={200}>200 per page</MenuItem>
+                          <MenuItem value={500}>500 per page</MenuItem>
+                          <MenuItem value={-1}>All entries</MenuItem>
+                        </Select>
+                      </FormControl>
+                      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600, fontSize: '0.8125rem' }}>
+                        {ledgerRowsPerPage === -1
+                          ? `Showing all ${finalLedgerEntries.length.toLocaleString()} entries`
+                          : `Showing ${Math.min((ledgerPage - 1) * ledgerRowsPerPage + 1, finalLedgerEntries.length).toLocaleString()}–${Math.min(ledgerPage * ledgerRowsPerPage, finalLedgerEntries.length).toLocaleString()} of ${finalLedgerEntries.length.toLocaleString()} entries`}
+                      </Typography>
+                    </Box>
+
+                    {ledgerRowsPerPage !== -1 && Math.ceil(finalLedgerEntries.length / ledgerRowsPerPage) > 1 && (
+                      <Pagination
+                        count={Math.ceil(finalLedgerEntries.length / ledgerRowsPerPage)}
+                        page={ledgerPage}
+                        onChange={(event, value) => {
+                          setLedgerPage(value);
+                        }}
+                        color="primary"
+                        size="small"
+                        showFirstButton
+                        showLastButton
+                        siblingCount={1}
+                        boundaryCount={1}
+                      />
+                    )}
+                  </Box>
+                )}
 
               </Box>
             )}

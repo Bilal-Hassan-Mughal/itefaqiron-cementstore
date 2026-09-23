@@ -1006,54 +1006,85 @@ async function getSaleReport(startDate, endDate) {
   return NextResponse.json({ sales, salesByPayment, summary });
 }
 
-// Profit Report - Calculate profit from sales
+// Profit Report - Calculate profit from sales and returns
 async function getProfitReport(startDate, endDate) {
   const whereClause = {
     bill_type: 'BILL'
   };
+  const returnWhereClause = {};
 
   if (startDate && endDate) {
-    whereClause.created_at = parseLocalDateRange(startDate, endDate);
+    const dateRange = parseLocalDateRange(startDate, endDate);
+    whereClause.created_at = dateRange;
+    returnWhereClause.created_at = dateRange;
   }
 
-  const sales = await prisma.sale.findMany({
-    where: whereClause,
-    include: {
-      customer: {
-        include: {
-          customer_category: true
-        }
-      },
-      sale_details: {
-        include: {
-          product: {
-            include: {
-              category: true,
-              sub_category: true
+  const [sales, saleReturns, expenses] = await Promise.all([
+    prisma.sale.findMany({
+      where: whereClause,
+      include: {
+        customer: {
+          include: {
+            customer_category: true
+          }
+        },
+        sale_details: {
+          include: {
+            product: {
+              include: {
+                category: true,
+                sub_category: true
+              }
             }
           }
         }
+      },
+      orderBy: {
+        created_at: 'desc'
       }
-    },
-    orderBy: {
-      created_at: 'desc'
-    }
-  });
+    }),
+    prisma.saleReturn.findMany({
+      where: returnWhereClause,
+      include: {
+        customer: {
+          include: {
+            customer_category: true
+          }
+        },
+        return_details: {
+          include: {
+            product: {
+              include: {
+                category: true,
+                sub_category: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: {
+        created_at: 'desc'
+      }
+    }),
+    prisma.expense.findMany({
+      where: startDate && endDate ? { created_at: parseLocalDateRange(startDate, endDate) } : {}
+    })
+  ]);
 
   // Calculate profit for each sale
   const salesWithProfit = sales.map(sale => {
     let totalCost = 0;
-    let totalSale = 0;
 
     sale.sale_details.forEach(detail => {
       const qnty = parseFloat(detail.qnty || 0);
       const costPrice = parseFloat(detail.product?.pro_cost_price || detail.product?.pro_crate || detail.product?.pro_baser_price || 0);
-      const saleAmount = parseFloat(detail.net_total || detail.total_amount || 0);
       totalCost += costPrice * qnty;
-      totalSale += saleAmount;
     });
 
-    const profit = totalSale - totalCost - parseFloat(sale.discount || 0);
+    const discount = parseFloat(sale.discount || 0);
+    const saleNet = parseFloat(sale.total_amount || 0);
+    const totalSale = saleNet + discount;
+    const profit = totalSale - totalCost - discount;
     const profitMargin = totalSale > 0 ? (profit / totalSale * 100) : 0;
 
     return {
@@ -1065,22 +1096,57 @@ async function getProfitReport(startDate, endDate) {
     };
   });
 
-  // Get expenses for the period
-  const expensesWhere = {};
-  if (startDate && endDate) {
-    expensesWhere.created_at = parseLocalDateRange(startDate, endDate);
-  }
+  // Calculate profit reduction for each sale return
+  const returnsWithProfit = saleReturns.map(ret => {
+    let returnCost = 0;
+    const returnDetailsAsSaleDetails = (ret.return_details || []).map(detail => {
+      const qnty = parseFloat(detail.qnty || 0);
+      const costPrice = parseFloat(detail.product?.pro_cost_price || detail.product?.pro_crate || detail.product?.pro_baser_price || 0);
+      const saleAmount = parseFloat(detail.net_total || detail.total_amount || 0);
+      returnCost += costPrice * qnty;
 
-  const expenses = await prisma.expense.findMany({
-    where: expensesWhere
+      return {
+        sale_detail_id: `SRD-${detail.return_detail_id}`,
+        pro_id: detail.pro_id,
+        qnty: -qnty,
+        unit: detail.unit,
+        unit_rate: detail.unit_rate,
+        total_amount: -saleAmount,
+        net_total: -saleAmount,
+        discount: -(parseFloat(detail.discount || 0)),
+        product: detail.product,
+      };
+    });
+
+    const discount = parseFloat(ret.discount || 0);
+    const labour = parseFloat(ret.labour_charges || 0);
+    const shipping = parseFloat(ret.shipping_amount || 0);
+    const netReturnSale = parseFloat(ret.total_amount || 0) - discount - labour - shipping;
+    const returnProfit = netReturnSale - returnCost;
+
+    return {
+      sale_id: `SR-${ret.return_id}`,
+      bill_type: 'SALE_RETURN',
+      created_at: ret.created_at,
+      cus_id: ret.cus_id,
+      customer: ret.customer,
+      sale_details: returnDetailsAsSaleDetails,
+      totalCost: -returnCost,
+      totalSale: -netReturnSale,
+      discount: 0,
+      profit: -returnProfit,
+      profitMargin: netReturnSale > 0 ? (returnProfit / netReturnSale * 100) : 0,
+      is_return: true,
+    };
   });
 
-  const totalExpenses = expenses.reduce((sum, e) => sum + parseFloat(e.exp_amount), 0);
+  const allTransactions = [...salesWithProfit, ...returnsWithProfit].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  const totalExpenses = expenses.reduce((sum, e) => sum + parseFloat(e.exp_amount || 0), 0);
 
   // Calculate summary
-  const totalSales = salesWithProfit.reduce((sum, s) => sum + s.totalSale, 0);
-  const totalCost = salesWithProfit.reduce((sum, s) => sum + s.totalCost, 0);
-  const totalDiscount = salesWithProfit.reduce((sum, s) => sum + parseFloat(s.discount), 0);
+  const totalSales = allTransactions.reduce((sum, s) => sum + s.totalSale, 0);
+  const totalCost = allTransactions.reduce((sum, s) => sum + s.totalCost, 0);
+  const totalDiscount = allTransactions.reduce((sum, s) => sum + parseFloat(s.discount || 0), 0);
   const grossProfit = totalSales - totalCost - totalDiscount;
   const netProfit = grossProfit - totalExpenses;
 
@@ -1095,7 +1161,7 @@ async function getProfitReport(startDate, endDate) {
     netProfitMargin: totalSales > 0 ? (netProfit / totalSales * 100) : 0
   };
 
-  return NextResponse.json({ sales: salesWithProfit, expenses, summary });
+  return NextResponse.json({ sales: allTransactions, expenses, summary });
 }
 
 // Purchase Report - Detailed purchases report

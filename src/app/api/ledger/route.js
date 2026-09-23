@@ -161,6 +161,76 @@ export async function GET(request) {
     }
 
     const hasFilters = customerId || startDate || endDate || categoryId || typeId || search;
+
+    // HIGH-PERFORMANCE PATH: When querying for a specific customer/account,
+    // fetch customer metadata ONCE rather than duplicating deeply nested
+    // customer/category/type relations across thousands of ledger rows.
+    if (customerId) {
+      const [singleCustomer, ledgerEntries] = await Promise.all([
+        prisma.customer.findUnique({
+          where: { cus_id: customerId },
+          select: {
+            cus_id: true,
+            cus_name: true,
+            cus_phone_no: true,
+            cus_phone_no2: true,
+            cus_reference: true,
+            cus_category: true,
+            cus_type: true,
+            customer_category: {
+              select: {
+                cus_cat_title: true
+              }
+            },
+            customer_type: {
+              select: {
+                cus_type_title: true
+              }
+            }
+          }
+        }),
+        prisma.ledger.findMany({
+          where,
+          select: {
+            l_id: true,
+            branch_id: true,
+            cus_id: true,
+            opening_balance: true,
+            debit_amount: true,
+            credit_amount: true,
+            closing_balance: true,
+            bill_no: true,
+            trnx_type: true,
+            details: true,
+            payments: true,
+            cash_payment: true,
+            bank_payment: true,
+            updated_by: true,
+            ledger_type: true,
+            created_at: true,
+            updated_at: true,
+            updated_by_user: {
+              select: {
+                user_id: true,
+                full_name: true,
+                role: true
+              }
+            }
+          },
+          orderBy: { l_id: 'desc' },
+          ...(limit ? { take: limit } : {})
+        })
+      ]);
+
+      if (singleCustomer) {
+        for (let i = 0; i < ledgerEntries.length; i++) {
+          ledgerEntries[i].customer = singleCustomer;
+        }
+      }
+
+      return NextResponse.json(ledgerEntries);
+    }
+
     const queryOptions = {
       where,
       include: {
@@ -169,6 +239,8 @@ export async function GET(request) {
             cus_id: true,
             cus_name: true,
             cus_phone_no: true,
+            cus_phone_no2: true,
+            cus_reference: true,
             cus_category: true,
             cus_type: true,
             customer_category: {

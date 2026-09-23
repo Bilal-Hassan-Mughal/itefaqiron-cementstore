@@ -47,9 +47,7 @@ async function syncAccountBalancesFromEntries(tx, ledgerEntries) {
   await tx.$executeRawUnsafe(sql);
 }
 
-let globalSpecialAccountsCache = null;
-
-// Helper function to get special accounts (moved outside transaction for better performance)
+// Helper function to get special accounts (query fresh from database to prevent stale balances)
 async function getSpecialAccounts() {
   try {
     const rows = await prisma.$queryRaw`
@@ -136,17 +134,11 @@ async function findOrCreateCashAccount() {
 
 /** Resolves getSpecialAccounts() and ensures a cash account customer exists for ledger / balance updates. */
 async function getSpecialAccountsForSale() {
-  if (globalSpecialAccountsCache && globalSpecialAccountsCache.cash) {
-    return globalSpecialAccountsCache;
-  }
-
   let accounts = await getSpecialAccounts();
   if (!accounts.cash) {
     const cash = await findOrCreateCashAccount();
     if (cash) accounts = { ...accounts, cash };
   }
-
-  globalSpecialAccountsCache = accounts;
   return accounts;
 }
 
@@ -1605,6 +1597,14 @@ export async function POST(request) {
       const ledgerEntries = [];
       let runningBalance = customerOpeningBalance;
 
+      const getRunningBalanceForAccount = async (accountId) => {
+        const priorEntries = ledgerEntries.filter(e => e.cus_id === accountId);
+        if (priorEntries.length > 0) {
+          return priorEntries[priorEntries.length - 1].closing_balance;
+        }
+        return await resolveOpeningBalance(tx, accountId, saleCreatedAt);
+      };
+
       if (!isQuotation) {
         // Create bill/order entry for both BILL and ORDER types
         // Only skip for quotations (which are just estimates)
@@ -1821,7 +1821,7 @@ export async function POST(request) {
 
             const bankEntry = createLedgerEntry({
               cus_id: bankAccountToUse.cus_id,
-              opening_balance: accountOpeningBalance(bankAccountToUse),
+              opening_balance: await getRunningBalanceForAccount(bankAccountToUse.cus_id),
               debit_amount: Number(eff_bank.toFixed(2)),
               credit_amount: 0,
               bill_no: sale.sale_id.toString(),
@@ -1847,7 +1847,7 @@ export async function POST(request) {
 
           const cashEntry = createLedgerEntry({
             cus_id: specialAccounts.cash.cus_id,
-            opening_balance: accountOpeningBalance(specialAccounts.cash),
+            opening_balance: await getRunningBalanceForAccount(specialAccounts.cash.cus_id),
             debit_amount: Number(eff_cash.toFixed(2)),
             credit_amount: 0,
             bill_no: sale.sale_id.toString(),
@@ -1884,7 +1884,7 @@ export async function POST(request) {
 
             const transportEntry = createLedgerEntry({
               cus_id: transportAccount.cus_id,
-              opening_balance: accountOpeningBalance(transportAccount),
+              opening_balance: await getRunningBalanceForAccount(transportAccount.cus_id),
               debit_amount: 0,
               credit_amount: Number(transportAmount.toFixed(2)),
               bill_no: sale.sale_id.toString(),
@@ -1936,7 +1936,7 @@ export async function POST(request) {
               if (debitAccount) {
                 const splitDebitEntry = createLedgerEntry({
                   cus_id: splitPayment.debit_account_id,
-                  opening_balance: accountOpeningBalance(debitAccount),
+                  opening_balance: await getRunningBalanceForAccount(splitPayment.debit_account_id),
                   debit_amount: splitAmount,
                   credit_amount: 0,
                   bill_no: sale.sale_id.toString(),
@@ -1958,7 +1958,7 @@ export async function POST(request) {
               if (creditAccount) {
                 const splitCreditEntry = createLedgerEntry({
                   cus_id: splitPayment.credit_account_id,
-                  opening_balance: accountOpeningBalance(creditAccount),
+                  opening_balance: await getRunningBalanceForAccount(splitPayment.credit_account_id),
                   debit_amount: 0,
                   credit_amount: splitAmount,
                   bill_no: sale.sale_id.toString(),

@@ -47,7 +47,9 @@ import {
   DialogContent,
   DialogActions,
   Divider,
-  Pagination
+  Pagination,
+  Switch,
+  FormControlLabel
 } from '@mui/material';
 
 import {
@@ -663,6 +665,8 @@ function SalesPageContent() {
   const [listPage, setListPage] = useState(1);
   const [listPageSize, setListPageSize] = useState(25);
   const [listTotal, setListTotal] = useState(0);
+  const tableContainerRef = useRef(null);
+  const [jumpToPage, setJumpToPage] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [debouncedItem, setDebouncedItem] = useState('');
   const [debouncedQuantity, setDebouncedQuantity] = useState('');
@@ -2117,14 +2121,19 @@ function SalesPageContent() {
         const bankReturn = parseFloat(paymentData.bank) || 0;
         const totalReturn = cashReturn + bankReturn; // Total refund amount
 
+        const isEditingReturn = Boolean(editingSale && (editingSale.is_return || editingSale.bill_type === 'SALE_RETURN' || editingSale.return_id));
+        const editReturnId = editingSale?.return_id || (typeof editingSale?.sale_id === 'string' ? parseInt(editingSale.sale_id.replace('SR-', '')) : editingSale?.sale_id);
+
         const returnBody = {
-          sale_id: selectedSaleForReturnMain ? selectedSaleForReturnMain.sale_id : null,
+          id: isEditingReturn ? editReturnId : undefined,
+          return_id: isEditingReturn ? editReturnId : undefined,
+          sale_id: selectedSaleForReturnMain ? selectedSaleForReturnMain.sale_id : (editingSale?.actual_sale_id || (typeof editingSale?.sale_id === 'number' ? editingSale?.sale_id : null)),
           cus_id: returnCustomerId,
           total_amount: Number(totalAmount.toFixed(0)),
           discount: Number(discount.toFixed(0)),
           labour_charges: Number(labourCharges.toFixed(0)),
           shipping_amount: Number(deliveryCharges.toFixed(0)),
-          loader_id: selectedSaleForReturnMain?.loader_id || null,
+          loader_id: selectedSaleForReturnMain?.loader_id || editingSale?.loader_id || null,
           payment: Number(totalReturn.toFixed(0)), // The total amount being refunded to customer
           payment_type: bankReturn > 0 ? 'BANK_TRANSFER' : 'CASH', // Use BANK_TRANSFER if there's bank amount
           cash_return: Number(cashReturn.toFixed(0)), // Additional: cash portion
@@ -2182,7 +2191,7 @@ function SalesPageContent() {
         setReceiptDialogOpen(true);
 
         const response = await fetch('/api/sale-returns', {
-          method: 'POST',
+          method: isEditingReturn ? 'PUT' : 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(returnBody),
         });
@@ -2190,6 +2199,7 @@ function SalesPageContent() {
         if (response.ok) {
           const saleReturnData = await response.json();
           notifyLedgerDataChanged('sale-return');
+          if (editingSale) setEditingSale(null);
 
           setCurrentBillData((prev) => ({
             ...prev,
@@ -3292,6 +3302,13 @@ function SalesPageContent() {
 
     fetchSalesList();
   }, [salesListEffectKey]);
+
+  const handlePageChange = (newPage) => {
+    const totalPages = Math.max(1, Math.ceil(listTotal / listPageSize));
+    const target = Math.max(1, Math.min(newPage, totalPages));
+    setListPage(target);
+    tableContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const fetchListFilterData = async () => {
     if (dataLoadedRef.current.form || dataLoadedRef.current.listFilters) return;
@@ -4906,8 +4923,96 @@ function SalesPageContent() {
   const handleEdit = async (sale) => {
     try {
       setLoading(true);
-      const res = await fetch(`/api/sales?id=${sale.sale_id}`);
-      const fullSale = res.ok ? await res.json() : sale;
+      const isReturn = Boolean(
+        sale.is_return ||
+        sale.bill_type === 'SALE_RETURN' ||
+        (typeof sale.sale_id === 'string' && sale.sale_id.startsWith('SR-'))
+      );
+      const returnId = isReturn
+        ? (sale.return_id || (typeof sale.sale_id === 'string' ? parseInt(sale.sale_id.replace('SR-', '')) : sale.sale_id))
+        : null;
+
+      let fullSale;
+      if (isReturn) {
+        const res = await fetch(`/api/sale-returns?id=${returnId}`);
+        fullSale = res.ok ? await res.json() : sale;
+      } else {
+        const res = await fetch(`/api/sales?id=${sale.sale_id}`);
+        fullSale = res.ok ? await res.json() : sale;
+      }
+
+      if (isReturn) {
+        const mappedReturn = {
+          ...fullSale,
+          return_id: returnId || fullSale.return_id,
+          sale_id: `SR-${returnId || fullSale.return_id}`,
+          actual_sale_id: fullSale.sale_id,
+          bill_type: 'SALE_RETURN',
+          is_return: true,
+        };
+        setEditingSale(mappedReturn);
+
+        // Customer
+        const customer = customers.find(c => c.cus_id === fullSale.cus_id);
+        setFormSelectedCustomer(customer || fullSale.customer || null);
+
+        // Store
+        const returnDetails = fullSale.return_details || fullSale.sale_details || [];
+        const finalStoreId = fullSale.store_id || (returnDetails.length > 0 ? returnDetails[0].store_id : null);
+        const store = stores.find(s => s.storeid === finalStoreId);
+        setFormSelectedStore(store || (stores.length > 0 ? stores[0] : null));
+
+        // Bill type
+        setBillType('SALE_RETURN');
+
+        // Product rows from return_details
+        setProductTableData(returnDetails.map((detail, index) => {
+          const detailStoreId = detail.store_id || finalStoreId;
+          const matchingStore = stores.find(s => s.storeid === detailStoreId);
+          const qnty = parseFloat(detail.qnty || detail.return_quantity || 0);
+          const rate = parseFloat(detail.unit_rate || 0);
+          const amt = parseFloat(detail.total_amount || detail.return_amount || (qnty * rate) || 0);
+          return {
+            id: detail.return_detail_id || detail.sale_detail_id || (Date.now() + index),
+            pro_id: detail.pro_id,
+            pro_title: detail.product?.pro_title || detail.pro_title || `Product #${detail.pro_id}`,
+            storeid: detailStoreId || '',
+            store_name: matchingStore?.store_name || detail.store?.store_name || '',
+            quantity: qnty,
+            rate: rate,
+            amount: amt,
+            stock: 0,
+            unit: detail.unit || 'PCS',
+            crate: rate,
+            cost_price: getProductCostPrice(detail.product)
+          };
+        }));
+
+        setTransportOptions([]);
+        setNewTransport({ amount: 0, accountId: '' });
+
+        // Payment data
+        const cashAmt = parseFloat(fullSale.cash_return || fullSale.cash_payment || 0);
+        const bankAmt = parseFloat(fullSale.bank_return || fullSale.bank_payment || 0);
+        const totalRefund = parseFloat(fullSale.payment || 0);
+        const fullShippingAmt = parseFloat(fullSale.shipping_amount || 0);
+        const labourAmt = parseFloat(fullSale.labour_charges || 0);
+
+        setPaymentData(normalizePaymentData({
+          cash: cashAmt > 0 ? cashAmt.toString() : (fullSale.payment_type === 'CASH' && totalRefund > 0 ? totalRefund.toString() : ''),
+          bank: bankAmt > 0 ? bankAmt.toString() : (fullSale.payment_type !== 'CASH' && totalRefund > 0 ? totalRefund.toString() : ''),
+          bankAccountId: fullSale.bank_account_id || fullSale.debit_account_id || '',
+          totalCashReceived: totalRefund,
+          advancePayment: 0,
+          discount: fullSale.discount?.toString() || '',
+          labour: labourAmt > 0 ? labourAmt.toString() : '',
+          deliveryCharges: fullShippingAmt > 0 ? fullShippingAmt.toString() : '',
+          notes: fullSale.reference || fullSale.reason || fullSale.notes || ''
+        }));
+
+        setCurrentView('create');
+        return;
+      }
 
       setEditingSale(fullSale);
 
@@ -7872,17 +7977,32 @@ function SalesPageContent() {
               alignItems: 'center',
               borderBottom: '1px solid #cbd5e1',
               bgcolor: '#f1f5f9',
+              flexWrap: 'wrap',
+              gap: 1,
             }}>
-              <Typography sx={{ fontWeight: 700, color: '#1e293b', fontSize: '0.875rem' }}>
-                Sales List
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                <Typography sx={{ fontWeight: 700, color: '#1e293b', fontSize: '0.875rem' }}>
+                  Sales List
+                </Typography>
+                <Chip
+                  label={listTotal === 0 ? '0 sales' : `Page ${listPage} of ${Math.max(1, Math.ceil(listTotal / listPageSize))}`}
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  sx={{ height: 22, fontSize: '0.72rem', fontWeight: 600 }}
+                />
+              </Box>
+
               <Typography sx={{ fontSize: '0.8125rem', color: '#64748b', fontWeight: 600 }}>
                 {listTotal === 0
                   ? '0 rows'
-                  : `${((listPage - 1) * listPageSize) + 1}–${Math.min(listPage * listPageSize, listTotal)} of ${listTotal}`}
+                  : `Showing ${((listPage - 1) * listPageSize) + 1}–${Math.min(listPage * listPageSize, listTotal)} of ${listTotal.toLocaleString()} sales`}
               </Typography>
             </Box>
-            <TableContainer sx={{ overflowX: 'auto', maxWidth: '100%', bgcolor: '#fff', maxHeight: 'calc(100vh - 320px)' }}>
+            <TableContainer
+              ref={tableContainerRef}
+              sx={{ overflowX: 'auto', maxWidth: '100%', bgcolor: '#fff', maxHeight: 'calc(100vh - 320px)' }}
+            >
               <Table stickyHeader sx={SALES_EXCEL_TABLE_SX}>
                 <TableHead>
                   <TableRow>
@@ -8043,6 +8163,7 @@ function SalesPageContent() {
                       );
                     })
                   )}
+
                 </TableBody>
               </Table>
             </TableContainer>
@@ -8063,30 +8184,82 @@ function SalesPageContent() {
                   <Select
                     labelId="sales-rows-per-page-label"
                     value={listPageSize}
-                    onChange={(e) => setListPageSize(parseInt(e.target.value, 10))}
+                    onChange={(e) => {
+                      const newSize = parseInt(e.target.value, 10);
+                      setListPageSize(newSize);
+                      setListPage(1);
+                    }}
                     label="Rows per page"
                   >
                     <MenuItem value={10}>10 per page</MenuItem>
                     <MenuItem value={25}>25 per page</MenuItem>
                     <MenuItem value={50}>50 per page</MenuItem>
                     <MenuItem value={100}>100 per page</MenuItem>
+                    <MenuItem value={200}>200 per page</MenuItem>
                   </Select>
                 </FormControl>
                 <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
-                  {sales.length} on this page · {listTotal} total
+                  {listTotal === 0
+                    ? '0 sales'
+                    : `Showing ${((listPage - 1) * listPageSize) + 1}–${Math.min(listPage * listPageSize, listTotal)} of ${listTotal.toLocaleString()} sales`}
                 </Typography>
               </Box>
-              <Pagination
-                count={Math.max(1, Math.ceil(listTotal / listPageSize))}
-                page={listPage}
-                onChange={(_, value) => setListPage(value)}
-                color="primary"
-                showFirstButton
-                showLastButton
-                siblingCount={1}
-                boundaryCount={1}
-                disabled={listLoading}
-              />
+
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.78rem', fontWeight: 500 }}>
+                    Go to:
+                  </Typography>
+                  <TextField
+                    size="small"
+                    type="number"
+                    value={jumpToPage}
+                    onChange={(e) => setJumpToPage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const pageNum = parseInt(jumpToPage, 10);
+                        if (!isNaN(pageNum) && pageNum >= 1) {
+                          handlePageChange(pageNum);
+                          setJumpToPage('');
+                        }
+                      }
+                    }}
+                    placeholder={`1-${Math.max(1, Math.ceil(listTotal / listPageSize))}`}
+                    sx={{
+                      width: 75,
+                      '& .MuiInputBase-input': { py: 0.5, px: 1, fontSize: '0.8rem', textAlign: 'center' }
+                    }}
+                    inputProps={{ min: 1, max: Math.max(1, Math.ceil(listTotal / listPageSize)) }}
+                  />
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={!jumpToPage || isNaN(parseInt(jumpToPage, 10)) || parseInt(jumpToPage, 10) < 1}
+                    onClick={() => {
+                      const pageNum = parseInt(jumpToPage, 10);
+                      if (!isNaN(pageNum) && pageNum >= 1) {
+                        handlePageChange(pageNum);
+                        setJumpToPage('');
+                      }
+                    }}
+                    sx={{ minWidth: 40, px: 1, py: 0.5, fontSize: '0.75rem', textTransform: 'none' }}
+                  >
+                    Go
+                  </Button>
+                </Box>
+
+                <Pagination
+                  count={Math.max(1, Math.ceil(listTotal / listPageSize))}
+                  page={listPage}
+                  onChange={(_, value) => handlePageChange(value)}
+                  color="primary"
+                  showFirstButton
+                  showLastButton
+                  siblingCount={1}
+                  boundaryCount={1}
+                  disabled={listLoading}
+                />
+              </Box>
             </Box>
           </Card>
         </Stack>
