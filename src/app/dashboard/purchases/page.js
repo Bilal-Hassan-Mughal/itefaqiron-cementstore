@@ -244,14 +244,9 @@ function commitPurchaseDropdownOnTab(e, highlighted, applyValue, focusNext) {
 }
 
 const PURCHASE_DROPDOWN_LINE = '1px solid #c5c5c5';
-const PURCHASE_SUPPLIER_DROPDOWN_GRID = '28px minmax(160px, 1.8fr) 110px minmax(110px, 1.2fr)';
-const PURCHASE_SUPPLIER_DROPDOWN_WIDTH = 540;
-
-const PURCHASE_PRODUCT_DROPDOWN_GRID = '28px minmax(130px, 1.8fr) minmax(95px, 1.1fr) 105px';
-const PURCHASE_PRODUCT_DROPDOWN_WIDTH = 540;
-
-const PURCHASE_BANK_DROPDOWN_GRID = '28px minmax(72px, 118px) minmax(80px, 1fr)';
-const PURCHASE_BANK_DROPDOWN_WIDTH = 340;
+const PURCHASE_SUPPLIER_DROPDOWN_GRID = '24px minmax(110px, 1.8fr) minmax(80px, 1fr) minmax(80px, 1.1fr)';
+const PURCHASE_PRODUCT_DROPDOWN_GRID = '24px minmax(110px, 1.8fr) minmax(75px, 1fr) minmax(75px, 1.1fr)';
+const PURCHASE_BANK_DROPDOWN_GRID = '24px minmax(80px, 1.5fr) minmax(80px, 1fr)';
 
 const purchaseDropdownRowStyle = (columns) => ({
   display: 'grid',
@@ -4092,10 +4087,10 @@ function PurchasesPageContent() {
                       slots={{ listbox: PurchaseSupplierDropdownListbox }}
                       slotProps={{
                         popper: {
-                          sx: { ...PURCHASE_DROPDOWN_POPPER_SX, minWidth: PURCHASE_SUPPLIER_DROPDOWN_WIDTH },
+                          sx: PURCHASE_DROPDOWN_POPPER_SX,
                           modifiers: [{ name: 'flip', enabled: false }],
                         },
-                        paper: { sx: { width: PURCHASE_SUPPLIER_DROPDOWN_WIDTH, maxWidth: '92vw', mt: 0.5 } },
+                        paper: { sx: { width: '100%', mt: 0.5 } },
                       }}
                       onHighlightChange={(_, option) => {
                         if (option) supplierHighlightRef.current = option;
@@ -4348,10 +4343,10 @@ function PurchasesPageContent() {
                         slots={{ listbox: PurchaseProductDropdownListbox }}
                         slotProps={{
                           popper: {
-                            sx: { ...PURCHASE_DROPDOWN_POPPER_SX, minWidth: PURCHASE_PRODUCT_DROPDOWN_WIDTH },
+                            sx: PURCHASE_DROPDOWN_POPPER_SX,
                             modifiers: [{ name: 'flip', enabled: false }],
                           },
-                          paper: { sx: { width: PURCHASE_PRODUCT_DROPDOWN_WIDTH, maxWidth: '92vw', mt: 0.5 } },
+                          paper: { sx: { width: '100%', mt: 0.5 } },
                           listbox: {
                             showCost: showProductCostInDropdown,
                             onToggleCost: () => setShowProductCostInDropdown((prev) => !prev),
