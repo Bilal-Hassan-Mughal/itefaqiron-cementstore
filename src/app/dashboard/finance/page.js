@@ -27,6 +27,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import DashboardLayout from '../components/dashboard-layout';
+import DateFilterInput from '../components/date-filter-input';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
 import { BRAND, COMPANY } from '@/lib/brand-theme';
@@ -4026,9 +4027,12 @@ export default function FinancePage() {
           {filtersExpanded && (
             <Box sx={{ px: { xs: 2, md: 2.5 }, pb: 2, pt: 0.5 }}>
               <Box sx={{ ...LEDGER_FILTER_GRID, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' } }}>
-                <TextField fullWidth size="small" label="From Date" type="date" value={startDate}
-                  onChange={(e) => {
-                    const val = e.target.value;
+                <DateFilterInput
+                  fullWidth
+                  size="small"
+                  label="From Date"
+                  value={startDate}
+                  onChange={(val) => {
                     setStartDate(val);
                     if (!val && !endDate) {
                       setLedgerDatePreset('all');
@@ -4038,10 +4042,14 @@ export default function FinancePage() {
                       setAllAccountsFullLedger(false);
                     }
                   }}
-                  InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }} sx={LEDGER_FILTER_FIELD_SX} />
-                <TextField fullWidth size="small" label="To Date" type="date" value={endDate}
-                  onChange={(e) => {
-                    const val = e.target.value;
+                  sx={LEDGER_FILTER_FIELD_SX}
+                />
+                <DateFilterInput
+                  fullWidth
+                  size="small"
+                  label="To Date"
+                  value={endDate}
+                  onChange={(val) => {
                     setEndDate(val);
                     if (!startDate && !val) {
                       setLedgerDatePreset('all');
@@ -4051,7 +4059,8 @@ export default function FinancePage() {
                       setAllAccountsFullLedger(false);
                     }
                   }}
-                  InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }} sx={LEDGER_FILTER_FIELD_SX} />
+                  sx={LEDGER_FILTER_FIELD_SX}
+                />
                 <FormControl fullWidth size="small" sx={LEDGER_FILTER_FIELD_SX}>
                   <InputLabel>Type</InputLabel>
                   <Select value={selectedLedgerType} onChange={(e) => setSelectedLedgerType(e.target.value)} label="Type">
@@ -7031,55 +7040,21 @@ export default function FinancePage() {
             {/* Date Range Pickers */}
             <Box sx={{ display: 'flex', gap: 2 }}>
               <Box sx={{ flex: 1 }}>
-                <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.8, mb: 1, display: 'block' }}>
-                  From Date *
-                </Typography>
-                <TextField
+                <DateFilterInput
                   fullWidth
-                  type="date"
+                  size="small"
+                  label="From Date *"
                   value={printFromDate}
-                  onChange={(e) => setPrintFromDate(e.target.value)}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <Calendar size={16} color="#6366f1" />
-                      </InputAdornment>
-                    ),
-                  }}
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      borderRadius: 2,
-                      bgcolor: 'white',
-                      '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#6366f1' },
-                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#6366f1' },
-                    }
-                  }}
+                  onChange={(val) => setPrintFromDate(val)}
                 />
               </Box>
               <Box sx={{ flex: 1 }}>
-                <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.8, mb: 1, display: 'block' }}>
-                  To Date *
-                </Typography>
-                <TextField
+                <DateFilterInput
                   fullWidth
-                  type="date"
+                  size="small"
+                  label="To Date *"
                   value={printToDate}
-                  onChange={(e) => setPrintToDate(e.target.value)}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <Calendar size={16} color="#6366f1" />
-                      </InputAdornment>
-                    ),
-                  }}
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      borderRadius: 2,
-                      bgcolor: 'white',
-                      '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#6366f1' },
-                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#6366f1' },
-                    }
-                  }}
+                  onChange={(val) => setPrintToDate(val)}
                 />
               </Box>
             </Box>
