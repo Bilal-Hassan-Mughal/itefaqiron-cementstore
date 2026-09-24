@@ -4261,6 +4261,7 @@ function PurchasesPageContent() {
                       value={formData.date || getTodayDateStr()}
                       onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
                       onFocus={(e) => e.target.select()}
+                      inputProps={{ lang: 'en-GB' }}
                       sx={PURCHASE_ENTRY_CONTROL_SX}
                     />
                   </Box>

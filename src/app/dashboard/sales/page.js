@@ -5857,6 +5857,7 @@ function SalesPageContent() {
                       size="small"
                       defaultValue={getPkDateString()}
                       onFocus={(e) => e.target.select()}
+                      inputProps={{ lang: 'en-GB' }}
                       sx={SALE_ENTRY_CONTROL_SX}
                     />
                 </Box>
