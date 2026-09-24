@@ -30,7 +30,14 @@ import {
   ArrowRight,
   Layers,
   FileSpreadsheet,
-  Download
+  Download,
+  Building2,
+  Sparkles,
+  Hash,
+  FileText,
+  CheckCircle2,
+  Coins,
+  ArrowRightLeft
 } from 'lucide-react';
 import {
   Autocomplete,
@@ -53,6 +60,17 @@ const fmtAmt = (val) => {
   if (n % 1 === 0) return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
+
+const QUICK_EXPENSE_SUGGESTIONS = [
+  'Electricity Bill',
+  'Office Rent',
+  'Staff Tea & Food',
+  'Freight & Delivery',
+  'Vehicle Fuel',
+  'Shop Maintenance',
+  'Stationery & Supplies',
+  'Internet / Phone'
+];
 
 export default function ExpensesPage() {
   // Core data states
@@ -169,6 +187,21 @@ export default function ExpensesPage() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Keyboard shortcut: Escape to close modals
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        if (currentView === 'create') {
+          setCurrentView('list');
+        } else if (viewingVoucher) {
+          setViewingVoucher(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentView, viewingVoucher]);
 
   // Default cash account auto-select
   useEffect(() => {
@@ -1319,451 +1352,535 @@ export default function ExpensesPage() {
       {/* ========================================================================= */}
       {/* ===================== ADD / EDIT EXPENSE MODAL ========================== */}
       {/* ========================================================================= */}
+      {/* ========================================================================= */}
+      {/* ===================== ADD / EDIT EXPENSE MODAL ========================== */}
+      {/* ========================================================================= */}
       {currentView === 'create' && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6 overflow-y-auto">
-          <div className="bg-white text-slate-900 rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full p-6 relative max-h-[90vh] flex flex-col my-auto animate-in fade-in zoom-in-95 duration-200">
-            {/* Header */}
-            <div className="flex items-center justify-between pb-3.5 border-b border-slate-200 flex-shrink-0">
+        <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="relative w-full max-w-lg bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col my-auto animate-in fade-in zoom-in-95 duration-200">
+            
+            {/* Smooth Top Accent Bar */}
+            <div className="h-1 w-full bg-gradient-to-r from-rose-500 via-pink-500 to-rose-600" />
+
+            {/* Sleek Compact Header */}
+            <div className="px-5 py-3.5 bg-gradient-to-r from-rose-50/40 via-white to-slate-50/40 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
               <div className="flex items-center space-x-2.5">
-                <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center font-bold border border-rose-200">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-rose-500 to-rose-600 text-white flex items-center justify-center shadow-xs">
                   <Receipt className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900">
-                    {editingExpense ? 'Edit Expense Entry' : 'Record New Expense'}
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    {editingExpense ? `Voucher #${editingExpense.exp_id}` : 'Fill in operating expense details'}
-                  </p>
+                  <div className="flex items-center gap-1.5">
+                    <h3 className="text-sm font-bold text-slate-800 tracking-tight">
+                      {editingExpense ? 'Edit Expense Entry' : 'Record Operating Expense'}
+                    </h3>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200/60 uppercase">
+                      {editingExpense ? `Voucher #${editingExpense.exp_id}` : 'Voucher'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">Post expense entry to cash or bank ledger</p>
                 </div>
               </div>
+
               <button
                 type="button"
                 onClick={() => setCurrentView('list')}
-                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                className="w-7 h-7 rounded-lg bg-slate-100/80 hover:bg-slate-200/80 text-slate-400 hover:text-slate-700 flex items-center justify-center transition-all cursor-pointer"
+                title="Close (Esc)"
               >
-                <X className="w-4 h-4" />
+                <X className="w-3.5 h-3.5" />
               </button>
             </div>
 
-            {/* Scrollable Form Body */}
-            <div className="flex-1 overflow-y-auto py-4 space-y-4">
-              <form onSubmit={handleSubmit} id="expense-modal-form" className="space-y-4">
-                {/* 1. Title & Category */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                      Expense Title *
-                    </label>
-                    <TextField
-                      fullWidth
-                      name="exp_title"
-                      value={formData.exp_title}
-                      onChange={handleInputChange}
-                      required
-                      size="small"
-                      variant="outlined"
-                      placeholder="e.g., Office Rent, Electricity, Freight"
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
-                    />
-                  </div>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Category *
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => setShowTypeDialog(true)}
-                        className="text-[10px] text-rose-600 hover:text-rose-800 font-bold flex items-center bg-rose-50 px-2 py-0.5 rounded border border-rose-200 transition-colors cursor-pointer"
-                      >
-                        <Plus className="w-2.5 h-2.5 mr-0.5" />
-                        New Category
-                      </button>
-                    </div>
-                    <Autocomplete
-                      options={expenseTitles}
-                      getOptionLabel={(option) => {
-                        if (typeof option === 'string') return option;
-                        return option.title || '';
-                      }}
-                      value={expenseTitles.find((t) => String(t.id) === String(formData.exp_type)) || null}
-                      onChange={(event, newValue) => {
-                        setFormData((prev) => ({ ...prev, exp_type: newValue ? newValue.id : '' }));
-                      }}
-                      isOptionEqualToValue={(option, value) => option.id === value.id}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          placeholder="Select category..."
-                          size="small"
-                          required={!formData.exp_type}
-                          fullWidth
-                          variant="outlined"
-                          sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
-                        />
-                      )}
-                    />
-                  </div>
+            {/* Smooth Compact Form Body */}
+            <form onSubmit={handleSubmit} id="expense-modal-form" className="p-5 space-y-3.5">
+              
+              {/* Row 1: Expense Title & Category */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Expense Title <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="exp_title"
+                    value={formData.exp_title}
+                    onChange={handleInputChange}
+                    required
+                    className="w-full px-3 py-2 bg-slate-50/80 hover:bg-white focus:bg-white border border-slate-200 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/10 rounded-lg text-xs font-semibold text-slate-800 transition-all shadow-2xs"
+                  />
                 </div>
 
-                {/* 2. Amount & Reference */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                      Amount (PKR) *
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Category <span className="text-rose-500">*</span>
                     </label>
-                    <TextField
-                      fullWidth
+                    <button
+                      type="button"
+                      onClick={() => setShowTypeDialog(true)}
+                      className="text-[10px] text-rose-600 hover:text-rose-700 font-bold flex items-center gap-0.5 bg-rose-50 hover:bg-rose-100 px-2 py-0.5 rounded border border-rose-200/60 transition-all cursor-pointer"
+                    >
+                      <Plus className="w-2.5 h-2.5" />
+                      New
+                    </button>
+                  </div>
+                  <Autocomplete
+                    options={expenseTitles}
+                    getOptionLabel={(option) => {
+                      if (typeof option === 'string') return option;
+                      return option.title || '';
+                    }}
+                    value={expenseTitles.find((t) => String(t.id) === String(formData.exp_type)) || null}
+                    onChange={(event, newValue) => {
+                      setFormData((prev) => ({ ...prev, exp_type: newValue ? newValue.id : '' }));
+                    }}
+                    isOptionEqualToValue={(option, value) => option.id === value.id}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        size="small"
+                        required={!formData.exp_type}
+                        fullWidth
+                        variant="outlined"
+                        sx={{
+                          '& .MuiOutlinedInput-root': {
+                            borderRadius: '8px',
+                            backgroundColor: '#f8fafc',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            color: '#0f172a',
+                            '& fieldset': { borderColor: '#e2e8f0' },
+                            '&:hover fieldset': { borderColor: '#cbd5e1' },
+                            '&.Mui-focused': { backgroundColor: '#ffffff' },
+                            '&.Mui-focused fieldset': { borderColor: '#f43f5e', borderWidth: '1.5px' }
+                          }
+                        }}
+                      />
+                    )}
+                  />
+                </div>
+              </div>
+
+              {/* Row 2: Amount & Reference */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Amount (PKR) <span className="text-rose-500">*</span>
+                    </label>
+                    {parseFloat(formData.exp_amount || 0) > 0 && (
+                      <span className="text-[10px] font-bold text-rose-700 font-mono bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200/60">
+                        Rs. {fmtAmt(formData.exp_amount)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative flex items-center">
+                    <span className="absolute left-2.5 text-[11px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200/60 select-none">
+                      Rs.
+                    </span>
+                    <input
                       type="number"
+                      step="0.01"
+                      min="0.01"
                       name="exp_amount"
                       value={formData.exp_amount}
                       onChange={handleInputChange}
                       required
-                      inputProps={{ step: '0.01', min: '0.01' }}
-                      size="small"
-                      variant="outlined"
-                      placeholder="0.00"
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                      Payment Reference (Optional)
-                    </label>
-                    <TextField
-                      fullWidth
-                      name="payment_reference"
-                      value={formData.payment_reference || ''}
-                      onChange={handleInputChange}
-                      size="small"
-                      variant="outlined"
-                      placeholder="e.g., Cheque #1234, TX ID, Slip #"
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+                      className="w-full pl-12 pr-3 py-2 bg-slate-50/80 hover:bg-white focus:bg-white border border-slate-200 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/10 rounded-lg text-xs font-bold text-slate-900 font-mono transition-all shadow-2xs"
                     />
                   </div>
                 </div>
 
-                {/* 3. Payment Method Choice */}
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                    Disbursement Channel *
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Payment Reference <span className="text-slate-400 font-normal">(Optional)</span>
                   </label>
-                  <div className="grid grid-cols-3 gap-2.5">
-                    {/* Cash button */}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setFormData((prev) => ({
-                          ...prev,
-                          paymentMethod: 'CASH',
-                          paid_from_account_id: getDefaultFormData().paid_from_account_id,
-                          bank_account_id: '',
-                          cash_amount: '',
-                          bank_amount: ''
-                        }))
-                      }
-                      className={`flex items-center justify-center p-2.5 rounded-lg border-2 transition-all cursor-pointer ${
-                        formData.paymentMethod === 'CASH'
-                          ? 'border-emerald-500 bg-emerald-50/80 text-emerald-800 font-bold'
-                          : 'border-slate-300 bg-slate-50 text-slate-500 hover:border-slate-400'
-                      }`}
-                    >
-                      <Banknote className="w-4 h-4 mr-1.5 text-emerald-600" />
-                      <span className="text-xs">Cash</span>
-                    </button>
-
-                    {/* Bank button */}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setFormData((prev) => ({
-                          ...prev,
-                          paymentMethod: 'BANK',
-                          paid_from_account_id: '',
-                          bank_account_id: '',
-                          cash_amount: '',
-                          bank_amount: ''
-                        }))
-                      }
-                      className={`flex items-center justify-center p-2.5 rounded-lg border-2 transition-all cursor-pointer ${
-                        formData.paymentMethod === 'BANK'
-                          ? 'border-blue-500 bg-blue-50/80 text-blue-800 font-bold'
-                          : 'border-slate-300 bg-slate-50 text-slate-500 hover:border-slate-400'
-                      }`}
-                    >
-                      <CreditCard className="w-4 h-4 mr-1.5 text-blue-600" />
-                      <span className="text-xs">Bank</span>
-                    </button>
-
-                    {/* Partial Split button */}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setFormData((prev) => ({
-                          ...prev,
-                          paymentMethod: 'PARTIAL',
-                          paid_from_account_id: getDefaultFormData().paid_from_account_id,
-                          bank_account_id: '',
-                          cash_amount: '',
-                          bank_amount: ''
-                        }))
-                      }
-                      className={`flex items-center justify-center p-2.5 rounded-lg border-2 transition-all cursor-pointer ${
-                        formData.paymentMethod === 'PARTIAL'
-                          ? 'border-purple-500 bg-purple-50/80 text-purple-800 font-bold'
-                          : 'border-slate-300 bg-slate-50 text-slate-500 hover:border-slate-400'
-                      }`}
-                    >
-                      <Layers className="w-4 h-4 mr-1.5 text-purple-600" />
-                      <span className="text-xs">Split</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* 4. Single Account Selection (Cash or Bank) */}
-                {formData.paymentMethod === 'CASH' && (
-                  <div className="bg-emerald-50/50 p-3.5 rounded-lg border border-emerald-200">
-                    <label className="block text-xs font-bold text-emerald-900 mb-1">
-                      Cash Account *
-                    </label>
-                    <Autocomplete
-                      options={cashAccountsList}
-                      getOptionLabel={(account) =>
-                        `${account.cus_name} (Balance: Rs. ${parseFloat(account.cus_balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })})`
-                      }
-                      value={cashAccountsList.find((a) => a.cus_id.toString() === formData.paid_from_account_id) || null}
-                      onChange={(event, newValue) => {
-                        setFormData((prev) => ({
-                          ...prev,
-                          paid_from_account_id: newValue ? newValue.cus_id.toString() : ''
-                        }));
-                      }}
-                      isOptionEqualToValue={(option, value) => option.cus_id === value.cus_id}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          placeholder="Select cash account..."
-                          size="small"
-                          required={!formData.paid_from_account_id}
-                          fullWidth
-                          variant="outlined"
-                          sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px', background: '#ffffff' } }}
-                        />
-                      )}
-                    />
-                  </div>
-                )}
-
-                {formData.paymentMethod === 'BANK' && (
-                  <div className="bg-blue-50/50 p-3.5 rounded-lg border border-blue-200">
-                    <label className="block text-xs font-bold text-blue-900 mb-1">
-                      Bank Account *
-                    </label>
-                    <Autocomplete
-                      options={bankAccountsList}
-                      getOptionLabel={(account) =>
-                        `${account.cus_name} (Balance: Rs. ${parseFloat(account.cus_balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })})`
-                      }
-                      value={bankAccountsList.find((a) => a.cus_id.toString() === formData.bank_account_id) || null}
-                      onChange={(event, newValue) => {
-                        setFormData((prev) => ({
-                          ...prev,
-                          bank_account_id: newValue ? newValue.cus_id.toString() : ''
-                        }));
-                      }}
-                      isOptionEqualToValue={(option, value) => option.cus_id === value.cus_id}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          placeholder="Select bank account..."
-                          size="small"
-                          required={!formData.bank_account_id}
-                          fullWidth
-                          variant="outlined"
-                          sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px', background: '#ffffff' } }}
-                        />
-                      )}
-                    />
-                  </div>
-                )}
-
-                {/* 5. Split / Partial Payment Block */}
-                {formData.paymentMethod === 'PARTIAL' && (
-                  <div className="space-y-3 bg-purple-50/60 p-3.5 rounded-lg border border-purple-200">
-                    <h5 className="text-xs font-bold text-purple-900 flex items-center uppercase tracking-wider">
-                      <Layers className="w-3.5 h-3.5 mr-1 text-purple-600" />
-                      Split Breakdown
-                    </h5>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {/* Cash Portion */}
-                      <div className="space-y-1.5 bg-white p-2.5 rounded border border-purple-200">
-                        <label className="block text-xs font-bold text-emerald-800">Cash Account *</label>
-                        <Autocomplete
-                          options={cashAccountsList}
-                          getOptionLabel={(account) => account.cus_name}
-                          value={cashAccountsList.find((a) => a.cus_id.toString() === formData.paid_from_account_id) || null}
-                          onChange={(event, newValue) => {
-                            setFormData((prev) => ({
-                              ...prev,
-                              paid_from_account_id: newValue ? newValue.cus_id.toString() : ''
-                            }));
-                          }}
-                          isOptionEqualToValue={(option, value) => option.cus_id === value.cus_id}
-                          renderInput={(params) => (
-                            <TextField
-                              {...params}
-                              placeholder="Cash account..."
-                              size="small"
-                              required={!formData.paid_from_account_id}
-                              fullWidth
-                              variant="outlined"
-                              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '6px' } }}
-                            />
-                          )}
-                        />
-
-                        <label className="block text-xs font-bold text-emerald-800 pt-1">Cash Amount *</label>
-                        <TextField
-                          fullWidth
-                          type="number"
-                          name="cash_amount"
-                          value={formData.cash_amount || ''}
-                          onChange={handleInputChange}
-                          required
-                          inputProps={{ step: '0.01', min: '0.01' }}
-                          size="small"
-                          variant="outlined"
-                          placeholder="0.00"
-                          sx={{ '& .MuiOutlinedInput-root': { borderRadius: '6px' } }}
-                        />
-                      </div>
-
-                      {/* Bank Portion */}
-                      <div className="space-y-1.5 bg-white p-2.5 rounded border border-purple-200">
-                        <label className="block text-xs font-bold text-blue-800">Bank Account *</label>
-                        <Autocomplete
-                          options={bankAccountsList}
-                          getOptionLabel={(account) => account.cus_name}
-                          value={bankAccountsList.find((a) => a.cus_id.toString() === formData.bank_account_id) || null}
-                          onChange={(event, newValue) => {
-                            setFormData((prev) => ({
-                              ...prev,
-                              bank_account_id: newValue ? newValue.cus_id.toString() : ''
-                            }));
-                          }}
-                          isOptionEqualToValue={(option, value) => option.cus_id === value.cus_id}
-                          renderInput={(params) => (
-                            <TextField
-                              {...params}
-                              placeholder="Bank account..."
-                              size="small"
-                              required={!formData.bank_account_id}
-                              fullWidth
-                              variant="outlined"
-                              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '6px' } }}
-                            />
-                          )}
-                        />
-
-                        <label className="block text-xs font-bold text-blue-800 pt-1">Bank Amount *</label>
-                        <TextField
-                          fullWidth
-                          type="number"
-                          name="bank_amount"
-                          value={formData.bank_amount || ''}
-                          onChange={handleInputChange}
-                          required
-                          inputProps={{ step: '0.01', min: '0.01' }}
-                          size="small"
-                          variant="outlined"
-                          placeholder="0.00"
-                          sx={{ '& .MuiOutlinedInput-root': { borderRadius: '6px' } }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Live Calculation Progress */}
-                    {parseFloat(formData.exp_amount || 0) > 0 && (
-                      <div className="mt-1 pt-1.5 border-t border-purple-200 text-xs flex flex-wrap items-center justify-between gap-1.5">
-                        <span className="text-slate-600">
-                          Total: <strong className="text-slate-900 font-bold">Rs. {fmtAmt(formData.exp_amount)}</strong>
-                        </span>
-                        <span className="text-slate-600">
-                          Allocated: <strong className="text-slate-900 font-bold">Rs. {fmtAmt(parseFloat(formData.cash_amount || 0) + parseFloat(formData.bank_amount || 0))}</strong>
-                        </span>
-                        {(() => {
-                          const total = parseFloat(formData.exp_amount || 0);
-                          const allocated =
-                            parseFloat(formData.cash_amount || 0) + parseFloat(formData.bank_amount || 0);
-                          const remaining = total - allocated;
-
-                          if (Math.abs(remaining) < 0.01) {
-                            return (
-                              <span className="text-emerald-700 font-bold bg-emerald-100 px-2 py-0.5 rounded">
-                                ✓ Fully Balanced
-                              </span>
-                            );
-                          } else if (remaining > 0) {
-                            return (
-                              <span className="text-amber-700 font-bold bg-amber-100 px-2 py-0.5 rounded">
-                                Remaining: Rs. {fmtAmt(remaining)}
-                              </span>
-                            );
-                          } else {
-                            return (
-                              <span className="text-rose-700 font-bold bg-rose-100 px-2 py-0.5 rounded">
-                                Over-allocated: Rs. {fmtAmt(Math.abs(remaining))}
-                              </span>
-                            );
-                          }
-                        })()}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* 6. Details / Remarks */}
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                    Details & Remarks
-                  </label>
-                  <TextField
-                    fullWidth
-                    multiline
-                    rows={2}
-                    name="exp_detail"
-                    value={formData.exp_detail}
+                  <input
+                    type="text"
+                    name="payment_reference"
+                    value={formData.payment_reference || ''}
                     onChange={handleInputChange}
-                    placeholder="Enter additional remarks or description..."
-                    size="small"
-                    variant="outlined"
-                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+                    className="w-full px-3 py-2 bg-slate-50/80 hover:bg-white focus:bg-white border border-slate-200 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/10 rounded-lg text-xs font-medium text-slate-800 transition-all shadow-2xs"
                   />
                 </div>
-              </form>
-            </div>
+              </div>
 
-            {/* Modal Actions Footer */}
-            <div className="flex items-center justify-end space-x-2 pt-3 border-t border-slate-200 mt-1 flex-shrink-0">
-              <button
-                type="button"
-                onClick={() => setCurrentView('list')}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                form="expense-modal-form"
-                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all active:scale-95 cursor-pointer"
-              >
-                {editingExpense ? 'Update Expense' : 'Save Expense'}
-              </button>
-            </div>
+              {/* Row 3: Disbursement Channel Toggle */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Disbursement Channel <span className="text-rose-500">*</span>
+                </label>
+                <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100/80 rounded-xl border border-slate-200/80">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        paymentMethod: 'CASH',
+                        paid_from_account_id: getDefaultFormData().paid_from_account_id,
+                        bank_account_id: '',
+                        cash_amount: '',
+                        bank_amount: ''
+                      }))
+                    }
+                    className={`flex items-center justify-center py-2 px-2.5 rounded-lg text-xs transition-all cursor-pointer ${
+                      formData.paymentMethod === 'CASH'
+                        ? 'bg-white text-emerald-800 shadow-2xs border border-emerald-100 font-bold'
+                        : 'text-slate-600 hover:text-slate-900 font-semibold'
+                    }`}
+                  >
+                    <Banknote className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
+                    Cash Drawer
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        paymentMethod: 'BANK',
+                        paid_from_account_id: '',
+                        bank_account_id: '',
+                        cash_amount: '',
+                        bank_amount: ''
+                      }))
+                    }
+                    className={`flex items-center justify-center py-2 px-2.5 rounded-lg text-xs transition-all cursor-pointer ${
+                      formData.paymentMethod === 'BANK'
+                        ? 'bg-white text-blue-800 shadow-2xs border border-blue-100 font-bold'
+                        : 'text-slate-600 hover:text-slate-900 font-semibold'
+                    }`}
+                  >
+                    <Building2 className="w-3.5 h-3.5 mr-1.5 text-blue-600" />
+                    Bank Account
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        paymentMethod: 'PARTIAL',
+                        paid_from_account_id: getDefaultFormData().paid_from_account_id,
+                        bank_account_id: '',
+                        cash_amount: '',
+                        bank_amount: ''
+                      }))
+                    }
+                    className={`flex items-center justify-center py-2 px-2.5 rounded-lg text-xs transition-all cursor-pointer ${
+                      formData.paymentMethod === 'PARTIAL'
+                        ? 'bg-white text-purple-800 shadow-2xs border border-purple-100 font-bold'
+                        : 'text-slate-600 hover:text-slate-900 font-semibold'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5 mr-1.5 text-purple-600" />
+                    Split Payment
+                  </button>
+                </div>
+              </div>
+
+              {/* Row 4: Account Selector */}
+              {formData.paymentMethod === 'CASH' && (
+                <div className="bg-emerald-50/40 p-3 rounded-xl border border-emerald-200/70 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-semibold text-emerald-950">
+                      Disburse From Cash Account <span className="text-rose-500">*</span>
+                    </label>
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">
+                      Cash Drawer
+                    </span>
+                  </div>
+                  <Autocomplete
+                    options={cashAccountsList}
+                    getOptionLabel={(account) =>
+                      `${account.cus_name} (Balance: Rs. ${parseFloat(account.cus_balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })})`
+                    }
+                    value={cashAccountsList.find((a) => a.cus_id.toString() === formData.paid_from_account_id) || null}
+                    onChange={(event, newValue) => {
+                      setFormData((prev) => ({
+                        ...prev,
+                        paid_from_account_id: newValue ? newValue.cus_id.toString() : ''
+                      }));
+                    }}
+                    isOptionEqualToValue={(option, value) => option.cus_id === value.cus_id}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        size="small"
+                        required={!formData.paid_from_account_id}
+                        fullWidth
+                        variant="outlined"
+                        sx={{
+                          '& .MuiOutlinedInput-root': {
+                            borderRadius: '8px',
+                            backgroundColor: '#ffffff',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            color: '#0f172a',
+                            '& fieldset': { borderColor: '#a7f3d0' },
+                            '&:hover fieldset': { borderColor: '#6ee7b7' },
+                            '&.Mui-focused fieldset': { borderColor: '#059669', borderWidth: '1.5px' }
+                          }
+                        }}
+                      />
+                    )}
+                  />
+                </div>
+              )}
+
+              {formData.paymentMethod === 'BANK' && (
+                <div className="bg-blue-50/40 p-3 rounded-xl border border-blue-200/70 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-semibold text-blue-950">
+                      Disburse From Bank Account <span className="text-rose-500">*</span>
+                    </label>
+                    <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded">
+                      Bank Transfer
+                    </span>
+                  </div>
+                  <Autocomplete
+                    options={bankAccountsList}
+                    getOptionLabel={(account) =>
+                      `${account.cus_name} (Balance: Rs. ${parseFloat(account.cus_balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })})`
+                    }
+                    value={bankAccountsList.find((a) => a.cus_id.toString() === formData.bank_account_id) || null}
+                    onChange={(event, newValue) => {
+                      setFormData((prev) => ({
+                        ...prev,
+                        bank_account_id: newValue ? newValue.cus_id.toString() : ''
+                      }));
+                    }}
+                    isOptionEqualToValue={(option, value) => option.cus_id === value.cus_id}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        size="small"
+                        required={!formData.bank_account_id}
+                        fullWidth
+                        variant="outlined"
+                        sx={{
+                          '& .MuiOutlinedInput-root': {
+                            borderRadius: '8px',
+                            backgroundColor: '#ffffff',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            color: '#0f172a',
+                            '& fieldset': { borderColor: '#bae6fd' },
+                            '&:hover fieldset': { borderColor: '#7dd3fc' },
+                            '&.Mui-focused fieldset': { borderColor: '#0284c7', borderWidth: '1.5px' }
+                          }
+                        }}
+                      />
+                    )}
+                  />
+                </div>
+              )}
+
+              {formData.paymentMethod === 'PARTIAL' && (
+                <div className="bg-purple-50/30 p-3 rounded-xl border border-purple-200/70 space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {/* Cash Portion */}
+                    <div className="space-y-1 bg-white p-2.5 rounded-lg border border-purple-100 shadow-2xs">
+                      <label className="block text-xs font-semibold text-slate-700">Cash Account *</label>
+                      <Autocomplete
+                        options={cashAccountsList}
+                        getOptionLabel={(account) => account.cus_name}
+                        value={cashAccountsList.find((a) => a.cus_id.toString() === formData.paid_from_account_id) || null}
+                        onChange={(event, newValue) => {
+                          setFormData((prev) => ({
+                            ...prev,
+                            paid_from_account_id: newValue ? newValue.cus_id.toString() : ''
+                          }));
+                        }}
+                        isOptionEqualToValue={(option, value) => option.cus_id === value.cus_id}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            size="small"
+                            required={!formData.paid_from_account_id}
+                            fullWidth
+                            variant="outlined"
+                            sx={{
+                              '& .MuiOutlinedInput-root': {
+                                borderRadius: '6px',
+                                fontSize: '0.75rem',
+                                '& fieldset': { borderColor: '#e2e8f0' }
+                              }
+                            }}
+                          />
+                        )}
+                      />
+
+                      <div className="flex items-center justify-between pt-0.5">
+                        <label className="block text-xs font-semibold text-slate-700">Cash Amount *</label>
+                        {parseFloat(formData.exp_amount || 0) > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const total = parseFloat(formData.exp_amount || 0);
+                              const bank = parseFloat(formData.bank_amount || 0);
+                              const remaining = Math.max(0, total - bank);
+                              setFormData((prev) => ({ ...prev, cash_amount: remaining.toString() }));
+                            }}
+                            className="text-[10px] font-bold text-purple-700 hover:text-purple-900 cursor-pointer"
+                          >
+                            Fill Balance
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        name="cash_amount"
+                        value={formData.cash_amount || ''}
+                        onChange={handleInputChange}
+                        required
+                        className="w-full px-2.5 py-1.5 bg-slate-50/70 border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500"
+                      />
+                    </div>
+
+                    {/* Bank Portion */}
+                    <div className="space-y-1 bg-white p-2.5 rounded-lg border border-purple-100 shadow-2xs">
+                      <label className="block text-xs font-semibold text-slate-700">Bank Account *</label>
+                      <Autocomplete
+                        options={bankAccountsList}
+                        getOptionLabel={(account) => account.cus_name}
+                        value={bankAccountsList.find((a) => a.cus_id.toString() === formData.bank_account_id) || null}
+                        onChange={(event, newValue) => {
+                          setFormData((prev) => ({
+                            ...prev,
+                            bank_account_id: newValue ? newValue.cus_id.toString() : ''
+                          }));
+                        }}
+                        isOptionEqualToValue={(option, value) => option.cus_id === value.cus_id}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            size="small"
+                            required={!formData.bank_account_id}
+                            fullWidth
+                            variant="outlined"
+                            sx={{
+                              '& .MuiOutlinedInput-root': {
+                                borderRadius: '6px',
+                                fontSize: '0.75rem',
+                                '& fieldset': { borderColor: '#e2e8f0' }
+                              }
+                            }}
+                          />
+                        )}
+                      />
+
+                      <div className="flex items-center justify-between pt-0.5">
+                        <label className="block text-xs font-semibold text-slate-700">Bank Amount *</label>
+                        {parseFloat(formData.exp_amount || 0) > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const total = parseFloat(formData.exp_amount || 0);
+                              const cash = parseFloat(formData.cash_amount || 0);
+                              const remaining = Math.max(0, total - cash);
+                              setFormData((prev) => ({ ...prev, bank_amount: remaining.toString() }));
+                            }}
+                            className="text-[10px] font-bold text-purple-700 hover:text-purple-900 cursor-pointer"
+                          >
+                            Fill Balance
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        name="bank_amount"
+                        value={formData.bank_amount || ''}
+                        onChange={handleInputChange}
+                        required
+                        className="w-full px-2.5 py-1.5 bg-slate-50/70 border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Split Allocation Progress */}
+                  {parseFloat(formData.exp_amount || 0) > 0 && (
+                    <div className="pt-1.5 border-t border-purple-200/60 flex items-center justify-between text-[11px]">
+                      {(() => {
+                        const total = parseFloat(formData.exp_amount || 0);
+                        const cash = parseFloat(formData.cash_amount || 0);
+                        const bank = parseFloat(formData.bank_amount || 0);
+                        const remaining = total - (cash + bank);
+
+                        if (Math.abs(remaining) < 0.01) {
+                          return (
+                            <span className="text-emerald-700 font-bold flex items-center gap-1 bg-emerald-100/80 px-2 py-0.5 rounded">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Fully Balanced
+                            </span>
+                          );
+                        } else if (remaining > 0) {
+                          return (
+                            <span className="text-amber-800 font-bold bg-amber-100/80 px-2 py-0.5 rounded">
+                              Remaining: Rs. {fmtAmt(remaining)}
+                            </span>
+                          );
+                        } else {
+                          return (
+                            <span className="text-rose-800 font-bold bg-rose-100/80 px-2 py-0.5 rounded">
+                              Over-allocated: Rs. {fmtAmt(Math.abs(remaining))}
+                            </span>
+                          );
+                        }
+                      })()}
+                      <span className="text-slate-600 font-mono text-[11px] font-semibold">
+                        Rs. {fmtAmt(parseFloat(formData.cash_amount || 0) + parseFloat(formData.bank_amount || 0))} / Rs. {fmtAmt(formData.exp_amount)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Row 5: Particulars & Remarks */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Particulars & Remarks <span className="text-slate-400 font-normal">(Optional)</span>
+                </label>
+                <input
+                  type="text"
+                  name="exp_detail"
+                  value={formData.exp_detail}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 bg-slate-50/80 hover:bg-white focus:bg-white border border-slate-200 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/10 rounded-lg text-xs font-medium text-slate-800 transition-all shadow-2xs"
+                />
+              </div>
+
+              {/* Compact Footer Actions */}
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                <div className="text-xs text-slate-500 font-medium">
+                  Total Outflow:{' '}
+                  <strong className="text-slate-900 font-mono font-bold text-sm ml-1">
+                    Rs. {fmtAmt(formData.exp_amount || 0)}
+                  </strong>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentView('list')}
+                    className="px-3.5 py-2 text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    form="expense-modal-form"
+                    className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all active:scale-[0.98] cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Receipt className="w-3.5 h-3.5" />
+                    {editingExpense ? 'Update Expense' : 'Save Expense'}
+                  </button>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -1772,110 +1889,115 @@ export default function ExpensesPage() {
       {/* ================== VIEW EXPENSE VOUCHER MODAL =========================== */}
       {/* ========================================================================= */}
       {viewingVoucher && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6 overflow-y-auto">
-          <div className="bg-white text-slate-900 rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-5 relative max-h-[90vh] flex flex-col my-auto animate-in fade-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-md flex items-center justify-center z-50 p-4 sm:p-6 overflow-y-auto">
+          <div className="relative w-full max-w-lg bg-white/95 backdrop-blur-2xl rounded-3xl shadow-[0_20px_60px_-15px_rgba(0,0,0,0.2),0_0_0_1px_rgba(255,255,255,0.9)_inset,0_0_40px_rgba(244,63,94,0.08)] border border-slate-200/70 p-6 flex flex-col my-auto animate-in fade-in zoom-in-95 duration-200">
             {/* Voucher Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-              <div className="flex items-center space-x-2">
-                <Receipt className="w-4 h-4 text-rose-600" />
-                <h3 className="text-sm font-bold text-slate-900">Expense Voucher</h3>
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-rose-600 text-white flex items-center justify-center shadow-md shadow-rose-500/20">
+                  <Receipt className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800 tracking-tight">Expense Voucher</h3>
+                  <p className="text-xs text-slate-400">Official cash & bank disbursement record</p>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => setViewingVoucher(null)}
-                className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded transition-colors cursor-pointer"
+                className="w-8 h-8 rounded-xl bg-slate-100/80 hover:bg-slate-200/80 text-slate-400 hover:text-slate-700 flex items-center justify-center transition-all cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Voucher Body (Printable Style) */}
-            <div className="py-4 space-y-3.5 overflow-y-auto" id="printable-expense-voucher">
+            <div className="py-4 space-y-4 overflow-y-auto" id="printable-expense-voucher">
               {/* Receipt Header Badge */}
-              <div className="text-center p-3 bg-slate-50 rounded-lg border border-slate-200">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-                  Payment Disbursement Voucher
+              <div className="text-center p-4 bg-gradient-to-b from-rose-50/50 via-white to-slate-50/50 rounded-2xl border border-rose-100/70 shadow-xs">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
+                  Disbursement Amount
                 </span>
-                <span className="text-2xl font-black text-rose-600 block mt-0.5">
+                <span className="text-3xl font-black text-rose-600 font-mono block mt-1 tracking-tight">
                   Rs. {fmtAmt(viewingVoucher.exp_amount)}
                 </span>
-                <span className="text-[11px] text-slate-500 font-mono mt-0.5 block">
+                <span className="text-[11px] text-slate-500 font-mono mt-1 block">
                   Voucher #{viewingVoucher.exp_id} • {formatDatePK(viewingVoucher.payment_date || viewingVoucher.created_at)}
                 </span>
               </div>
 
               {/* Information Rows */}
-              <div className="space-y-2 text-xs divide-y divide-slate-100">
-                <div className="pt-2 flex justify-between">
-                  <span className="text-slate-400 font-medium">Expense Title</span>
-                  <span className="text-slate-900 font-bold text-right">{viewingVoucher.exp_title}</span>
+              <div className="space-y-2.5 text-xs divide-y divide-slate-100">
+                <div className="pt-2.5 flex justify-between items-center">
+                  <span className="text-slate-500 font-medium">Expense Title</span>
+                  <span className="text-slate-900 font-bold text-right text-sm">{viewingVoucher.exp_title}</span>
                 </div>
 
-                <div className="pt-2 flex justify-between">
-                  <span className="text-slate-400 font-medium">Category</span>
-                  <span className="text-rose-700 font-bold bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                <div className="pt-2.5 flex justify-between items-center">
+                  <span className="text-slate-500 font-medium">Category</span>
+                  <span className="text-rose-700 font-bold bg-rose-50/90 px-2.5 py-0.5 rounded-lg border border-rose-200/70">
                     {viewingVoucher.expense_title?.title || 'Uncategorized'}
                   </span>
                 </div>
 
-                <div className="pt-2 flex justify-between">
-                  <span className="text-slate-400 font-medium">Payment Timestamp</span>
+                <div className="pt-2.5 flex justify-between items-center">
+                  <span className="text-slate-500 font-medium">Payment Timestamp</span>
                   <span className="text-slate-700 font-medium font-mono">
                     {formatDateTimePK(viewingVoucher.payment_date || viewingVoucher.created_at)}
                   </span>
                 </div>
 
                 {viewingVoucher.payment_reference && (
-                  <div className="pt-2 flex justify-between">
-                    <span className="text-slate-400 font-medium">Payment Reference</span>
-                    <span className="text-slate-800 font-mono font-bold">
+                  <div className="pt-2.5 flex justify-between items-center">
+                    <span className="text-slate-500 font-medium">Payment Reference</span>
+                    <span className="text-slate-800 font-mono font-bold bg-slate-100/80 px-2 py-0.5 rounded border border-slate-200/60">
                       {viewingVoucher.payment_reference}
                     </span>
                   </div>
                 )}
 
                 {/* Account Disbursement Breakdown */}
-                <div className="pt-2">
-                  <span className="text-slate-400 font-medium block mb-1">Disbursement Breakdown</span>
+                <div className="pt-2.5">
+                  <span className="text-slate-500 font-medium block mb-1.5">Disbursement Breakdown</span>
                   {(() => {
                     const cashAmt = parseFloat(viewingVoucher.cash_amount || 0);
                     const bankAmt = parseFloat(viewingVoucher.bank_amount || 0);
 
                     if (cashAmt > 0 && bankAmt > 0) {
                       return (
-                        <div className="bg-purple-50/60 p-2.5 rounded border border-purple-200 space-y-1">
+                        <div className="bg-purple-50/40 p-3 rounded-xl border border-purple-200/70 space-y-1.5">
                           <div className="flex justify-between font-semibold text-emerald-800">
                             <span>Cash: {viewingVoucher.paid_from_account?.cus_name || 'Cash'}</span>
-                            <strong>Rs. {fmtAmt(cashAmt)}</strong>
+                            <strong className="font-mono">Rs. {fmtAmt(cashAmt)}</strong>
                           </div>
                           <div className="flex justify-between font-semibold text-blue-800">
                             <span>Bank: {viewingVoucher.bank_account?.cus_name || 'Bank'}</span>
-                            <strong>Rs. {fmtAmt(bankAmt)}</strong>
+                            <strong className="font-mono">Rs. {fmtAmt(bankAmt)}</strong>
                           </div>
                         </div>
                       );
                     }
                     if (bankAmt > 0 || viewingVoucher.paid_from_account?.cus_name?.toLowerCase().includes('bank')) {
                       return (
-                        <div className="bg-blue-50/60 p-2.5 rounded border border-blue-200 flex justify-between font-semibold text-blue-900">
+                        <div className="bg-blue-50/40 p-3 rounded-xl border border-blue-200/70 flex justify-between font-semibold text-blue-900">
                           <span>Bank: {viewingVoucher.bank_account?.cus_name || viewingVoucher.paid_from_account?.cus_name}</span>
-                          <strong>Rs. {fmtAmt(viewingVoucher.exp_amount)}</strong>
+                          <strong className="font-mono">Rs. {fmtAmt(viewingVoucher.exp_amount)}</strong>
                         </div>
                       );
                     }
                     return (
-                      <div className="bg-emerald-50/60 p-2.5 rounded border border-emerald-200 flex justify-between font-semibold text-emerald-900">
+                      <div className="bg-emerald-50/40 p-3 rounded-xl border border-emerald-200/70 flex justify-between font-semibold text-emerald-900">
                         <span>Cash: {viewingVoucher.paid_from_account?.cus_name || 'Cash in Hand'}</span>
-                        <strong>Rs. {fmtAmt(viewingVoucher.exp_amount)}</strong>
+                        <strong className="font-mono">Rs. {fmtAmt(viewingVoucher.exp_amount)}</strong>
                       </div>
                     );
                   })()}
                 </div>
 
                 {viewingVoucher.exp_detail && (
-                  <div className="pt-2">
-                    <span className="text-slate-400 font-medium block mb-1">Particulars / Remarks</span>
-                    <p className="text-slate-700 bg-slate-50 p-2.5 rounded border border-slate-200 leading-relaxed font-sans">
+                  <div className="pt-2.5">
+                    <span className="text-slate-500 font-medium block mb-1">Particulars / Remarks</span>
+                    <p className="text-slate-700 bg-slate-50/80 p-3 rounded-xl border border-slate-200/80 leading-relaxed font-sans text-xs">
                       {viewingVoucher.exp_detail}
                     </p>
                   </div>
@@ -1884,11 +2006,11 @@ export default function ExpensesPage() {
             </div>
 
             {/* Voucher Footer Actions */}
-            <div className="flex items-center justify-between pt-3 border-t border-slate-200">
+            <div className="flex items-center justify-between pt-4 border-t border-slate-100">
               <button
                 type="button"
                 onClick={printVoucher}
-                className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
+                className="inline-flex items-center px-4 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100/90 hover:bg-slate-200/90 transition-all cursor-pointer shadow-xs"
               >
                 <Printer className="w-3.5 h-3.5 mr-1.5" />
                 Print Voucher
@@ -1902,14 +2024,14 @@ export default function ExpensesPage() {
                     setViewingVoucher(null);
                     handleEdit(toEdit);
                   }}
-                  className="px-3 py-1.5 rounded-lg text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors cursor-pointer"
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-blue-700 bg-blue-50/90 hover:bg-blue-100/90 border border-blue-200/70 transition-all cursor-pointer shadow-xs"
                 >
                   Edit
                 </button>
                 <button
                   type="button"
                   onClick={() => setViewingVoucher(null)}
-                  className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 transition-colors cursor-pointer"
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-slate-800 hover:bg-slate-900 transition-all cursor-pointer shadow-xs"
                 >
                   Close
                 </button>

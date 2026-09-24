@@ -177,15 +177,15 @@ function resolveSaleReceiptBalances(bill) {
   return { prevBal: postBal - currentDue, currentDue, totalBal: postBal };
 }
 
-/** Match order invoice print styling — darker header/borders for print */
+/** Ink-saving outline print styling optimized for B&W & thermal printers (white background, bold black text & borders) */
 const SALE_INVOICE_PRINT = {
-  headerBg: '#808080',
-  headerText: '#ffffff',
-  border: '#777',
+  headerBg: '#ffffff',
+  headerText: '#000000',
+  border: '#000000',
   bodyText: '#000000',
-  balanceTotalBg: '#808080',
-  balanceTotalText: '#ffffff',
-  grandTotalBg: '#e0e0e0',
+  balanceTotalBg: '#ffffff',
+  balanceTotalText: '#000000',
+  grandTotalBg: '#ffffff',
 };
 
 const SALE_PRODUCT_LIST_LIMIT = 50;
@@ -416,7 +416,7 @@ const SALE_ENTRY_ROW2_SX = {
 };
 
 const SALE_DROPDOWN_LINE = '1px solid #c5c5c5';
-const SALE_CUSTOMER_DROPDOWN_GRID = '32px minmax(320px, 3.2fr) 110px minmax(110px, 1fr) 100px';
+const SALE_CUSTOMER_DROPDOWN_GRID = '32px minmax(270px, 2.7fr) 110px minmax(100px, 1fr) 130px';
 
 const saleDropdownRowStyle = (columns) => ({
   display: 'grid',
@@ -488,7 +488,8 @@ function SaleDropdownListbox({ columns, headers, props, listRef }) {
             style={{
               ...saleDropdownHeaderCell,
               borderRight: i === headers.length - 1 ? 'none' : SALE_DROPDOWN_LINE,
-              justifyContent: label === '#' ? 'center' : 'flex-start',
+              justifyContent: label === '#' ? 'center' : label === 'Balance' ? 'flex-end' : 'flex-start',
+              paddingRight: label === 'Balance' ? 10 : 8,
             }}
           >
             {label}
@@ -507,7 +508,7 @@ const SaleCustomerDropdownListbox = forwardRef(function SaleCustomerDropdownList
       listRef={ref}
       props={props}
       columns={SALE_CUSTOMER_DROPDOWN_GRID}
-      headers={['#', 'Name', 'Phone', 'Address', 'City']}
+      headers={['#', 'Name', 'Phone', 'Address', 'Balance']}
     />
   );
 });
@@ -5703,8 +5704,19 @@ function SalesPageContent() {
                             <span title={option.cus_address || ''} style={saleDropdownCellStyle}>
                               {option.cus_address || ''}
                             </span>
-                            <span title={option.city?.city_name || ''} style={{ ...saleDropdownCellStyle, borderRight: 'none' }}>
-                              {option.city?.city_name || ''}
+                            <span
+                              title={`Balance: Rs. ${parseFloat(option.cus_balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                              style={{
+                                ...saleDropdownCellStyle,
+                                borderRight: 'none',
+                                fontWeight: 700,
+                                fontVariantNumeric: 'tabular-nums',
+                                color: parseFloat(option.cus_balance || 0) > 0 ? '#b91c1c' : parseFloat(option.cus_balance || 0) < 0 ? '#15803d' : '#475569',
+                                justifyContent: 'flex-end',
+                                paddingRight: 10,
+                              }}
+                            >
+                              Rs. {parseFloat(option.cus_balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </span>
                           </li>
                         );
@@ -10115,9 +10127,9 @@ function SalesPageContent() {
                               </>
                             );
                           })()}
-                          <TableRow sx={{ bgcolor: '#d0d0d0' }}>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>بقايا رقم</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                          <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.balanceTotalBg }}>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.balanceTotalText }}>بقايا رقم</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.balanceTotalText }}>
                               {fmtAmt(parseFloat(selectedBill.total_amount || 0) + parseFloat(selectedBill.previous_balance || 0) - parseFloat(selectedBill.payment || 0))}
                             </TableCell>
                           </TableRow>
@@ -10270,22 +10282,25 @@ function SalesPageContent() {
           body.print-a4 #printable-invoice-a4 thead .MuiTableRow-root,
           body.print-a4 #printable-invoice thead .MuiTableRow-root,
           body.print-existing #printable-invoice thead .MuiTableRow-root {
-            background-color: #808080 !important;
+            background-color: #ffffff !important;
+            color: #000000 !important;
           }
 
           body.print-a4 #printable-invoice-a4 thead .MuiTableCell-root,
           body.print-a4 #printable-invoice thead .MuiTableCell-root,
           body.print-existing #printable-invoice thead .MuiTableCell-root {
-            background-color: #808080 !important;
-            color: #ffffff !important;
-            border-color: #777 !important;
+            background-color: #ffffff !important;
+            color: #000000 !important;
+            border-color: #000000 !important;
+            font-weight: bold !important;
+            border-bottom: 2px solid #000000 !important;
           }
 
           body.print-a4 #printable-invoice-a4 .MuiTableBody-root .MuiTableCell-root,
           body.print-a4 #printable-invoice .MuiTableBody-root .MuiTableCell-root,
           body.print-existing #printable-invoice .MuiTableBody-root .MuiTableCell-root {
             color: #000000 !important;
-            border-color: #777 !important;
+            border-color: #000000 !important;
           }
 
           body.print-existing {
