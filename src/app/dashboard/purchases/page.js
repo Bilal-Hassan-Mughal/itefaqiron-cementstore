@@ -244,8 +244,8 @@ function commitPurchaseDropdownOnTab(e, highlighted, applyValue, focusNext) {
 }
 
 const PURCHASE_DROPDOWN_LINE = '1px solid #c5c5c5';
-const PURCHASE_SUPPLIER_DROPDOWN_GRID = '28px minmax(140px, 1.6fr) 96px minmax(80px, 1.4fr)';
-const PURCHASE_SUPPLIER_DROPDOWN_WIDTH = 520;
+const PURCHASE_SUPPLIER_DROPDOWN_GRID = '28px minmax(160px, 1.8fr) 110px minmax(110px, 1.2fr)';
+const PURCHASE_SUPPLIER_DROPDOWN_WIDTH = 540;
 
 const PURCHASE_PRODUCT_DROPDOWN_GRID = '28px minmax(130px, 1.8fr) minmax(95px, 1.1fr) 105px';
 const PURCHASE_PRODUCT_DROPDOWN_WIDTH = 540;
@@ -318,8 +318,8 @@ function PurchaseDropdownListbox({ columns, headers, props, listRef, showCost = 
                 textTransform: 'uppercase',
                 letterSpacing: '0.04em',
                 borderRight: i === headers.length - 1 ? 'none' : PURCHASE_DROPDOWN_LINE,
-                justifyContent: label === '#' ? 'center' : label === 'Cost' ? 'flex-end' : 'flex-start',
-                paddingRight: label === 'Cost' ? 8 : 8,
+                justifyContent: label === '#' ? 'center' : label === 'Cost' || label === 'Balance' ? 'flex-end' : 'flex-start',
+                paddingRight: label === 'Cost' || label === 'Balance' ? 10 : 8,
               }}
             >
               {label === 'Cost' ? (
@@ -366,7 +366,7 @@ const PurchaseSupplierDropdownListbox = forwardRef(function PurchaseSupplierDrop
       listRef={ref}
       props={props}
       columns={PURCHASE_SUPPLIER_DROPDOWN_GRID}
-      headers={['#', 'Name', 'Phone', 'Address']}
+      headers={['#', 'Name', 'Phone', 'Balance']}
     />
   );
 });
@@ -4158,8 +4158,19 @@ function PurchasesPageContent() {
                             <span title={option.cus_phone_no || ''} style={{ ...purchaseDropdownCellStyle, fontVariantNumeric: 'tabular-nums' }}>
                               {option.cus_phone_no || ''}
                             </span>
-                            <span title={option.cus_address || ''} style={{ ...purchaseDropdownCellStyle, borderRight: 'none' }}>
-                              {option.cus_address || ''}
+                            <span
+                              title={`Balance: Rs. ${parseFloat(option.cus_balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                              style={{
+                                ...purchaseDropdownCellStyle,
+                                borderRight: 'none',
+                                fontWeight: 700,
+                                fontVariantNumeric: 'tabular-nums',
+                                color: parseFloat(option.cus_balance || 0) > 0 ? '#b91c1c' : parseFloat(option.cus_balance || 0) < 0 ? '#15803d' : '#475569',
+                                justifyContent: 'flex-end',
+                                paddingRight: 10,
+                              }}
+                            >
+                              Rs. {parseFloat(option.cus_balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </span>
                           </li>
                         );
