@@ -247,8 +247,8 @@ const PURCHASE_DROPDOWN_LINE = '1px solid #c5c5c5';
 const PURCHASE_SUPPLIER_DROPDOWN_GRID = '28px minmax(140px, 1.6fr) 96px minmax(80px, 1.4fr)';
 const PURCHASE_SUPPLIER_DROPDOWN_WIDTH = 520;
 
-const PURCHASE_PRODUCT_DROPDOWN_GRID = '28px minmax(140px, 1.8fr) minmax(90px, 1fr) 72px';
-const PURCHASE_PRODUCT_DROPDOWN_WIDTH = 480;
+const PURCHASE_PRODUCT_DROPDOWN_GRID = '28px minmax(130px, 1.8fr) minmax(95px, 1.1fr) 105px';
+const PURCHASE_PRODUCT_DROPDOWN_WIDTH = 540;
 
 const PURCHASE_BANK_DROPDOWN_GRID = '28px minmax(72px, 118px) minmax(80px, 1fr)';
 const PURCHASE_BANK_DROPDOWN_WIDTH = 340;
@@ -991,6 +991,7 @@ function PurchasesPageContent() {
   const [cityFormData, setCityFormData] = useState({ city_name: '' });
   const [showAddProductPopup, setShowAddProductPopup] = useState(false);
   const [showProductCostInDropdown, setShowProductCostInDropdown] = useState(false);
+  const [revealedCostProductIds, setRevealedCostProductIds] = useState({});
   const [addProductFormData, setAddProductFormData] = useState({ pro_title: '', pro_description: '', cat_id: '', sub_cat_id: '', pro_crate: '', pro_sale_price: '', pro_baser_price: '', pro_cost_price: '', pro_stock_qnty: '', pro_unit: '', pro_packing: '', low_stock_quantity: '10' });
   const [productCatInput, setProductCatInput] = useState('');
   const [productSubCatInput, setProductSubCatInput] = useState('');
@@ -4379,6 +4380,9 @@ function PurchasesPageContent() {
                         )}
                         renderOption={(props, option, { index }) => {
                           const { key, ownerState, ...optionProps } = props;
+                          const rawUnit = option.pro_unit ? String(option.pro_unit).trim() : '';
+                          const cleanUnit = (rawUnit && rawUnit.toLowerCase() !== 'null' && rawUnit.toLowerCase() !== 'undefined') ? rawUnit : '';
+
                           const storeId = formData.store_id ? parseInt(formData.store_id, 10) : null;
                           const storeStockEntry = storeId
                             ? option.store_stocks?.find((s) => s.store_id === storeId)
@@ -4388,9 +4392,11 @@ function PurchasesPageContent() {
                             : (option.store_stocks?.length
                               ? option.store_stocks.reduce((sum, s) => sum + parseFloat(s.stock_quantity || 0), 0)
                               : (option.pro_stock_qnty != null ? parseFloat(option.pro_stock_qnty || 0) : 0));
-                          const stockLabel = stockQty != null && Number.isFinite(stockQty)
-                            ? `${stockQty.toLocaleString()}${option.pro_unit ? ` ${option.pro_unit}` : ''}`
-                            : '0';
+                          const formattedQty = Number.isFinite(stockQty)
+                            ? (Math.abs(stockQty) < 0.001 ? 0 : (stockQty % 1 === 0 ? stockQty : parseFloat(stockQty.toFixed(2))))
+                            : 0;
+                          const stockLabel = `${formattedQty.toLocaleString()}${cleanUnit ? ` ${cleanUnit}` : ''}`;
+                          const isCostVisible = showProductCostInDropdown || Boolean(revealedCostProductIds[option.pro_id]);
                           return (
                             <li key={option.pro_id ?? key} {...optionProps} style={{ ...purchaseDropdownRowStyle(PURCHASE_PRODUCT_DROPDOWN_GRID), ...optionProps.style }}>
                               <span style={{ ...purchaseDropdownCellStyle, justifyContent: 'center', color: '#64748b', fontSize: 12, fontWeight: 700 }}>
@@ -4402,8 +4408,36 @@ function PurchasesPageContent() {
                               <span title={stockLabel} style={{ ...purchaseDropdownCellStyle, fontVariantNumeric: 'tabular-nums', justifyContent: 'flex-end', fontWeight: 600, color: stockQty > 0 ? '#15803d' : '#64748b' }}>
                                 {stockLabel}
                               </span>
-                              <span style={{ ...purchaseDropdownCellStyle, borderRight: 'none', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums', fontSize: 12, fontWeight: 600 }}>
-                                {showProductCostInDropdown ? fmtAmt(option.pro_cost_price) : '••••••'}
+                              <span style={{ ...purchaseDropdownCellStyle, borderRight: 'none', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums', fontSize: 12, fontWeight: 600, gap: 4 }}>
+                                <span>{isCostVisible ? fmtAmt(option.pro_cost_price) : '••••••'}</span>
+                                <Box
+                                  component="span"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setRevealedCostProductIds((prev) => ({
+                                      ...prev,
+                                      [option.pro_id]: !prev[option.pro_id],
+                                    }));
+                                  }}
+                                  sx={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    cursor: 'pointer',
+                                    pointerEvents: 'auto',
+                                    p: 0.25,
+                                    borderRadius: 0.5,
+                                    color: isCostVisible ? '#0284c7' : '#94a3b8',
+                                    '&:hover': { color: '#0284c7', bgcolor: 'rgba(2, 132, 199, 0.12)' },
+                                  }}
+                                  title={isCostVisible ? 'Hide Cost' : 'Show Cost'}
+                                >
+                                  {isCostVisible ? (
+                                    <EyeIcon sx={{ fontSize: 13 }} />
+                                  ) : (
+                                    <EyeOffIcon sx={{ fontSize: 13 }} />
+                                  )}
+                                </Box>
                               </span>
                             </li>
                           );
