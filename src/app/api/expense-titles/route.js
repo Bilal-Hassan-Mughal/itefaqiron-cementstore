@@ -93,7 +93,7 @@ export async function POST(request) {
     }
 
     // Check if title already exists
-    const existingTitle = await prisma.expenseTitle.findUnique({
+    const existingTitle = await prisma.expenseTitle.findFirst({
       where: { title: title.trim() }
     });
 

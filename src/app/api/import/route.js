@@ -816,7 +816,7 @@ export async function POST(request) {
             if (id) {
               existing = await tx.expenseTitle.findUnique({ where: { id } });
             } else {
-              existing = await tx.expenseTitle.findUnique({ where: { title } });
+              existing = await tx.expenseTitle.findFirst({ where: { title } });
             }
 
             if (existing) {
