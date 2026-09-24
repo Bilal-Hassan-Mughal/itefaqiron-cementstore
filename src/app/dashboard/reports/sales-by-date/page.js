@@ -1,6 +1,6 @@
-import { TailwindDateInput } from '../../components/date-filter-input';
 'use client';
 
+import { TailwindDateInput } from '../../components/date-filter-input';
 import { useState, useEffect, useRef } from 'react';
 import { formatDatePK } from '@/lib/date-helper';
 import { 
@@ -536,15 +536,11 @@ export default function SalesByDateReport() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
-                <TailwindDateInput value={startDate} onChange={setStartDate} /> setStartDate(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black"
-                />
+                <TailwindDateInput value={startDate} onChange={setStartDate} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
-                <TailwindDateInput value={endDate} onChange={setEndDate} /> setEndDate(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black"
-                />
+                <TailwindDateInput value={endDate} onChange={setEndDate} />
               </div>
               <div className="flex items-end">
                 <button

@@ -1,6 +1,6 @@
-import { TailwindDateInput } from '../../components/date-filter-input';
 'use client';
 
+import { TailwindDateInput } from '../../components/date-filter-input';
 import { useState, useEffect } from 'react';
 import { ArrowLeft, Download, Printer, Search, ShoppingBag, Package, Truck, CreditCard, Clock, Eye, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -171,13 +171,11 @@ export default function OrderReport() {
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex-1 min-w-[140px] max-w-[180px]">
               <label className="block text-xs font-semibold text-slate-600 mb-1">FROM DATE</label>
-              <TailwindDateInput value={startDate} onChange={setStartDate} /> setStartDate(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-rose-500 focus:border-rose-500" />
+              <TailwindDateInput value={startDate} onChange={setStartDate} />
             </div>
             <div className="flex-1 min-w-[140px] max-w-[180px]">
               <label className="block text-xs font-semibold text-slate-600 mb-1">TO DATE</label>
-              <TailwindDateInput value={endDate} onChange={setEndDate} /> setEndDate(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-rose-500 focus:border-rose-500" />
+              <TailwindDateInput value={endDate} onChange={setEndDate} />
             </div>
             <div className="flex-1 min-w-[200px] max-w-[250px]">
               <label className="block text-xs font-semibold text-slate-600 mb-1 caps">CATEGORY</label>

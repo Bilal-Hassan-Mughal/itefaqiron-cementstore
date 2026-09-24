@@ -1,6 +1,6 @@
-import { TailwindDateInput } from '../../components/date-filter-input';
 'use client';
 
+import { TailwindDateInput } from '../../components/date-filter-input';
 import { useState, useEffect } from 'react';
 import { formatDatePK } from '@/lib/date-helper';
 import {
@@ -192,15 +192,11 @@ export default function SupplierLedgerReport() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Start Date *</label>
-                <TailwindDateInput value={startDate} onChange={setStartDate} /> setStartDate(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+                <TailwindDateInput value={startDate} onChange={setStartDate} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">End Date *</label>
-                <TailwindDateInput value={endDate} onChange={setEndDate} /> setEndDate(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+                <TailwindDateInput value={endDate} onChange={setEndDate} />
               </div>
             </div>
             <div className="flex gap-2 mt-6 print:hidden">
