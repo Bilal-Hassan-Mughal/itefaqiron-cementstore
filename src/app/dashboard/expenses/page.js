@@ -1093,15 +1093,13 @@ export default function ExpensesPage() {
           {datePreset === 'custom' && (
             <div className="flex items-center flex-wrap gap-2 pt-2 border-t border-slate-200 bg-white p-2 rounded-lg text-xs">
               <span className="font-bold text-slate-600">From Date:</span>
-              <input
-                type="date"
+              <input type="date" lang="en-GB"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
                 className="bg-white border border-slate-300 rounded px-2 py-1 text-slate-700"
               />
               <span className="font-bold text-slate-600">To Date:</span>
-              <input
-                type="date"
+              <input type="date" lang="en-GB"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
                 className="bg-white border border-slate-300 rounded px-2 py-1 text-slate-700"

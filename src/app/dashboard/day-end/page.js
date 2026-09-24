@@ -387,8 +387,7 @@ export default function DayEndPage() {
               </button>
               <div className="flex items-center space-x-1 px-2">
                 <Calendar className="w-4 h-4 text-blue-600" />
-                <input
-                  type="date"
+                <input type="date" lang="en-GB"
                   value={selectedDate}
                   max={todayPk}
                   onChange={(e) => {

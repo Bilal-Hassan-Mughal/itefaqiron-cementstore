@@ -5262,7 +5262,7 @@ function OrdersPageContent() {
                       type="date"
                       value={dateFrom}
                       onChange={(e) => setDateFrom(e.target.value)}
-                      InputLabelProps={{ shrink: true }}
+                      InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
                       sx={ORDER_FILTER_FIELD_SX}
                     />
                   </Box>
@@ -5275,7 +5275,7 @@ function OrdersPageContent() {
                       type="date"
                       value={dateTo}
                       onChange={(e) => setDateTo(e.target.value)}
-                      InputLabelProps={{ shrink: true }}
+                      InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
                       sx={ORDER_FILTER_FIELD_SX}
                     />
                   </Box>

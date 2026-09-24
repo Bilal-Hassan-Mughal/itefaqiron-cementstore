@@ -1135,7 +1135,7 @@ export default function SaleReturnsPage() {
                         value={dateFrom}
                         onChange={(e) => setDateFrom(e.target.value)}
                         onFocus={(e) => e.target.select()}
-                        InputLabelProps={{ shrink: true }}
+                        InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
                         sx={STYLES.input}
                       />
                     </Grid>
@@ -1148,7 +1148,7 @@ export default function SaleReturnsPage() {
                         value={dateTo}
                         onChange={(e) => setDateTo(e.target.value)}
                         onFocus={(e) => e.target.select()}
-                        InputLabelProps={{ shrink: true }}
+                        InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
                         sx={STYLES.input}
                       />
                     </Grid>
@@ -1440,7 +1440,7 @@ export default function SaleReturnsPage() {
                             type="date"
                             value={formData.return_date}
                             onChange={(e) => setFormData(prev => ({ ...prev, return_date: e.target.value }))}
-                            InputLabelProps={{ shrink: true }}
+                            InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
                             sx={STYLES.input}
                             required
                           />

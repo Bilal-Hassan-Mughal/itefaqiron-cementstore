@@ -2195,10 +2195,10 @@ function QuotationsPageContent() {
                   />
                 </Box>
                 <Box>
-                  <TextField fullWidth size="small" type="date" label="From Date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} InputLabelProps={{ shrink: true }} sx={QUOTE_FILTER_FIELD_SX} />
+                  <TextField fullWidth size="small" type="date" label="From Date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }} sx={QUOTE_FILTER_FIELD_SX} />
                 </Box>
                 <Box>
-                  <TextField fullWidth size="small" type="date" label="To Date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} InputLabelProps={{ shrink: true }} sx={QUOTE_FILTER_FIELD_SX} />
+                  <TextField fullWidth size="small" type="date" label="To Date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }} sx={QUOTE_FILTER_FIELD_SX} />
                 </Box>
                 <Box>
                   <Autocomplete

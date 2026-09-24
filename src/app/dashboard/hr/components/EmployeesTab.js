@@ -483,7 +483,7 @@ export default function EmployeesTab() {
                     type="date"
                     value={dialog.data.join_date}
                     onChange={(e) => updateForm('join_date', e.target.value)}
-                    InputLabelProps={{ shrink: true }}
+                    InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
                     sx={FIELD_SX}
                     helperText="Used for salary pro-rating in join month"
                     InputProps={{

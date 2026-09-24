@@ -727,7 +727,7 @@ export default function PurchaseReturnsPage() {
                     label="From Date"
                     value={dateFrom}
                     onChange={(e) => setDateFrom(e.target.value)}
-                    InputLabelProps={{ shrink: true }}
+                    InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
                     sx={STYLES.input}
                   />
                 </Grid>
@@ -738,7 +738,7 @@ export default function PurchaseReturnsPage() {
                     label="To Date"
                     value={dateTo}
                     onChange={(e) => setDateTo(e.target.value)}
-                    InputLabelProps={{ shrink: true }}
+                    InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
                     sx={STYLES.input}
                   />
                 </Grid>
@@ -1021,7 +1021,7 @@ export default function PurchaseReturnsPage() {
                         value={formData.return_date}
                         onChange={(e) => setFormData(prev => ({ ...prev, return_date: e.target.value }))}
                         onFocus={(e) => e.target.select()}
-                        InputLabelProps={{ shrink: true }}
+                        InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
                         sx={STYLES.input}
                       />
                     </Grid>

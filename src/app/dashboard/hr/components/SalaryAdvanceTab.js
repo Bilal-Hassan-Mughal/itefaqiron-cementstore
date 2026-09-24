@@ -420,7 +420,7 @@ export default function SalaryAdvanceTab() {
                   type="date"
                   value={form.advance_date}
                   onChange={(e) => setForm((f) => ({ ...f, advance_date: e.target.value }))}
-                  InputLabelProps={{ shrink: true }}
+                  InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
                   sx={{ '& .MuiOutlinedInput-root': { borderRadius: '10px' } }}
                 />
 

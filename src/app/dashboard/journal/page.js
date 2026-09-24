@@ -753,8 +753,7 @@ export default function JournalPage() {
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Journal Date *
                       </label>
-                      <input
-                        type="date"
+                      <input type="date" lang="en-GB"
                         name="journal_date"
                         value={formData.journal_date}
                         onChange={handleInputChange}

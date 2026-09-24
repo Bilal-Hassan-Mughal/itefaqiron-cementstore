@@ -251,8 +251,7 @@ function WidgetDateFilter({ filters, onChange, loading = false, accent }) {
       <div className={REPORT.datePill} style={{ borderColor: neon.chartBorder }}>
         <Calendar className="w-3.5 h-3.5" style={{ color: neon.primary }} />
         <span className="text-[10px] font-semibold text-slate-500">From</span>
-        <input
-          type="date"
+        <input type="date" lang="en-GB"
           value={filters.fromDate}
           onChange={(e) => onChange({ ...filters, fromDate: e.target.value })}
           className="text-[11px] font-medium text-slate-800 bg-transparent focus:outline-none"
@@ -261,8 +260,7 @@ function WidgetDateFilter({ filters, onChange, loading = false, accent }) {
       <div className={REPORT.datePill} style={{ borderColor: neon.chartBorder }}>
         <Calendar className="w-3.5 h-3.5" style={{ color: neon.primary }} />
         <span className="text-[10px] font-semibold text-slate-500">To</span>
-        <input
-          type="date"
+        <input type="date" lang="en-GB"
           value={filters.toDate}
           onChange={(e) => onChange({ ...filters, toDate: e.target.value })}
           className="text-[11px] font-medium text-slate-800 bg-transparent focus:outline-none"

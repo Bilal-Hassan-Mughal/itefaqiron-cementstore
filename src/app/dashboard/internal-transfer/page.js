@@ -346,8 +346,7 @@ export default function InternalTransferPage() {
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
                     Transfer Date *
                   </label>
-                  <input
-                    type="date"
+                  <input type="date" lang="en-GB"
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
                     required

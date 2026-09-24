@@ -413,15 +413,13 @@ export default function CashReport() {
                   <Calendar className="w-4 h-4 text-slate-400 mr-2" />
                   <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Dates:</span>
                 </div>
-                <input
-                  type="date"
+                <input type="date" lang="en-GB"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
                   className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                 />
                 <span className="text-slate-400 text-xs px-1.5 font-medium">to</span>
-                <input
-                  type="date"
+                <input type="date" lang="en-GB"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
                   className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"

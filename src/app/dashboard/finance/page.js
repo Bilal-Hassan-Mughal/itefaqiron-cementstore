@@ -4038,7 +4038,7 @@ export default function FinancePage() {
                       setAllAccountsFullLedger(false);
                     }
                   }}
-                  InputLabelProps={{ shrink: true }} sx={LEDGER_FILTER_FIELD_SX} />
+                  InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }} sx={LEDGER_FILTER_FIELD_SX} />
                 <TextField fullWidth size="small" label="To Date" type="date" value={endDate}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -4051,7 +4051,7 @@ export default function FinancePage() {
                       setAllAccountsFullLedger(false);
                     }
                   }}
-                  InputLabelProps={{ shrink: true }} sx={LEDGER_FILTER_FIELD_SX} />
+                  InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }} sx={LEDGER_FILTER_FIELD_SX} />
                 <FormControl fullWidth size="small" sx={LEDGER_FILTER_FIELD_SX}>
                   <InputLabel>Type</InputLabel>
                   <Select value={selectedLedgerType} onChange={(e) => setSelectedLedgerType(e.target.value)} label="Type">

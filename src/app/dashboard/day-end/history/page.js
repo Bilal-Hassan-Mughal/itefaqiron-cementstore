@@ -216,15 +216,13 @@ export default function DayEndHistoryPage() {
             {/* Date Range */}
             <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs">
               <span className="text-slate-500 font-medium">From:</span>
-              <input
-                type="date"
+              <input type="date" lang="en-GB"
                 value={startDate}
                 onChange={(e) => { setStartDate(e.target.value); setPage(1); }}
                 className="bg-transparent text-xs font-bold text-slate-800 border-none focus:outline-none cursor-pointer"
               />
               <span className="text-slate-500 font-medium">To:</span>
-              <input
-                type="date"
+              <input type="date" lang="en-GB"
                 value={endDate}
                 onChange={(e) => { setEndDate(e.target.value); setPage(1); }}
                 className="bg-transparent text-xs font-bold text-slate-800 border-none focus:outline-none cursor-pointer"

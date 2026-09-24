@@ -7798,7 +7798,7 @@ function SalesPageContent() {
                     type="date"
                     value={dateFrom}
                     onChange={(e) => setDateFrom(e.target.value)}
-                    InputLabelProps={{ shrink: true }}
+                    InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
                     sx={SALES_FILTER_FIELD_SX}
                   />
                 </Box>
@@ -7811,7 +7811,7 @@ function SalesPageContent() {
                     type="date"
                     value={dateTo}
                     onChange={(e) => setDateTo(e.target.value)}
-                    InputLabelProps={{ shrink: true }}
+                    InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
                     sx={SALES_FILTER_FIELD_SX}
                   />
                 </Box>
@@ -10715,7 +10715,7 @@ function SalesPageContent() {
               label="Start Date"
               value={ledgerStartDate}
               onChange={(e) => setLedgerStartDate(e.target.value)}
-              InputLabelProps={{ shrink: true }}
+              InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
               sx={{ bgcolor: 'white' }}
             />
             <TextField
@@ -10724,7 +10724,7 @@ function SalesPageContent() {
               label="End Date"
               value={ledgerEndDate}
               onChange={(e) => setLedgerEndDate(e.target.value)}
-              InputLabelProps={{ shrink: true }}
+              InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
               sx={{ bgcolor: 'white' }}
             />
             <Button

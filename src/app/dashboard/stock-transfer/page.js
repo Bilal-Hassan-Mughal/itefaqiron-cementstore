@@ -679,7 +679,7 @@ export default function StockTransferPage() {
                     label="From Date"
                     value={dateFrom}
                     onChange={(e) => setDateFrom(e.target.value)}
-                    InputLabelProps={{ shrink: true }}
+                    InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
                   />
                 </Grid>
                 <Grid item xs={12} sm={6} md={2.4}>
@@ -690,7 +690,7 @@ export default function StockTransferPage() {
                     label="To Date"
                     value={dateTo}
                     onChange={(e) => setDateTo(e.target.value)}
-                    InputLabelProps={{ shrink: true }}
+                    InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
                   />
                 </Grid>
               </Grid>

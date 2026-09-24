@@ -219,7 +219,7 @@ export default function HqMonitoringPage() {
               type="date"
               value={draftFrom}
               onChange={(e) => setDraftFrom(e.target.value)}
-              InputLabelProps={{ shrink: true }}
+              InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
               sx={{ bgcolor: '#f8fafc', borderRadius: 2 }}
             />
           </Grid>
@@ -231,7 +231,7 @@ export default function HqMonitoringPage() {
               type="date"
               value={draftTo}
               onChange={(e) => setDraftTo(e.target.value)}
-              InputLabelProps={{ shrink: true }}
+              InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
               sx={{ bgcolor: '#f8fafc', borderRadius: 2 }}
             />
           </Grid>

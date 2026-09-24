@@ -528,7 +528,7 @@ export default function VehiclesPage() {
                 size="small"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                InputLabelProps={{ shrink: true }}
+                InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
                 sx={FILTER_FIELD_SX}
               />
               <TextField
@@ -537,7 +537,7 @@ export default function VehiclesPage() {
                 size="small"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                InputLabelProps={{ shrink: true }}
+                InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
                 sx={FILTER_FIELD_SX}
               />
               <FormControl size="small" sx={FILTER_FIELD_SX}>
