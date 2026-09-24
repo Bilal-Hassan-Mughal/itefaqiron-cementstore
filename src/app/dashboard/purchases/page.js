@@ -4251,14 +4251,11 @@ function PurchasesPageContent() {
 
                   <Box sx={PURCHASE_ENTRY_CELL_SX}>
                     <Typography sx={PURCHASE_ENTRY_LABEL_SX}>DATE</Typography>
-                    <TextField
+                    <DateFilterInput
                       fullWidth
                       size="small"
-                      type="date"
                       value={formData.date || getTodayDateStr()}
-                      onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
-                      onFocus={(e) => e.target.select()}
-                      inputProps={{ lang: 'en-GB' }}
+                      onChange={(val) => setFormData(prev => ({ ...prev, date: val }))}
                       sx={PURCHASE_ENTRY_CONTROL_SX}
                     />
                   </Box>

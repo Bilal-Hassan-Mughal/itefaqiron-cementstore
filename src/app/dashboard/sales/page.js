@@ -661,6 +661,7 @@ function SalesPageContent() {
   const [filterBalanceStatus, setFilterBalanceStatus] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [saleEntryDate, setSaleEntryDate] = useState(() => getPkDateString());
   const [filterItem, setFilterItem] = useState('');
   const [filterQuantity, setFilterQuantity] = useState('');
   const [filterNotes, setFilterNotes] = useState('');
@@ -5852,13 +5853,11 @@ function SalesPageContent() {
                     <Typography sx={SALE_ENTRY_LABEL_SX}>
                       DATE
                     </Typography>
-                    <TextField
+                    <DateFilterInput
                       fullWidth
-                      type="date"
                       size="small"
-                      defaultValue={getPkDateString()}
-                      onFocus={(e) => e.target.select()}
-                      inputProps={{ lang: 'en-GB' }}
+                      value={saleEntryDate}
+                      onChange={(val) => setSaleEntryDate(val)}
                       sx={SALE_ENTRY_CONTROL_SX}
                     />
                 </Box>
