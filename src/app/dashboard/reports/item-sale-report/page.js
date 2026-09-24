@@ -1,3 +1,4 @@
+import { TailwindDateInput } from '../../components/date-filter-input';
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
@@ -234,10 +235,10 @@ export default function ItemSaleReport() {
             {/* Date range */}
             <div className="no-print" style={{ padding: '8px 14px', borderBottom: '1px solid #ccc', display: 'flex', alignItems: 'center', gap: 12, background: '#f9f9f9' }}>
               <span style={{ fontSize: 15, fontWeight: 700, color: '#c0392b' }}>From:</span>
-              <input type="date" lang="en-GB" value={startDate} onChange={e => setStartDate(e.target.value)}
+              <TailwindDateInput value={startDate} onChange={setStartDate} /> setStartDate(e.target.value)}
                 style={{ border: '1px solid #bbb', padding: '4px 8px', fontSize: 14, borderRadius: 2 }} />
               <span style={{ fontSize: 15, fontWeight: 700, color: '#c0392b' }}>To:</span>
-              <input type="date" lang="en-GB" value={endDate} onChange={e => setEndDate(e.target.value)}
+              <TailwindDateInput value={endDate} onChange={setEndDate} /> setEndDate(e.target.value)}
                 style={{ border: '1px solid #bbb', padding: '4px 8px', fontSize: 14, borderRadius: 2 }} />
               <button onClick={handleApply} disabled={loading || !selectedProduct}
                 style={{ background: '#316ac5', color: 'white', border: 'none', padding: '5px 18px', cursor: 'pointer', fontSize: 14, borderRadius: 2, opacity: !selectedProduct ? 0.5 : 1 }}>

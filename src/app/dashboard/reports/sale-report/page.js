@@ -5,6 +5,7 @@ import { ArrowLeft, Download, Printer, Search, ShoppingCart, TrendingUp } from '
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, Table as MuiTable, TableBody as MuiTableBody, TableCell as MuiTableCell, TableContainer as MuiTableContainer, TableHead as MuiTableHead, TableRow as MuiTableRow, Paper } from '@mui/material';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '../../components/dashboard-layout';
+import { TailwindDateInput } from '../../components/date-filter-input';
 import ReportPageHeader from '../../components/report-page-header';
 
 const fmtAmt = (val) => {
@@ -389,14 +390,10 @@ export default function SaleReport() {
         <div className="flex-shrink-0 bg-slate-50 border-b border-slate-200 px-6 py-3 print:hidden">
           <div className="flex flex-wrap items-end gap-3 mb-3">
             <div className="flex-1 min-w-[130px] max-w-[160px]">
-              <label className="block text-xs font-semibold text-slate-600 mb-1">FROM DATE</label>
-              <input type="date" lang="en-GB" value={startDate} onChange={(e) => setStartDate(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+              <TailwindDateInput label="FROM DATE" value={startDate} onChange={setStartDate} />
             </div>
             <div className="flex-1 min-w-[130px] max-w-[160px]">
-              <label className="block text-xs font-semibold text-slate-600 mb-1">TO DATE</label>
-              <input type="date" lang="en-GB" value={endDate} onChange={(e) => setEndDate(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+              <TailwindDateInput label="TO DATE" value={endDate} onChange={setEndDate} />
             </div>
             <div className="flex-1 min-w-[130px] max-w-[160px]">
               <label className="block text-xs font-semibold text-slate-600 mb-1">CATEGORY</label>

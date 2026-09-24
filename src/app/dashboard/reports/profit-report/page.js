@@ -1,3 +1,4 @@
+import { TailwindDateInput } from '../../components/date-filter-input';
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
@@ -279,12 +280,12 @@ export default function ProfitReport() {
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex-1 min-w-[140px] max-w-[180px]">
               <label className="block text-xs font-semibold text-slate-600 mb-1">FROM DATE</label>
-              <input type="date" lang="en-GB" value={startDate} onChange={e => setStartDate(e.target.value)}
+              <TailwindDateInput value={startDate} onChange={setStartDate} /> setStartDate(e.target.value)}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500" />
             </div>
             <div className="flex-1 min-w-[140px] max-w-[180px]">
               <label className="block text-xs font-semibold text-slate-600 mb-1">TO DATE</label>
-              <input type="date" lang="en-GB" value={endDate} onChange={e => setEndDate(e.target.value)}
+              <TailwindDateInput value={endDate} onChange={setEndDate} /> setEndDate(e.target.value)}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500" />
             </div>
             <div className="flex-1 min-w-[200px] max-w-[250px]">

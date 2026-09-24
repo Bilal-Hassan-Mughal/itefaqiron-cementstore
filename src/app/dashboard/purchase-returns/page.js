@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import DashboardLayout from '../components/dashboard-layout';
+import DateFilterInput from '../components/date-filter-input';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
 
@@ -721,24 +722,20 @@ export default function PurchaseReturnsPage() {
                   />
                 </Grid>
                 <Grid item xs={12} md={2}>
-                  <TextField
+                  <DateFilterInput
                     fullWidth
-                    type="date"
                     label="From Date"
                     value={dateFrom}
-                    onChange={(e) => setDateFrom(e.target.value)}
-                    InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
+                    onChange={(val) => setDateFrom(val)}
                     sx={STYLES.input}
                   />
                 </Grid>
                 <Grid item xs={12} md={2}>
-                  <TextField
+                  <DateFilterInput
                     fullWidth
-                    type="date"
                     label="To Date"
                     value={dateTo}
-                    onChange={(e) => setDateTo(e.target.value)}
-                    InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
+                    onChange={(val) => setDateTo(val)}
                     sx={STYLES.input}
                   />
                 </Grid>

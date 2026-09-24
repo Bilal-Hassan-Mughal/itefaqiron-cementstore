@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, Suspense, useRef, useLayoutEffect, fo
 import { getCreatedByName, formatTimePK, formatDatePK } from '@/lib/date-helper';
 import { useSearchParams, useRouter } from 'next/navigation';
 import DashboardLayout from '../components/dashboard-layout';
+import DateFilterInput from '../components/date-filter-input';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
 import { openAccountLedgerTab, FINANCE_LEDGER_PATH, notifyLedgerDataChanged } from '@/lib/ledger-tabs';
@@ -3451,27 +3452,23 @@ function PurchasesPageContent() {
                 </Box>
 
                 <Box>
-                  <TextField
+                  <DateFilterInput
                     fullWidth
                     size="small"
                     label="From Date"
-                    type="date"
                     value={dateFrom}
-                    onChange={(e) => setDateFrom(e.target.value)}
-                    InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
+                    onChange={(val) => setDateFrom(val)}
                     sx={PURCHASE_FILTER_FIELD_SX}
                   />
                 </Box>
 
                 <Box>
-                  <TextField
+                  <DateFilterInput
                     fullWidth
                     size="small"
                     label="To Date"
-                    type="date"
                     value={dateTo}
-                    onChange={(e) => setDateTo(e.target.value)}
-                    InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
+                    onChange={(val) => setDateTo(val)}
                     sx={PURCHASE_FILTER_FIELD_SX}
                   />
                 </Box>

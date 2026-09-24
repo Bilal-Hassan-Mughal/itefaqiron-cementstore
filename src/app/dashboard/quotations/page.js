@@ -6,6 +6,7 @@ import { formatDatePK } from '@/lib/date-helper';
 import { BRAND, COMPANY } from '@/lib/brand-theme';
 import { openAccountLedgerTab, FINANCE_LEDGER_PATH } from '@/lib/ledger-tabs';
 import DashboardLayout from '../components/dashboard-layout';
+import DateFilterInput from '../components/date-filter-input';
 import SaveProgressBackdrop from '../components/save-progress-backdrop';
 
 // Material-UI imports
@@ -2195,10 +2196,10 @@ function QuotationsPageContent() {
                   />
                 </Box>
                 <Box>
-                  <TextField fullWidth size="small" type="date" label="From Date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }} sx={QUOTE_FILTER_FIELD_SX} />
+                  <DateFilterInput fullWidth size="small" label="From Date" value={dateFrom} onChange={(val) => setDateFrom(val)} sx={QUOTE_FILTER_FIELD_SX} />
                 </Box>
                 <Box>
-                  <TextField fullWidth size="small" type="date" label="To Date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }} sx={QUOTE_FILTER_FIELD_SX} />
+                  <DateFilterInput fullWidth size="small" label="To Date" value={dateTo} onChange={(val) => setDateTo(val)} sx={QUOTE_FILTER_FIELD_SX} />
                 </Box>
                 <Box>
                   <Autocomplete
