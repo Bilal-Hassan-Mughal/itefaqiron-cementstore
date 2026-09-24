@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import DashboardLayout from '../../components/dashboard-layout';
+import DateFilterInput from '../../components/date-filter-input';
 import ReportPageHeader from '../../components/report-page-header';
 import {
   TextField,
@@ -433,7 +434,7 @@ export default function SuperOrderEditor({ orderId = null, viewOnly = false, aut
                 </div>
                 <div className="excel-field">
                   <label className="excel-field-label">Date</label>
-                  <TextField fullWidth size="small" type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} sx={SO_FIELD_SX} />
+                  <DateFilterInput fullWidth size="small" value={orderDate} onChange={(val) => setOrderDate(val)} sx={SO_FIELD_SX} />
                 </div>
                 <div className="excel-field">
                   <label className="excel-field-label">Supplier</label>

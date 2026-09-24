@@ -676,6 +676,7 @@ function OrdersPageContent() {
   );
   const [formSelectedProduct, setFormSelectedProduct] = useState(null);
   const [formSelectedStore, setFormSelectedStore] = useState(null);
+  const [orderEntryDate, setOrderEntryDate] = useState(() => new Date().toISOString().split('T')[0]);
   const customerTypeHighlightRef = useRef(null);
   const customerHighlightRef = useRef(null);
   const productHighlightRef = useRef(null);
@@ -3439,11 +3440,11 @@ function OrdersPageContent() {
                     <Typography sx={ORDER_ENTRY_LABEL_SX}>
                       DATE
                     </Typography>
-                    <TextField
+                    <DateFilterInput
                       fullWidth
-                      type="date"
                       size="small"
-                      defaultValue={new Date().toISOString().split('T')[0]}
+                      value={orderEntryDate}
+                      onChange={(val) => setOrderEntryDate(val)}
                       sx={ORDER_ENTRY_CONTROL_SX}
                     />
                 </Box>
