@@ -4983,10 +4983,10 @@ function PurchasesPageContent() {
                           slots={{ listbox: PurchaseBankDropdownListbox }}
                           slotProps={{
                             popper: {
-                              sx: { ...PURCHASE_DROPDOWN_POPPER_SX, minWidth: PURCHASE_BANK_DROPDOWN_WIDTH },
+                              sx: PURCHASE_DROPDOWN_POPPER_SX,
                               modifiers: [{ name: 'flip', enabled: false }],
                             },
-                            paper: { sx: { width: PURCHASE_BANK_DROPDOWN_WIDTH, maxWidth: '92vw', mt: 0.5 } },
+                            paper: { sx: { width: '100%', mt: 0.5 } },
                           }}
                           onHighlightChange={(_, option) => {
                             if (option) bankAccountHighlightRef.current = option;
