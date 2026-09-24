@@ -69,6 +69,7 @@ import {
   TrendingUp as TrendingUpIcon,
   Error as AlertCircleIcon,
   Visibility as EyeIcon,
+  VisibilityOff as EyeOffIcon,
   BarChart as BarChartIcon,
   LocalShipping as TruckIcon,
   Inventory as PackageIcon,
@@ -276,7 +277,7 @@ const purchaseDropdownCellStyle = {
   fontSize: 13,
 };
 
-function PurchaseDropdownListbox({ columns, headers, props, listRef }) {
+function PurchaseDropdownListbox({ columns, headers, props, listRef, showCost = false, onToggleCost = null }) {
   const { children, ownerState, sx, className, style, slots, slotProps, ...other } = props;
   return (
     <ul
@@ -303,7 +304,6 @@ function PurchaseDropdownListbox({ columns, headers, props, listRef }) {
             position: 'sticky',
             top: 0,
             zIndex: 2,
-            pointerEvents: 'none',
             background: '#d9e2f3',
           }}
         >
@@ -318,10 +318,39 @@ function PurchaseDropdownListbox({ columns, headers, props, listRef }) {
                 textTransform: 'uppercase',
                 letterSpacing: '0.04em',
                 borderRight: i === headers.length - 1 ? 'none' : PURCHASE_DROPDOWN_LINE,
-                justifyContent: label === '#' ? 'center' : 'flex-start',
+                justifyContent: label === '#' ? 'center' : label === 'Cost' ? 'flex-end' : 'flex-start',
+                paddingRight: label === 'Cost' ? 8 : 8,
               }}
             >
-              {label}
+              {label === 'Cost' ? (
+                <Box
+                  component="span"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (onToggleCost) onToggleCost();
+                  }}
+                  sx={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 0.5,
+                    cursor: 'pointer',
+                    pointerEvents: 'auto',
+                    userSelect: 'none',
+                    '&:hover': { color: '#0284c7' },
+                  }}
+                  title={showCost ? 'Hide Cost Rate' : 'Show Cost Rate'}
+                >
+                  <span>{label}</span>
+                  {showCost ? (
+                    <EyeIcon sx={{ fontSize: 13, color: '#1e3a5f' }} />
+                  ) : (
+                    <EyeOffIcon sx={{ fontSize: 13, color: '#64748b' }} />
+                  )}
+                </Box>
+              ) : (
+                label
+              )}
             </span>
           ))}
         </li>
@@ -343,12 +372,15 @@ const PurchaseSupplierDropdownListbox = forwardRef(function PurchaseSupplierDrop
 });
 
 const PurchaseProductDropdownListbox = forwardRef(function PurchaseProductDropdownListbox(props, ref) {
+  const { showCost, onToggleCost, ...restProps } = props;
   return (
     <PurchaseDropdownListbox
       listRef={ref}
-      props={props}
+      props={restProps}
       columns={PURCHASE_PRODUCT_DROPDOWN_GRID}
       headers={['#', 'Product', 'Stock', 'Cost']}
+      showCost={showCost}
+      onToggleCost={onToggleCost}
     />
   );
 });
@@ -958,6 +990,7 @@ function PurchasesPageContent() {
   const [customerTypeFormData, setCustomerTypeFormData] = useState({ cus_type_title: '' });
   const [cityFormData, setCityFormData] = useState({ city_name: '' });
   const [showAddProductPopup, setShowAddProductPopup] = useState(false);
+  const [showProductCostInDropdown, setShowProductCostInDropdown] = useState(false);
   const [addProductFormData, setAddProductFormData] = useState({ pro_title: '', pro_description: '', cat_id: '', sub_cat_id: '', pro_crate: '', pro_sale_price: '', pro_baser_price: '', pro_cost_price: '', pro_stock_qnty: '', pro_unit: '', pro_packing: '', low_stock_quantity: '10' });
   const [productCatInput, setProductCatInput] = useState('');
   const [productSubCatInput, setProductSubCatInput] = useState('');
@@ -1234,7 +1267,7 @@ function PurchasesPageContent() {
     try {
       const [customersRes, productsRes, storesRes, customerCategoriesRes, customerTypesRes] = await Promise.all([
         fetch('/api/customers?dropdown=true'),
-        fetch('/api/products?dropdown=true&noStoreStock=true'),
+        fetch('/api/products?dropdown=true'),
         fetch('/api/stores'),
         fetch('/api/customer-category'),
         fetch('/api/customer-types'),
@@ -4307,6 +4340,10 @@ function PurchasesPageContent() {
                             modifiers: [{ name: 'flip', enabled: false }],
                           },
                           paper: { sx: { width: PURCHASE_PRODUCT_DROPDOWN_WIDTH, maxWidth: '92vw', mt: 0.5 } },
+                          listbox: {
+                            showCost: showProductCostInDropdown,
+                            onToggleCost: () => setShowProductCostInDropdown((prev) => !prev),
+                          },
                         }}
                         value={selectedProduct}
                         onChange={(event, newValue) => {
@@ -4350,10 +4387,10 @@ function PurchasesPageContent() {
                             ? parseFloat(storeStockEntry.stock_quantity || 0)
                             : (option.store_stocks?.length
                               ? option.store_stocks.reduce((sum, s) => sum + parseFloat(s.stock_quantity || 0), 0)
-                              : null);
+                              : (option.pro_stock_qnty != null ? parseFloat(option.pro_stock_qnty || 0) : 0));
                           const stockLabel = stockQty != null && Number.isFinite(stockQty)
                             ? `${stockQty.toLocaleString()}${option.pro_unit ? ` ${option.pro_unit}` : ''}`
-                            : '—';
+                            : '0';
                           return (
                             <li key={option.pro_id ?? key} {...optionProps} style={{ ...purchaseDropdownRowStyle(PURCHASE_PRODUCT_DROPDOWN_GRID), ...optionProps.style }}>
                               <span style={{ ...purchaseDropdownCellStyle, justifyContent: 'center', color: '#64748b', fontSize: 12, fontWeight: 700 }}>
@@ -4362,11 +4399,11 @@ function PurchasesPageContent() {
                               <span title={option.pro_title || ''} style={{ ...purchaseDropdownCellStyle, fontWeight: 600, color: '#111827' }}>
                                 {option.pro_title || ''}
                               </span>
-                              <span title={stockLabel} style={{ ...purchaseDropdownCellStyle, fontVariantNumeric: 'tabular-nums', justifyContent: 'flex-end' }}>
+                              <span title={stockLabel} style={{ ...purchaseDropdownCellStyle, fontVariantNumeric: 'tabular-nums', justifyContent: 'flex-end', fontWeight: 600, color: stockQty > 0 ? '#15803d' : '#64748b' }}>
                                 {stockLabel}
                               </span>
-                              <span style={{ ...purchaseDropdownCellStyle, borderRight: 'none', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>
-                                {fmtAmt(option.pro_cost_price)}
+                              <span style={{ ...purchaseDropdownCellStyle, borderRight: 'none', justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums', fontSize: 12, fontWeight: 600 }}>
+                                {showProductCostInDropdown ? fmtAmt(option.pro_cost_price) : '••••••'}
                               </span>
                             </li>
                           );

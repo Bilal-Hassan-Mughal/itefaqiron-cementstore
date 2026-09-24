@@ -76,6 +76,7 @@ export async function GET(request) {
         pro_crate: true,
         pro_unit: true,
         pro_packing: true,
+        pro_stock_qnty: true,
         ...(skipStoreStocks
           ? {}
           : {
