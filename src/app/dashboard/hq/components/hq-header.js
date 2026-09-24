@@ -38,7 +38,7 @@ export default function HqHeader({ setSidebarOpen, user, onLogout }) {
   const [currentDate, setCurrentDate] = useState('');
 
   useEffect(() => {
-    setCurrentDate(new Date().toLocaleDateString('en-US', {
+    setCurrentDate(new Date().toLocaleDateString('en-GB', {
       weekday: 'short',
       day: 'numeric',
       month: 'short',

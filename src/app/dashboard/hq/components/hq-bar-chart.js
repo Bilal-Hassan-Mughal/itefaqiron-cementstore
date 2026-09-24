@@ -29,7 +29,7 @@ export function fmtK(v) {
 
 export function fmtDate(d) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' });
+  return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 export default function HqBarChart({

@@ -25,7 +25,7 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
   const [currentDate, setCurrentDate] = useState('');
 
   useEffect(() => {
-    setCurrentDate(new Date().toLocaleDateString('en-US', {
+    setCurrentDate(new Date().toLocaleDateString('en-GB', {
       weekday: 'short',
       day: 'numeric',
       month: 'short',

@@ -439,7 +439,7 @@ export default function PurchaseReturnsPage() {
           <p style="margin:6px 0 0 0;color:#555;">Return #${returnItem.id}</p>
         </div>
         <p><strong>Supplier:</strong> ${customer?.cus_name || 'N/A'}</p>
-        <p><strong>Date:</strong> ${new Date(returnItem.return_date).toLocaleDateString('en-PK')}</p>
+        <p><strong>Date:</strong> ${new Date(returnItem.return_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}</p>
         <p><strong>Reason:</strong> ${returnItem.return_reason || 'N/A'}</p>
         <p><strong>Total Return:</strong> ${formatCurrency(returnItem.total_return_amount)}</p>
       `;
@@ -810,7 +810,7 @@ export default function PurchaseReturnsPage() {
                             {getSupplierName(returnItem.purchase?.cus_id)}
                           </TableCell>
                           <TableCell>
-                            {new Date(returnItem.return_date).toLocaleDateString('en-PK')}
+                            {new Date(returnItem.return_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                           </TableCell>
                           <TableCell>
                             <Typography
@@ -1002,7 +1002,7 @@ export default function PurchaseReturnsPage() {
                                 </Typography>
                                 <Typography variant="caption" color="text.secondary">
                                   Amount: {formatCurrency(option.net_total || option.total_amount)} |
-                                  Date: {new Date(option.created_at).toLocaleDateString('en-PK')}
+                                  Date: {new Date(option.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                                 </Typography>
                               </Box>
                             </li>
