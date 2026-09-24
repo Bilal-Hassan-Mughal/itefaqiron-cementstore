@@ -1,5 +1,6 @@
 'use client';
 
+import { TailwindDateInput } from '../components/date-filter-input';
 import { useState, useEffect, useMemo } from 'react';
 import { 
   Calendar,
@@ -385,17 +386,14 @@ export default function DayEndPage() {
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <div className="flex items-center space-x-1 px-2">
-                <Calendar className="w-4 h-4 text-blue-600" />
-                <input type="date" lang="en-GB"
+              <div className="flex items-center space-x-1 px-1">
+                <TailwindDateInput
                   value={selectedDate}
-                  max={todayPk}
-                  onChange={(e) => {
-                    const next = e.target.value;
-                    if (next && next > todayPk) return;
-                    setSelectedDate(next);
+                  onChange={(val) => {
+                    if (val && val > todayPk) return;
+                    setSelectedDate(val);
                   }}
-                  className="bg-transparent text-xs font-bold text-slate-800 border-none focus:outline-none cursor-pointer py-1"
+                  inputClassName="bg-transparent text-xs font-bold text-slate-800 border-none focus:outline-none cursor-pointer py-1"
                 />
               </div>
               <button
