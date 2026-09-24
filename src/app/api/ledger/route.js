@@ -66,6 +66,7 @@ export async function GET(request) {
   const typeId = searchParams.get('typeId') ? parseInt(searchParams.get('typeId')) : null;
   const search = searchParams.get('search');
   const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')) : null;
+  const all = searchParams.get('all') === 'true' || searchParams.get('allTime') === 'true';
 
   try {
     if (id) {
@@ -160,7 +161,7 @@ export async function GET(request) {
       where.OR = orConditions;
     }
 
-    const hasFilters = customerId || startDate || endDate || categoryId || typeId || search;
+    const hasFilters = customerId || startDate || endDate || categoryId || typeId || search || all;
 
     // HIGH-PERFORMANCE PATH: When querying for a specific customer/account,
     // fetch customer metadata ONCE rather than duplicating deeply nested
@@ -268,8 +269,8 @@ export async function GET(request) {
 
     if (limit) {
       queryOptions.take = limit;
-    } else if (!hasFilters) {
-      // Limit to 200 entries by default to make loading extremely fast
+    } else if (!hasFilters && !all) {
+      // Limit to 200 entries by default to make initial unfocused loading fast
       queryOptions.take = 200;
     }
 

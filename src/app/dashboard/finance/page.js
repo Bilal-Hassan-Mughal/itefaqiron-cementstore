@@ -1096,6 +1096,24 @@ export default function FinancePage() {
   // Ledger table pagination (prevents DOM freeze when loading accounts with thousands of entries)
   const [ledgerPage, setLedgerPage] = useState(1);
   const [ledgerRowsPerPage, setLedgerRowsPerPage] = useState(100);
+  const ledgerTableContainerRef = useRef(null);
+  const ledgerTableCardRef = useRef(null);
+
+  const handleLedgerPageChange = useCallback((event, value) => {
+    setLedgerPage(value);
+    if (ledgerTableContainerRef.current) {
+      ledgerTableContainerRef.current.scrollTop = 0;
+    }
+    if (ledgerTableCardRef.current) {
+      ledgerTableCardRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (ledgerTableContainerRef.current) {
+      ledgerTableContainerRef.current.scrollTop = 0;
+    }
+  }, [ledgerPage]);
 
   const resetLedgerDatesToToday = useCallback(() => {
     const today = getTodayKarachiDateKey();
@@ -1106,18 +1124,7 @@ export default function FinancePage() {
   }, []);
 
   const applyLedgerDatePreset = useCallback((presetId) => {
-    // If clicking the active preset, toggle it:
-    // If 'today' or any other preset is active and clicked, unclick it -> switch to All Time ('all')
-    if (presetId === ledgerDatePreset) {
-      if (presetId === 'all') {
-        // If clicking All Time when already All Time, switch back to Today
-        const today = getTodayKarachiDateKey();
-        setStartDate(today);
-        setEndDate(today);
-        setLedgerDatePreset('today');
-        setAllAccountsFullLedger(false);
-        return;
-      }
+    if (presetId === 'all') {
       setStartDate('');
       setEndDate('');
       setLedgerDatePreset('all');
@@ -1125,7 +1132,8 @@ export default function FinancePage() {
       return;
     }
 
-    if (presetId === 'all') {
+    // If clicking an active preset (today, 7d, 15d, month), toggle it off -> switch to All Time ('all')
+    if (presetId === ledgerDatePreset) {
       setStartDate('');
       setEndDate('');
       setLedgerDatePreset('all');
@@ -1457,6 +1465,9 @@ export default function FinancePage() {
       if (startDate) params.append('startDate', startDate);
       if (endDate) params.append('endDate', endDate);
       if (searchTerm) params.append('search', searchTerm);
+      if (ledgerDatePreset === 'all' || (!startDate && !endDate)) {
+        params.append('all', 'true');
+      }
 
       const res = await fetch(`/api/ledger?${params.toString()}`, {
         cache: 'no-store',
@@ -1476,7 +1487,7 @@ export default function FinancePage() {
       }
       if (!silent) setLoading(false);
     }
-  }, [selectedCustomer, selectedCategory, selectedSubCategory, startDate, endDate, searchTerm]);
+  }, [selectedCustomer, selectedCategory, selectedSubCategory, startDate, endDate, searchTerm, ledgerDatePreset]);
 
   const refreshLedgerView = useCallback(async (silent = true) => {
     await fetchLedgerData(silent);
@@ -1570,7 +1581,7 @@ export default function FinancePage() {
       }, 300); // 300ms debounce
       return () => clearTimeout(timer);
     }
-  }, [selectedCustomer, selectedCategory, selectedSubCategory, startDate, endDate, searchTerm, staticDataLoaded, fetchLedgerData]);
+  }, [selectedCustomer, selectedCategory, selectedSubCategory, startDate, endDate, searchTerm, ledgerDatePreset, staticDataLoaded, fetchLedgerData]);
 
   // Auto-refresh when ledger changes elsewhere (sales, payments, other tabs)
   useEffect(() => {
@@ -2020,7 +2031,7 @@ export default function FinancePage() {
 
   const isAllAccountsLedgerView = !selectedCustomer && !activeLedgerId;
   const useAllAccountsRecentDefault =
-    isAllAccountsLedgerView && !allAccountsFullLedger && !startDate && !endDate;
+    isAllAccountsLedgerView && !allAccountsFullLedger && ledgerDatePreset !== 'all' && !startDate && !endDate;
 
   const allAccountsRecentViewIds = useMemo(() => {
     if (!useAllAccountsRecentDefault) return null;
@@ -2088,12 +2099,14 @@ export default function FinancePage() {
     const matchesCustomer = !selectedCustomer || entry.cus_id == selectedCustomer;
     const matchesCategory = !selectedCategory || entry.customer?.cus_category == selectedCategory;
     const matchesSubCategory = !selectedSubCategory || entry.customer?.cus_type == selectedSubCategory;
-    const matchesLedgerType = !selectedLedgerType || entry.ledger_type === selectedLedgerType;
+    const matchesLedgerType = !selectedLedgerType || 
+      (entry.ledger_type && entry.ledger_type.toLowerCase() === selectedLedgerType.toLowerCase()) ||
+      (!entry.ledger_type && selectedLedgerType.toLowerCase() === (entry.trnx_type || '').toLowerCase());
 
     // Date range filter
     let matchesDate = true;
     if (startDate || endDate) {
-      const entryDateStr = new Date(entry.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
+      const entryDateStr = getKarachiDateKey(entry.created_at);
       if (startDate) matchesDate = matchesDate && entryDateStr >= startDate;
       if (endDate) matchesDate = matchesDate && entryDateStr <= endDate;
     }
@@ -4090,7 +4103,7 @@ export default function FinancePage() {
 
         {/* Ledger Table */}
         <Box sx={{ width: '100%' }}>
-          <Card sx={LEDGER_UI.tableCard}>
+          <Card ref={ledgerTableCardRef} sx={LEDGER_UI.tableCard}>
             {loading && <LinearProgress color="primary" sx={{ width: '100%', height: 3, position: 'absolute', top: 0, zIndex: 10 }} />}
             <CardHeader
               title={
@@ -4272,7 +4285,7 @@ export default function FinancePage() {
                     </TableHead>
                   </Table>
                 </Box>
-                <TableContainer sx={{
+                <TableContainer ref={ledgerTableContainerRef} sx={{
                   minHeight: 320,
                   maxHeight: { xs: '65vh', md: 'calc(100vh - 380px)' },
                   overflow: 'auto',
@@ -4587,7 +4600,7 @@ export default function FinancePage() {
                     }}
                   >
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                      <FormControl size="small" variant="outlined" sx={{ minWidth: 125 }}>
+                      <FormControl size="small" variant="outlined" sx={{ minWidth: 140 }}>
                         <Select
                           value={ledgerRowsPerPage}
                           onChange={(e) => {
@@ -4601,6 +4614,9 @@ export default function FinancePage() {
                           <MenuItem value={100}>100 per page</MenuItem>
                           <MenuItem value={200}>200 per page</MenuItem>
                           <MenuItem value={500}>500 per page</MenuItem>
+                          <MenuItem value={1000}>1000 per page</MenuItem>
+                          <MenuItem value={2000}>2000 per page</MenuItem>
+                          <MenuItem value={3000}>3000 per page</MenuItem>
                           <MenuItem value={-1}>All entries</MenuItem>
                         </Select>
                       </FormControl>
@@ -4615,9 +4631,7 @@ export default function FinancePage() {
                       <Pagination
                         count={Math.ceil(finalLedgerEntries.length / ledgerRowsPerPage)}
                         page={ledgerPage}
-                        onChange={(event, value) => {
-                          setLedgerPage(value);
-                        }}
+                        onChange={handleLedgerPageChange}
                         color="primary"
                         size="small"
                         showFirstButton
