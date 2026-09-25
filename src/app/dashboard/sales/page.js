@@ -189,9 +189,9 @@ const SALE_INVOICE_PRINT = {
   headerText: '#000000',
   border: '#000000',
   bodyText: '#000000',
-  balanceTotalBg: '#ffffff',
+  balanceTotalBg: '#e0e0e0',
   balanceTotalText: '#000000',
-  grandTotalBg: '#ffffff',
+  grandTotalBg: '#e0e0e0',
 };
 
 const SALE_PRODUCT_LIST_LIMIT = 50;
@@ -8986,7 +8986,7 @@ function SalesPageContent() {
                 </Box>
               </Box>
 
-              <Box id="receipt-preview" className="thermal-receipt" sx={{ width: '100%', bgcolor: 'white', p: 3, color: '#000', fontWeight: 'bold', '& *': { fontWeight: 'bold !important', color: '#000 !important' } }}>
+              <Box id="receipt-preview" className="thermal-receipt" sx={{ width: '100%', bgcolor: 'white', p: 3, color: '#000' }}>
                 {/* Company Header */}
                 <Box sx={{
                   textAlign: 'center',
@@ -9029,10 +9029,11 @@ function SalesPageContent() {
                     <Typography variant="body2" sx={{
                       display: 'inline-block',
                       px: 3,
-                      py: 0.6,
+                      py: 0.5,
                       borderRadius: '6px',
-                      bgcolor: currentBillData?.is_return ? '#991b1b' : '#0f172a',
-                      color: '#ffffff !important',
+                      bgcolor: currentBillData?.is_return ? '#fef2f2' : '#f1f5f9',
+                      color: currentBillData?.is_return ? '#991b1b !important' : '#0f172a !important',
+                      border: currentBillData?.is_return ? '1.5px solid #fca5a5' : '1.5px solid #cbd5e1',
                       fontWeight: 800,
                       fontSize: '0.9rem',
                       letterSpacing: 2,
