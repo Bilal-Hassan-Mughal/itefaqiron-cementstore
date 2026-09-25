@@ -474,32 +474,32 @@ function SaleDropdownListbox({ columns, headers, props, listRef }) {
       {...other}
     >
       {headers.length > 0 && (
-      <li
-        role="presentation"
-        aria-hidden
-        style={{
-          ...saleDropdownRowStyle(columns),
-          position: 'sticky',
-          top: 0,
-          zIndex: 2,
-          pointerEvents: 'none',
-          background: '#d9e2f3',
-        }}
-      >
-        {headers.map((label, i) => (
-          <span
-            key={label || `h-${i}`}
-            style={{
-              ...saleDropdownHeaderCell,
-              borderRight: i === headers.length - 1 ? 'none' : SALE_DROPDOWN_LINE,
-              justifyContent: label === '#' ? 'center' : label === 'Balance' ? 'flex-end' : 'flex-start',
-              paddingRight: label === 'Balance' ? 10 : 8,
-            }}
-          >
-            {label}
-          </span>
-        ))}
-      </li>
+        <li
+          role="presentation"
+          aria-hidden
+          style={{
+            ...saleDropdownRowStyle(columns),
+            position: 'sticky',
+            top: 0,
+            zIndex: 2,
+            pointerEvents: 'none',
+            background: '#d9e2f3',
+          }}
+        >
+          {headers.map((label, i) => (
+            <span
+              key={label || `h-${i}`}
+              style={{
+                ...saleDropdownHeaderCell,
+                borderRight: i === headers.length - 1 ? 'none' : SALE_DROPDOWN_LINE,
+                justifyContent: label === '#' ? 'center' : label === 'Balance' ? 'flex-end' : 'flex-start',
+                paddingRight: label === 'Balance' ? 10 : 8,
+              }}
+            >
+              {label}
+            </span>
+          ))}
+        </li>
       )}
       {children}
     </ul>
@@ -648,7 +648,7 @@ function SalesPageContent() {
       try {
         const u = JSON.parse(localStorage.getItem('user') || '{}');
         setCurrentUser(u);
-      } catch (e) {}
+      } catch (e) { }
     }
   }, []);
 
@@ -1719,8 +1719,8 @@ function SalesPageContent() {
 
   const renderSaleLineItemsCell = (sale) => {
     const details = getSaleDetailsInAddOrder(sale?.sale_details || []);
-    const highlightTerm = filterItem.trim();
-    const highlightQty = filterQuantity.trim();
+    const highlightTerm = (debouncedItem || '').trim();
+    const highlightQty = (debouncedQuantity || '').trim();
 
     if (!details.length) {
       return (
@@ -2413,11 +2413,11 @@ function SalesPageContent() {
       // Use PUT when editing an existing sale, POST for new
       const apiBody = isEditing
         ? {
-            ...saleData,
-            id: editingSale.sale_id,
-            created_at: editingSale.created_at,
-            date: editingSale.date || editingSale.created_at,
-          }
+          ...saleData,
+          id: editingSale.sale_id,
+          created_at: editingSale.created_at,
+          date: editingSale.date || editingSale.created_at,
+        }
         : saleData;
       let response;
       let isNetworkFailure = typeof navigator !== 'undefined' && !navigator.onLine;
@@ -2501,10 +2501,10 @@ function SalesPageContent() {
         const resolvedPrevBalance = result.previous_balance !== undefined && result.previous_balance !== null
           ? parseFloat(result.previous_balance)
           : (result.previous_customer_balance !== undefined && result.previous_customer_balance !== null
-              ? parseFloat(result.previous_customer_balance)
-              : (isEditing && editingSale?.previous_balance !== undefined
-                  ? parseFloat(editingSale.previous_balance)
-                  : parseFloat(formSelectedCustomer?.cus_balance || 0)));
+            ? parseFloat(result.previous_customer_balance)
+            : (isEditing && editingSale?.previous_balance !== undefined
+              ? parseFloat(editingSale.previous_balance)
+              : parseFloat(formSelectedCustomer?.cus_balance || 0)));
 
         const billDataForPrint = buildSaleReceiptBill({
           saleId: savedSaleId,
@@ -2557,7 +2557,7 @@ function SalesPageContent() {
               await fetch(`/api/draft-sales?id=${draftIdToDelete}`, { method: 'DELETE' });
               if (typeof fetchDrafts === 'function') fetchDrafts();
             } catch (e) {
-              console.error('Failed to delete held bill after sale completion:', e);
+              console.error('Failed to delete hold bill after sale completion:', e);
             }
           }
         })();
@@ -3550,6 +3550,10 @@ function SalesPageContent() {
     }
   };
 
+  useEffect(() => {
+    fetchDrafts();
+  }, []);
+
   // Save current form as draft
   const handleSendWhatsApp = async (bill, customPhone, elementId = 'receipt-preview') => {
     try {
@@ -4131,7 +4135,7 @@ function SalesPageContent() {
       const response = await fetch(endpoint);
       if (!response.ok) throw new Error('Failed to fetch bill details');
       const saleData = await response.json();
-      
+
       // Ensure mapped return fields align on details view
       const notesVal = saleData.notes || saleData.reference || sale.notes || sale.reference || '';
       const formattedData = isReturn ? {
@@ -4181,7 +4185,7 @@ function SalesPageContent() {
       const response = await fetch(endpoint);
       if (!response.ok) throw new Error('Failed to fetch receipt details');
       const saleData = await response.json();
-      
+
       // Ensure mapped return fields align on details view
       const notesVal = saleData.notes || saleData.reference || sale.notes || sale.reference || '';
       const formattedData = isReturn ? {
@@ -4358,7 +4362,7 @@ function SalesPageContent() {
           if (errData && errData.error) {
             errMsg = errData.error;
           }
-        } catch (_) {}
+        } catch (_) { }
         if (errMsg === 'Sale not found') {
           errMsg = 'Order does not exist. Please check the Order Number.';
         }
@@ -4797,8 +4801,8 @@ function SalesPageContent() {
   const handlePrintBill = async (mode = 'A4', fromDialog = false, targetBill = null) => {
     try {
       const actualMode = typeof mode === 'string' ? mode : 'A4';
-      const className = actualMode === 'THERMAL' 
-        ? 'print-thermal' 
+      const className = actualMode === 'THERMAL'
+        ? 'print-thermal'
         : (actualMode === 'EXISTING' ? 'print-existing' : 'print-a4');
       const isThermal = actualMode === 'THERMAL';
 
@@ -5238,91 +5242,91 @@ function SalesPageContent() {
                   {isSyncingOffline ? 'Syncing...' : `Sync Offline (${offlineQueueCount})`}
                 </Button>
               )}
-            <Button
-              variant="outlined"
-              startIcon={<ReceiptIcon />}
-              onClick={() => setLoadQuotationDialogOpen(true)}
-              sx={{
-                mr: 2,
-                borderColor: '#ed6c02',
-                color: '#ed6c02',
-                '&:hover': {
-                  borderColor: '#e65100',
-                  backgroundColor: '#fff3e0'
-                }
-              }}
-            >
-              Load Quotation
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<ListAltIcon />}
-              onClick={openLoadOrderDialog}
-              sx={{
-                mr: 2,
-                borderColor: '#1976d2',
-                color: '#1976d2',
-                '&:hover': {
-                  borderColor: '#115293',
-                  backgroundColor: '#e3f2fd'
-                }
-              }}
-            >
-              Load Order
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<AddIcon />}
-              onClick={handleOpenCustomerPopup}
-              sx={{
-                borderColor: '#6f42c1',
-                color: '#6f42c1',
-                '&:hover': {
-                  borderColor: '#5a2d91',
-                  backgroundColor: '#f8f5ff'
-                }
-              }}
-            >
-              Create Customer
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<PackageIcon />}
-              onClick={() => setShowAddProductPopup(true)}
-              sx={{
-                borderColor: 'info.main',
-                color: 'info.main',
-                '&:hover': { borderColor: 'info.dark', backgroundColor: 'info.light', color: 'info.dark' }
-              }}
-            >
-              Add Product
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<FolderIcon />}
-              onClick={() => setShowAddProductCategoryPopup(true)}
-              sx={{
-                borderColor: 'success.main',
-                color: 'success.main',
-                '&:hover': { borderColor: 'success.dark', backgroundColor: 'success.light', color: 'success.dark' }
-              }}
-            >
-              Add Product Category
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<FolderOpenIcon />}
-              onClick={() => setShowAddProductSubCategoryPopup(true)}
-              sx={{
-                borderColor: 'secondary.main',
-                color: 'secondary.main',
-                '&:hover': { borderColor: 'secondary.dark', backgroundColor: 'secondary.light', color: 'secondary.dark' }
-              }}
-            >
-              Add Product Sub Category
-            </Button>
+              <Button
+                variant="outlined"
+                startIcon={<ReceiptIcon />}
+                onClick={() => setLoadQuotationDialogOpen(true)}
+                sx={{
+                  mr: 2,
+                  borderColor: '#ed6c02',
+                  color: '#ed6c02',
+                  '&:hover': {
+                    borderColor: '#e65100',
+                    backgroundColor: '#fff3e0'
+                  }
+                }}
+              >
+                Load Quotation
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<ListAltIcon />}
+                onClick={openLoadOrderDialog}
+                sx={{
+                  mr: 2,
+                  borderColor: '#1976d2',
+                  color: '#1976d2',
+                  '&:hover': {
+                    borderColor: '#115293',
+                    backgroundColor: '#e3f2fd'
+                  }
+                }}
+              >
+                Load Order
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<AddIcon />}
+                onClick={handleOpenCustomerPopup}
+                sx={{
+                  borderColor: '#6f42c1',
+                  color: '#6f42c1',
+                  '&:hover': {
+                    borderColor: '#5a2d91',
+                    backgroundColor: '#f8f5ff'
+                  }
+                }}
+              >
+                Create Customer
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<PackageIcon />}
+                onClick={() => setShowAddProductPopup(true)}
+                sx={{
+                  borderColor: 'info.main',
+                  color: 'info.main',
+                  '&:hover': { borderColor: 'info.dark', backgroundColor: 'info.light', color: 'info.dark' }
+                }}
+              >
+                Add Product
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<FolderIcon />}
+                onClick={() => setShowAddProductCategoryPopup(true)}
+                sx={{
+                  borderColor: 'success.main',
+                  color: 'success.main',
+                  '&:hover': { borderColor: 'success.dark', backgroundColor: 'success.light', color: 'success.dark' }
+                }}
+              >
+                Add Product Category
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<FolderOpenIcon />}
+                onClick={() => setShowAddProductSubCategoryPopup(true)}
+                sx={{
+                  borderColor: 'secondary.main',
+                  color: 'secondary.main',
+                  '&:hover': { borderColor: 'secondary.dark', backgroundColor: 'secondary.light', color: 'secondary.dark' }
+                }}
+              >
+                Add Product Sub Category
+              </Button>
+            </Box>
           </Box>
-        </Box>
 
 
           {/* Screen Stack Indicator */}
@@ -5445,7 +5449,7 @@ function SalesPageContent() {
 
               {/* Filter and Order Search Row */}
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2, mb: 3, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
-                
+
                 {/* Left Side: Customer Type Dropdown Filter */}
                 <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}>
                   <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'black', whiteSpace: 'nowrap' }}>
@@ -5546,342 +5550,342 @@ function SalesPageContent() {
               {/* First Row - Customer, Date, Reference */}
               <Box sx={billType === 'SALE_RETURN' ? SALE_ENTRY_ROW1_RETURN_SX : SALE_ENTRY_ROW1_SX}>
                 <Box sx={SALE_ENTRY_CELL_SX}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.75, gap: 1, minHeight: 22, flexWrap: 'wrap' }}>
-                      <Typography sx={{ ...SALE_ENTRY_LABEL_SX, mb: 0 }}>
-                        CUSTOMER
-                      </Typography>
-                      {formSelectedCustomer && (
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Typography
-                            component="span"
-                            sx={{
-                              bgcolor: '#bbf7d0',
-                              color: '#14532d',
-                              border: '1px solid #22c55e',
-                              px: 2,
-                              py: 0.75,
-                              borderRadius: 1.5,
-                              fontSize: '0.95rem',
-                              fontWeight: 900,
-                              lineHeight: 1.3,
-                              letterSpacing: '0.02em',
-                              display: 'inline-block',
-                              boxShadow: '0 1px 2px rgba(22, 163, 74, 0.15)',
-                            }}
-                          >
-                            Balance:{' '}
-                            <Box component="span" sx={{ fontSize: '1.05rem', fontWeight: 900 }}>
-                              {parseFloat(formSelectedCustomer.cus_balance || 0).toLocaleString('en-PK', { maximumFractionDigits: 0 })}
-                            </Box>
-                          </Typography>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            startIcon={<ListAltIcon />}
-                            onClick={handleOpenLedger}
-                            sx={{
-                              py: 0.5,
-                              fontSize: '0.75rem',
-                              color: 'secondary.main',
-                              borderColor: 'secondary.main',
-                              '&:hover': {
-                                borderColor: 'secondary.dark',
-                                bgcolor: 'secondary.light',
-                                color: 'white'
-                              }
-                            }}
-                          >
-                            View Ledger
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            startIcon={<EditIcon />}
-                            onClick={handleOpenEditCustomer}
-                            sx={{
-                              py: 0.5,
-                              fontSize: '0.75rem',
-                              color: 'warning.main',
-                              borderColor: 'warning.main',
-                              '&:hover': {
-                                borderColor: 'warning.dark',
-                                bgcolor: 'warning.light',
-                                color: 'white'
-                              }
-                            }}
-                          >
-                            Edit
-                          </Button>
-                        </Stack>
-                      )}
-                    </Box>
-                    <Autocomplete
-                      fullWidth
-                      size="small"
-                      sx={{ 
-                        width: '100%',
-                        minWidth: 0,
-                        '& .MuiAutocomplete-popupIndicator': { color: 'white' },
-                        '& .MuiAutocomplete-clearIndicator': { color: 'white' }
-                      }}
-                      onKeyDown={(e) => {
-                        commitDropdownOnTab(
-                          e,
-                          customerHighlightRef.current || formSelectedCustomer,
-                          (val) => {
-                            setFormSelectedCustomer(val);
-                            if (billType === 'SALE_RETURN') {
-                              setSaleSearchResults([]);
-                              setSelectedSaleForReturnMain(null);
-                            }
-                          },
-                          () => {
-                            if (billType === 'SALE_RETURN') {
-                              return document.querySelector('input[placeholder*="Search Sale ID"]');
-                            }
-                            return document.getElementById('product-select-dropdown-input')
-                              || document.querySelector('input[placeholder*="Select product"]');
-                          }
-                        );
-                      }}
-                      onHighlightChange={(_, option) => {
-                        if (option) customerHighlightRef.current = option;
-                      }}
-                      options={customers.filter(customer => {
-                        // Filter by Category: Customer
-                        // User requested: "customer catagory customer type any"
-                        const category = customerCategories.find(c => c.cus_cat_id === customer.cus_category);
-                        const isCustomer = category && category.cus_cat_title.toLowerCase().includes('customer');
-                        if (!isCustomer) return false;
-                        
-                        // Filter by Customer Type if selected
-                        if (selectedCustomerTypeFilter) {
-                          return customer.cus_type === selectedCustomerTypeFilter.cus_type_id;
-                        }
-                        return true;
-                      })}
-                      getOptionLabel={(option) => option.cus_name || ''}
-                      slots={{ listbox: SaleCustomerDropdownListbox }}
-                      slotProps={{
-                        popper: {
-                          sx: {
-                            ...SALE_DROPDOWN_POPPER_SX,
-                            minWidth: 740,
-                          },
-                          modifiers: [{ name: 'flip', enabled: false }],
-                        },
-                        paper: {
-                          sx: { width: 740, maxWidth: '92vw', mt: 0.5 },
-                        },
-                      }}
-                      filterOptions={filterSaleCustomers}
-                      value={formSelectedCustomer ?? null}
-                      onChange={(event, newValue) => {
-                        setFormSelectedCustomer(newValue ?? null);
-                        if (billType === 'SALE_RETURN') {
-                          setSaleSearchResults([]);
-                          setSelectedSaleForReturnMain(null);
-                        }
-                      }}
-                      isOptionEqualToValue={(option, value) => option.cus_id === value?.cus_id}
-                      autoSelect={true}
-                      autoHighlight={true}
-                      openOnFocus={true}
-                      selectOnFocus={true}
-                      renderOption={(props, option, { index }) => {
-                        const { key, ownerState, ...optionProps } = props;
-                        return (
-                          <li key={option.cus_id ?? key} {...optionProps} style={{ ...saleDropdownRowStyle(SALE_CUSTOMER_DROPDOWN_GRID), ...optionProps.style }}>
-                            <span style={{ ...saleDropdownCellStyle, justifyContent: 'center', color: '#64748b', fontSize: 12, fontWeight: 700 }}>
-                              {index + 1}
-                            </span>
-                            <span
-                              title={option.cus_name || ''}
-                              style={{
-                                ...saleDropdownCellStyle,
-                                fontWeight: 700,
-                                color: '#111827',
-                                whiteSpace: 'normal',
-                                overflow: 'visible',
-                                textOverflow: 'unset',
-                                lineHeight: 1.25,
-                              }}
-                            >
-                              {option.cus_name || ''}
-                            </span>
-                            <span title={option.cus_phone_no || ''} style={{ ...saleDropdownCellStyle, fontVariantNumeric: 'tabular-nums' }}>
-                              {option.cus_phone_no || ''}
-                            </span>
-                            <span title={option.cus_address || ''} style={saleDropdownCellStyle}>
-                              {option.cus_address || ''}
-                            </span>
-                            <span
-                              title={`Balance: Rs. ${parseFloat(option.cus_balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                              style={{
-                                ...saleDropdownCellStyle,
-                                borderRight: 'none',
-                                fontWeight: 700,
-                                fontVariantNumeric: 'tabular-nums',
-                                color: parseFloat(option.cus_balance || 0) > 0 ? '#b91c1c' : parseFloat(option.cus_balance || 0) < 0 ? '#15803d' : '#475569',
-                                justifyContent: 'flex-end',
-                                paddingRight: 10,
-                              }}
-                            >
-                              Rs. {parseFloat(option.cus_balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </span>
-                          </li>
-                        );
-                      }}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          id="customer-search-dropdown-input"
-                          fullWidth
-                          placeholder="Search by name, phone, address, city, reference"
-                          onFocus={(e) => e.target.select()}
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.75, gap: 1, minHeight: 22, flexWrap: 'wrap' }}>
+                    <Typography sx={{ ...SALE_ENTRY_LABEL_SX, mb: 0 }}>
+                      CUSTOMER
+                    </Typography>
+                    {formSelectedCustomer && (
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <Typography
+                          component="span"
                           sx={{
-                            bgcolor: '#2e7d32',
-                            width: '100%',
-                            minWidth: 0,
-                            borderRadius: 1,
-                            '& .MuiOutlinedInput-root': {
-                              height: 40,
-                              fontSize: '0.95rem',
-                              color: 'white !important',
-                              WebkitTextFillColor: 'white !important',
-                              '& fieldset': {
-                                borderColor: '#1b5e20',
-                                borderWidth: '2px'
-                              },
-                              '&:hover fieldset': {
-                                borderColor: '#1b5e20'
-                              },
-                              '&.Mui-focused fieldset': {
-                                borderColor: '#1b5e20'
-                              }
-                            },
-                            '& .MuiInputBase-input': {
-                              fontWeight: 'bold',
-                              color: 'white !important',
-                              WebkitTextFillColor: 'white !important',
-                              '&::placeholder': {
-                                color: 'rgba(255, 255, 255, 0.7) !important',
-                                WebkitTextFillColor: 'rgba(255, 255, 255, 0.7) !important',
-                                opacity: 1
-                              }
+                            bgcolor: '#bbf7d0',
+                            color: '#14532d',
+                            border: '1px solid #22c55e',
+                            px: 2,
+                            py: 0.75,
+                            borderRadius: 1.5,
+                            fontSize: '0.95rem',
+                            fontWeight: 900,
+                            lineHeight: 1.3,
+                            letterSpacing: '0.02em',
+                            display: 'inline-block',
+                            boxShadow: '0 1px 2px rgba(22, 163, 74, 0.15)',
+                          }}
+                        >
+                          Balance:{' '}
+                          <Box component="span" sx={{ fontSize: '1.05rem', fontWeight: 900 }}>
+                            {parseFloat(formSelectedCustomer.cus_balance || 0).toLocaleString('en-PK', { maximumFractionDigits: 0 })}
+                          </Box>
+                        </Typography>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<ListAltIcon />}
+                          onClick={handleOpenLedger}
+                          sx={{
+                            py: 0.5,
+                            fontSize: '0.75rem',
+                            color: 'secondary.main',
+                            borderColor: 'secondary.main',
+                            '&:hover': {
+                              borderColor: 'secondary.dark',
+                              bgcolor: 'secondary.light',
+                              color: 'white'
                             }
                           }}
-                        />
-                      )}
-                    />
+                        >
+                          View Ledger
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<EditIcon />}
+                          onClick={handleOpenEditCustomer}
+                          sx={{
+                            py: 0.5,
+                            fontSize: '0.75rem',
+                            color: 'warning.main',
+                            borderColor: 'warning.main',
+                            '&:hover': {
+                              borderColor: 'warning.dark',
+                              bgcolor: 'warning.light',
+                              color: 'white'
+                            }
+                          }}
+                        >
+                          Edit
+                        </Button>
+                      </Stack>
+                    )}
+                  </Box>
+                  <Autocomplete
+                    fullWidth
+                    size="small"
+                    sx={{
+                      width: '100%',
+                      minWidth: 0,
+                      '& .MuiAutocomplete-popupIndicator': { color: 'white' },
+                      '& .MuiAutocomplete-clearIndicator': { color: 'white' }
+                    }}
+                    onKeyDown={(e) => {
+                      commitDropdownOnTab(
+                        e,
+                        customerHighlightRef.current || formSelectedCustomer,
+                        (val) => {
+                          setFormSelectedCustomer(val);
+                          if (billType === 'SALE_RETURN') {
+                            setSaleSearchResults([]);
+                            setSelectedSaleForReturnMain(null);
+                          }
+                        },
+                        () => {
+                          if (billType === 'SALE_RETURN') {
+                            return document.querySelector('input[placeholder*="Search Sale ID"]');
+                          }
+                          return document.getElementById('product-select-dropdown-input')
+                            || document.querySelector('input[placeholder*="Select product"]');
+                        }
+                      );
+                    }}
+                    onHighlightChange={(_, option) => {
+                      if (option) customerHighlightRef.current = option;
+                    }}
+                    options={customers.filter(customer => {
+                      // Filter by Category: Customer
+                      // User requested: "customer catagory customer type any"
+                      const category = customerCategories.find(c => c.cus_cat_id === customer.cus_category);
+                      const isCustomer = category && category.cus_cat_title.toLowerCase().includes('customer');
+                      if (!isCustomer) return false;
+
+                      // Filter by Customer Type if selected
+                      if (selectedCustomerTypeFilter) {
+                        return customer.cus_type === selectedCustomerTypeFilter.cus_type_id;
+                      }
+                      return true;
+                    })}
+                    getOptionLabel={(option) => option.cus_name || ''}
+                    slots={{ listbox: SaleCustomerDropdownListbox }}
+                    slotProps={{
+                      popper: {
+                        sx: {
+                          ...SALE_DROPDOWN_POPPER_SX,
+                          minWidth: 740,
+                        },
+                        modifiers: [{ name: 'flip', enabled: false }],
+                      },
+                      paper: {
+                        sx: { width: 740, maxWidth: '92vw', mt: 0.5 },
+                      },
+                    }}
+                    filterOptions={filterSaleCustomers}
+                    value={formSelectedCustomer ?? null}
+                    onChange={(event, newValue) => {
+                      setFormSelectedCustomer(newValue ?? null);
+                      if (billType === 'SALE_RETURN') {
+                        setSaleSearchResults([]);
+                        setSelectedSaleForReturnMain(null);
+                      }
+                    }}
+                    isOptionEqualToValue={(option, value) => option.cus_id === value?.cus_id}
+                    autoSelect={true}
+                    autoHighlight={true}
+                    openOnFocus={true}
+                    selectOnFocus={true}
+                    renderOption={(props, option, { index }) => {
+                      const { key, ownerState, ...optionProps } = props;
+                      return (
+                        <li key={option.cus_id ?? key} {...optionProps} style={{ ...saleDropdownRowStyle(SALE_CUSTOMER_DROPDOWN_GRID), ...optionProps.style }}>
+                          <span style={{ ...saleDropdownCellStyle, justifyContent: 'center', color: '#64748b', fontSize: 12, fontWeight: 700 }}>
+                            {index + 1}
+                          </span>
+                          <span
+                            title={option.cus_name || ''}
+                            style={{
+                              ...saleDropdownCellStyle,
+                              fontWeight: 700,
+                              color: '#111827',
+                              whiteSpace: 'normal',
+                              overflow: 'visible',
+                              textOverflow: 'unset',
+                              lineHeight: 1.25,
+                            }}
+                          >
+                            {option.cus_name || ''}
+                          </span>
+                          <span title={option.cus_phone_no || ''} style={{ ...saleDropdownCellStyle, fontVariantNumeric: 'tabular-nums' }}>
+                            {option.cus_phone_no || ''}
+                          </span>
+                          <span title={option.cus_address || ''} style={saleDropdownCellStyle}>
+                            {option.cus_address || ''}
+                          </span>
+                          <span
+                            title={`Balance: Rs. ${parseFloat(option.cus_balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                            style={{
+                              ...saleDropdownCellStyle,
+                              borderRight: 'none',
+                              fontWeight: 700,
+                              fontVariantNumeric: 'tabular-nums',
+                              color: parseFloat(option.cus_balance || 0) > 0 ? '#b91c1c' : parseFloat(option.cus_balance || 0) < 0 ? '#15803d' : '#475569',
+                              justifyContent: 'flex-end',
+                              paddingRight: 10,
+                            }}
+                          >
+                            Rs. {parseFloat(option.cus_balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </li>
+                      );
+                    }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        id="customer-search-dropdown-input"
+                        fullWidth
+                        placeholder="Search by name, phone, address, city, reference"
+                        onFocus={(e) => e.target.select()}
+                        sx={{
+                          bgcolor: '#2e7d32',
+                          width: '100%',
+                          minWidth: 0,
+                          borderRadius: 1,
+                          '& .MuiOutlinedInput-root': {
+                            height: 40,
+                            fontSize: '0.95rem',
+                            color: 'white !important',
+                            WebkitTextFillColor: 'white !important',
+                            '& fieldset': {
+                              borderColor: '#1b5e20',
+                              borderWidth: '2px'
+                            },
+                            '&:hover fieldset': {
+                              borderColor: '#1b5e20'
+                            },
+                            '&.Mui-focused fieldset': {
+                              borderColor: '#1b5e20'
+                            }
+                          },
+                          '& .MuiInputBase-input': {
+                            fontWeight: 'bold',
+                            color: 'white !important',
+                            WebkitTextFillColor: 'white !important',
+                            '&::placeholder': {
+                              color: 'rgba(255, 255, 255, 0.7) !important',
+                              WebkitTextFillColor: 'rgba(255, 255, 255, 0.7) !important',
+                              opacity: 1
+                            }
+                          }
+                        }}
+                      />
+                    )}
+                  />
                 </Box>
 
                 {/* Return Invoice Selection (Only for Sale Return) */}
                 {billType === 'SALE_RETURN' && (
                   <Box sx={SALE_ENTRY_CELL_SX}>
-                      <Typography sx={SALE_ENTRY_LABEL_SX}>
-                        SELECT INVOICE
-                      </Typography>
-                      <Autocomplete
-                        open={saleSearchOpen}
-                        onOpen={() => {
-                          setSaleSearchOpen(true);
-                          // Always search when opening, either scoped to customer or all
-                          if (formSelectedCustomer) {
-                            const customerSales = sales.filter(s => s.cus_id === formSelectedCustomer.cus_id);
-                            setSaleSearchResults(customerSales);
-                          } else {
-                            // Show latest sales if no customer selected
-                            setSaleSearchResults(sales.slice(0, 50)); // Limit to prevent lag
+                    <Typography sx={SALE_ENTRY_LABEL_SX}>
+                      SELECT INVOICE
+                    </Typography>
+                    <Autocomplete
+                      open={saleSearchOpen}
+                      onOpen={() => {
+                        setSaleSearchOpen(true);
+                        // Always search when opening, either scoped to customer or all
+                        if (formSelectedCustomer) {
+                          const customerSales = sales.filter(s => s.cus_id === formSelectedCustomer.cus_id);
+                          setSaleSearchResults(customerSales);
+                        } else {
+                          // Show latest sales if no customer selected
+                          setSaleSearchResults(sales.slice(0, 50)); // Limit to prevent lag
+                        }
+                      }}
+                      onClose={() => setSaleSearchOpen(false)}
+                      options={saleSearchResults}
+                      getOptionLabel={(option) => {
+                        // Helper to find customer name
+                        const cName = option.customer?.cus_name || (customers.find(c => c.cus_id === option.cus_id)?.cus_name) || 'Unknown';
+                        return `#${option.sale_id} - ${cName} - ${option.reference || 'No Ref'} (${parseFloat(option.total_amount).toFixed(0)})`;
+                      }}
+                      value={selectedSaleForReturnMain ?? null}
+                      onChange={(event, newValue) => {
+                        if (newValue) handleLoadSaleForReturnMain(newValue);
+                      }}
+                      autoSelect={true}
+                      autoHighlight={true}
+                      openOnFocus={true}
+                      selectOnFocus={true}
+                      onInputChange={(event, inputValue) => {
+                        if (!formSelectedCustomer) {
+                          // Search across all sales if no customer selected
+                          if (!inputValue) {
+                            setSaleSearchResults(sales.slice(0, 50));
+                            return;
                           }
-                        }}
-                        onClose={() => setSaleSearchOpen(false)}
-                        options={saleSearchResults}
-                        getOptionLabel={(option) => {
-                          // Helper to find customer name
-                          const cName = option.customer?.cus_name || (customers.find(c => c.cus_id === option.cus_id)?.cus_name) || 'Unknown';
-                          return `#${option.sale_id} - ${cName} - ${option.reference || 'No Ref'} (${parseFloat(option.total_amount).toFixed(0)})`;
-                        }}
-                        value={selectedSaleForReturnMain ?? null}
-                        onChange={(event, newValue) => {
-                          if (newValue) handleLoadSaleForReturnMain(newValue);
-                        }}
-                        autoSelect={true}
-                        autoHighlight={true}
-                        openOnFocus={true}
-                        selectOnFocus={true}
-                        onInputChange={(event, inputValue) => {
-                          if (!formSelectedCustomer) {
-                            // Search across all sales if no customer selected
-                            if (!inputValue) {
-                              setSaleSearchResults(sales.slice(0, 50));
-                              return;
+                          const searchLower = inputValue.toLowerCase();
+                          const results = sales.filter(sale =>
+                            sale.sale_id?.toString().includes(searchLower) ||
+                            sale.invoice_number?.toLowerCase().includes(searchLower) ||
+                            sale.reference?.toLowerCase().includes(searchLower)
+                          ).slice(0, 50);
+                          setSaleSearchResults(results);
+                        } else {
+                          handleSaleSearch(inputValue);
+                        }
+                      }}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          size="small"
+                          placeholder="Search Sale ID..."
+                          onFocus={(e) => e.target.select()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && selectedSaleForReturnMain) {
+                              e.preventDefault();
+                              const productInput = document.querySelector('input[placeholder*="Select product"]');
+                              if (productInput) productInput.focus();
                             }
-                            const searchLower = inputValue.toLowerCase();
-                            const results = sales.filter(sale =>
-                              sale.sale_id?.toString().includes(searchLower) ||
-                              sale.invoice_number?.toLowerCase().includes(searchLower) ||
-                              sale.reference?.toLowerCase().includes(searchLower)
-                            ).slice(0, 50);
-                            setSaleSearchResults(results);
-                          } else {
-                            handleSaleSearch(inputValue);
-                          }
-                        }}
-                        renderInput={(params) => (
-                          <TextField
-                            {...params}
-                            size="small"
-                            placeholder="Search Sale ID..."
-                            onFocus={(e) => e.target.select()}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && selectedSaleForReturnMain) {
-                                e.preventDefault();
-                                const productInput = document.querySelector('input[placeholder*="Select product"]');
-                                if (productInput) productInput.focus();
-                              }
-                            }}
-                            sx={{ ...SALE_ENTRY_CONTROL_SX }}
-                            InputProps={{
-                              ...params.InputProps,
-                              endAdornment: (
-                                <>
-                                  {params.InputProps.endAdornment}
-                                </>
-                              ),
-                            }}
-                          />
-                        )}
-                        noOptionsText="No sales found"
-                      />
-                    </Box>
+                          }}
+                          sx={{ ...SALE_ENTRY_CONTROL_SX }}
+                          InputProps={{
+                            ...params.InputProps,
+                            endAdornment: (
+                              <>
+                                {params.InputProps.endAdornment}
+                              </>
+                            ),
+                          }}
+                        />
+                      )}
+                      noOptionsText="No sales found"
+                    />
+                  </Box>
                 )}
 
 
                 <Box sx={SALE_ENTRY_CELL_SX}>
-                    <Typography sx={SALE_ENTRY_LABEL_SX}>
-                      DATE
-                    </Typography>
-                    <DateFilterInput
-                      fullWidth
-                      size="small"
-                      value={saleEntryDate}
-                      onChange={(val) => setSaleEntryDate(val)}
-                      sx={SALE_ENTRY_CONTROL_SX}
-                    />
+                  <Typography sx={SALE_ENTRY_LABEL_SX}>
+                    DATE
+                  </Typography>
+                  <DateFilterInput
+                    fullWidth
+                    size="small"
+                    value={saleEntryDate}
+                    onChange={(val) => setSaleEntryDate(val)}
+                    sx={SALE_ENTRY_CONTROL_SX}
+                  />
                 </Box>
                 <Box sx={SALE_ENTRY_CELL_SX}>
-                    <Typography sx={SALE_ENTRY_LABEL_SX}>
-                      REFERENCE
-                    </Typography>
-                    <TextField
-                      fullWidth
-                      size="small"
-                      sx={SALE_ENTRY_CONTROL_SX}
-                      value={paymentData.notes || ''}
-                      onChange={(e) => setPaymentData(prev => ({ ...prev, notes: e.target.value }))}
-                      onFocus={(e) => e.target.select()}
-                    />
+                  <Typography sx={SALE_ENTRY_LABEL_SX}>
+                    REFERENCE
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    sx={SALE_ENTRY_CONTROL_SX}
+                    value={paymentData.notes || ''}
+                    onChange={(e) => setPaymentData(prev => ({ ...prev, notes: e.target.value }))}
+                    onFocus={(e) => e.target.select()}
+                  />
                 </Box>
               </Box>
 
@@ -5889,45 +5893,45 @@ function SalesPageContent() {
               {/* Product Selection Row */}
               <Box sx={SALE_ENTRY_ROW2_SX}>
                 <Box sx={SALE_ENTRY_CELL_SX}>
-                    <Typography sx={SALE_ENTRY_LABEL_SX}>
-                      SELECT PRODUCT
-                    </Typography>
-                    <Autocomplete
-                      size="small"
-                      fullWidth
-                      sx={{ width: '100%', minWidth: 0 }}
-                      options={products || []}
-                      getOptionLabel={(option) => option.pro_title || ''}
-                      getOptionKey={(option) => option.pro_id}
-                      filterOptions={filterSaleProducts}
-                      slotProps={{
-                        listbox: {
-                          sx: {
-                            height: 240,
-                            maxHeight: 240,
-                            overflowY: 'auto',
-                            overscrollBehavior: 'contain',
+                  <Typography sx={SALE_ENTRY_LABEL_SX}>
+                    SELECT PRODUCT
+                  </Typography>
+                  <Autocomplete
+                    size="small"
+                    fullWidth
+                    sx={{ width: '100%', minWidth: 0 }}
+                    options={products || []}
+                    getOptionLabel={(option) => option.pro_title || ''}
+                    getOptionKey={(option) => option.pro_id}
+                    filterOptions={filterSaleProducts}
+                    slotProps={{
+                      listbox: {
+                        sx: {
+                          height: 240,
+                          maxHeight: 240,
+                          overflowY: 'auto',
+                          overscrollBehavior: 'contain',
+                          py: 0,
+                          '& .MuiAutocomplete-option': {
+                            minHeight: 36,
+                            height: 36,
                             py: 0,
-                            '& .MuiAutocomplete-option': {
-                              minHeight: 36,
-                              height: 36,
-                              py: 0,
-                              alignItems: 'center',
-                            },
+                            alignItems: 'center',
                           },
                         },
-                        paper: {
-                          sx: { width: '100%', minWidth: 280, mt: 0.5 },
-                        },
-                        popper: {
-                          modifiers: [
-                            { name: 'flip', enabled: false },
-                          ],
-                        },
-                      }}
-                      renderOption={(props, option) => {
-                        const { key, ...optionProps } = props;
-                        return (
+                      },
+                      paper: {
+                        sx: { width: '100%', minWidth: 280, mt: 0.5 },
+                      },
+                      popper: {
+                        modifiers: [
+                          { name: 'flip', enabled: false },
+                        ],
+                      },
+                    }}
+                    renderOption={(props, option) => {
+                      const { key, ...optionProps } = props;
+                      return (
                         <li key={option.pro_id ?? key} {...optionProps} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                           <Typography noWrap sx={{ fontWeight: 500, flex: 1, minWidth: 0 }}>
                             {option.pro_title}
@@ -5949,23 +5953,23 @@ function SalesPageContent() {
                             </IconButton>
                           </Box>
                         </li>
-                        );
-                      }}
-                      value={formSelectedProduct ?? null}
-                      onChange={(event, newValue) => {
-                        handleProductSelect(newValue);
-                      }}
-                      isOptionEqualToValue={(option, value) => option.pro_id === value?.pro_id}
-                      autoHighlight={true}
-                      autoSelect={true}
-                      openOnFocus={true}
-                      selectOnFocus={true}
-                      onHighlightChange={(_, option) => {
-                        if (option) productHighlightRef.current = option;
-                      }}
-                      renderInput={(params) => {
-                        const prevKeyDown = params.inputProps?.onKeyDown;
-                        return (
+                      );
+                    }}
+                    value={formSelectedProduct ?? null}
+                    onChange={(event, newValue) => {
+                      handleProductSelect(newValue);
+                    }}
+                    isOptionEqualToValue={(option, value) => option.pro_id === value?.pro_id}
+                    autoHighlight={true}
+                    autoSelect={true}
+                    openOnFocus={true}
+                    selectOnFocus={true}
+                    onHighlightChange={(_, option) => {
+                      if (option) productHighlightRef.current = option;
+                    }}
+                    renderInput={(params) => {
+                      const prevKeyDown = params.inputProps?.onKeyDown;
+                      return (
                         <TextField
                           {...params}
                           id="product-select-dropdown-input"
@@ -5997,185 +6001,185 @@ function SalesPageContent() {
                           }}
                           sx={{ ...SALE_ENTRY_CONTROL_SX, '& .MuiInputBase-input': { fontWeight: formSelectedProduct ? 'bold' : 'normal' } }}
                         />
-                        );
-                      }}
-                      disabled={products.length === 0}
-                    />
+                      );
+                    }}
+                    disabled={products.length === 0}
+                  />
                 </Box>
                 <Box sx={SALE_ENTRY_CELL_SX}>
-                    <Typography sx={SALE_ENTRY_LABEL_SX}>
-                      SELECT STORE
-                    </Typography>
-                    <Autocomplete
-                      size="small"
-                      fullWidth
-                      sx={{ width: '100%', minWidth: 0 }}
-                      options={stores || []}
-                      getOptionLabel={(option) => option.store_name || ''}
-                      value={formSelectedStore ?? null}
-                      onChange={(event, newValue) => {
-                        setFormSelectedStore(newValue);
-                      }}
-                      isOptionEqualToValue={(option, value) => option.storeid === value?.storeid}
-                      autoSelect={true}
-                      autoHighlight={true}
-                      openOnFocus={true}
-                      selectOnFocus={true}
-                      onHighlightChange={(_, option) => {
-                        if (option) storeHighlightRef.current = option;
-                      }}
-                      onKeyDown={(e) => {
-                        commitDropdownOnTab(
-                          e,
-                          storeHighlightRef.current || formSelectedStore,
-                          (val) => setFormSelectedStore(val),
-                          () => document.querySelector('#sale-qty-input')
-                        );
-                      }}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          placeholder="Select Store"
-                          onFocus={(e) => e.target.select()}
-                          sx={{ ...SALE_ENTRY_CONTROL_SX, '& .MuiInputBase-input': { fontWeight: formSelectedStore ? 'bold' : 'normal' } }}
-                        />
-                      )}
-                    />
+                  <Typography sx={SALE_ENTRY_LABEL_SX}>
+                    SELECT STORE
+                  </Typography>
+                  <Autocomplete
+                    size="small"
+                    fullWidth
+                    sx={{ width: '100%', minWidth: 0 }}
+                    options={stores || []}
+                    getOptionLabel={(option) => option.store_name || ''}
+                    value={formSelectedStore ?? null}
+                    onChange={(event, newValue) => {
+                      setFormSelectedStore(newValue);
+                    }}
+                    isOptionEqualToValue={(option, value) => option.storeid === value?.storeid}
+                    autoSelect={true}
+                    autoHighlight={true}
+                    openOnFocus={true}
+                    selectOnFocus={true}
+                    onHighlightChange={(_, option) => {
+                      if (option) storeHighlightRef.current = option;
+                    }}
+                    onKeyDown={(e) => {
+                      commitDropdownOnTab(
+                        e,
+                        storeHighlightRef.current || formSelectedStore,
+                        (val) => setFormSelectedStore(val),
+                        () => document.querySelector('#sale-qty-input')
+                      );
+                    }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        placeholder="Select Store"
+                        onFocus={(e) => e.target.select()}
+                        sx={{ ...SALE_ENTRY_CONTROL_SX, '& .MuiInputBase-input': { fontWeight: formSelectedStore ? 'bold' : 'normal' } }}
+                      />
+                    )}
+                  />
                 </Box>
                 <Box sx={SALE_ENTRY_CELL_SX}>
-                    <Typography sx={SALE_ENTRY_LABEL_SX}>
-                      QTY
-                    </Typography>
-                    <TextField
-                      fullWidth
-                      size="small"
-                      type="number"
-                      id="sale-qty-input"
-                      value={paymentInputValue(productFormData.quantity)}
-                      onChange={(e) => handleQuantityChange(e.target.value)}
-                      onFocus={(e) => e.target.select()}
-                      inputProps={{ step: 'any' }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          // If rate is already filled, add product directly
-                          if (productFormData.rate > 0) {
-                            handleAddProductToTable();
-                          } else {
-                            // Focus on rate field if rate is not filled
-                            const rateInput = document.getElementById('sale-rate-input');
-                            if (rateInput) rateInput.focus();
-                          }
-                        } else if (e.key === 'Tab') {
-                          e.preventDefault();
-                          // Move to RATE field
+                  <Typography sx={SALE_ENTRY_LABEL_SX}>
+                    QTY
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    type="number"
+                    id="sale-qty-input"
+                    value={paymentInputValue(productFormData.quantity)}
+                    onChange={(e) => handleQuantityChange(e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                    inputProps={{ step: 'any' }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        // If rate is already filled, add product directly
+                        if (productFormData.rate > 0) {
+                          handleAddProductToTable();
+                        } else {
+                          // Focus on rate field if rate is not filled
                           const rateInput = document.getElementById('sale-rate-input');
                           if (rateInput) rateInput.focus();
                         }
-                      }}
-                      sx={{
-                        ...SALE_ENTRY_CONTROL_SX,
-                        '& .MuiInputBase-input': {
-                          fontWeight: 'bold',
-                          color: '#000000',
-                          WebkitTextFillColor: '#000000 !important'
-                        },
-                        '& .MuiInputBase-input::placeholder': {
-                          color: '#000000',
-                          WebkitTextFillColor: '#000000 !important',
-                          fontWeight: 'bold',
-                          opacity: 1
-                        }
-                      }}
-                    />
+                      } else if (e.key === 'Tab') {
+                        e.preventDefault();
+                        // Move to RATE field
+                        const rateInput = document.getElementById('sale-rate-input');
+                        if (rateInput) rateInput.focus();
+                      }
+                    }}
+                    sx={{
+                      ...SALE_ENTRY_CONTROL_SX,
+                      '& .MuiInputBase-input': {
+                        fontWeight: 'bold',
+                        color: '#000000',
+                        WebkitTextFillColor: '#000000 !important'
+                      },
+                      '& .MuiInputBase-input::placeholder': {
+                        color: '#000000',
+                        WebkitTextFillColor: '#000000 !important',
+                        fontWeight: 'bold',
+                        opacity: 1
+                      }
+                    }}
+                  />
                 </Box>
                 <Box sx={SALE_ENTRY_CELL_SX}>
-                    <Typography sx={SALE_ENTRY_LABEL_SX}>
-                      SALE RATE
-                    </Typography>
-                    <TextField
-                      fullWidth
-                      size="small"
-                      type="number"
-                      value={paymentInputValue(productFormData.rate)}
-                      onChange={(e) => handleRateChange(e.target.value)}
-                      onFocus={(e) => e.target.select()}
-                      inputProps={{ step: 'any' }}
-                      id="sale-rate-input"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          // Add product to table when Enter is pressed in rate field
-                          handleAddProductToTable();
-                        } else if (e.key === 'Tab') {
-                          e.preventDefault();
-                          // Tab should focus the + button
-                          const addBtn = document.getElementById('add-product-btn');
-                          if (addBtn) {
-                            addBtn.focus();
-                          }
+                  <Typography sx={SALE_ENTRY_LABEL_SX}>
+                    SALE RATE
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    type="number"
+                    value={paymentInputValue(productFormData.rate)}
+                    onChange={(e) => handleRateChange(e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                    inputProps={{ step: 'any' }}
+                    id="sale-rate-input"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        // Add product to table when Enter is pressed in rate field
+                        handleAddProductToTable();
+                      } else if (e.key === 'Tab') {
+                        e.preventDefault();
+                        // Tab should focus the + button
+                        const addBtn = document.getElementById('add-product-btn');
+                        if (addBtn) {
+                          addBtn.focus();
                         }
-                      }}
-                      sx={{
-                        ...SALE_ENTRY_CONTROL_SX,
-                        '& .MuiInputBase-input': {
-                          fontWeight: 'bold',
-                          color: '#000000',
-                          WebkitTextFillColor: '#000000 !important'
-                        },
-                        '& .MuiInputBase-input::placeholder': {
-                          color: '#000000',
-                          WebkitTextFillColor: '#000000 !important',
-                          fontWeight: 'bold',
-                          opacity: 1
-                        }
-                      }}
-                    />
+                      }
+                    }}
+                    sx={{
+                      ...SALE_ENTRY_CONTROL_SX,
+                      '& .MuiInputBase-input': {
+                        fontWeight: 'bold',
+                        color: '#000000',
+                        WebkitTextFillColor: '#000000 !important'
+                      },
+                      '& .MuiInputBase-input::placeholder': {
+                        color: '#000000',
+                        WebkitTextFillColor: '#000000 !important',
+                        fontWeight: 'bold',
+                        opacity: 1
+                      }
+                    }}
+                  />
                 </Box>
                 <Box sx={SALE_ENTRY_CELL_SX}>
-                    <Typography sx={SALE_ENTRY_LABEL_SX}>
-                      AMOUNT
-                    </Typography>
-                    <TextField
-                      fullWidth
-                      size="small"
-                      type="number"
-                      value={productFormData.amount ?? ''}
-                      sx={SALE_ENTRY_CONTROL_SX}
-                      disabled
-                    />
+                  <Typography sx={SALE_ENTRY_LABEL_SX}>
+                    AMOUNT
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    type="number"
+                    value={productFormData.amount ?? ''}
+                    sx={SALE_ENTRY_CONTROL_SX}
+                    disabled
+                  />
                 </Box>
                 <Box sx={SALE_ENTRY_CELL_SX}>
-                    <Typography sx={SALE_ENTRY_LABEL_SX}>
-                      STOCK
-                    </Typography>
-                    <TextField
-                      fullWidth
-                      size="small"
-                      value={productFormData.stock ?? ''}
-                      disabled
-                      sx={{ ...SALE_ENTRY_CONTROL_SX, bgcolor: '#f8f9fa', '& .MuiInputBase-root': { ...SALE_ENTRY_CONTROL_SX['& .MuiInputBase-root'], bgcolor: '#f8f9fa' } }}
-                    />
+                  <Typography sx={SALE_ENTRY_LABEL_SX}>
+                    STOCK
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    value={productFormData.stock ?? ''}
+                    disabled
+                    sx={{ ...SALE_ENTRY_CONTROL_SX, bgcolor: '#f8f9fa', '& .MuiInputBase-root': { ...SALE_ENTRY_CONTROL_SX['& .MuiInputBase-root'], bgcolor: '#f8f9fa' } }}
+                  />
                 </Box>
                 <Box sx={{ minWidth: 0, width: '100%', display: 'flex', alignItems: 'end' }}>
-                    <Button
-                      variant="contained"
-                      id="add-product-btn"
-                      onClick={handleAddProductToTable}
-                      fullWidth
-                      sx={{
-                        bgcolor: '#6f42c1',
-                        color: 'white',
-                        borderRadius: 1,
-                        minWidth: 40,
-                        width: 44,
-                        height: 40,
-                        p: 0,
-                        '&:hover': { bgcolor: '#5a2d91' }
-                      }}
-                    >
-                      +
-                    </Button>
+                  <Button
+                    variant="contained"
+                    id="add-product-btn"
+                    onClick={handleAddProductToTable}
+                    fullWidth
+                    sx={{
+                      bgcolor: '#6f42c1',
+                      color: 'white',
+                      borderRadius: 1,
+                      minWidth: 40,
+                      width: 44,
+                      height: 40,
+                      p: 0,
+                      '&:hover': { bgcolor: '#5a2d91' }
+                    }}
+                  >
+                    +
+                  </Button>
                 </Box>
               </Box>
 
@@ -6216,182 +6220,182 @@ function SalesPageContent() {
                         ];
                         const rowBg = rowColors[index % rowColors.length];
                         return (
-                        <TableRow
-                          key={product.id}
-                          sx={{
-                            bgcolor: rowBg,
-                            '&:hover': { filter: 'brightness(0.96)' },
-                            transition: 'background-color 0.15s'
-                          }}
-                        >
-                          <TableCell sx={{ py: 1, fontWeight: 'bold', color: 'text.secondary', fontSize: '0.8rem' }}>{index + 1}</TableCell>
-                          <TableCell sx={{ py: 1 }}>
-                            <Select
-                              size="small"
-                              value={product.storeid || ''}
-                              onChange={(e) => {
-                                const s = stores.find(st => st.storeid === e.target.value);
-                                setProductTableData(prev => prev.map(p =>
-                                  p.id === product.id ? { ...p, storeid: s?.storeid, store_name: s?.store_name } : p
-                                ));
-                              }}
-                              sx={{ minWidth: 110, fontSize: '0.85rem' }}
-                            >
-                              {stores.map(s => (
-                                <MenuItem key={s.storeid} value={s.storeid}>{s.store_name}</MenuItem>
-                              ))}
-                            </Select>
-                          </TableCell>
-                          <TableCell sx={{ py: 1, fontWeight: 700 }}>{product.pro_title}</TableCell>
-                          <TableCell sx={{ py: 1 }}>
-                            <TextField
-                              size="small"
-                              placeholder="Size"
-                              value={product.size || ''}
-                              onChange={(e) => {
-                                const newSize = e.target.value;
-                                setProductTableData((prev) =>
-                                  prev.map((p) =>
-                                    p.id === product.id ? { ...p, size: newSize } : p
-                                  )
-                                );
-                              }}
-                              onFocus={(e) => e.target.select()}
-                              sx={{
-                                width: 90,
-                                '& .MuiInputBase-input': {
-                                  padding: '4px 8px',
-                                  textAlign: 'center',
-                                  fontWeight: 'bold'
-                                }
-                              }}
-                            />
-                          </TableCell>
-                          <TableCell sx={{ py: 1 }}>
-                            <TextField
-                              size="small"
-                              type="number"
-                              value={product.quantity}
-                              onChange={(e) => {
-                                const newQuantity = parseFloat(e.target.value) || 0;
-                                if (newQuantity > 0) {
-                                  const updatedData = productTableData.map((p) =>
-                                    p.id === product.id
-                                      ? {
-                                        ...p,
-                                        quantity: newQuantity,
-                                        amount: Number((newQuantity * p.rate).toFixed(0))
-                                      }
-                                      : p
-                                  );
-                                  setProductTableData(updatedData);
-                                }
-                              }}
-                              onFocus={(e) => e.target.select()}
-                              sx={{
-                                width: 80,
-                                '& .MuiInputBase-input': {
-                                  padding: '4px 8px',
-                                  textAlign: 'center',
-                                  fontWeight: 'bold'
-                                }
-                              }}
-                              inputProps={{ min: 0.01, step: 'any' }}
-                            />
-                          </TableCell>
-                          <TableCell sx={{ py: 1, whiteSpace: 'normal', overflow: 'visible', verticalAlign: 'top' }}>
-                            {(() => {
-                              const cp = getCartLineCostRate(product, products);
-                              const belowCost = cp > 0 && parseFloat(product.rate) < cp;
-                              return (
-                                <>
-                            <TextField
-                              size="small"
-                              type="number"
-                              value={product.rate}
-                              onChange={(e) => {
-                                const newRate = parseFloat(e.target.value) || 0;
-                                if (newRate >= 0) {
+                          <TableRow
+                            key={product.id}
+                            sx={{
+                              bgcolor: rowBg,
+                              '&:hover': { filter: 'brightness(0.96)' },
+                              transition: 'background-color 0.15s'
+                            }}
+                          >
+                            <TableCell sx={{ py: 1, fontWeight: 'bold', color: 'text.secondary', fontSize: '0.8rem' }}>{index + 1}</TableCell>
+                            <TableCell sx={{ py: 1 }}>
+                              <Select
+                                size="small"
+                                value={product.storeid || ''}
+                                onChange={(e) => {
+                                  const s = stores.find(st => st.storeid === e.target.value);
+                                  setProductTableData(prev => prev.map(p =>
+                                    p.id === product.id ? { ...p, storeid: s?.storeid, store_name: s?.store_name } : p
+                                  ));
+                                }}
+                                sx={{ minWidth: 110, fontSize: '0.85rem' }}
+                              >
+                                {stores.map(s => (
+                                  <MenuItem key={s.storeid} value={s.storeid}>{s.store_name}</MenuItem>
+                                ))}
+                              </Select>
+                            </TableCell>
+                            <TableCell sx={{ py: 1, fontWeight: 700 }}>{product.pro_title}</TableCell>
+                            <TableCell sx={{ py: 1 }}>
+                              <TextField
+                                size="small"
+                                placeholder="Size"
+                                value={product.size || ''}
+                                onChange={(e) => {
+                                  const newSize = e.target.value;
                                   setProductTableData((prev) =>
                                     prev.map((p) =>
+                                      p.id === product.id ? { ...p, size: newSize } : p
+                                    )
+                                  );
+                                }}
+                                onFocus={(e) => e.target.select()}
+                                sx={{
+                                  width: 90,
+                                  '& .MuiInputBase-input': {
+                                    padding: '4px 8px',
+                                    textAlign: 'center',
+                                    fontWeight: 'bold'
+                                  }
+                                }}
+                              />
+                            </TableCell>
+                            <TableCell sx={{ py: 1 }}>
+                              <TextField
+                                size="small"
+                                type="number"
+                                value={product.quantity}
+                                onChange={(e) => {
+                                  const newQuantity = parseFloat(e.target.value) || 0;
+                                  if (newQuantity > 0) {
+                                    const updatedData = productTableData.map((p) =>
                                       p.id === product.id
                                         ? {
                                           ...p,
-                                          rate: newRate,
-                                          amount: Number((p.quantity * newRate).toFixed(0)),
-                                          cost_price: p.cost_price || cp
+                                          quantity: newQuantity,
+                                          amount: Number((newQuantity * p.rate).toFixed(0))
                                         }
                                         : p
-                                    )
-                                  );
-                                }
-                              }}
-                              onFocus={(e) => e.target.select()}
-                              sx={{
-                                width: 100,
-                                '& .MuiInputBase-input': {
-                                  padding: '4px 8px',
-                                  textAlign: 'center',
-                                  fontWeight: 'bold',
-                                  color: belowCost ? '#dc2626' : 'inherit'
-                                },
-                                '& .MuiOutlinedInput-root': {
-                                  '& fieldset': {
-                                    borderColor: belowCost ? '#dc2626' : undefined,
-                                    borderWidth: belowCost ? 2 : undefined
+                                    );
+                                    setProductTableData(updatedData);
                                   }
-                                }
-                              }}
-                              inputProps={{ min: 0, step: 'any' }}
-                            />
-                            {belowCost ? (
-                                <Typography variant="caption" sx={{ color: '#dc2626', display: 'block', mt: 0.25, fontWeight: 600, whiteSpace: 'normal', lineHeight: 1.3 }}>
-                                  ⚠️ Below cost ({fmtRateQty(cp)})
-                                </Typography>
-                            ) : null}
-                                </>
-                              );
-                            })()}
-                          </TableCell>
-                          <TableCell sx={{ py: 1, fontWeight: 'bold' }}>{parseFloat(product.amount || 0).toFixed(0)}</TableCell>
-                          <TableCell sx={{ py: 1 }}>
-                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
-                              <Tooltip title="Move up">
-                                <span>
-                                  <IconButton
-                                    size="small"
-                                    disabled={index === 0}
-                                    onClick={() => moveProductRow(index, -1)}
-                                    sx={{ p: 0.25, color: 'primary.main', '&:disabled': { opacity: 0.3 } }}
-                                  >
-                                    <ArrowUpIcon sx={{ fontSize: 16 }} />
-                                  </IconButton>
-                                </span>
-                              </Tooltip>
-                              <Tooltip title="Move down">
-                                <span>
-                                  <IconButton
-                                    size="small"
-                                    disabled={index === productTableData.length - 1}
-                                    onClick={() => moveProductRow(index, 1)}
-                                    sx={{ p: 0.25, color: 'primary.main', '&:disabled': { opacity: 0.3 } }}
-                                  >
-                                    <ArrowDownIcon sx={{ fontSize: 16 }} />
-                                  </IconButton>
-                                </span>
-                              </Tooltip>
-                            </Box>
-                          </TableCell>
-                          <TableCell sx={{ py: 1 }}>
-                            <IconButton
-                              size="small"
-                              onClick={() => handleRemoveProductFromTable(product.id)}
-                              sx={{ color: 'error.main' }}
-                            >
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </TableCell>
-                        </TableRow>
+                                }}
+                                onFocus={(e) => e.target.select()}
+                                sx={{
+                                  width: 80,
+                                  '& .MuiInputBase-input': {
+                                    padding: '4px 8px',
+                                    textAlign: 'center',
+                                    fontWeight: 'bold'
+                                  }
+                                }}
+                                inputProps={{ min: 0.01, step: 'any' }}
+                              />
+                            </TableCell>
+                            <TableCell sx={{ py: 1, whiteSpace: 'normal', overflow: 'visible', verticalAlign: 'top' }}>
+                              {(() => {
+                                const cp = getCartLineCostRate(product, products);
+                                const belowCost = cp > 0 && parseFloat(product.rate) < cp;
+                                return (
+                                  <>
+                                    <TextField
+                                      size="small"
+                                      type="number"
+                                      value={product.rate}
+                                      onChange={(e) => {
+                                        const newRate = parseFloat(e.target.value) || 0;
+                                        if (newRate >= 0) {
+                                          setProductTableData((prev) =>
+                                            prev.map((p) =>
+                                              p.id === product.id
+                                                ? {
+                                                  ...p,
+                                                  rate: newRate,
+                                                  amount: Number((p.quantity * newRate).toFixed(0)),
+                                                  cost_price: p.cost_price || cp
+                                                }
+                                                : p
+                                            )
+                                          );
+                                        }
+                                      }}
+                                      onFocus={(e) => e.target.select()}
+                                      sx={{
+                                        width: 100,
+                                        '& .MuiInputBase-input': {
+                                          padding: '4px 8px',
+                                          textAlign: 'center',
+                                          fontWeight: 'bold',
+                                          color: belowCost ? '#dc2626' : 'inherit'
+                                        },
+                                        '& .MuiOutlinedInput-root': {
+                                          '& fieldset': {
+                                            borderColor: belowCost ? '#dc2626' : undefined,
+                                            borderWidth: belowCost ? 2 : undefined
+                                          }
+                                        }
+                                      }}
+                                      inputProps={{ min: 0, step: 'any' }}
+                                    />
+                                    {belowCost ? (
+                                      <Typography variant="caption" sx={{ color: '#dc2626', display: 'block', mt: 0.25, fontWeight: 600, whiteSpace: 'normal', lineHeight: 1.3 }}>
+                                        ⚠️ Below cost ({fmtRateQty(cp)})
+                                      </Typography>
+                                    ) : null}
+                                  </>
+                                );
+                              })()}
+                            </TableCell>
+                            <TableCell sx={{ py: 1, fontWeight: 'bold' }}>{parseFloat(product.amount || 0).toFixed(0)}</TableCell>
+                            <TableCell sx={{ py: 1 }}>
+                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                                <Tooltip title="Move up">
+                                  <span>
+                                    <IconButton
+                                      size="small"
+                                      disabled={index === 0}
+                                      onClick={() => moveProductRow(index, -1)}
+                                      sx={{ p: 0.25, color: 'primary.main', '&:disabled': { opacity: 0.3 } }}
+                                    >
+                                      <ArrowUpIcon sx={{ fontSize: 16 }} />
+                                    </IconButton>
+                                  </span>
+                                </Tooltip>
+                                <Tooltip title="Move down">
+                                  <span>
+                                    <IconButton
+                                      size="small"
+                                      disabled={index === productTableData.length - 1}
+                                      onClick={() => moveProductRow(index, 1)}
+                                      sx={{ p: 0.25, color: 'primary.main', '&:disabled': { opacity: 0.3 } }}
+                                    >
+                                      <ArrowDownIcon sx={{ fontSize: 16 }} />
+                                    </IconButton>
+                                  </span>
+                                </Tooltip>
+                              </Box>
+                            </TableCell>
+                            <TableCell sx={{ py: 1 }}>
+                              <IconButton
+                                size="small"
+                                onClick={() => handleRemoveProductFromTable(product.id)}
+                                sx={{ color: 'error.main' }}
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </TableCell>
+                          </TableRow>
                         );
                       })
                     )}
@@ -6822,7 +6826,7 @@ function SalesPageContent() {
                         size="small"
                         type="number"
                         value={calculateTotalAmount().toFixed(0)}
-                        onChange={() => {}}
+                        onChange={() => { }}
                         sx={{
                           bgcolor: 'white',
                           '& .MuiInputBase-input': {
@@ -7269,12 +7273,16 @@ function SalesPageContent() {
                     color: '#fd7e14',
                     borderRadius: 2,
                     fontWeight: 600,
+                    fontSize: '0.8rem',
+                    px: 1.2,
+                    minWidth: 'auto',
+                    whiteSpace: 'nowrap',
                     '&:hover': { bgcolor: '#fff3e0', borderColor: '#e8690a' }
                   }}
                   onClick={() => { fetchDrafts(); setDraftModalOpen(true); }}
-                  title="View held bills"
+                  title="View hold bills"
                 >
-                  📋 Held Bills {drafts.length > 0 && `(${drafts.length})`}
+                  📋 Hold Bills ({drafts.length})
                 </Button>
                 <Button
                   variant="contained"
@@ -7942,12 +7950,36 @@ function SalesPageContent() {
                     fullWidth
                     size="small"
                     label="Search by Quantity"
-                    type="number"
                     placeholder="e.g. 5 or 2.5"
                     value={filterQuantity}
                     onChange={(e) => setFilterQuantity(e.target.value)}
                     onFocus={(e) => e.target.select()}
-                    inputProps={{ min: 0, step: 'any' }}
+                    inputProps={{ inputMode: 'decimal' }}
+                    InputProps={{
+                      endAdornment: filterQuantity ? (
+                        <InputAdornment position="end">
+                          <Button
+                            size="small"
+                            onClick={() => setFilterQuantity('')}
+                            sx={{
+                              color: '#dc2626',
+                              fontWeight: 700,
+                              fontSize: '0.75rem',
+                              textTransform: 'none',
+                              minWidth: 'auto',
+                              p: '2px 6px',
+                              lineHeight: 1,
+                              '&:hover': {
+                                bgcolor: '#fef2f2',
+                                color: '#b91c1c'
+                              }
+                            }}
+                          >
+                            Clear
+                          </Button>
+                        </InputAdornment>
+                      ) : null,
+                    }}
                     sx={SALES_FILTER_FIELD_SX}
                   />
                 </Box>
@@ -8333,446 +8365,446 @@ function SalesPageContent() {
         </Alert>
       </Snackbar>
 
-        {/* Printable Bill Content - Hidden but accessible for printing */}
-        {
-          currentBillData && (
-            <Box sx={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '21cm', overflow: 'hidden' }}>
-              {/* A4 Printable Container */}
-              <Box id="printable-invoice-a4" sx={{ width: '100%', bgcolor: '#ffffff', color: SALE_INVOICE_PRINT.bodyText, '& .MuiTypography-root': { color: SALE_INVOICE_PRINT.bodyText }, '& .MuiTableCell-root': { color: SALE_INVOICE_PRINT.bodyText } }}>
-                {/* Company Header */}
-                <Box sx={{ textAlign: 'center', py: 3, borderBottom: '2px solid #000' }}>
-                  <Typography variant="h4" sx={{
-                    fontWeight: 'bold',
-                    mb: 1,
-                    fontFamily: 'Arial, sans-serif',
-                    fontSize: { xs: '1.5rem', md: '2rem' },
-                    direction: 'rtl'
-                  }}>
-                    اتفاق آئرن اینڈ سیمنٹ سٹور
-                  </Typography>
-                  <Typography variant="body2" sx={{
-                    mb: 1,
-                    fontSize: { xs: '0.75rem', md: '0.9rem' },
-                    direction: 'rtl'
-                  }}>
-                    گجرات سرگودھا روڈ، پاہڑیانوالی
-                  </Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
-                    <PhoneIcon sx={{ color: '#25D366', fontSize: '1rem' }} />
-                    <Typography variant="body2">
-                      Ph:- 0346-7560306, 0300-7560306
-                    </Typography>
-                  </Box>
-                  <Typography variant="h6" sx={{
-                    fontWeight: 'bold',
-                    textTransform: 'uppercase',
-                    letterSpacing: 1,
-                    mt: 2
-                  }}>
-                    {currentBillData?.is_return ? 'SALE RETURN INVOICE' : 'SALE INVOICE'}
+      {/* Printable Bill Content - Hidden but accessible for printing */}
+      {
+        currentBillData && (
+          <Box sx={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '21cm', overflow: 'hidden' }}>
+            {/* A4 Printable Container */}
+            <Box id="printable-invoice-a4" sx={{ width: '100%', bgcolor: '#ffffff', color: SALE_INVOICE_PRINT.bodyText, '& .MuiTypography-root': { color: SALE_INVOICE_PRINT.bodyText }, '& .MuiTableCell-root': { color: SALE_INVOICE_PRINT.bodyText } }}>
+              {/* Company Header */}
+              <Box sx={{ textAlign: 'center', py: 3, borderBottom: '2px solid #000' }}>
+                <Typography variant="h4" sx={{
+                  fontWeight: 'bold',
+                  mb: 1,
+                  fontFamily: 'Arial, sans-serif',
+                  fontSize: { xs: '1.5rem', md: '2rem' },
+                  direction: 'rtl'
+                }}>
+                  اتفاق آئرن اینڈ سیمنٹ سٹور
+                </Typography>
+                <Typography variant="body2" sx={{
+                  mb: 1,
+                  fontSize: { xs: '0.75rem', md: '0.9rem' },
+                  direction: 'rtl'
+                }}>
+                  گجرات سرگودھا روڈ، پاہڑیانوالی
+                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
+                  <PhoneIcon sx={{ color: '#25D366', fontSize: '1rem' }} />
+                  <Typography variant="body2">
+                    Ph:- 0346-7560306, 0300-7560306
                   </Typography>
                 </Box>
-
-                {/* Customer and Invoice Details */}
-                <Box sx={{ px: 3, py: 2, borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between' }}>
-                  <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column' }}>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Customer Name:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }}>
-                        {currentBillData.customer ? `${currentBillData.customer.cus_name}${currentBillData.customer.name_urdu ? ' ' + currentBillData.customer.name_urdu : ''}` : 'N/A'}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Phone No:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {currentBillData.customer?.cus_phone_no || 'N/A'}
-                      </Typography>
-                    </Box>
-                    {currentBillData.customer?.cus_address && (
-                      <Box sx={{ display: 'flex' }}>
-                        <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Address:</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          {currentBillData.customer.cus_address}
-                        </Typography>
-                      </Box>
-                    )}
-                  </Box>
-                  <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column', pl: 4 }}>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Invoice No:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {getBillDisplayNo(currentBillData)}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>
-                        {currentBillData?.is_return ? 'Return ID:' : 'Sale ID:'}
-                      </Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {currentBillData?.is_return ? currentBillData.return_id : currentBillData.sale_id}
-                      </Typography>
-                    </Box>
-                    {currentBillData?.is_return && currentBillData.sale_id && (
-                      <Box sx={{ display: 'flex', mb: 0.5 }}>
-                        <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Sale ID:</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          {currentBillData.sale_id}
-                        </Typography>
-                      </Box>
-                    )}
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Date:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {formatDatePK(currentBillData?.created_at) || '—'}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Time:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {formatTimePK(currentBillData?.created_at) || '—'}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Created By:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {getCreatedByName(currentBillData, currentUser)}
-                      </Typography>
-                    </Box>
-                    {currentBillData.reference && (
-                      <Box sx={{ display: 'flex' }}>
-                        <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Reference:</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          {currentBillData.reference}
-                        </Typography>
-                      </Box>
-                    )}
-                  </Box>
-                </Box>
-
-                {/* Product Table */}
-                <Box sx={{ px: 3, py: 2 }}>
-                  {(() => {
-                    const details = currentBillData?.sale_details ? getSaleDetailsInAddOrder(currentBillData.sale_details) : [];
-                    const hasAnySize = details.some(d => d.size && String(d.size).trim() !== '');
-                    return (
-                      <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #000', boxShadow: 'none' }}>
-                        <Table size="small">
-                          <TableHead>
-                            <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.headerBg }}>
-                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>S#</TableCell>
-                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>Product Name</TableCell>
-                              {hasAnySize && (
-                                <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="center">Size</TableCell>
-                              )}
-                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Qty</TableCell>
-                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Rate</TableCell>
-                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Amount</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {details.length > 0 ? (
-                              details.map((detail, index) => (
-                                <TableRow key={detail.sale_detail_id || index}>
-                                  <TableCell sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.85rem', fontWeight: 'bold', color: SALE_INVOICE_PRINT.bodyText }}>{index + 1}</TableCell>
-                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }}>{detail.product?.pro_title || detail.pro_title || 'N/A'}</TableCell>
-                                  {hasAnySize && (
-                                    <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="center">{detail.size || '—'}</TableCell>
-                                  )}
-                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtRateQty(detail.qnty)}</TableCell>
-                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtRateQty(detail.unit_rate)}</TableCell>
-                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtAmt(detail.total_amount)}</TableCell>
-                                </TableRow>
-                              ))
-                            ) : (
-                              <TableRow>
-                                <TableCell colSpan={hasAnySize ? 6 : 5} align="center" sx={{ py: 4 }}>
-                                  No items found
-                                </TableCell>
-                              </TableRow>
-                            )}
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
-                    );
-                  })()}
-
-                  {/* Payment Summary */}
-                  <Box sx={{ mt: 2, width: '100%', display: 'flex', justifyContent: 'space-between', gap: 2 }}>
-                    <Box sx={{ flex: '0 0 48%' }}>
-                      {!isWalkinCustomer(currentBillData.customer) && (() => {
-                        const { prevBal, currentDue, totalBal } = resolveSaleReceiptBalances(currentBillData);
-                        return (
-                          <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #000', width: '100%' }}>
-                            <Table size="small">
-                              <TableBody>
-                                <TableRow>
-                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>سابقہ بقایا</TableCell>
-                                  <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>
-                                    {fmtAmt(prevBal)}
-                                  </TableCell>
-                                </TableRow>
-                                <TableRow>
-                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>موجوده بقايا</TableCell>
-                                  <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>
-                                    {fmtAmt(currentDue)}
-                                  </TableCell>
-                                </TableRow>
-                                <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.balanceTotalBg }}>
-                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>كل بقايا</TableCell>
-                                  <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>
-                                    {fmtAmt(totalBal)}
-                                  </TableCell>
-                                </TableRow>
-                              </TableBody>
-                            </Table>
-                          </TableContainer>
-                        );
-                      })()}
-                      {(currentBillData.notes || currentBillData.reference) && (
-                        <Box sx={{ mt: 1 }}>
-                          <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>
-                            <strong>Notes:</strong> {currentBillData.notes || currentBillData.reference}
-                          </Typography>
-                        </Box>
-                      )}
-                    </Box>
-                    <Box sx={{ flex: '0 0 48%', display: 'flex', justifyContent: 'flex-end' }}>
-                      <TableContainer component={Paper} variant="outlined" sx={{ border: '1px solid #000', width: '100%', maxWidth: '100%' }}>
-                        <Table size="small">
-                          <TableBody>
-                            <TableRow>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رقم بل</TableCell>
-                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                {fmtAmt(parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.labour_charges || currentBillData.labour || 0) - parseFloat(currentBillData.shipping_amount || 0) + parseFloat(currentBillData.discount || 0))}
-                              </TableCell>
-                            </TableRow>
-                            <TableRow>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>مزدوری</TableCell>
-                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                {fmtAmt(currentBillData.labour_charges || currentBillData.labour)}
-                              </TableCell>
-                            </TableRow>
-                            <TableRow>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>کرایہ</TableCell>
-                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                {fmtAmt(currentBillData.shipping_amount)}
-                              </TableCell>
-                            </TableRow>
-                            <TableRow>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رعایت</TableCell>
-                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                {fmtAmt(currentBillData.discount)}
-                              </TableCell>
-                            </TableRow>
-                            <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.grandTotalBg }}>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>كل رقم</TableCell>
-                              <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>
-                                {fmtAmt(currentBillData.total_amount)}
-                              </TableCell>
-                            </TableRow>
-                            {/* Always show cash payment */}
-                            <TableRow>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>نقد كيش</TableCell>
-                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                {fmtAmt(currentBillData.cash_payment)}
-                              </TableCell>
-                            </TableRow>
-                            {/* Show bank payment with account name if bank payment exists */}
-                            {currentBillData.bank_payment > 0 && (
-                              <TableRow>
-                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                  {currentBillData.bank_title || 'بینک'}
-                                </TableCell>
-                                <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                  {fmtAmt(currentBillData.bank_payment)}
-                                </TableCell>
-                              </TableRow>
-                            )}
-
-                            <TableRow sx={{ bgcolor: '#d0d0d0' }}>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>بقايا رقم</TableCell>
-                              <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
-                                {fmtAmt(parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0))}
-                              </TableCell>
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
-                    </Box>
-                  </Box>
-                </Box>
+                <Typography variant="h6" sx={{
+                  fontWeight: 'bold',
+                  textTransform: 'uppercase',
+                  letterSpacing: 1,
+                  mt: 2
+                }}>
+                  {currentBillData?.is_return ? 'SALE RETURN INVOICE' : 'SALE INVOICE'}
+                </Typography>
               </Box>
 
-              </Box>
-          )
-        }
-
-        {/* Receipt Dialog */}
-        <Dialog
-          open={receiptDialogOpen}
-          onClose={() => setReceiptDialogOpen(false)}
-          maxWidth="md"
-          fullWidth
-          PaperProps={{
-            sx: {
-              bgcolor: 'white',
-              borderRadius: 2
-            }
-          }}
-        >
-          <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="h6" component="span" sx={{ fontWeight: 'bold' }}>
-              {currentBillData?.is_return ? 'Sale Return Invoice' : 'Receipt'} - {getBillDisplayNo(currentBillData)}
-            </Typography>
-            <IconButton
-              onClick={() => setReceiptDialogOpen(false)}
-              size="small"
-              sx={{ color: 'white', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}
-            >
-              <CloseIcon />
-            </IconButton>
-          </DialogTitle>
-          <DialogContent sx={{ p: 0, bgcolor: 'white' }}>
-            {currentBillData && (
-              <>
-                {/* Off-screen: WhatsApp image = receipt-style summary (no product line list) */}
-                <Box
-                  id="receipt-whatsapp-capture"
-                  aria-hidden
-                  sx={{
-                    // Kept off-screen; capture uses clone to document.body in handleSendWhatsApp.
-                    position: 'fixed',
-                    left: '-10000px',
-                    top: 0,
-                    width: '80mm',
-                    minWidth: 302,
-                    maxWidth: 360,
-                    bgcolor: '#ffffff',
-                    p: 1.25,
-                    fontFamily: 'Arial, sans-serif',
-                    boxSizing: 'border-box',
-                    color: '#000',
-                    fontWeight: 'bold',
-                    '& *': { fontWeight: 'bold !important', color: '#000 !important' }
-                  }}
-                >
-                  <Box sx={{ textAlign: 'center', pb: 1, borderBottom: '1px solid #000' }}>
-                    <Typography sx={{ fontSize: '12px', fontWeight: 'bold' }}>اتفاق آئرن اینڈ سیمنٹ سٹور</Typography>
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>گجرات سرگودھا روڈ، پاہڑیانوالی</Typography>
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Ph: 0346-7560306, 0300-7560306</Typography>
-                    <Typography
-                      sx={{
-                        mt: 0.5,
-                        fontSize: '11px',
-                        fontWeight: 'bold',
-                        color: currentBillData?.is_return ? '#c62828' : '#000',
-                      }}
-                    >
-                      {currentBillData?.is_return ? 'SALE RETURN' : 'SALE RECEIPT'}
+              {/* Customer and Invoice Details */}
+              <Box sx={{ px: 3, py: 2, borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between' }}>
+                <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column' }}>
+                  <Box sx={{ display: 'flex', mb: 0.5 }}>
+                    <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Customer Name:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }}>
+                      {currentBillData.customer ? `${currentBillData.customer.cus_name}${currentBillData.customer.name_urdu ? ' ' + currentBillData.customer.name_urdu : ''}` : 'N/A'}
                     </Typography>
                   </Box>
-                  <Box sx={{ py: 1 }}>
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Inv#: {getBillDisplayNo(currentBillData)}</Typography>
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
-                      {currentBillData?.is_return ? `Return ID: ${currentBillData.return_id}` : `Sale ID: ${currentBillData.sale_id}`}
+                  <Box sx={{ display: 'flex', mb: 0.5 }}>
+                    <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Phone No:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                      {currentBillData.customer?.cus_phone_no || 'N/A'}
                     </Typography>
-                    {currentBillData?.is_return && currentBillData.sale_id && (
-                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Sale ID: {currentBillData.sale_id}</Typography>
-                    )}
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Type: {currentBillData.bill_type || 'BILL'}</Typography>
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
-                      Date: {formatDatePK(currentBillData?.created_at) || '—'}
+                  </Box>
+                  {currentBillData.customer?.cus_address && (
+                    <Box sx={{ display: 'flex' }}>
+                      <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Address:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                        {currentBillData.customer.cus_address}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+                <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column', pl: 4 }}>
+                  <Box sx={{ display: 'flex', mb: 0.5 }}>
+                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Invoice No:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                      {getBillDisplayNo(currentBillData)}
                     </Typography>
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
-                      Time:{' '}
+                  </Box>
+                  <Box sx={{ display: 'flex', mb: 0.5 }}>
+                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>
+                      {currentBillData?.is_return ? 'Return ID:' : 'Sale ID:'}
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                      {currentBillData?.is_return ? currentBillData.return_id : currentBillData.sale_id}
+                    </Typography>
+                  </Box>
+                  {currentBillData?.is_return && currentBillData.sale_id && (
+                    <Box sx={{ display: 'flex', mb: 0.5 }}>
+                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Sale ID:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                        {currentBillData.sale_id}
+                      </Typography>
+                    </Box>
+                  )}
+                  <Box sx={{ display: 'flex', mb: 0.5 }}>
+                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Date:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                      {formatDatePK(currentBillData?.created_at) || '—'}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', mb: 0.5 }}>
+                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Time:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
                       {formatTimePK(currentBillData?.created_at) || '—'}
                     </Typography>
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Cust: {currentBillData.customer?.cus_name || 'N/A'}</Typography>
-                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
-                      Created By: {getCreatedByName(currentBillData, currentUser)}
+                  </Box>
+                  <Box sx={{ display: 'flex', mb: 0.5 }}>
+                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Created By:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                      {getCreatedByName(currentBillData, currentUser)}
                     </Typography>
+                  </Box>
+                  {currentBillData.reference && (
+                    <Box sx={{ display: 'flex' }}>
+                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Reference:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                        {currentBillData.reference}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              </Box>
+
+              {/* Product Table */}
+              <Box sx={{ px: 3, py: 2 }}>
+                {(() => {
+                  const details = currentBillData?.sale_details ? getSaleDetailsInAddOrder(currentBillData.sale_details) : [];
+                  const hasAnySize = details.some(d => d.size && String(d.size).trim() !== '');
+                  return (
+                    <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #000', boxShadow: 'none' }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.headerBg }}>
+                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>S#</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>Product Name</TableCell>
+                            {hasAnySize && (
+                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="center">Size</TableCell>
+                            )}
+                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Qty</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Rate</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Amount</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {details.length > 0 ? (
+                            details.map((detail, index) => (
+                              <TableRow key={detail.sale_detail_id || index}>
+                                <TableCell sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.85rem', fontWeight: 'bold', color: SALE_INVOICE_PRINT.bodyText }}>{index + 1}</TableCell>
+                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }}>{detail.product?.pro_title || detail.pro_title || 'N/A'}</TableCell>
+                                {hasAnySize && (
+                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="center">{detail.size || '—'}</TableCell>
+                                )}
+                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtRateQty(detail.qnty)}</TableCell>
+                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtRateQty(detail.unit_rate)}</TableCell>
+                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtAmt(detail.total_amount)}</TableCell>
+                              </TableRow>
+                            ))
+                          ) : (
+                            <TableRow>
+                              <TableCell colSpan={hasAnySize ? 6 : 5} align="center" sx={{ py: 4 }}>
+                                No items found
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  );
+                })()}
+
+                {/* Payment Summary */}
+                <Box sx={{ mt: 2, width: '100%', display: 'flex', justifyContent: 'space-between', gap: 2 }}>
+                  <Box sx={{ flex: '0 0 48%' }}>
+                    {!isWalkinCustomer(currentBillData.customer) && (() => {
+                      const { prevBal, currentDue, totalBal } = resolveSaleReceiptBalances(currentBillData);
+                      return (
+                        <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #000', width: '100%' }}>
+                          <Table size="small">
+                            <TableBody>
+                              <TableRow>
+                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>سابقہ بقایا</TableCell>
+                                <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>
+                                  {fmtAmt(prevBal)}
+                                </TableCell>
+                              </TableRow>
+                              <TableRow>
+                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>موجوده بقايا</TableCell>
+                                <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>
+                                  {fmtAmt(currentDue)}
+                                </TableCell>
+                              </TableRow>
+                              <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.balanceTotalBg }}>
+                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>كل بقايا</TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>
+                                  {fmtAmt(totalBal)}
+                                </TableCell>
+                              </TableRow>
+                            </TableBody>
+                          </Table>
+                        </TableContainer>
+                      );
+                    })()}
+                    {(currentBillData.notes || currentBillData.reference) && (
+                      <Box sx={{ mt: 1 }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>
+                          <strong>Notes:</strong> {currentBillData.notes || currentBillData.reference}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                  <Box sx={{ flex: '0 0 48%', display: 'flex', justifyContent: 'flex-end' }}>
+                    <TableContainer component={Paper} variant="outlined" sx={{ border: '1px solid #000', width: '100%', maxWidth: '100%' }}>
+                      <Table size="small">
+                        <TableBody>
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رقم بل</TableCell>
+                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                              {fmtAmt(parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.labour_charges || currentBillData.labour || 0) - parseFloat(currentBillData.shipping_amount || 0) + parseFloat(currentBillData.discount || 0))}
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>مزدوری</TableCell>
+                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                              {fmtAmt(currentBillData.labour_charges || currentBillData.labour)}
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>کرایہ</TableCell>
+                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                              {fmtAmt(currentBillData.shipping_amount)}
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رعایت</TableCell>
+                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                              {fmtAmt(currentBillData.discount)}
+                            </TableCell>
+                          </TableRow>
+                          <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.grandTotalBg }}>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>كل رقم</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>
+                              {fmtAmt(currentBillData.total_amount)}
+                            </TableCell>
+                          </TableRow>
+                          {/* Always show cash payment */}
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>نقد كيش</TableCell>
+                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                              {fmtAmt(currentBillData.cash_payment)}
+                            </TableCell>
+                          </TableRow>
+                          {/* Show bank payment with account name if bank payment exists */}
+                          {currentBillData.bank_payment > 0 && (
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                {currentBillData.bank_title || 'بینک'}
+                              </TableCell>
+                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                {fmtAmt(currentBillData.bank_payment)}
+                              </TableCell>
+                            </TableRow>
+                          )}
+
+                          <TableRow sx={{ bgcolor: '#d0d0d0' }}>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>بقايا رقم</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                              {fmtAmt(parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0))}
+                            </TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </Box>
+                </Box>
+              </Box>
+            </Box>
+
+          </Box>
+        )
+      }
+
+      {/* Receipt Dialog */}
+      <Dialog
+        open={receiptDialogOpen}
+        onClose={() => setReceiptDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            bgcolor: 'white',
+            borderRadius: 2
+          }
+        }}
+      >
+        <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography variant="h6" component="span" sx={{ fontWeight: 'bold' }}>
+            {currentBillData?.is_return ? 'Sale Return Invoice' : 'Receipt'} - {getBillDisplayNo(currentBillData)}
+          </Typography>
+          <IconButton
+            onClick={() => setReceiptDialogOpen(false)}
+            size="small"
+            sx={{ color: 'white', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent sx={{ p: 0, bgcolor: 'white' }}>
+          {currentBillData && (
+            <>
+              {/* Off-screen: WhatsApp image = receipt-style summary (no product line list) */}
+              <Box
+                id="receipt-whatsapp-capture"
+                aria-hidden
+                sx={{
+                  // Kept off-screen; capture uses clone to document.body in handleSendWhatsApp.
+                  position: 'fixed',
+                  left: '-10000px',
+                  top: 0,
+                  width: '80mm',
+                  minWidth: 302,
+                  maxWidth: 360,
+                  bgcolor: '#ffffff',
+                  p: 1.25,
+                  fontFamily: 'Arial, sans-serif',
+                  boxSizing: 'border-box',
+                  color: '#000',
+                  fontWeight: 'bold',
+                  '& *': { fontWeight: 'bold !important', color: '#000 !important' }
+                }}
+              >
+                <Box sx={{ textAlign: 'center', pb: 1, borderBottom: '1px solid #000' }}>
+                  <Typography sx={{ fontSize: '12px', fontWeight: 'bold' }}>اتفاق آئرن اینڈ سیمنٹ سٹور</Typography>
+                  <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>گجرات سرگودھا روڈ، پاہڑیانوالی</Typography>
+                  <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Ph: 0346-7560306, 0300-7560306</Typography>
+                  <Typography
+                    sx={{
+                      mt: 0.5,
+                      fontSize: '11px',
+                      fontWeight: 'bold',
+                      color: currentBillData?.is_return ? '#c62828' : '#000',
+                    }}
+                  >
+                    {currentBillData?.is_return ? 'SALE RETURN' : 'SALE RECEIPT'}
+                  </Typography>
+                </Box>
+                <Box sx={{ py: 1 }}>
+                  <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Inv#: {getBillDisplayNo(currentBillData)}</Typography>
+                  <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                    {currentBillData?.is_return ? `Return ID: ${currentBillData.return_id}` : `Sale ID: ${currentBillData.sale_id}`}
+                  </Typography>
+                  {currentBillData?.is_return && currentBillData.sale_id && (
+                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Sale ID: {currentBillData.sale_id}</Typography>
+                  )}
+                  <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Type: {currentBillData.bill_type || 'BILL'}</Typography>
+                  <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                    Date: {formatDatePK(currentBillData?.created_at) || '—'}
+                  </Typography>
+                  <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                    Time:{' '}
+                    {formatTimePK(currentBillData?.created_at) || '—'}
+                  </Typography>
+                  <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Cust: {currentBillData.customer?.cus_name || 'N/A'}</Typography>
+                  <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                    Created By: {getCreatedByName(currentBillData, currentUser)}
+                  </Typography>
+                </Box>
+                <Box
+                  sx={{
+                    borderTop: '1px dashed #000',
+                    borderBottom: '1px dashed #000',
+                    py: 0.75,
+                    textAlign: 'center',
+                  }}
+                >
+                  <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                    {currentBillData?.is_return ? 'Return lines' : 'Line items'}:{' '}
+                    {Array.isArray(currentBillData.sale_details) ? currentBillData.sale_details.length : 0}
+                  </Typography>
+                </Box>
+                <Box sx={{ pt: 1 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Subtotal</Typography>
+                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                      {fmtAmt(
+                        parseFloat(currentBillData.total_amount || 0) -
+                        parseFloat(currentBillData.labour_charges || currentBillData.labour || 0) -
+                        parseFloat(currentBillData.shipping_amount || 0) +
+                        parseFloat(currentBillData.discount || 0)
+                      )}
+                    </Typography>
+                  </Box>
+                  {parseFloat(currentBillData.discount || 0) > 0 && (
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Discount</Typography>
+                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.discount)}</Typography>
+                    </Box>
+                  )}
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Shipping</Typography>
+                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.shipping_amount)}</Typography>
                   </Box>
                   <Box
                     sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      fontWeight: 'bold',
                       borderTop: '1px dashed #000',
-                      borderBottom: '1px dashed #000',
-                      py: 0.75,
-                      textAlign: 'center',
+                      mt: 0.5,
+                      pt: 0.5,
                     }}
                   >
+                    <Typography sx={{ fontSize: '11px', fontWeight: 'bold' }}>Grand Total</Typography>
+                    <Typography sx={{ fontSize: '11px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.total_amount)}</Typography>
+                  </Box>
+                  {parseFloat(currentBillData.cash_payment || 0) > 0 && (
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Cash Payment</Typography>
+                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.cash_payment)}</Typography>
+                    </Box>
+                  )}
+                  {parseFloat(currentBillData.bank_payment || 0) > 0 && (
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                        Bank ({currentBillData.bank_title || 'Bank'})
+                      </Typography>
+                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.bank_payment)}</Typography>
+                    </Box>
+                  )}
+                  {currentBillData.previous_balance !== undefined && (
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Prev Balance</Typography>
+                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.previous_balance)}</Typography>
+                    </Box>
+                  )}
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Balance</Typography>
                     <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
-                      {currentBillData?.is_return ? 'Return lines' : 'Line items'}:{' '}
-                      {Array.isArray(currentBillData.sale_details) ? currentBillData.sale_details.length : 0}
+                      {fmtAmt(
+                        parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0)
+                      )}
                     </Typography>
                   </Box>
-                  <Box sx={{ pt: 1 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Subtotal</Typography>
-                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
-                        {fmtAmt(
-                          parseFloat(currentBillData.total_amount || 0) -
-                            parseFloat(currentBillData.labour_charges || currentBillData.labour || 0) -
-                            parseFloat(currentBillData.shipping_amount || 0) +
-                            parseFloat(currentBillData.discount || 0)
-                        )}
-                      </Typography>
-                    </Box>
-                    {parseFloat(currentBillData.discount || 0) > 0 && (
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Discount</Typography>
-                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.discount)}</Typography>
-                      </Box>
-                    )}
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Shipping</Typography>
-                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.shipping_amount)}</Typography>
-                    </Box>
-                    <Box
-                      sx={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        fontWeight: 'bold',
-                        borderTop: '1px dashed #000',
-                        mt: 0.5,
-                        pt: 0.5,
-                      }}
-                    >
-                      <Typography sx={{ fontSize: '11px', fontWeight: 'bold' }}>Grand Total</Typography>
-                      <Typography sx={{ fontSize: '11px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.total_amount)}</Typography>
-                    </Box>
-                    {parseFloat(currentBillData.cash_payment || 0) > 0 && (
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Cash Payment</Typography>
-                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.cash_payment)}</Typography>
-                      </Box>
-                    )}
-                    {parseFloat(currentBillData.bank_payment || 0) > 0 && (
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
-                          Bank ({currentBillData.bank_title || 'Bank'})
-                        </Typography>
-                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.bank_payment)}</Typography>
-                      </Box>
-                    )}
-                    {currentBillData.previous_balance !== undefined && (
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Prev Balance</Typography>
-                        <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>{fmtAmt(currentBillData.previous_balance)}</Typography>
-                      </Box>
-                    )}
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Balance</Typography>
-                      <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
-                        {fmtAmt(
-                          parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0)
-                        )}
-                      </Typography>
-                    </Box>
-                  </Box>
-                  <Box sx={{ textAlign: 'center', borderTop: '1px solid #000', mt: 1, pt: 1 }}>
-                    <Typography sx={{ fontSize: '9px', fontWeight: 'bold' }}>Thank you for your business!</Typography>
-                  </Box>
                 </Box>
+                <Box sx={{ textAlign: 'center', borderTop: '1px solid #000', mt: 1, pt: 1 }}>
+                  <Typography sx={{ fontSize: '9px', fontWeight: 'bold' }}>Thank you for your business!</Typography>
+                </Box>
+              </Box>
 
               <Box id="receipt-preview" className="thermal-receipt" sx={{ width: '100%', bgcolor: 'white', p: 3, color: '#000', fontWeight: 'bold', '& *': { fontWeight: 'bold !important', color: '#000 !important' } }}>
                 {/* Company Header */}
@@ -9130,58 +9162,58 @@ function SalesPageContent() {
                   </Box>
                 </Box>
               </Box>
-              </>
-            )}
-          </DialogContent>
-          <DialogActions sx={{ p: 3, bgcolor: 'grey.50', borderTop: '1px solid #e0e0e0' }} className="no-print">
-            <Button
-              onClick={() => setReceiptDialogOpen(false)}
-              variant="outlined"
-              sx={{ minWidth: 100 }}
-            >
-              Close
-            </Button>
-            <Button
-              variant="contained"
-              startIcon={isSendingWhatsApp ? <CircularProgress size={16} sx={{ color: 'white' }} /> : null}
-              sx={{
-                minWidth: 150,
-                bgcolor: '#25D366',
-                '&:hover': { bgcolor: '#1ebe5d' },
-                color: 'white'
-              }}
-              onClick={() => handleSendWhatsApp(currentBillData)}
-              disabled={isSendingWhatsApp}
-              title="Copy invoice to clipboard and open WhatsApp Desktop"
-            >
-              {isSendingWhatsApp ? 'Copying...' : '📲 WhatsApp'}
-            </Button>
-            <Button
-              variant="contained"
-              startIcon={<PrintIcon />}
-              sx={{
-                minWidth: 150,
-                bgcolor: 'primary.main',
-                '&:hover': { bgcolor: 'primary.dark' }
-              }}
-              onClick={() => handlePrintBill('A4', true)}
-            >
-              Print A4
-            </Button>
-            <Button
-              variant="contained"
-              startIcon={<PrintIcon />}
-              sx={{
-                minWidth: 150,
-                bgcolor: '#fd7e14',
-                '&:hover': { bgcolor: '#e8690b' }
-              }}
-              onClick={() => handlePrintBill('THERMAL', true)}
-            >
-              Print Thermal
-            </Button>
-          </DialogActions>
-        </Dialog>
+            </>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 3, bgcolor: 'grey.50', borderTop: '1px solid #e0e0e0' }} className="no-print">
+          <Button
+            onClick={() => setReceiptDialogOpen(false)}
+            variant="outlined"
+            sx={{ minWidth: 100 }}
+          >
+            Close
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={isSendingWhatsApp ? <CircularProgress size={16} sx={{ color: 'white' }} /> : null}
+            sx={{
+              minWidth: 150,
+              bgcolor: '#25D366',
+              '&:hover': { bgcolor: '#1ebe5d' },
+              color: 'white'
+            }}
+            onClick={() => handleSendWhatsApp(currentBillData)}
+            disabled={isSendingWhatsApp}
+            title="Copy invoice to clipboard and open WhatsApp Desktop"
+          >
+            {isSendingWhatsApp ? 'Copying...' : '📲 WhatsApp'}
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<PrintIcon />}
+            sx={{
+              minWidth: 150,
+              bgcolor: 'primary.main',
+              '&:hover': { bgcolor: 'primary.dark' }
+            }}
+            onClick={() => handlePrintBill('A4', true)}
+          >
+            Print A4
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<PrintIcon />}
+            sx={{
+              minWidth: 150,
+              bgcolor: '#fd7e14',
+              '&:hover': { bgcolor: '#e8690b' }
+            }}
+            onClick={() => handlePrintBill('THERMAL', true)}
+          >
+            Print Thermal
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Load Order Dialog */}
       <Dialog
@@ -9253,60 +9285,60 @@ function SalesPageContent() {
                   </TableRow>
                 ) : (
                   <>
-                {loadOrderList
-                  .filter(sale => {
-                    if (!orderSearchTerm) return true;
+                    {loadOrderList
+                      .filter(sale => {
+                        if (!orderSearchTerm) return true;
 
-                    const searchLower = orderSearchTerm.toLowerCase();
-                    const orderNo = getBillDisplayNo(sale);
-                    const matchesName = sale.customer?.cus_name?.toLowerCase().includes(searchLower);
-                    const matchesId = sale.sale_id?.toString().includes(searchLower);
-                    const matchesOrderNo =
-                      String(sale.bill_number || '').includes(searchLower) ||
-                      orderNo.toLowerCase().includes(searchLower);
+                        const searchLower = orderSearchTerm.toLowerCase();
+                        const orderNo = getBillDisplayNo(sale);
+                        const matchesName = sale.customer?.cus_name?.toLowerCase().includes(searchLower);
+                        const matchesId = sale.sale_id?.toString().includes(searchLower);
+                        const matchesOrderNo =
+                          String(sale.bill_number || '').includes(searchLower) ||
+                          orderNo.toLowerCase().includes(searchLower);
 
-                    return matchesName || matchesId || matchesOrderNo;
-                  })
-                  .map((sale) => (
-                    <TableRow key={sale.sale_id} hover>
-                      <TableCell>{sale.sale_id}</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>
-                        {getBillDisplayNo(sale) || '—'}
-                      </TableCell>
-                      <TableCell>{sale.customer?.cus_name || 'N/A'}</TableCell>
-                      <TableCell>{formatDatePK(sale?.created_at) || '—'}</TableCell>
-                      <TableCell align="right">{parseFloat(sale.total_amount || 0).toFixed(0)}</TableCell>
-                      <TableCell align="center">
-                        <Button
-                          size="small"
-                          variant="contained"
-                          onClick={() => handleLoadOrder(sale)}
-                          startIcon={<ShoppingCartIcon />}
-                        >
-                          Load
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                {!loadOrderListLoading && loadOrderList.filter(sale => {
-                  if (!orderSearchTerm) return true;
+                        return matchesName || matchesId || matchesOrderNo;
+                      })
+                      .map((sale) => (
+                        <TableRow key={sale.sale_id} hover>
+                          <TableCell>{sale.sale_id}</TableCell>
+                          <TableCell sx={{ fontWeight: 700 }}>
+                            {getBillDisplayNo(sale) || '—'}
+                          </TableCell>
+                          <TableCell>{sale.customer?.cus_name || 'N/A'}</TableCell>
+                          <TableCell>{formatDatePK(sale?.created_at) || '—'}</TableCell>
+                          <TableCell align="right">{parseFloat(sale.total_amount || 0).toFixed(0)}</TableCell>
+                          <TableCell align="center">
+                            <Button
+                              size="small"
+                              variant="contained"
+                              onClick={() => handleLoadOrder(sale)}
+                              startIcon={<ShoppingCartIcon />}
+                            >
+                              Load
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    {!loadOrderListLoading && loadOrderList.filter(sale => {
+                      if (!orderSearchTerm) return true;
 
-                  const searchLower = orderSearchTerm.toLowerCase();
-                  const orderNo = getBillDisplayNo(sale);
-                  const matchesName = sale.customer?.cus_name?.toLowerCase().includes(searchLower);
-                  const matchesId = sale.sale_id?.toString().includes(searchLower);
-                  const matchesOrderNo =
-                    String(sale.bill_number || '').includes(searchLower) ||
-                    orderNo.toLowerCase().includes(searchLower);
+                      const searchLower = orderSearchTerm.toLowerCase();
+                      const orderNo = getBillDisplayNo(sale);
+                      const matchesName = sale.customer?.cus_name?.toLowerCase().includes(searchLower);
+                      const matchesId = sale.sale_id?.toString().includes(searchLower);
+                      const matchesOrderNo =
+                        String(sale.bill_number || '').includes(searchLower) ||
+                        orderNo.toLowerCase().includes(searchLower);
 
-                  return matchesName || matchesId || matchesOrderNo;
-                }).length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
-                        {orderSearchTerm ? 'No matching orders found' : 'No orders found'}
-                      </TableCell>
-                    </TableRow>
-                  )}
+                      return matchesName || matchesId || matchesOrderNo;
+                    }).length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
+                            {orderSearchTerm ? 'No matching orders found' : 'No orders found'}
+                          </TableCell>
+                        </TableRow>
+                      )}
                   </>
                 )}
               </TableBody>
@@ -10867,44 +10899,44 @@ function SalesPageContent() {
                       const accentColor = isCredit ? '#16a34a !important' : isDebit ? '#dc2626 !important' : '#0284c7 !important';
                       const baseBg = isCredit ? '#f0fdf4' : isDebit ? '#fef2f2' : 'inherit';
                       return (
-                      <TableRow
-                        key={idx}
-                        hover
-                        sx={{
-                          bgcolor: baseBg,
-                          '&:last-child td, &:last-child th': { border: 0 },
-                          transition: 'background-color 0.15s ease, box-shadow 0.15s ease',
-                          cursor: 'pointer',
-                          '&:hover': {
-                            backgroundColor: hoverBg,
-                            boxShadow: `inset 4px 0 0 ${accentColor}`
-                          }
-                        }}
-                      >
-                        <TableCell>{formatDatePK(entry?.created_at) || '—'}</TableCell>
-                        <TableCell>
-                          <Chip
-                            label={entry.trnx_type}
-                            size="small"
-                            color={entry.trnx_type === 'SALE' ? 'primary' : entry.trnx_type === 'PAYMENT' ? 'success' : 'default'}
-                            variant="outlined"
-                            sx={{ fontWeight: 'bold', borderRadius: 1 }}
-                          />
-                        </TableCell>
-                        <TableCell sx={{ fontWeight: 'medium' }}>{entry.bill_no || '-'}</TableCell>
-                        <TableCell sx={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          <Tooltip title={entry.details || entry.payments?.[0]?.payment_details || ''}>
-                            <span>{entry.details || entry.payments?.[0]?.payment_details || '-'}</span>
-                          </Tooltip>
-                        </TableCell>
-                        <TableCell align="right" sx={{ color: entry.debit_amount > 0 ? 'success.main' : 'inherit', fontWeight: entry.debit_amount > 0 ? 'bold' : 'normal' }}>
-                          {entry.debit_amount > 0 ? entry.debit_amount.toFixed(0) : '-'}
-                        </TableCell>
-                        <TableCell align="right" sx={{ color: entry.credit_amount > 0 ? 'error.main' : 'inherit', fontWeight: entry.credit_amount > 0 ? 'bold' : 'normal' }}>
-                          {entry.credit_amount > 0 ? entry.credit_amount.toFixed(0) : '-'}
-                        </TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>{entry.closing_balance.toFixed(0)}</TableCell>
-                      </TableRow>
+                        <TableRow
+                          key={idx}
+                          hover
+                          sx={{
+                            bgcolor: baseBg,
+                            '&:last-child td, &:last-child th': { border: 0 },
+                            transition: 'background-color 0.15s ease, box-shadow 0.15s ease',
+                            cursor: 'pointer',
+                            '&:hover': {
+                              backgroundColor: hoverBg,
+                              boxShadow: `inset 4px 0 0 ${accentColor}`
+                            }
+                          }}
+                        >
+                          <TableCell>{formatDatePK(entry?.created_at) || '—'}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={entry.trnx_type}
+                              size="small"
+                              color={entry.trnx_type === 'SALE' ? 'primary' : entry.trnx_type === 'PAYMENT' ? 'success' : 'default'}
+                              variant="outlined"
+                              sx={{ fontWeight: 'bold', borderRadius: 1 }}
+                            />
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 'medium' }}>{entry.bill_no || '-'}</TableCell>
+                          <TableCell sx={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <Tooltip title={entry.details || entry.payments?.[0]?.payment_details || ''}>
+                              <span>{entry.details || entry.payments?.[0]?.payment_details || '-'}</span>
+                            </Tooltip>
+                          </TableCell>
+                          <TableCell align="right" sx={{ color: entry.debit_amount > 0 ? 'success.main' : 'inherit', fontWeight: entry.debit_amount > 0 ? 'bold' : 'normal' }}>
+                            {entry.debit_amount > 0 ? entry.debit_amount.toFixed(0) : '-'}
+                          </TableCell>
+                          <TableCell align="right" sx={{ color: entry.credit_amount > 0 ? 'error.main' : 'inherit', fontWeight: entry.credit_amount > 0 ? 'bold' : 'normal' }}>
+                            {entry.credit_amount > 0 ? entry.credit_amount.toFixed(0) : '-'}
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 'bold' }}>{entry.closing_balance.toFixed(0)}</TableCell>
+                        </TableRow>
                       );
                     })}
                   </TableBody>
