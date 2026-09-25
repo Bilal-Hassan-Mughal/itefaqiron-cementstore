@@ -8776,7 +8776,7 @@ function SalesPageContent() {
                               {fmtAmt(currentBillData.discount)}
                             </TableCell>
                           </TableRow>
-                          <TableRow sx={{ bgcolor: '#9e9e9e' }}>
+                          <TableRow sx={{ bgcolor: '#e0e0e0' }}>
                             <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #ffffff', borderBottom: '1px solid #e0e0e0', fontSize: '0.875rem', color: '#000000 !important' }}>كل رقم</TableCell>
                             <TableCell align="right" sx={{ fontWeight: 'bold', px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontSize: '0.875rem', color: '#000000 !important' }}>
                               {fmtAmt(currentBillData.total_amount)}
@@ -10664,7 +10664,7 @@ function SalesPageContent() {
                               {fmtAmt(selectedBill.shipping_amount)}
                             </TableCell>
                           </TableRow>
-                          <TableRow sx={{ bgcolor: '#9e9e9e' }}>
+                          <TableRow sx={{ bgcolor: '#e0e0e0' }}>
                             <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #ffffff', borderBottom: '1px solid #e0e0e0', fontSize: '0.875rem', color: '#000000 !important' }}>كل رقم</TableCell>
                             <TableCell align="right" sx={{ fontWeight: 'bold', px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontSize: '0.875rem', color: '#000000 !important' }}>
                               {fmtAmt(selectedBill.total_amount)}
