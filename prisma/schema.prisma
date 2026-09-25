@@ -448,6 +448,7 @@ model SaleDetail {
   store_id        Int?
   pro_id          Int
   vehicle_no      String?
+  size            String?   @db.VarChar(255)
   qnty                          Decimal   @db.Decimal(18, 2)
   unit            String
   unit_rate                     Decimal   @db.Decimal(18, 2)
@@ -779,6 +780,7 @@ model HoldBillDetail {
   hold_bill_id        Int
   pro_id              Int
   vehicle_no          String?
+  size                String?   @db.VarChar(255)
   qnty                          Decimal   @db.Decimal(18, 2)
   unit                String
   unit_rate                     Decimal   @db.Decimal(18, 2)

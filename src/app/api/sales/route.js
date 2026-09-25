@@ -709,7 +709,7 @@ export async function GET(request) {
           // Fetch sale_details separately - explicitly select columns to avoid datetime issues
           const saleDetails = await prisma.$queryRaw`
             SELECT 
-              sd.sale_detail_id, sd.sale_id, sd.pro_id, sd.vehicle_no, 
+              sd.sale_detail_id, sd.sale_id, sd.pro_id, sd.vehicle_no, sd.size,
               sd.qnty, sd.unit, sd.unit_rate, sd.total_amount, sd.discount, 
               sd.net_total, sd.cus_id,
               p.pro_title, p.pro_stock_qnty
@@ -1021,7 +1021,7 @@ export async function GET(request) {
                 // Try with subcategories first - use Prisma.join for safe IN clause
                 saleDetails = await prisma.$queryRaw`
                   SELECT 
-                    sd.sale_detail_id, sd.sale_id, sd.pro_id, sd.vehicle_no, 
+                    sd.sale_detail_id, sd.sale_id, sd.pro_id, sd.vehicle_no, sd.size,
                     sd.qnty, sd.unit, sd.unit_rate, sd.total_amount, sd.discount, 
                     sd.net_total, sd.cus_id,
                     p.pro_title, p.pro_stock_qnty, 
@@ -1040,7 +1040,7 @@ export async function GET(request) {
                   console.warn('⚠️ subcategories table not found, fetching without it');
                   saleDetails = await prisma.$queryRaw`
                     SELECT 
-                      sd.sale_detail_id, sd.sale_id, sd.pro_id, sd.vehicle_no, 
+                      sd.sale_detail_id, sd.sale_id, sd.pro_id, sd.vehicle_no, sd.size,
                       sd.qnty, sd.unit, sd.unit_rate, sd.total_amount, sd.discount, 
                       sd.net_total, sd.cus_id,
                       p.pro_title, p.pro_stock_qnty, 
@@ -1530,6 +1530,7 @@ export async function POST(request) {
         store_id: parseInt(store_id),
         pro_id: detail.pro_id,
         vehicle_no: detail.vehicle_no || null,
+        size: detail.size ? String(detail.size) : null,
         qnty: Number(parseFloat(detail.qnty || 0).toFixed(2)),
         unit: detail.unit,
         unit_rate: Number(parseFloat(detail.unit_rate || 0).toFixed(2)),
@@ -1547,11 +1548,11 @@ export async function POST(request) {
           if (storeIdError.code === 'P2022' && storeIdError.message?.includes('store_id')) {
             await Promise.all(detailRows.map((row) => tx.$executeRaw`
               INSERT INTO sale_details (
-                sale_id, pro_id, vehicle_no, qnty, unit, unit_rate,
+                sale_id, pro_id, vehicle_no, size, qnty, unit, unit_rate,
                 total_amount, discount, net_total, cus_id, updated_by
               ) VALUES (
                 ${row.sale_id}, ${row.pro_id},
-                ${row.vehicle_no}, ${row.qnty},
+                ${row.vehicle_no}, ${row.size || null}, ${row.qnty},
                 ${row.unit}, ${row.unit_rate},
                 ${row.total_amount}, ${row.discount},
                 ${row.net_total}, ${row.cus_id},
@@ -2503,6 +2504,7 @@ export async function PUT(request) {
             store_id: finalStoreId,
             pro_id: detail.pro_id,
             vehicle_no: detail.vehicle_no || null,
+            size: detail.size ? String(detail.size) : null,
             qnty: Number(parseFloat(detail.qnty || 0).toFixed(2)),
             unit: detail.unit,
             unit_rate: Number(parseFloat(detail.unit_rate || 0).toFixed(2)),

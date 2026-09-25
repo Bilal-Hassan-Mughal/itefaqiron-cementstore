@@ -155,6 +155,7 @@ function buildSaleReceiptBill({
       unit: 'PCS',
       unit_rate: product.rate,
       total_amount: product.amount,
+      size: product.size || null,
       product: { pro_title: product.pro_title || 'N/A' },
     })),
     labour: parseFloat(paymentData.labour) || 0,
@@ -311,6 +312,7 @@ const EMPTY_PRODUCT_FORM_DATA = {
   amount: '',
   stock: '',
   crate: '',
+  size: '',
 };
 
 const normalizeProductFormData = (data) => ({
@@ -319,6 +321,7 @@ const normalizeProductFormData = (data) => ({
   amount: data?.amount ?? EMPTY_PRODUCT_FORM_DATA.amount,
   stock: data?.stock ?? EMPTY_PRODUCT_FORM_DATA.stock,
   crate: data?.crate ?? EMPTY_PRODUCT_FORM_DATA.crate,
+  size: data?.size ?? EMPTY_PRODUCT_FORM_DATA.size,
 });
 
 const EMPTY_CUSTOMER_FORM = {
@@ -1565,6 +1568,7 @@ function SalesPageContent() {
       rate: productFormData.rate,
       amount: productFormData.amount,
       stock: productFormData.stock,
+      size: productFormData.size || '',
       cost_price: getProductCostPrice(formSelectedProduct)
     };
 
@@ -1935,6 +1939,7 @@ function SalesPageContent() {
           crate: item.product ? (item.product.pro_crate || '') : '',
           cost_price: getProductCostPrice(item.product),
           stock: 0, // Stock will need to be fetched or updated
+          size: item.size || '',
           storeid: fullOrder.store_id, // Map the store ID from the order
           store_name: selectedStore ? selectedStore.store_name : 'Unknown'
         }));
@@ -2042,6 +2047,7 @@ function SalesPageContent() {
             rate: parseFloat(detail.unit_rate) || 0,
             amount: parseFloat(detail.total_amount) || 0,
             cost_price: getProductCostPrice(detail.product),
+            size: detail.size || '',
             stock: 0 // We don't have current stock here, could fetch it but for now 0 is safe
           };
         });
@@ -2374,6 +2380,7 @@ function SalesPageContent() {
         sale_details: getCartItemsInAddOrder().map(product => ({
           pro_id: product.pro_id,
           vehicle_no: null,
+          size: product.size || null,
           qnty: product.quantity,
           unit: 'PCS', // Default unit
           unit_rate: product.rate,
@@ -4987,6 +4994,7 @@ function SalesPageContent() {
             stock: 0,
             unit: detail.unit || 'PCS',
             crate: rate,
+            size: detail.size || '',
             cost_price: getProductCostPrice(detail.product)
           };
         }));
@@ -5047,6 +5055,7 @@ function SalesPageContent() {
           stock: 0,
           unit: detail.unit || 'PCS',
           crate: parseFloat(detail.unit_rate),
+          size: detail.size || '',
           cost_price: getProductCostPrice(detail.product)
         };
       }));
@@ -6178,6 +6187,7 @@ function SalesPageContent() {
                       <TableCell sx={{ fontWeight: 'bold', py: 1, color: 'white' }}>S. No</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', py: 1, color: 'white' }}>Store</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', py: 1, color: 'white' }}>Product</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', py: 1, color: 'white' }}>Size</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', py: 1, color: 'white' }}>Qty</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', py: 1, color: 'white' }}>Sale Price</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', py: 1, color: 'white' }}>Amount</TableCell>
@@ -6188,7 +6198,7 @@ function SalesPageContent() {
                   <TableBody>
                     {productTableData.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                        <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
                           <Typography variant="body2" color="text.secondary">
                             No products added yet
                           </Typography>
@@ -6233,6 +6243,30 @@ function SalesPageContent() {
                             </Select>
                           </TableCell>
                           <TableCell sx={{ py: 1, fontWeight: 700 }}>{product.pro_title}</TableCell>
+                          <TableCell sx={{ py: 1 }}>
+                            <TextField
+                              size="small"
+                              placeholder="Size"
+                              value={product.size || ''}
+                              onChange={(e) => {
+                                const newSize = e.target.value;
+                                setProductTableData((prev) =>
+                                  prev.map((p) =>
+                                    p.id === product.id ? { ...p, size: newSize } : p
+                                  )
+                                );
+                              }}
+                              onFocus={(e) => e.target.select()}
+                              sx={{
+                                width: 90,
+                                '& .MuiInputBase-input': {
+                                  padding: '4px 8px',
+                                  textAlign: 'center',
+                                  fontWeight: 'bold'
+                                }
+                              }}
+                            />
+                          </TableCell>
                           <TableCell sx={{ py: 1 }}>
                             <TextField
                               size="small"
@@ -8417,38 +8451,50 @@ function SalesPageContent() {
 
                 {/* Product Table */}
                 <Box sx={{ px: 3, py: 2 }}>
-                  <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #000', boxShadow: 'none' }}>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.headerBg }}>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>S#</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>Product Name</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Qty</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Rate</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Amount</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {currentBillData.sale_details && currentBillData.sale_details.length > 0 ? (
-                          getSaleDetailsInAddOrder(currentBillData.sale_details).map((detail, index) => (
-                            <TableRow key={detail.sale_detail_id || index}>
-                              <TableCell sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.85rem', fontWeight: 'bold', color: SALE_INVOICE_PRINT.bodyText }}>{index + 1}</TableCell>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }}>{detail.product?.pro_title || 'N/A'}</TableCell>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtRateQty(detail.qnty)}</TableCell>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtRateQty(detail.unit_rate)}</TableCell>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtAmt(detail.total_amount)}</TableCell>
+                  {(() => {
+                    const details = currentBillData?.sale_details ? getSaleDetailsInAddOrder(currentBillData.sale_details) : [];
+                    const hasAnySize = details.some(d => d.size && String(d.size).trim() !== '');
+                    return (
+                      <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #000', boxShadow: 'none' }}>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.headerBg }}>
+                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>S#</TableCell>
+                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>Product Name</TableCell>
+                              {hasAnySize && (
+                                <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="center">Size</TableCell>
+                              )}
+                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Qty</TableCell>
+                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Rate</TableCell>
+                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Amount</TableCell>
                             </TableRow>
-                          ))
-                        ) : (
-                          <TableRow>
-                            <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                              No items found
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
+                          </TableHead>
+                          <TableBody>
+                            {details.length > 0 ? (
+                              details.map((detail, index) => (
+                                <TableRow key={detail.sale_detail_id || index}>
+                                  <TableCell sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.85rem', fontWeight: 'bold', color: SALE_INVOICE_PRINT.bodyText }}>{index + 1}</TableCell>
+                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }}>{detail.product?.pro_title || detail.pro_title || 'N/A'}</TableCell>
+                                  {hasAnySize && (
+                                    <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="center">{detail.size || '—'}</TableCell>
+                                  )}
+                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtRateQty(detail.qnty)}</TableCell>
+                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtRateQty(detail.unit_rate)}</TableCell>
+                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtAmt(detail.total_amount)}</TableCell>
+                                </TableRow>
+                              ))
+                            ) : (
+                              <TableRow>
+                                <TableCell colSpan={hasAnySize ? 6 : 5} align="center" sx={{ py: 4 }}>
+                                  No items found
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    );
+                  })()}
 
                   {/* Payment Summary */}
                   <Box sx={{ mt: 2, width: '100%', display: 'flex', justifyContent: 'space-between', gap: 2 }}>
@@ -8816,38 +8862,50 @@ function SalesPageContent() {
 
                 {/* Product Table */}
                 <Box sx={{ px: 2, py: 2 }}>
-                  <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.headerBg }}>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>S#</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>Product Name</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Qty</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Rate</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Amount</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {currentBillData.sale_details && currentBillData.sale_details.length > 0 ? (
-                          getSaleDetailsInAddOrder(currentBillData.sale_details).map((detail, index) => (
-                            <TableRow key={detail.sale_detail_id || index}>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{index + 1}</TableCell>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{detail.product?.pro_title || 'N/A'}</TableCell>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">{fmtRateQty(detail.qnty)}</TableCell>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">{fmtRateQty(detail.unit_rate)}</TableCell>
-                              <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">{fmtAmt(detail.total_amount)}</TableCell>
+                  {(() => {
+                    const details = currentBillData?.sale_details ? getSaleDetailsInAddOrder(currentBillData.sale_details) : [];
+                    const hasAnySize = details.some(d => d.size && String(d.size).trim() !== '');
+                    return (
+                      <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.headerBg }}>
+                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>S#</TableCell>
+                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>Product Name</TableCell>
+                              {hasAnySize && (
+                                <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="center">Size</TableCell>
+                              )}
+                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Qty</TableCell>
+                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Rate</TableCell>
+                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Amount</TableCell>
                             </TableRow>
-                          ))
-                        ) : (
-                          <TableRow>
-                            <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                              No items found
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
+                          </TableHead>
+                          <TableBody>
+                            {details.length > 0 ? (
+                              details.map((detail, index) => (
+                                <TableRow key={detail.sale_detail_id || index}>
+                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{index + 1}</TableCell>
+                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{detail.product?.pro_title || detail.pro_title || 'N/A'}</TableCell>
+                                  {hasAnySize && (
+                                    <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="center">{detail.size || '—'}</TableCell>
+                                  )}
+                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">{fmtRateQty(detail.qnty)}</TableCell>
+                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">{fmtRateQty(detail.unit_rate)}</TableCell>
+                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">{fmtAmt(detail.total_amount)}</TableCell>
+                                </TableRow>
+                              ))
+                            ) : (
+                              <TableRow>
+                                <TableCell colSpan={hasAnySize ? 6 : 5} align="center" sx={{ py: 4 }}>
+                                  No items found
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    );
+                  })()}
 
                   {/* Payment Summary */}
                   <Box sx={{ mt: 2, width: '100%', display: 'flex', justifyContent: 'space-between', gap: 2 }}>
@@ -9948,38 +10006,50 @@ function SalesPageContent() {
               {/* Product Table and Payment Summary - Full Width */}
               <Box sx={{ px: 3, py: 2 }}>
                 {/* Product Details Table - Full Width */}
-                <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.headerBg }}>
-                        <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>S#</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>Product Name</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Qty</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Rate</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Amount</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {selectedBill.sale_details && selectedBill.sale_details.length > 0 ? (
-                        getSaleDetailsInAddOrder(selectedBill.sale_details).map((detail, index) => (
-                          <TableRow key={detail.sale_detail_id || index}>
-                            <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }}>{index + 1}</TableCell>
-                            <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }}>{detail.product?.pro_title || detail.product?.pro_name || detail.product?.prod_name || 'N/A'}</TableCell>
-                            <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{detail.qnty || 0}</TableCell>
-                            <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{parseFloat(detail.unit_rate || 0).toFixed(2)}</TableCell>
-                            <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{parseFloat(detail.total_amount || 0).toFixed(0)}</TableCell>
+                {(() => {
+                  const details = selectedBill?.sale_details ? getSaleDetailsInAddOrder(selectedBill.sale_details) : [];
+                  const hasAnySize = details.some(d => d.size && String(d.size).trim() !== '');
+                  return (
+                    <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.headerBg }}>
+                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>S#</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>Product Name</TableCell>
+                            {hasAnySize && (
+                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="center">Size</TableCell>
+                            )}
+                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Qty</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Rate</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Amount</TableCell>
                           </TableRow>
-                        ))
-                      ) : (
-                        <TableRow>
-                          <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                            No items found
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
+                        </TableHead>
+                        <TableBody>
+                          {details.length > 0 ? (
+                            details.map((detail, index) => (
+                              <TableRow key={detail.sale_detail_id || index}>
+                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }}>{index + 1}</TableCell>
+                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }}>{detail.product?.pro_title || detail.product?.pro_name || detail.product?.prod_name || detail.pro_title || 'N/A'}</TableCell>
+                                {hasAnySize && (
+                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="center">{detail.size || '—'}</TableCell>
+                                )}
+                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{detail.qnty || 0}</TableCell>
+                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{parseFloat(detail.unit_rate || 0).toFixed(2)}</TableCell>
+                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{parseFloat(detail.total_amount || 0).toFixed(0)}</TableCell>
+                              </TableRow>
+                            ))
+                          ) : (
+                            <TableRow>
+                              <TableCell colSpan={hasAnySize ? 6 : 5} align="center" sx={{ py: 4 }}>
+                                No items found
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  );
+                })()}
 
                 {/* Payment Summary - Below Product Details */}
                 <Box sx={{ mt: 2, width: '100%', display: 'flex', justifyContent: 'space-between', gap: 2 }}>
@@ -11562,7 +11632,7 @@ function SalesPageContent() {
                 getSaleDetailsInAddOrder(activeBillData.sale_details).map((d, i) => (
                   <Box key={d.sale_detail_id || i} sx={{ mb: 0.75 }}>
                     <Typography sx={{ fontSize: '11px', fontWeight: 'bold', color: '#000', wordBreak: 'break-word' }}>
-                      {d.product?.pro_title || 'Item'}
+                      {d.product?.pro_title || 'Item'}{d.size && String(d.size).trim() !== '' ? ` (Size: ${d.size})` : ''}
                     </Typography>
                     <Box sx={{ display: 'flex', alignItems: 'center', color: '#000' }}>
                       <Box sx={{ flex: 1 }} />
