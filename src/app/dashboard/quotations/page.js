@@ -118,6 +118,51 @@ const QUOTE_NUM_CELL_SX = {
   fontVariantNumeric: 'tabular-nums',
 };
 
+function isCustomerAccount(customer, customerCategories = []) {
+  if (!customer) return false;
+  let catTitle = customer.customer_category?.cus_cat_title || '';
+  if (!catTitle && Array.isArray(customerCategories) && customerCategories.length > 0 && customer.cus_category != null) {
+    const cat = customerCategories.find((c) => Number(c.cus_cat_id) === Number(customer.cus_category));
+    if (cat) catTitle = cat.cus_cat_title || '';
+  }
+
+  const normCat = (catTitle || '').trim().toLowerCase();
+  if (normCat) {
+    const isNonCustomerCat = (
+      normCat.includes('bank') ||
+      normCat.includes('transport') ||
+      normCat.includes('transporter') ||
+      normCat.includes('cargo') ||
+      normCat.includes('vendor') ||
+      normCat.includes('supplier')
+    );
+    if (isNonCustomerCat) return false;
+  }
+
+  return true;
+}
+
+function matchesCustomerType(customer, selectedType) {
+  if (!selectedType) return true;
+  if (!customer) return false;
+
+  const targetTypeId = selectedType.cus_type_id ?? selectedType.id;
+  const targetTitle = (selectedType.cus_type_title || selectedType.title || selectedType.name || '').trim().toLowerCase();
+
+  const custTypeId = customer.cus_type ?? customer.customer_type?.cus_type_id;
+  const custTypeTitle = (customer.customer_type?.cus_type_title || customer.cus_type_title || '').trim().toLowerCase();
+
+  if (targetTypeId != null && custTypeId != null && Number(custTypeId) === Number(targetTypeId)) {
+    return true;
+  }
+
+  if (targetTitle && custTypeTitle && targetTitle === custTypeTitle) {
+    return true;
+  }
+
+  return false;
+}
+
 const QUOTE_STATS_GRID = {
   display: 'grid',
   gridTemplateColumns: {
@@ -1527,13 +1572,9 @@ function QuotationsPageContent() {
                         }
                       }}
                       options={customers.filter(customer => {
-                        const category = customerCategories.find(c => c.cus_cat_id === customer.cus_category);
-                        if (category && !category.cus_cat_title.toLowerCase().includes('customer')) {
-                          return false;
-                        }
-                        
+                        if (!isCustomerAccount(customer, customerCategories)) return false;
                         if (selectedCustomerTypeFilter) {
-                          return customer.cus_type === selectedCustomerTypeFilter.cus_type_id;
+                          return matchesCustomerType(customer, selectedCustomerTypeFilter);
                         }
                         return true;
                       })}

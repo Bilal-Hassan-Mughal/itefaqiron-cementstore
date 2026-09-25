@@ -42,7 +42,21 @@ export default function SplitPaymentModal({
 
   // Filter customers by type
   const getCustomerAccounts = () => {
-    return customers.filter(c => c.customer_category?.cus_cat_title?.toLowerCase().includes('customer'));
+    return customers.filter(c => {
+      const catTitle = (c.customer_category?.cus_cat_title || '').trim().toLowerCase();
+      if (catTitle) {
+        const isNonCustomerCat = (
+          catTitle.includes('bank') ||
+          catTitle.includes('transport') ||
+          catTitle.includes('transporter') ||
+          catTitle.includes('cargo') ||
+          catTitle.includes('vendor') ||
+          catTitle.includes('supplier')
+        );
+        if (isNonCustomerCat) return false;
+      }
+      return true;
+    });
   };
 
   const getCashAccounts = () => {

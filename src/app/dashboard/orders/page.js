@@ -250,6 +250,51 @@ function filterOrderPageCustomerTypes(allTypes) {
   return picked;
 }
 
+function isCustomerAccount(customer, customerCategories = []) {
+  if (!customer) return false;
+  let catTitle = customer.customer_category?.cus_cat_title || '';
+  if (!catTitle && Array.isArray(customerCategories) && customerCategories.length > 0 && customer.cus_category != null) {
+    const cat = customerCategories.find((c) => Number(c.cus_cat_id) === Number(customer.cus_category));
+    if (cat) catTitle = cat.cus_cat_title || '';
+  }
+
+  const normCat = (catTitle || '').trim().toLowerCase();
+  if (normCat) {
+    const isNonCustomerCat = (
+      normCat.includes('bank') ||
+      normCat.includes('transport') ||
+      normCat.includes('transporter') ||
+      normCat.includes('cargo') ||
+      normCat.includes('vendor') ||
+      normCat.includes('supplier')
+    );
+    if (isNonCustomerCat) return false;
+  }
+
+  return true;
+}
+
+function matchesCustomerType(customer, selectedType) {
+  if (!selectedType) return true;
+  if (!customer) return false;
+
+  const targetTypeId = selectedType.cus_type_id ?? selectedType.id;
+  const targetTitle = (selectedType.cus_type_title || selectedType.title || selectedType.name || '').trim().toLowerCase();
+
+  const custTypeId = customer.cus_type ?? customer.customer_type?.cus_type_id;
+  const custTypeTitle = (customer.customer_type?.cus_type_title || customer.cus_type_title || '').trim().toLowerCase();
+
+  if (targetTypeId != null && custTypeId != null && Number(custTypeId) === Number(targetTypeId)) {
+    return true;
+  }
+
+  if (targetTitle && custTypeTitle && targetTitle === custTypeTitle) {
+    return true;
+  }
+
+  return false;
+}
+
 function getFocusedAutocompleteOption() {
   const el = document.querySelector(
     '.MuiAutocomplete-popper .MuiAutocomplete-option.Mui-focused, .MuiAutocomplete-popper .MuiAutocomplete-option[aria-selected="true"]'
@@ -3232,7 +3277,8 @@ function OrdersPageContent() {
                           const typeTitle = (newValue.cus_type_title || '').toLowerCase();
                           if (typeTitle.includes('walk')) {
                             const matchingCustomer = customers.find((c) =>
-                              c.cus_type === newValue.cus_type_id ||
+                              Number(c.cus_type) === Number(newValue.cus_type_id) ||
+                              (c.customer_type?.cus_type_id != null && Number(c.customer_type.cus_type_id) === Number(newValue.cus_type_id)) ||
                               (c.cus_name || '').toLowerCase().includes('walk')
                             );
                             if (matchingCustomer) {
@@ -3321,11 +3367,11 @@ function OrdersPageContent() {
                       fullWidth
                       sx={{ width: '100%', minWidth: 0 }}
                       options={customers.filter(customer => {
-                        const category = customerCategories.find(c => c.cus_cat_id === customer.cus_category);
-                        const isCustomer = category && category.cus_cat_title.toLowerCase().includes('customer');
-                        if (!isCustomer) return false;
-                        if (!selectedCustomerType) return true;
-                        return customer.cus_type === selectedCustomerType.cus_type_id;
+                        if (!isCustomerAccount(customer, customerCategories)) return false;
+                        if (selectedCustomerType) {
+                          return matchesCustomerType(customer, selectedCustomerType);
+                        }
+                        return true;
                       })}
                       getOptionLabel={(option) => option.cus_name || ''}
                       ListboxProps={{ sx: { maxHeight: 180 } }}
@@ -3376,11 +3422,11 @@ function OrdersPageContent() {
                               if (!e.shiftKey && (e.key === 'Tab' || e.key === 'Enter')) {
                                 const inputValue = e.currentTarget.value || '';
                                 const customerOptions = (customers || []).filter((customer) => {
-                                  const category = customerCategories.find((c) => c.cus_cat_id === customer.cus_category);
-                                  const isCustomer = category && category.cus_cat_title.toLowerCase().includes('customer');
-                                  if (!isCustomer) return false;
-                                  if (!selectedCustomerType) return true;
-                                  return customer.cus_type === selectedCustomerType.cus_type_id;
+                                  if (!isCustomerAccount(customer, customerCategories)) return false;
+                                  if (selectedCustomerType) {
+                                    return matchesCustomerType(customer, selectedCustomerType);
+                                  }
+                                  return true;
                                 });
                                 const filtered = filterOrderCustomers(customerOptions, inputValue);
                                 const idx = getFocusedAutocompleteOption();
@@ -5187,12 +5233,7 @@ function OrdersPageContent() {
                     <Autocomplete
                       fullWidth
                       size="small"
-                      options={customers.filter(customer => {
-                        const isCustomer = customer.customer_category &&
-                          customer.customer_category.cus_cat_title &&
-                          customer.customer_category.cus_cat_title.toLowerCase().includes('customer');
-                        return isCustomer;
-                      })}
+                      options={customers.filter(customer => isCustomerAccount(customer, customerCategories))}
                       getOptionLabel={(option) => option.cus_name || ''}
                       value={customers.find(c => c.cus_id.toString() === filterCustomer) || null}
                       onChange={(event, newValue) => {
