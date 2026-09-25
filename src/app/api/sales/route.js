@@ -2146,13 +2146,13 @@ export async function POST(request) {
     });
 
     const targetCreatedAt = result.created_at || new Date();
+    // Non-blocking background recalculation: only run for main customer, skip system Cash/Bank accounts for instant response
     if (result.affectedCusIds?.length > 0) {
-      for (const cid of result.affectedCusIds) {
-        try {
-          await recalculateLedgerBalancesWithRetry(cid, 3, targetCreatedAt);
-        } catch (err) {
-          console.error(`Ledger recalc failed for customer ${cid} after POST:`, err);
-        }
+      const targetCusIds = result.affectedCusIds.filter(cid => cid === result.cus_id);
+      if (targetCusIds.length > 0) {
+        Promise.all(targetCusIds.map(cid => recalculateLedgerBalancesWithRetry(cid, 1, targetCreatedAt))).catch(err => {
+          console.error('Async background ledger recalc error:', err);
+        });
       }
     }
 
