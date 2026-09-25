@@ -8552,10 +8552,11 @@ function SalesPageContent() {
                   <Typography variant="body2" sx={{
                     display: 'inline-block',
                     px: 3,
-                    py: 0.6,
+                    py: 0.5,
                     borderRadius: '6px',
-                    bgcolor: currentBillData?.is_return ? '#991b1b' : '#0f172a',
-                    color: '#ffffff !important',
+                    bgcolor: currentBillData?.is_return ? '#fef2f2' : '#f1f5f9',
+                    color: currentBillData?.is_return ? '#991b1b !important' : '#0f172a !important',
+                    border: currentBillData?.is_return ? '1.5px solid #fca5a5' : '1.5px solid #cbd5e1',
                     fontWeight: 800,
                     fontSize: '0.9rem',
                     letterSpacing: 2,
@@ -8728,7 +8729,7 @@ function SalesPageContent() {
                                   {fmtAmt(currentDue)}
                                 </TableCell>
                               </TableRow>
-                              <TableRow sx={{ bgcolor: '#9e9e9e' }}>
+                              <TableRow sx={{ bgcolor: '#e0e0e0' }}>
                                 <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.65, borderRight: '1px solid #ffffff', color: '#000000 !important', fontSize: '0.875rem' }}>كل بقايا</TableCell>
                                 <TableCell align="right" sx={{ fontWeight: 'bold', px: 1.25, py: 0.65, color: '#000000 !important', fontSize: '0.9rem' }}>
                                   {fmtAmt(totalBal)}
@@ -10447,10 +10448,11 @@ function SalesPageContent() {
                   <Typography variant="body2" sx={{
                     display: 'inline-block',
                     px: 3,
-                    py: 0.6,
+                    py: 0.5,
                     borderRadius: '6px',
-                    bgcolor: (selectedBill?.is_return || selectedBill?.bill_type === 'SALE_RETURN') ? '#991b1b' : '#0f172a',
-                    color: '#ffffff !important',
+                    bgcolor: (selectedBill?.is_return || selectedBill?.bill_type === 'SALE_RETURN') ? '#fef2f2' : '#f1f5f9',
+                    color: (selectedBill?.is_return || selectedBill?.bill_type === 'SALE_RETURN') ? '#991b1b !important' : '#0f172a !important',
+                    border: (selectedBill?.is_return || selectedBill?.bill_type === 'SALE_RETURN') ? '1.5px solid #fca5a5' : '1.5px solid #cbd5e1',
                     fontWeight: 800,
                     fontSize: '0.9rem',
                     letterSpacing: 2,
@@ -10617,7 +10619,7 @@ function SalesPageContent() {
                                   </TableCell>
                                 </TableRow>
                               )}
-                              <TableRow sx={{ bgcolor: '#9e9e9e' }}>
+                              <TableRow sx={{ bgcolor: '#e0e0e0' }}>
                                 <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.65, borderRight: '1px solid #ffffff', color: '#000000 !important', fontSize: '0.875rem' }}>كل بقايا</TableCell>
                                 <TableCell align="right" sx={{ fontWeight: 'bold', px: 1.25, py: 0.65, color: '#000000 !important', fontSize: '0.9rem' }}>
                                   {fmtAmt(totalBalance)}
