@@ -76,6 +76,10 @@ import {
   ListAlt as ListAltIcon,
   Info as InfoIcon,
   Save as SaveIcon,
+  Label as TagIcon,
+  CreditCard as CreditCardIcon,
+  Translate as TranslateIcon,
+  Description as NotesIcon,
   Folder as FolderIcon,
   FolderOpen as FolderOpenIcon,
   ArrowUpward as ArrowUpIcon,
@@ -1042,6 +1046,8 @@ function SalesPageContent() {
   const [isSearchingOrder, setIsSearchingOrder] = useState(false);
   const [loadedOrderId, setLoadedOrderId] = useState(null); // Track the order being converted to bill
   const [selectedCustomerTypeFilter, setSelectedCustomerTypeFilter] = useState(null); // Filter customers by type
+  const [customerTypeFilterOpen, setCustomerTypeFilterOpen] = useState(false);
+  const customerTypeHighlightRef = useRef(null);
 
   const salePageCustomerTypeOptions = useMemo(
     () => filterSalePageCustomerTypes(customerTypes),
@@ -3888,9 +3894,9 @@ function SalesPageContent() {
 </style></head><body>
   <div class="page">
     <header class="company-header">
-      <div class="urdu-name">اتفاق آئرن اینڈ سیمنٹ سٹور</div>
+      <div class="urdu-name" style="font-family:'Noto Nastaliq Urdu','Jameel Noori Nastaleeq','Urdu Typesetting',serif !important;">اتفاق آئرن اینڈ سیمنٹ سٹور</div>
       <div class="urdu-address">گجرات سرگودھا روڈ، پاہڑیانوالی</div>
-      <div class="phone">Ph: 0346-7560306 &nbsp;|&nbsp; 0300-7560306</div>
+      <div class="phone">Ph: 0300-7560306</div>
       <div class="doc-title">Sales List Report</div>
     </header>
 
@@ -5506,8 +5512,12 @@ function SalesPageContent() {
                     options={salePageCustomerTypeOptions}
                     getOptionLabel={(option) => option.cus_type_title || ''}
                     value={selectedCustomerTypeFilter ?? null}
+                    open={customerTypeFilterOpen}
+                    onOpen={() => setCustomerTypeFilterOpen(true)}
+                    onClose={() => setCustomerTypeFilterOpen(false)}
                     onChange={(event, newValue) => {
                       setSelectedCustomerTypeFilter(newValue ?? null);
+                      setCustomerTypeFilterOpen(false);
                       if (newValue) {
                         const typeTitle = (newValue.cus_type_title || '').toLowerCase();
                         if (typeTitle.includes('walk')) {
@@ -5521,31 +5531,125 @@ function SalesPageContent() {
                           }
                         }
                       }
+                      setTimeout(() => {
+                        const customerInput = document.getElementById('customer-search-dropdown-input');
+                        if (customerInput) {
+                          customerInput.focus();
+                          if (typeof customerInput.select === 'function') customerInput.select();
+                        }
+                      }, 50);
                     }}
                     isOptionEqualToValue={(option, value) => option.cus_type_id === value?.cus_type_id}
                     autoSelect={true}
                     autoHighlight={true}
-                    openOnFocus={true}
                     selectOnFocus={true}
+                    slotProps={{
+                      clearIndicator: { tabIndex: -1 },
+                      popupIndicator: { tabIndex: -1 },
+                      popper: {
+                        placement: 'bottom-start',
+                        modifiers: [
+                          {
+                            name: 'flip',
+                            enabled: false,
+                          },
+                        ],
+                      },
+                    }}
+                    onHighlightChange={(_, option) => {
+                      if (option) customerTypeHighlightRef.current = option;
+                    }}
                     onKeyDown={(e) => {
                       if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
                         e.preventDefault();
-                        setTimeout(() => {
-                          const customerInput = document.getElementById('customer-search-dropdown-input');
-                          if (customerInput) {
-                            customerInput.focus();
+                        e.stopPropagation();
+                        setCustomerTypeFilterOpen(false);
+
+                        let toSelect = customerTypeHighlightRef.current;
+                        if (!toSelect) {
+                          const idx = getHighlightedOptionIndex();
+                          if (idx != null && salePageCustomerTypeOptions[idx]) {
+                            toSelect = salePageCustomerTypeOptions[idx];
                           }
-                        }, 50);
+                        }
+                        if (!toSelect && e.target.value) {
+                          const searchVal = e.target.value.toLowerCase().trim();
+                          toSelect = salePageCustomerTypeOptions.find(opt =>
+                            (opt.cus_type_title || '').toLowerCase().includes(searchVal)
+                          );
+                        }
+
+                        if (toSelect) {
+                          setSelectedCustomerTypeFilter(toSelect);
+                          const typeTitle = (toSelect.cus_type_title || '').toLowerCase();
+                          if (typeTitle.includes('walk')) {
+                            const matchingCustomer = customers.find((c) =>
+                              Number(c.cus_type) === Number(toSelect.cus_type_id) ||
+                              (c.customer_type?.cus_type_id != null && Number(c.customer_type.cus_type_id) === Number(toSelect.cus_type_id)) ||
+                              (c.cus_name || '').toLowerCase().includes('walk')
+                            );
+                            if (matchingCustomer) {
+                              setFormSelectedCustomer(matchingCustomer);
+                            }
+                          }
+                        }
+
+                        [0, 25, 75, 150].forEach((delay) => {
+                          setTimeout(() => {
+                            const customerInput = document.getElementById('customer-search-dropdown-input') ||
+                                                  document.querySelector('input[placeholder*="Search by name"]');
+                            if (customerInput) {
+                              customerInput.focus();
+                              if (typeof customerInput.select === 'function') {
+                                try { customerInput.select(); } catch (err) {}
+                              }
+                            }
+                          }, delay);
+                        });
                       }
                     }}
                     renderInput={(params) => (
                       <TextField
                         {...params}
+                        id="customer-type-filter-autocomplete-input"
                         placeholder="All Customer Types"
                         variant="outlined"
+                        onKeyDown={(e) => {
+                          if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setCustomerTypeFilterOpen(false);
+
+                            let toSelect = customerTypeHighlightRef.current;
+                            if (!toSelect && e.target.value) {
+                              const searchVal = e.target.value.toLowerCase().trim();
+                              toSelect = salePageCustomerTypeOptions.find(opt =>
+                                (opt.cus_type_title || '').toLowerCase().includes(searchVal)
+                              );
+                            }
+
+                            if (toSelect) {
+                              setSelectedCustomerTypeFilter(toSelect);
+                            }
+
+                            [0, 25, 75, 150].forEach((delay) => {
+                              setTimeout(() => {
+                                const customerInput = document.getElementById('customer-search-dropdown-input') ||
+                                                      document.querySelector('input[placeholder*="Search by name"]');
+                                if (customerInput) {
+                                  customerInput.focus();
+                                  if (typeof customerInput.select === 'function') {
+                                    try { customerInput.select(); } catch (err) {}
+                                  }
+                                }
+                              }, delay);
+                            });
+                          }
+                        }}
                         sx={{
                           bgcolor: 'white',
-                          minWidth: 450,
+                          borderRadius: '8px',
+                          '& .MuiOutlinedInput-root': { borderRadius: '8px' },
                           '& .MuiInputBase-input': {
                             fontWeight: 'bold',
                             color: 'black'
@@ -6231,7 +6335,7 @@ function SalesPageContent() {
                       <TableCell sx={{ fontWeight: 'bold', py: 1, color: 'white' }}>S. No</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', py: 1, color: 'white' }}>Store</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', py: 1, color: 'white' }}>Product</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', py: 1, color: 'white' }}>Size</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', py: 1, color: 'white' }}>Description</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', py: 1, color: 'white' }}>Qty</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', py: 1, color: 'white' }}>Sale Price</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', py: 1, color: 'white' }}>Amount</TableCell>
@@ -6290,7 +6394,7 @@ function SalesPageContent() {
                             <TableCell sx={{ py: 1 }}>
                               <TextField
                                 size="small"
-                                placeholder="Size"
+                                placeholder="Description"
                                 value={product.size || ''}
                                 onChange={(e) => {
                                   const newSize = e.target.value;
@@ -6302,10 +6406,10 @@ function SalesPageContent() {
                                 }}
                                 onFocus={(e) => e.target.select()}
                                 sx={{
-                                  width: 90,
+                                  width: 150,
                                   '& .MuiInputBase-input': {
                                     padding: '4px 8px',
-                                    textAlign: 'center',
+                                    textAlign: 'left',
                                     fontWeight: 'bold'
                                   }
                                 }}
@@ -8407,108 +8511,133 @@ function SalesPageContent() {
             {/* A4 Printable Container */}
             <Box id="printable-invoice-a4" sx={{ width: '100%', bgcolor: '#ffffff', color: SALE_INVOICE_PRINT.bodyText, '& .MuiTypography-root': { color: SALE_INVOICE_PRINT.bodyText }, '& .MuiTableCell-root': { color: SALE_INVOICE_PRINT.bodyText } }}>
               {/* Company Header */}
-              <Box sx={{ textAlign: 'center', py: 3, borderBottom: '2px solid #000' }}>
+              <Box sx={{
+                textAlign: 'center',
+                pt: 2.5,
+                pb: 2,
+                px: 2,
+                borderTop: '4px solid #0f172a',
+                borderBottom: '3px double #0f172a',
+                bgcolor: '#ffffff',
+                mb: 1
+              }}>
                 <Typography variant="h4" sx={{
                   fontWeight: 'bold',
-                  mb: 1,
-                  fontFamily: 'Arial, sans-serif',
-                  fontSize: { xs: '1.5rem', md: '2rem' },
-                  direction: 'rtl'
+                  mb: 1.25,
+                  fontFamily: '"Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", "Urdu Typesetting", serif !important',
+                  fontSize: { xs: '1.6rem', md: '2.1rem' },
+                  direction: 'rtl',
+                  color: '#0f172a',
+                  lineHeight: 1.8
                 }}>
                   اتفاق آئرن اینڈ سیمنٹ سٹور
                 </Typography>
                 <Typography variant="body2" sx={{
-                  mb: 1,
-                  fontSize: { xs: '0.75rem', md: '0.9rem' },
-                  direction: 'rtl'
+                  mt: 0.75,
+                  mb: 1.5,
+                  fontSize: '0.9rem',
+                  direction: 'rtl',
+                  color: '#d32f2f !important',
+                  fontWeight: 600
                 }}>
                   گجرات سرگودھا روڈ، پاہڑیانوالی
                 </Typography>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
-                  <PhoneIcon sx={{ color: '#25D366', fontSize: '1rem' }} />
-                  <Typography variant="body2">
-                    Ph:- 0346-7560306, 0300-7560306
+                <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, px: 1.75, py: 0.35, borderRadius: '20px', bgcolor: '#f8fafc', border: '1px solid #e2e8f0', mb: 1.75 }}>
+                  <PhoneIcon sx={{ color: '#10b981', fontSize: '0.95rem' }} />
+                  <Typography variant="body2" sx={{ color: '#1e293b', fontWeight: 600, fontSize: '0.85rem', letterSpacing: 0.5 }}>
+                    Ph:- 0300-7560306
                   </Typography>
                 </Box>
-                <Typography variant="h6" sx={{
-                  fontWeight: 'bold',
-                  textTransform: 'uppercase',
-                  letterSpacing: 1,
-                  mt: 2
-                }}>
-                  {currentBillData?.is_return ? 'SALE RETURN INVOICE' : 'SALE INVOICE'}
-                </Typography>
+                <Box sx={{ mt: 0.5 }}>
+                  <Typography variant="body2" sx={{
+                    display: 'inline-block',
+                    px: 3,
+                    py: 0.6,
+                    borderRadius: '6px',
+                    bgcolor: currentBillData?.is_return ? '#991b1b' : '#0f172a',
+                    color: '#ffffff !important',
+                    fontWeight: 800,
+                    fontSize: '0.9rem',
+                    letterSpacing: 2,
+                    textTransform: 'uppercase'
+                  }}>
+                    {currentBillData?.is_return ? 'SALE RETURN INVOICE' : 'SALE INVOICE'}
+                  </Typography>
+                </Box>
               </Box>
 
               {/* Customer and Invoice Details */}
-              <Box sx={{ px: 3, py: 2, borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between' }}>
-                <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column' }}>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Customer Name:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }}>
+              <Box sx={{ px: 3, pt: 1.25, pb: 2, borderBottom: '1.5px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                {/* Left Side: Customer Details */}
+                <Box sx={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', pr: 3, alignItems: 'flex-start' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 0.75, flexWrap: 'nowrap' }}>
+                    <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Customer Name:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '1.05rem', color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {currentBillData.customer ? `${currentBillData.customer.cus_name}${currentBillData.customer.name_urdu ? ' ' + currentBillData.customer.name_urdu : ''}` : 'N/A'}
                     </Typography>
                   </Box>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Phone No:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 0.75, flexWrap: 'nowrap' }}>
+                    <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Phone No:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {currentBillData.customer?.cus_phone_no || 'N/A'}
                     </Typography>
                   </Box>
                   {currentBillData.customer?.cus_address && (
-                    <Box sx={{ display: 'flex' }}>
-                      <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Address:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'nowrap' }}>
+                      <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Address:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                         {currentBillData.customer.cus_address}
                       </Typography>
                     </Box>
                   )}
                 </Box>
-                <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column', pl: 4 }}>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Invoice No:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+
+                {/* Right Side: Invoice Meta Details */}
+                <Box sx={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', ml: 'auto', pl: 3, alignItems: 'flex-end', textAlign: 'right' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, mb: 0.75, width: '100%', flexWrap: 'nowrap' }}>
+                    <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Invoice No:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {getBillDisplayNo(currentBillData)}
                     </Typography>
                   </Box>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, mb: 0.75, width: '100%', flexWrap: 'nowrap' }}>
+                    <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>
                       {currentBillData?.is_return ? 'Return ID:' : 'Sale ID:'}
                     </Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {currentBillData?.is_return ? currentBillData.return_id : currentBillData.sale_id}
                     </Typography>
                   </Box>
                   {currentBillData?.is_return && currentBillData.sale_id && (
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Sale ID:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, mb: 0.75, width: '100%', flexWrap: 'nowrap' }}>
+                      <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Sale ID:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                         {currentBillData.sale_id}
                       </Typography>
                     </Box>
                   )}
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Date:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, mb: 0.75, width: '100%', flexWrap: 'nowrap' }}>
+                    <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Date:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {formatDatePK(currentBillData?.created_at) || '—'}
                     </Typography>
                   </Box>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Time:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, mb: 0.75, width: '100%', flexWrap: 'nowrap' }}>
+                    <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Time:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {formatTimePK(currentBillData?.created_at) || '—'}
                     </Typography>
                   </Box>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Created By:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, mb: currentBillData.reference ? 0.75 : 0, width: '100%', flexWrap: 'nowrap' }}>
+                    <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Created By:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {getCreatedByName(currentBillData, currentUser)}
                     </Typography>
                   </Box>
                   {currentBillData.reference && (
-                    <Box sx={{ display: 'flex' }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Reference:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, width: '100%', flexWrap: 'nowrap' }}>
+                      <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Reference:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                         {currentBillData.reference}
                       </Typography>
                     </Box>
@@ -8521,38 +8650,53 @@ function SalesPageContent() {
                 {(() => {
                   const details = currentBillData?.sale_details ? getSaleDetailsInAddOrder(currentBillData.sale_details) : [];
                   const hasAnySize = details.some(d => d.size && String(d.size).trim() !== '');
+                  const totalQty = details.reduce((sum, d) => sum + (parseFloat(d.qnty) || 0), 0);
+                  const totalItemAmt = details.reduce((sum, d) => sum + (parseFloat(d.total_amount) || 0), 0);
                   return (
-                    <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #000', boxShadow: 'none' }}>
-                      <Table size="small">
+                    <TableContainer component={Paper} variant="outlined" sx={{ mb: 2.5, border: '1px solid #cbd5e1', borderRadius: '4px', overflow: 'hidden', boxShadow: 'none' }}>
+                      <Table size="small" sx={{ tableLayout: 'fixed', width: '100%' }}>
                         <TableHead>
-                          <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.headerBg }}>
-                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>S#</TableCell>
-                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>Product Name</TableCell>
+                          <TableRow sx={{ bgcolor: '#9e9e9e' }}>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: '6%', borderRight: '1px solid #ffffff', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="center">S#</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: hasAnySize ? '36%' : '50%', borderRight: '1px solid #ffffff', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="left">Product Name</TableCell>
                             {hasAnySize && (
-                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="center">Size</TableCell>
+                              <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: '20%', borderRight: '1px solid #ffffff', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="center">Description</TableCell>
                             )}
-                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Qty</TableCell>
-                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Rate</TableCell>
-                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, fontSize: '0.85rem', border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Amount</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: '12%', borderRight: '1px solid #ffffff', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="center">Qty</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: '13%', borderRight: '1px solid #ffffff', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="center">Rate</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: '13%', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="center">Amount</TableCell>
                           </TableRow>
                         </TableHead>
                         <TableBody>
                           {details.length > 0 ? (
-                            details.map((detail, index) => (
-                              <TableRow key={detail.sale_detail_id || index}>
-                                <TableCell sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.85rem', fontWeight: 'bold', color: SALE_INVOICE_PRINT.bodyText }}>{index + 1}</TableCell>
-                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }}>{detail.product?.pro_title || detail.pro_title || 'N/A'}</TableCell>
+                            <>
+                              {details.map((detail, index) => (
+                                <TableRow key={detail.sale_detail_id || index}>
+                                  <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{index + 1}</TableCell>
+                                  <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="left">{detail.product?.pro_title || detail.pro_title || 'N/A'}</TableCell>
+                                  {hasAnySize && (
+                                    <TableCell className="cell-normal" sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'normal !important', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="center">{detail.size || '—'}</TableCell>
+                                  )}
+                                  <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtRateQty(detail.qnty)}</TableCell>
+                                  <TableCell className="cell-normal" sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'normal !important', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtRateQty(detail.unit_rate)}</TableCell>
+                                  <TableCell sx={{ px: 1.25, py: 0.75, borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtAmt(detail.total_amount)}</TableCell>
+                                </TableRow>
+                              ))}
+                              {/* Total Row */}
+                              <TableRow sx={{ bgcolor: '#e0e0e0' }}>
+                                <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #ffffff', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center"></TableCell>
+                                <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #ffffff', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="left">Total</TableCell>
                                 {hasAnySize && (
-                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="center">{detail.size || '—'}</TableCell>
+                                  <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #ffffff', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center"></TableCell>
                                 )}
-                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtRateQty(detail.qnty)}</TableCell>
-                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtRateQty(detail.unit_rate)}</TableCell>
-                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtAmt(detail.total_amount)}</TableCell>
+                                <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #ffffff', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtRateQty(totalQty)}</TableCell>
+                                <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #ffffff', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center"></TableCell>
+                                <TableCell sx={{ px: 1.25, py: 0.75, fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtAmt(totalItemAmt)}</TableCell>
                               </TableRow>
-                            ))
+                            </>
                           ) : (
                             <TableRow>
-                              <TableCell colSpan={hasAnySize ? 6 : 5} align="center" sx={{ py: 4 }}>
+                              <TableCell colSpan={hasAnySize ? 6 : 5} align="center" sx={{ py: 4, color: '#64748b' }}>
                                 No items found
                               </TableCell>
                             </TableRow>
@@ -8569,24 +8713,24 @@ function SalesPageContent() {
                     {!isWalkinCustomer(currentBillData.customer) && (() => {
                       const { prevBal, currentDue, totalBal } = resolveSaleReceiptBalances(currentBillData);
                       return (
-                        <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #000', width: '100%' }}>
+                        <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #cbd5e1', borderRadius: '4px', overflow: 'hidden', width: '100%', boxShadow: 'none' }}>
                           <Table size="small">
                             <TableBody>
                               <TableRow>
-                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>سابقہ بقایا</TableCell>
-                                <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>
+                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', color: '#000000', fontSize: '0.875rem' }}>سابقہ بقایا</TableCell>
+                                <TableCell align="right" sx={{ px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontWeight: 'bold', color: '#000000', fontSize: '0.875rem' }}>
                                   {fmtAmt(prevBal)}
                                 </TableCell>
                               </TableRow>
                               <TableRow>
-                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>موجوده بقايا</TableCell>
-                                <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>
+                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', color: '#000000', fontSize: '0.875rem' }}>موجوده بقايا</TableCell>
+                                <TableCell align="right" sx={{ px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontWeight: 'bold', color: '#000000', fontSize: '0.875rem' }}>
                                   {fmtAmt(currentDue)}
                                 </TableCell>
                               </TableRow>
-                              <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.balanceTotalBg }}>
-                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>كل بقايا</TableCell>
-                                <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>
+                              <TableRow sx={{ bgcolor: '#9e9e9e' }}>
+                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.65, borderRight: '1px solid #ffffff', color: '#000000 !important', fontSize: '0.875rem' }}>كل بقايا</TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 'bold', px: 1.25, py: 0.65, color: '#000000 !important', fontSize: '0.9rem' }}>
                                   {fmtAmt(totalBal)}
                                 </TableCell>
                               </TableRow>
@@ -8596,69 +8740,69 @@ function SalesPageContent() {
                       );
                     })()}
                     {(currentBillData.notes || currentBillData.reference) && (
-                      <Box sx={{ mt: 1 }}>
-                        <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>
-                          <strong>Notes:</strong> {currentBillData.notes || currentBillData.reference}
+                      <Box sx={{ mt: 1, p: 1.25, bgcolor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '4px' }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.85rem', color: '#000000', fontWeight: 'bold' }}>
+                          <strong style={{ color: '#000000' }}>Notes:</strong> {currentBillData.notes || currentBillData.reference}
                         </Typography>
                       </Box>
                     )}
                   </Box>
                   <Box sx={{ flex: '0 0 48%', display: 'flex', justifyContent: 'flex-end' }}>
-                    <TableContainer component={Paper} variant="outlined" sx={{ border: '1px solid #000', width: '100%', maxWidth: '100%' }}>
+                    <TableContainer component={Paper} variant="outlined" sx={{ border: '1px solid #cbd5e1', borderRadius: '4px', overflow: 'hidden', width: '100%', maxWidth: '100%', boxShadow: 'none' }}>
                       <Table size="small">
                         <TableBody>
                           <TableRow>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رقم بل</TableCell>
-                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', color: '#000000', fontSize: '0.875rem' }}>رقم بل</TableCell>
+                            <TableCell align="right" sx={{ px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontWeight: 'bold', color: '#000000', fontSize: '0.875rem' }}>
                               {fmtAmt(parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.labour_charges || currentBillData.labour || 0) - parseFloat(currentBillData.shipping_amount || 0) + parseFloat(currentBillData.discount || 0))}
                             </TableCell>
                           </TableRow>
                           <TableRow>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>مزدوری</TableCell>
-                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', color: '#000000', fontSize: '0.875rem' }}>مزدوری</TableCell>
+                            <TableCell align="right" sx={{ px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontWeight: 'bold', color: '#000000', fontSize: '0.875rem' }}>
                               {fmtAmt(currentBillData.labour_charges || currentBillData.labour)}
                             </TableCell>
                           </TableRow>
                           <TableRow>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>کرایہ</TableCell>
-                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', color: '#000000', fontSize: '0.875rem' }}>کرایہ</TableCell>
+                            <TableCell align="right" sx={{ px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontWeight: 'bold', color: '#000000', fontSize: '0.875rem' }}>
                               {fmtAmt(currentBillData.shipping_amount)}
                             </TableCell>
                           </TableRow>
                           <TableRow>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رعایت</TableCell>
-                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', color: '#000000', fontSize: '0.875rem' }}>رعایت</TableCell>
+                            <TableCell align="right" sx={{ px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontWeight: 'bold', color: '#000000', fontSize: '0.875rem' }}>
                               {fmtAmt(currentBillData.discount)}
                             </TableCell>
                           </TableRow>
-                          <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.grandTotalBg }}>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>كل رقم</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>
+                          <TableRow sx={{ bgcolor: '#9e9e9e' }}>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #ffffff', borderBottom: '1px solid #e0e0e0', fontSize: '0.875rem', color: '#000000 !important' }}>كل رقم</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontSize: '0.875rem', color: '#000000 !important' }}>
                               {fmtAmt(currentBillData.total_amount)}
                             </TableCell>
                           </TableRow>
                           {/* Always show cash payment */}
                           <TableRow>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>نقد كيش</TableCell>
-                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', color: '#000000', fontSize: '0.875rem' }}>نقد كيش</TableCell>
+                            <TableCell align="right" sx={{ px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontWeight: 'bold', color: '#000000', fontSize: '0.875rem' }}>
                               {fmtAmt(currentBillData.cash_payment)}
                             </TableCell>
                           </TableRow>
                           {/* Show bank payment with account name if bank payment exists */}
                           {currentBillData.bank_payment > 0 && (
                             <TableRow>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', color: '#000000', fontSize: '0.875rem' }}>
                                 {currentBillData.bank_title || 'بینک'}
                               </TableCell>
-                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                              <TableCell align="right" sx={{ px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontWeight: 'bold', color: '#000000', fontSize: '0.875rem' }}>
                                 {fmtAmt(currentBillData.bank_payment)}
                               </TableCell>
                             </TableRow>
                           )}
 
-                          <TableRow sx={{ bgcolor: '#d0d0d0' }}>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>بقايا رقم</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                          <TableRow sx={{ bgcolor: '#e0e0e0' }}>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.65, borderRight: '1px solid #ffffff', fontSize: '0.875rem', color: '#000000 !important' }}>بقايا رقم</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1.25, py: 0.65, fontSize: '0.9rem', color: '#000000 !important' }}>
                               {fmtAmt(parseFloat(currentBillData.total_amount || 0) - parseFloat(currentBillData.payment || 0))}
                             </TableCell>
                           </TableRow>
@@ -8724,9 +8868,9 @@ function SalesPageContent() {
                 }}
               >
                 <Box sx={{ textAlign: 'center', pb: 1, borderBottom: '1px solid #000' }}>
-                  <Typography sx={{ fontSize: '12px', fontWeight: 'bold' }}>اتفاق آئرن اینڈ سیمنٹ سٹور</Typography>
+                  <Typography sx={{ fontSize: '15px', fontWeight: 'bold', fontFamily: '"Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", "Urdu Typesetting", serif !important', lineHeight: 1.8 }}>اتفاق آئرن اینڈ سیمنٹ سٹور</Typography>
                   <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>گجرات سرگودھا روڈ، پاہڑیانوالی</Typography>
-                  <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Ph: 0346-7560306, 0300-7560306</Typography>
+                  <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Ph: 0300-7560306</Typography>
                   <Typography
                     sx={{
                       mt: 0.5,
@@ -8843,84 +8987,110 @@ function SalesPageContent() {
 
               <Box id="receipt-preview" className="thermal-receipt" sx={{ width: '100%', bgcolor: 'white', p: 3, color: '#000', fontWeight: 'bold', '& *': { fontWeight: 'bold !important', color: '#000 !important' } }}>
                 {/* Company Header */}
-                <Box sx={{ textAlign: 'center', py: 2, borderBottom: '2px solid #000' }}>
-                  <Typography variant="h5" sx={{
+                <Box sx={{
+                  textAlign: 'center',
+                  pt: 2.5,
+                  pb: 2,
+                  px: 2,
+                  borderTop: '4px solid #0f172a',
+                  borderBottom: '3px double #0f172a',
+                  bgcolor: '#ffffff',
+                  mb: 1
+                }}>
+                  <Typography variant="h4" sx={{
                     fontWeight: 'bold',
-                    mb: 1,
-                    fontFamily: 'Arial, sans-serif',
-                    direction: 'rtl'
+                    mb: 1.25,
+                    fontFamily: '"Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", "Urdu Typesetting", serif !important',
+                    fontSize: { xs: '1.6rem', md: '2.1rem' },
+                    direction: 'rtl',
+                    color: '#0f172a',
+                    lineHeight: 1.8
                   }}>
                     اتفاق آئرن اینڈ سیمنٹ سٹور
                   </Typography>
                   <Typography variant="body2" sx={{
-                    mb: 1,
-                    direction: 'rtl'
+                    mt: 0.75,
+                    mb: 1.5,
+                    fontSize: '0.9rem',
+                    direction: 'rtl',
+                    color: '#d32f2f !important',
+                    fontWeight: 600
                   }}>
                     گجرات سرگودھا روڈ، پاہڑیانوالی
                   </Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
-                    <PhoneIcon sx={{ color: '#25D366', fontSize: '1rem' }} />
-                    <Typography variant="body2">
-                      Ph:- 0346-7560306, 0300-7560306
+                  <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, px: 1.75, py: 0.35, borderRadius: '20px', bgcolor: '#f8fafc', border: '1px solid #e2e8f0', mb: 1.75 }}>
+                    <PhoneIcon sx={{ color: '#10b981', fontSize: '0.95rem' }} />
+                    <Typography variant="body2" sx={{ color: '#1e293b', fontWeight: 600, fontSize: '0.85rem', letterSpacing: 0.5 }}>
+                      Ph:- 0300-7560306
                     </Typography>
                   </Box>
-                  <Typography variant="h6" sx={{
-                    fontWeight: 'bold',
-                    textTransform: 'uppercase',
-                    letterSpacing: 1,
-                    mt: 1,
-                    color: currentBillData?.is_return ? '#d32f2f' : '#000'
-                  }}>
-                    {currentBillData?.is_return ? 'SALE RETURN INVOICE' : 'SALE INVOICE'}
-                  </Typography>
+                  <Box sx={{ mt: 0.5 }}>
+                    <Typography variant="body2" sx={{
+                      display: 'inline-block',
+                      px: 3,
+                      py: 0.6,
+                      borderRadius: '6px',
+                      bgcolor: currentBillData?.is_return ? '#991b1b' : '#0f172a',
+                      color: '#ffffff !important',
+                      fontWeight: 800,
+                      fontSize: '0.9rem',
+                      letterSpacing: 2,
+                      textTransform: 'uppercase'
+                    }}>
+                      {currentBillData?.is_return ? 'SALE RETURN INVOICE' : 'SALE INVOICE'}
+                    </Typography>
+                  </Box>
                 </Box>
 
                 {/* Customer and Invoice Details */}
-                <Box sx={{ px: 2, py: 2, borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between' }}>
-                  <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column' }}>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Customer Name:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }}>
+                <Box sx={{ px: 2, pt: 1.25, pb: 2, borderBottom: '1.5px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                  {/* Left Side: Customer Details */}
+                  <Box sx={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', pr: 2, alignItems: 'flex-start' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 0.75, flexWrap: 'nowrap' }}>
+                      <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Customer Name:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '1rem', color: '#0f172a', whiteSpace: 'nowrap' }}>
                         {currentBillData.customer ? `${currentBillData.customer.cus_name}${currentBillData.customer.name_urdu ? ' ' + currentBillData.customer.name_urdu : ''}` : 'N/A'}
                       </Typography>
                     </Box>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Phone No:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 0.75, flexWrap: 'nowrap' }}>
+                      <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Phone No:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                         {currentBillData.customer?.cus_phone_no || 'N/A'}
                       </Typography>
                     </Box>
                     {currentBillData.customer?.cus_address && (
-                      <Box sx={{ display: 'flex' }}>
-                        <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Address:</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'nowrap' }}>
+                        <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Address:</Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                           {currentBillData.customer.cus_address}
                         </Typography>
                       </Box>
                     )}
                   </Box>
-                  <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column', pl: 4 }}>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Invoice No:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+
+                  {/* Right Side: Invoice Meta Details */}
+                  <Box sx={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', ml: 'auto', pl: 2, alignItems: 'flex-end', textAlign: 'right' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, mb: 0.75, width: '100%', flexWrap: 'nowrap' }}>
+                      <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Invoice No:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                         {getBillDisplayNo(currentBillData)}
                       </Typography>
                     </Box>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Date:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, mb: 0.75, width: '100%', flexWrap: 'nowrap' }}>
+                      <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Date:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                         {formatDatePK(currentBillData?.created_at) || '—'}
                       </Typography>
                     </Box>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Time:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, mb: 0.75, width: '100%', flexWrap: 'nowrap' }}>
+                      <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Time:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                         {formatTimePK(currentBillData?.created_at) || '—'}
                       </Typography>
                     </Box>
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Created By:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, width: '100%', flexWrap: 'nowrap' }}>
+                      <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Created By:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                         {getCreatedByName(currentBillData, currentUser)}
                       </Typography>
                     </Box>
@@ -8932,38 +9102,53 @@ function SalesPageContent() {
                   {(() => {
                     const details = currentBillData?.sale_details ? getSaleDetailsInAddOrder(currentBillData.sale_details) : [];
                     const hasAnySize = details.some(d => d.size && String(d.size).trim() !== '');
+                    const totalQty = details.reduce((sum, d) => sum + (parseFloat(d.qnty) || 0), 0);
+                    const totalItemAmt = details.reduce((sum, d) => sum + (parseFloat(d.total_amount) || 0), 0);
                     return (
-                      <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
-                        <Table size="small">
+                      <TableContainer component={Paper} variant="outlined" sx={{ mb: 2.5, border: '1px solid #cbd5e1', borderRadius: '4px', overflow: 'hidden', boxShadow: 'none' }}>
+                        <Table size="small" sx={{ tableLayout: 'fixed', width: '100%' }}>
                           <TableHead>
-                            <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.headerBg }}>
-                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>S#</TableCell>
-                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>Product Name</TableCell>
+                            <TableRow sx={{ bgcolor: '#9e9e9e' }}>
+                              <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: '6%', borderRight: '1px solid #ffffff', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="center">S#</TableCell>
+                              <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: hasAnySize ? '36%' : '50%', borderRight: '1px solid #ffffff', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="left">Product Name</TableCell>
                               {hasAnySize && (
-                                <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="center">Size</TableCell>
+                                <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: '20%', borderRight: '1px solid #ffffff', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="center">Description</TableCell>
                               )}
-                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Qty</TableCell>
-                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Rate</TableCell>
-                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Amount</TableCell>
+                              <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: '12%', borderRight: '1px solid #ffffff', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="center">Qty</TableCell>
+                              <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: '13%', borderRight: '1px solid #ffffff', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="center">Rate</TableCell>
+                              <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: '13%', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="center">Amount</TableCell>
                             </TableRow>
                           </TableHead>
                           <TableBody>
                             {details.length > 0 ? (
-                              details.map((detail, index) => (
-                                <TableRow key={detail.sale_detail_id || index}>
-                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{index + 1}</TableCell>
-                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{detail.product?.pro_title || detail.pro_title || 'N/A'}</TableCell>
+                              <>
+                                {details.map((detail, index) => (
+                                  <TableRow key={detail.sale_detail_id || index}>
+                                    <TableCell sx={{ px: 0.75, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{index + 1}</TableCell>
+                                    <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="left">{detail.product?.pro_title || detail.pro_title || 'N/A'}</TableCell>
+                                    {hasAnySize && (
+                                      <TableCell className="cell-normal" sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'normal !important', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="center">{detail.size || '—'}</TableCell>
+                                    )}
+                                    <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtRateQty(detail.qnty)}</TableCell>
+                                    <TableCell className="cell-normal" sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'normal !important', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtRateQty(detail.unit_rate)}</TableCell>
+                                    <TableCell sx={{ px: 1, py: 0.75, borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtAmt(detail.total_amount)}</TableCell>
+                                  </TableRow>
+                                ))}
+                                {/* Total Row */}
+                                <TableRow sx={{ bgcolor: '#e0e0e0' }}>
+                                  <TableCell sx={{ px: 0.75, py: 0.75, borderRight: '1px solid #ffffff', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center"></TableCell>
+                                  <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #ffffff', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="left">Total</TableCell>
                                   {hasAnySize && (
-                                    <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="center">{detail.size || '—'}</TableCell>
+                                    <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #ffffff', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center"></TableCell>
                                   )}
-                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">{fmtRateQty(detail.qnty)}</TableCell>
-                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">{fmtRateQty(detail.unit_rate)}</TableCell>
-                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">{fmtAmt(detail.total_amount)}</TableCell>
+                                  <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #ffffff', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtRateQty(totalQty)}</TableCell>
+                                  <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #ffffff', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center"></TableCell>
+                                  <TableCell sx={{ px: 1, py: 0.75, fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtAmt(totalItemAmt)}</TableCell>
                                 </TableRow>
-                              ))
+                              </>
                             ) : (
                               <TableRow>
-                                <TableCell colSpan={hasAnySize ? 6 : 5} align="center" sx={{ py: 4 }}>
+                                <TableCell colSpan={hasAnySize ? 6 : 5} align="center" sx={{ py: 4, color: '#64748b' }}>
                                   No items found
                                 </TableCell>
                               </TableRow>
@@ -9368,12 +9553,12 @@ function SalesPageContent() {
 
                       return matchesName || matchesId || matchesOrderNo;
                     }).length === 0 && (
-                        <TableRow>
-                          <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
-                            {orderSearchTerm ? 'No matching orders found' : 'No orders found'}
-                          </TableCell>
-                        </TableRow>
-                      )}
+                      <TableRow>
+                        <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
+                          {orderSearchTerm ? 'No matching orders found' : 'No orders found'}
+                        </TableCell>
+                      </TableRow>
+                    )}
                   </>
                 )}
               </TableBody>
@@ -9394,113 +9579,75 @@ function SalesPageContent() {
         fullWidth
         PaperProps={{
           sx: {
-            borderRadius: 3,
-            minHeight: '80vh'
+            borderRadius: '16px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            overflow: 'hidden',
           }
         }}
       >
         <DialogTitle sx={{
-          background: 'linear-gradient(45deg, #2196f3 30%, #9c27b0 90%)',
+          background: 'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)',
           color: 'white',
+          px: 3, py: 2.2,
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between'
+          justify: 'space-between'
         }}>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <Avatar sx={{
               bgcolor: 'rgba(255,255,255,0.2)',
-              mr: 2,
-              width: 48,
-              height: 48
+              width: 40, height: 40,
+              backdropFilter: 'blur(4px)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
             }}>
-              <PersonIcon />
+              <PersonIcon sx={{ fontSize: 22, color: '#fff' }} />
             </Avatar>
             <Box>
-              <Typography variant="h5" component="div" sx={{ fontWeight: 'bold' }}>
-                {editingCustomer ? 'Edit Customer' : 'Add New Customer'}
+              <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: '-0.01em', lineHeight: 1.2, fontSize: '1.1rem' }}>
+                {editingCustomer ? 'Edit Customer Account' : 'Add New Customer Account'}
               </Typography>
-              <Typography variant="body2" sx={{ opacity: 0.9 }}>
-                {editingCustomer ? `Editing: ${formSelectedCustomer?.cus_name}` : 'Create a new customer profile'}
+              <Typography variant="caption" sx={{ opacity: 0.85, fontWeight: 500, fontSize: '0.78rem' }}>
+                {editingCustomer ? `Editing: ${formSelectedCustomer?.cus_name}` : 'Create a new customer profile and ledger account'}
               </Typography>
             </Box>
           </Box>
           <IconButton
             onClick={handleCloseCustomerPopup}
-            sx={{ color: 'white' }}
+            sx={{ color: 'white', opacity: 0.85, '&:hover': { opacity: 1, bgcolor: 'rgba(255,255,255,0.15)' } }}
           >
             <CloseIcon />
           </IconButton>
         </DialogTitle>
 
-        <DialogContent sx={{ p: 3 }}>
-          <Box component="form" sx={{ mt: 2 }}>
-            {/* Quick Actions */}
-            <Box sx={{
-              bgcolor: 'grey.50',
-              borderRadius: 2,
-              p: 2,
-              border: 1,
-              borderColor: 'grey.200',
-              mb: 3
-            }}>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<BusinessIcon />}
-                  onClick={() => setShowCustomerCategoryPopup(true)}
-                  sx={{
-                    borderColor: 'success.main',
-                    color: 'success.main',
-                    '&:hover': {
-                      borderColor: 'success.dark',
-                      backgroundColor: 'success.light',
-                      color: 'success.dark'
-                    }
-                  }}
-                >
-                  Add Account Category
+        <DialogContent sx={{ p: 3, bgcolor: '#f8fafc' }}>
+          <Box component="form" sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 0.5 }}>
+
+            {/* Inline Quick Add Bar */}
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', bgcolor: '#ffffff', p: 1.2, px: 2, borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.03)', gap: 1.5, flexWrap: 'wrap' }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b', fontSize: '0.8rem', letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>
+                ✨ Quick Add:
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Button size="small" variant="outlined" startIcon={<BusinessIcon />} onClick={() => setShowCustomerCategoryPopup(true)}
+                  sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 700, fontSize: '0.75rem', py: 0.4, px: 1.2, bgcolor: '#f0fdf4', borderColor: '#bbf7d0', color: '#166534', '&:hover': { bgcolor: '#dcfce7', borderColor: '#86efac' } }}>
+                  + Category
                 </Button>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<PersonIcon />}
-                  onClick={() => setShowCustomerTypePopup(true)}
-                  sx={{
-                    borderColor: 'secondary.main',
-                    color: 'secondary.main',
-                    '&:hover': {
-                      borderColor: 'secondary.dark',
-                      backgroundColor: 'secondary.light',
-                      color: 'secondary.dark'
-                    }
-                  }}
-                >
-                  Add Type
+                <Button size="small" variant="outlined" startIcon={<PersonIcon />} onClick={() => setShowCustomerTypePopup(true)}
+                  sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 700, fontSize: '0.75rem', py: 0.4, px: 1.2, bgcolor: '#f5f3ff', borderColor: '#ddd6fe', color: '#5b21b6', '&:hover': { bgcolor: '#ede9fe', borderColor: '#c4b5fd' } }}>
+                  + Type
                 </Button>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<MapPinIcon />}
-                  onClick={() => setShowCityPopup(true)}
-                  sx={{
-                    borderColor: 'warning.main',
-                    color: 'warning.main',
-                    '&:hover': {
-                      borderColor: 'warning.dark',
-                      backgroundColor: 'warning.light',
-                      color: 'warning.dark'
-                    }
-                  }}
-                >
-                  Add City
+                <Button size="small" variant="outlined" startIcon={<MapPinIcon />} onClick={() => setShowCityPopup(true)}
+                  sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 700, fontSize: '0.75rem', py: 0.4, px: 1.2, bgcolor: '#fffbeb', borderColor: '#fde68a', color: '#92400e', '&:hover': { bgcolor: '#fef3c7', borderColor: '#fcd34d' } }}>
+                  + City
                 </Button>
               </Box>
             </Box>
 
-            <Grid container spacing={3}>
-              {/* First Row - Name, Primary Phone, Secondary Phone */}
-              <Grid item xs={12} md={4}>
+            {/* Single Form Box */}
+            <Box sx={{ p: 2.5, borderRadius: '14px', border: '1px solid #e2e8f0', bgcolor: '#ffffff', boxShadow: '0 1px 4px rgba(0, 0, 0, 0.02)' }}>
+              {/* Strict 2-Column CSS Grid Layout */}
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 2.2 }}>
+                {/* Row 1 */}
                 <TextField
                   fullWidth
                   required
@@ -9509,19 +9656,32 @@ function SalesPageContent() {
                   name="cus_name"
                   value={newCustomer.cus_name ?? ''}
                   onChange={(e) => setNewCustomer(prev => ({ ...prev, cus_name: e.target.value }))}
-                  sx={{ minWidth: 250 }}
                   placeholder="Enter account name"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#4f46e5', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(79, 70, 229, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#4f46e5', fontWeight: 700 } }
+                  }}
                   InputProps={{
                     startAdornment: (
-                      <InputAdornment position="start">
-                        <PersonIcon />
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <PersonIcon sx={{ fontSize: 16, color: '#4f46e5' }} />
+                        </Box>
                       </InputAdornment>
                     ),
                   }}
                 />
-              </Grid>
 
-              <Grid item xs={12} md={4}>
                 <TextField
                   fullWidth
                   required
@@ -9530,19 +9690,33 @@ function SalesPageContent() {
                   type="tel"
                   value={newCustomer.cus_phone_no ?? ''}
                   onChange={(e) => setNewCustomer(prev => ({ ...prev, cus_phone_no: e.target.value }))}
-                  sx={{ minWidth: 250 }}
                   placeholder="Enter primary phone number"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#4f46e5', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(79, 70, 229, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#4f46e5', fontWeight: 700 } }
+                  }}
                   InputProps={{
                     startAdornment: (
-                      <InputAdornment position="start">
-                        <PhoneIcon />
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <PhoneIcon sx={{ fontSize: 16, color: '#475569' }} />
+                        </Box>
                       </InputAdornment>
                     ),
                   }}
                 />
-              </Grid>
 
-              <Grid item xs={12} md={4}>
+                {/* Row 2 */}
                 <TextField
                   fullWidth
                   label="Secondary Phone"
@@ -9551,19 +9725,32 @@ function SalesPageContent() {
                   value={newCustomer.cus_phone_no2 ?? ''}
                   onChange={(e) => setNewCustomer(prev => ({ ...prev, cus_phone_no2: e.target.value }))}
                   onFocus={(e) => e.target.select()}
-                  sx={{ minWidth: 250 }}
                   placeholder="Enter secondary phone number"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#4f46e5', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(79, 70, 229, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#4f46e5', fontWeight: 700 } }
+                  }}
                   InputProps={{
                     startAdornment: (
-                      <InputAdornment position="start">
-                        <PhoneIcon />
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#f8fafc', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <PhoneIcon sx={{ fontSize: 16, color: '#94a3b8' }} />
+                        </Box>
                       </InputAdornment>
                     ),
                   }}
                 />
-              </Grid>
 
-              <Grid item xs={12}>
                 <TextField
                   fullWidth
                   required
@@ -9573,261 +9760,369 @@ function SalesPageContent() {
                   onChange={(e) => setNewCustomer(prev => ({ ...prev, cus_address: e.target.value }))}
                   onFocus={(e) => e.target.select()}
                   placeholder="Enter complete address"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#4f46e5', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(79, 70, 229, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#4f46e5', fontWeight: 700 } }
+                  }}
                   InputProps={{
                     startAdornment: (
-                      <InputAdornment position="start">
-                        <MapPinIcon />
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <MapPinIcon sx={{ fontSize: 16, color: '#475569' }} />
+                        </Box>
                       </InputAdornment>
                     ),
                   }}
                 />
-              </Grid>
 
-              {/* Second Row - Customer Type, Category */}
-
-              <Grid item xs={12} md={4}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <IconButton
-                    size="small"
-                    aria-label="Add type"
-                    onMouseDown={(ev) => ev.stopPropagation()}
-                    onClick={() => setShowCustomerTypePopup(true)}
-                    sx={{ color: 'primary.main' }}
-                  >
-                    <AddIcon />
-                  </IconButton>
-
-                  <Autocomplete
-                    fullWidth
-                    required
-                    openOnFocus
-                    autoHighlight
-                    selectOnFocus
-                    autoSelect
-                    sx={{ flex: 1 }}
-                    options={[
-                      { id: '', title: 'Select a type' },
-                      ...customerTypes.map(type => ({
-                        id: type.cus_type_id,
-                        title: type.cus_type_title
-                      }))
-                    ]}
-                    value={(() => {
-                      const options = [
-                        { id: '', title: 'Select a type' },
-                        ...customerTypes.map(type => ({
-                          id: type.cus_type_id,
-                          title: type.cus_type_title
-                        }))
-                      ];
-                      return options.find(option => option.id === newCustomer.cus_type) || { id: '', title: 'Select a type' };
-                    })()}
-                    onChange={(event, newValue) => {
-                      setNewCustomer(prev => ({
-                        ...prev,
-                        cus_type: newValue ? newValue.id : ''
-                      }));
-                    }}
-                    getOptionLabel={(option) => option.title}
-                    open={customerTypeOpen}
-                    onOpen={() => setCustomerTypeOpen(true)}
-                    onClose={() => setCustomerTypeOpen(false)}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        inputRef={customerTypeInputRef}
-                        label="Account Type"
-                        onFocus={(e) => e.target.select()}
-                        sx={{ minWidth: 250 }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Tab' && customerTypeOpen) {
-                            const firstType = customerTypes && customerTypes.length ? customerTypes[0].cus_type_id : '';
-                            if (!newCustomer.cus_type && firstType) {
-                              setNewCustomer(prev => ({ ...prev, cus_type: firstType }));
-                            }
-                            setCustomerTypeOpen(false);
+                {/* Row 3 - Account Category & Account Type */}
+                <Autocomplete
+                  fullWidth
+                  autoSelect={true}
+                  autoHighlight={true}
+                  openOnFocus={true}
+                  selectOnFocus={true}
+                  PaperComponent={(props) => (
+                    <Paper
+                      {...props}
+                      elevation={8}
+                      sx={{
+                        borderRadius: '12px',
+                        mt: 1,
+                        boxShadow: '0 12px 32px rgba(15, 23, 42, 0.16), 0 2px 8px rgba(15, 23, 42, 0.08)',
+                        border: '1px solid #e2e8f0',
+                        overflow: 'hidden',
+                        '& .MuiAutocomplete-listbox': {
+                          p: 1,
+                          maxHeight: '260px',
+                          '&::-webkit-scrollbar': { width: '6px' },
+                          '&::-webkit-scrollbar-thumb': { backgroundColor: '#cbd5e1', borderRadius: '4px' },
+                          '&::-webkit-scrollbar-thumb:hover': { backgroundColor: '#94a3b8' }
+                        },
+                        '& .MuiAutocomplete-option': {
+                          fontSize: '0.875rem',
+                          fontWeight: 500,
+                          py: 1.2,
+                          px: 2,
+                          borderRadius: '8px',
+                          mb: 0.5,
+                          transition: 'all 0.15s ease',
+                          color: '#334155',
+                          '&:hover': {
+                            backgroundColor: '#f1f5f9',
+                            color: '#0f172a'
+                          },
+                          '&[aria-selected="true"]': {
+                            backgroundColor: '#e0e7ff !important',
+                            color: '#4338ca',
+                            fontWeight: 600
                           }
-                        }}
-                        InputProps={{
-                          ...params.InputProps,
-                          startAdornment: (
-                            <InputAdornment position="start">
-                              <PersonIcon />
-                            </InputAdornment>
-                          ),
-                        }}
-                      />
-                    )}
-                  />
-                </Box>
-              </Grid>
+                        }
+                      }}
+                    />
+                  )}
+                  options={customerCategories.map(category => ({
+                    id: category.cus_cat_id,
+                    title: category.cus_cat_title
+                  }))}
+                  getOptionLabel={(option) => option.title || ''}
+                  value={(() => {
+                    return customerCategories.find(option => option.cus_cat_id === newCustomer.cus_category)
+                      ? { id: newCustomer.cus_category, title: customerCategories.find(option => option.cus_cat_id === newCustomer.cus_category).cus_cat_title }
+                      : null;
+                  })()}
+                  onChange={(event, newValue) => {
+                    setNewCustomer(prev => ({
+                      ...prev,
+                      cus_category: newValue ? newValue.id : ''
+                    }));
+                  }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Account Category"
+                      required
+                      placeholder="Select category"
+                      onFocus={(e) => e.target.select()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Tab' && params.inputProps?.ariaExpanded) {
+                          const firstCat = customerCategories && customerCategories.length ? customerCategories[0].cus_cat_id : '';
+                          if (!newCustomer.cus_category && firstCat) setNewCustomer(prev => ({ ...prev, cus_category: firstCat }));
+                        }
+                      }}
+                      sx={{
+                        bgcolor: '#ffffff',
+                        borderRadius: '10px',
+                        '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                        '& .MuiOutlinedInput-root': {
+                          borderRadius: '10px',
+                          backgroundColor: '#ffffff',
+                          fontSize: '0.9rem',
+                          '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                          '&:hover fieldset': { borderColor: '#818cf8' },
+                          '&.Mui-focused fieldset': { borderColor: '#059669', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(5, 150, 105, 0.12)' },
+                        },
+                        '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#059669', fontWeight: 700 } }
+                      }}
+                      InputProps={{
+                        ...params.InputProps,
+                        startAdornment: (
+                          <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                            <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#d1fae5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <BusinessIcon sx={{ fontSize: 16, color: '#059669' }} />
+                            </Box>
+                          </InputAdornment>
+                        ),
+                      }}
+                    />
+                  )}
+                />
 
-              <Grid item xs={12} md={4}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <IconButton
-                    size="small"
-                    aria-label="Add category"
-                    onMouseDown={(ev) => ev.stopPropagation()}
-                    onClick={() => setShowCustomerCategoryPopup(true)}
-                    sx={{ color: 'primary.main' }}
-                  >
-                    <AddIcon />
-                  </IconButton>
-
-                  <Autocomplete
-                    fullWidth
-                    required
-                    openOnFocus
-                    autoHighlight
-                    selectOnFocus
-                    autoSelect
-                    sx={{ flex: 1 }}
-                    options={[
-                      { id: '', title: 'Select a category' },
-                      ...customerCategories.map(category => ({
-                        id: category.cus_cat_id,
-                        title: category.cus_cat_title
-                      }))
-                    ]}
-                    value={(() => {
-                      const options = [
-                        { id: '', title: 'Select a category' },
-                        ...customerCategories.map(category => ({
-                          id: category.cus_cat_id,
-                          title: category.cus_cat_title
-                        }))
-                      ];
-                      return options.find(option => option.id === newCustomer.cus_category) || { id: '', title: 'Select a category' };
-                    })()}
-                    onChange={(event, newValue) => {
-                      setNewCustomer(prev => ({
-                        ...prev,
-                        cus_category: newValue ? newValue.id : ''
-                      }));
-                    }}
-                    getOptionLabel={(option) => option.title}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Account Category"
-                        onFocus={(e) => e.target.select()}
-                        sx={{ minWidth: 250 }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Tab' && params.inputProps?.ariaExpanded) {
-                            const firstCat = customerCategories && customerCategories.length ? customerCategories[0].cus_cat_id : '';
-                            if (!newCustomer.cus_category && firstCat) setNewCustomer(prev => ({ ...prev, cus_category: firstCat }));
+                <Autocomplete
+                  fullWidth
+                  autoSelect={true}
+                  autoHighlight={true}
+                  openOnFocus={true}
+                  selectOnFocus={true}
+                  PaperComponent={(props) => (
+                    <Paper
+                      {...props}
+                      elevation={8}
+                      sx={{
+                        borderRadius: '12px',
+                        mt: 1,
+                        boxShadow: '0 12px 32px rgba(15, 23, 42, 0.16), 0 2px 8px rgba(15, 23, 42, 0.08)',
+                        border: '1px solid #e2e8f0',
+                        overflow: 'hidden',
+                        '& .MuiAutocomplete-listbox': {
+                          p: 1,
+                          maxHeight: '260px',
+                          '&::-webkit-scrollbar': { width: '6px' },
+                          '&::-webkit-scrollbar-thumb': { backgroundColor: '#cbd5e1', borderRadius: '4px' },
+                          '&::-webkit-scrollbar-thumb:hover': { backgroundColor: '#94a3b8' }
+                        },
+                        '& .MuiAutocomplete-option': {
+                          fontSize: '0.875rem',
+                          fontWeight: 500,
+                          py: 1.2,
+                          px: 2,
+                          borderRadius: '8px',
+                          mb: 0.5,
+                          transition: 'all 0.15s ease',
+                          color: '#334155',
+                          '&:hover': {
+                            backgroundColor: '#f1f5f9',
+                            color: '#0f172a'
+                          },
+                          '&[aria-selected="true"]': {
+                            backgroundColor: '#e0e7ff !important',
+                            color: '#4338ca',
+                            fontWeight: 600
                           }
-                        }}
-                        InputProps={{
-                          ...params.InputProps,
-                          startAdornment: (
-                            <InputAdornment position="start">
-                              <BusinessIcon />
-                            </InputAdornment>
-                          ),
-                        }}
-                      />
-                    )}
-                  />
-                </Box>
-              </Grid>
+                        }
+                      }}
+                    />
+                  )}
+                  options={customerTypes.map(type => ({
+                    id: type.cus_type_id,
+                    title: type.cus_type_title
+                  }))}
+                  getOptionLabel={(option) => option.title || ''}
+                  value={(() => {
+                    return customerTypes.find(option => option.cus_type_id === newCustomer.cus_type)
+                      ? { id: newCustomer.cus_type, title: customerTypes.find(option => option.cus_type_id === newCustomer.cus_type).cus_type_title }
+                      : null;
+                  })()}
+                  onChange={(event, newValue) => {
+                    setNewCustomer(prev => ({
+                      ...prev,
+                      cus_type: newValue ? newValue.id : ''
+                    }));
+                  }}
+                  open={customerTypeOpen}
+                  onOpen={() => setCustomerTypeOpen(true)}
+                  onClose={() => setCustomerTypeOpen(false)}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      inputRef={customerTypeInputRef}
+                      label="Account Type"
+                      required
+                      placeholder="Select type"
+                      onFocus={(e) => e.target.select()}
+                      sx={{
+                        bgcolor: '#ffffff',
+                        borderRadius: '10px',
+                        '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                        '& .MuiOutlinedInput-root': {
+                          borderRadius: '10px',
+                          backgroundColor: '#ffffff',
+                          fontSize: '0.9rem',
+                          '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                          '&:hover fieldset': { borderColor: '#818cf8' },
+                          '&.Mui-focused fieldset': { borderColor: '#7c3aed', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(124, 58, 237, 0.12)' },
+                        },
+                        '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#7c3aed', fontWeight: 700 } }
+                      }}
+                      InputProps={{
+                        ...params.InputProps,
+                        startAdornment: (
+                          <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                            <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#ede9fe', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <PersonIcon sx={{ fontSize: 16, color: '#7c3aed' }} />
+                            </Box>
+                          </InputAdornment>
+                        ),
+                      }}
+                    />
+                  )}
+                />
 
-              {/* Third Row - Reference, Account Info, City */}
-              <Grid item xs={12} md={4}>
+                {/* Row 4 - City & Reference */}
+                <Autocomplete
+                  fullWidth
+                  autoSelect={true}
+                  autoHighlight={true}
+                  openOnFocus={true}
+                  selectOnFocus={true}
+                  PaperComponent={(props) => (
+                    <Paper
+                      {...props}
+                      elevation={8}
+                      sx={{
+                        borderRadius: '12px',
+                        mt: 1,
+                        boxShadow: '0 12px 32px rgba(15, 23, 42, 0.16), 0 2px 8px rgba(15, 23, 42, 0.08)',
+                        border: '1px solid #e2e8f0',
+                        overflow: 'hidden',
+                        '& .MuiAutocomplete-listbox': {
+                          p: 1,
+                          maxHeight: '260px',
+                          '&::-webkit-scrollbar': { width: '6px' },
+                          '&::-webkit-scrollbar-thumb': { backgroundColor: '#cbd5e1', borderRadius: '4px' },
+                          '&::-webkit-scrollbar-thumb:hover': { backgroundColor: '#94a3b8' }
+                        },
+                        '& .MuiAutocomplete-option': {
+                          fontSize: '0.875rem',
+                          fontWeight: 500,
+                          py: 1.2,
+                          px: 2,
+                          borderRadius: '8px',
+                          mb: 0.5,
+                          transition: 'all 0.15s ease',
+                          color: '#334155',
+                          '&:hover': {
+                            backgroundColor: '#f1f5f9',
+                            color: '#0f172a'
+                          },
+                          '&[aria-selected="true"]': {
+                            backgroundColor: '#e0e7ff !important',
+                            color: '#4338ca',
+                            fontWeight: 600
+                          }
+                        }
+                      }}
+                    />
+                  )}
+                  options={cities.map(city => ({
+                    id: city.city_id,
+                    title: city.city_name
+                  }))}
+                  getOptionLabel={(option) => option.title || ''}
+                  value={(() => {
+                    return cities.find(option => option.city_id === newCustomer.city_id)
+                      ? { id: newCustomer.city_id, title: cities.find(option => option.city_id === newCustomer.city_id).city_name }
+                      : null;
+                  })()}
+                  onChange={(event, newValue) => {
+                    setNewCustomer(prev => ({
+                      ...prev,
+                      city_id: newValue ? newValue.id : ''
+                    }));
+                  }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="City"
+                      placeholder="Select city"
+                      onFocus={(e) => e.target.select()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Tab' && params.inputProps?.ariaExpanded) {
+                          const firstCity = cities && cities.length ? cities[0].city_id : '';
+                          if (!newCustomer.city_id && firstCity) setNewCustomer(prev => ({ ...prev, city_id: firstCity }));
+                        }
+                      }}
+                      sx={{
+                        bgcolor: '#ffffff',
+                        borderRadius: '10px',
+                        '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                        '& .MuiOutlinedInput-root': {
+                          borderRadius: '10px',
+                          backgroundColor: '#ffffff',
+                          fontSize: '0.9rem',
+                          '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                          '&:hover fieldset': { borderColor: '#818cf8' },
+                          '&.Mui-focused fieldset': { borderColor: '#d97706', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(217, 119, 6, 0.12)' },
+                        },
+                        '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#d97706', fontWeight: 700 } }
+                      }}
+                      InputProps={{
+                        ...params.InputProps,
+                        startAdornment: (
+                          <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                            <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <MapPinIcon sx={{ fontSize: 16, color: '#d97706' }} />
+                            </Box>
+                          </InputAdornment>
+                        ),
+                      }}
+                    />
+                  )}
+                />
+
                 <TextField
                   fullWidth
                   label="Reference"
                   name="cus_reference"
                   value={newCustomer.cus_reference ?? ''}
                   onChange={(e) => setNewCustomer(prev => ({ ...prev, cus_reference: e.target.value }))}
-                  sx={{ minWidth: 250 }}
                   placeholder="Enter reference number"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#0284c7', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(2, 132, 199, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#0284c7', fontWeight: 700 } }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#e0f2fe', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <TagIcon sx={{ fontSize: 16, color: '#0284c7' }} />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
                 />
-              </Grid>
 
-              <Grid item xs={12} md={4}>
-                <TextField
-                  fullWidth
-                  label="Account Info"
-                  name="cus_account_info"
-                  value={newCustomer.cus_account_info ?? ''}
-                  onChange={(e) => setNewCustomer(prev => ({ ...prev, cus_account_info: e.target.value }))}
-                  sx={{ minWidth: 250 }}
-                  placeholder="Enter account information"
-                />
-              </Grid>
-
-              <Grid item xs={12} md={4}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <IconButton
-                    size="small"
-                    aria-label="Add city"
-                    onMouseDown={(ev) => ev.stopPropagation()}
-                    onClick={() => setShowCityPopup(true)}
-                    sx={{ color: 'primary.main' }}
-                  >
-                    <AddIcon />
-                  </IconButton>
-
-                  <Autocomplete
-                    fullWidth
-                    options={[
-                      { id: '', title: 'Select a city' },
-                      ...cities.map(city => ({
-                        id: city.city_id,
-                        title: city.city_name
-                      }))
-                    ]}
-                    value={(() => {
-                      const options = [
-                        { id: '', title: 'Select a city' },
-                        ...cities.map(city => ({
-                          id: city.city_id,
-                          title: city.city_name
-                        }))
-                      ];
-                      return options.find(option => option.id === newCustomer.city_id) || { id: '', title: 'Select a city' };
-                    })()}
-                    onChange={(event, newValue) => {
-                      setNewCustomer(prev => ({
-                        ...prev,
-                        city_id: newValue ? newValue.id : ''
-                      }));
-                    }}
-                    getOptionLabel={(option) => option.title}
-                    autoSelect={true}
-                    autoHighlight={true}
-                    openOnFocus={true}
-                    selectOnFocus={true}
-                    sx={{ flex: 1 }}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="City"
-                        onFocus={(e) => e.target.select()}
-                        sx={{ minWidth: 250 }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Tab' && params.inputProps?.ariaExpanded) {
-                            const firstCity = cities && cities.length ? cities[0].city_id : '';
-                            if (!newCustomer.city_id && firstCity) setNewCustomer(prev => ({ ...prev, city_id: firstCity }));
-                          }
-                        }}
-                        InputProps={{
-                          ...params.InputProps,
-                          startAdornment: (
-                            <InputAdornment position="start">
-                              <MapPinIcon />
-                            </InputAdornment>
-                          ),
-                        }}
-                      />
-                    )}
-                  />
-                </Box>
-              </Grid>
-
-              {/* Fourth Row - CNIC, NTN, Balance */}
-              <Grid item xs={12} md={4}>
+                {/* Row 5 - CNIC & NTN Number */}
                 <TextField
                   fullWidth
                   label="CNIC"
@@ -9835,12 +10130,32 @@ function SalesPageContent() {
                   value={newCustomer.CNIC ?? ''}
                   onChange={(e) => setNewCustomer(prev => ({ ...prev, CNIC: e.target.value }))}
                   onFocus={(e) => e.target.select()}
-                  sx={{ minWidth: 250 }}
                   placeholder="Enter CNIC number"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#e11d48', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(225, 29, 72, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#e11d48', fontWeight: 700 } }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#ffe4e6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <CreditCardIcon sx={{ fontSize: 16, color: '#e11d48' }} />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
                 />
-              </Grid>
 
-              <Grid item xs={12} md={4}>
                 <TextField
                   fullWidth
                   label="NTN Number"
@@ -9848,12 +10163,33 @@ function SalesPageContent() {
                   value={newCustomer.NTN_NO ?? ''}
                   onChange={(e) => setNewCustomer(prev => ({ ...prev, NTN_NO: e.target.value }))}
                   onFocus={(e) => e.target.select()}
-                  sx={{ minWidth: 250 }}
                   placeholder="Enter NTN number"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#0d9488', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(13, 148, 136, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#0d9488', fontWeight: 700 } }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#ccfbf1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <TagIcon sx={{ fontSize: 16, color: '#0d9488' }} />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
                 />
-              </Grid>
 
-              <Grid item xs={12} md={4}>
+                {/* Row 6 - Initial Balance & Account Info */}
                 <TextField
                   fullWidth
                   disabled
@@ -9864,34 +10200,64 @@ function SalesPageContent() {
                   value={newCustomer.cus_balance ?? ''}
                   onChange={(e) => setNewCustomer(prev => ({ ...prev, cus_balance: e.target.value }))}
                   onFocus={(e) => e.target.select()}
-                  sx={{ minWidth: 250 }}
                   placeholder="Balance is non-editable"
+                  sx={{
+                    bgcolor: '#f8fafc',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#f8fafc',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#e2e8f0', borderWidth: '1.5px' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#94a3b8', fontWeight: 500 }
+                  }}
                   InputProps={{
                     readOnly: true,
                     startAdornment: (
-                      <InputAdornment position="start">
-                        <AttachMoneyIcon />
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <AttachMoneyIcon sx={{ fontSize: 16, color: '#16a34a' }} />
+                        </Box>
                       </InputAdornment>
                     ),
                   }}
                 />
-              </Grid>
 
-              {/* Fifth Row - Other, Name in Urdu */}
-              <Grid item xs={12} md={6}>
                 <TextField
                   fullWidth
-                  label="Other Information"
-                  name="other"
-                  value={newCustomer.other ?? ''}
-                  onChange={(e) => setNewCustomer(prev => ({ ...prev, other: e.target.value }))}
-                  onFocus={(e) => e.target.select()}
-                  sx={{ minWidth: 250 }}
-                  placeholder="Enter other information"
+                  label="Account Info"
+                  name="cus_account_info"
+                  value={newCustomer.cus_account_info ?? ''}
+                  onChange={(e) => setNewCustomer(prev => ({ ...prev, cus_account_info: e.target.value }))}
+                  placeholder="Enter account information"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#2563eb', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(37, 99, 235, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#2563eb', fontWeight: 700 } }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#dbeafe', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <InfoIcon sx={{ fontSize: 16, color: '#2563eb' }} />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
                 />
-              </Grid>
 
-              <Grid item xs={12} md={6}>
+                {/* Row 7 - Name in Urdu & Other Information */}
                 <TextField
                   fullWidth
                   label="Name in Urdu"
@@ -9899,26 +10265,97 @@ function SalesPageContent() {
                   value={newCustomer.name_urdu ?? ''}
                   onChange={(e) => setNewCustomer(prev => ({ ...prev, name_urdu: e.target.value }))}
                   onFocus={(e) => e.target.select()}
-                  sx={{ minWidth: 250 }}
                   placeholder="Enter name in Urdu"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#9333ea', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(147, 51, 234, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#9333ea', fontWeight: 700 } }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#f3e8ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <TranslateIcon sx={{ fontSize: 16, color: '#9333ea' }} />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
                 />
-              </Grid>
-            </Grid>
+
+                <TextField
+                  fullWidth
+                  label="Other Information"
+                  name="other"
+                  value={newCustomer.other ?? ''}
+                  onChange={(e) => setNewCustomer(prev => ({ ...prev, other: e.target.value }))}
+                  onFocus={(e) => e.target.select()}
+                  placeholder="Enter other information"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#475569', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(71, 85, 105, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#475569', fontWeight: 700 } }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <NotesIcon sx={{ fontSize: 16, color: '#475569' }} />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </Box>
+            </Box>
           </Box>
         </DialogContent>
-        <DialogActions sx={{ p: 3, borderTop: 1, borderColor: 'divider' }}>
-          <Button onClick={handleCloseCustomerPopup} color="primary">
-            Cancel
-          </Button>
-          <Button
-            onClick={handleCreateCustomer}
-            variant="contained"
-            disabled={isSavingCustomer}
-            startIcon={isSavingCustomer ? <CircularProgress size={16} color="inherit" /> : null}
-            sx={{ bgcolor: '#6f42c1', '&:hover': { bgcolor: '#5a2d91' }, minWidth: 140 }}
-          >
-            {isSavingCustomer ? 'Saving...' : (editingCustomer ? 'Save Changes' : 'Create Customer')}
-          </Button>
+
+        <DialogActions sx={{ px: 3, py: 2.2, bgcolor: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600, fontSize: '0.82rem' }}>
+            Fields marked with <span style={{ color: '#ef4444', fontWeight: 700 }}>*</span> are required
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1.5 }}>
+            <Button onClick={handleCloseCustomerPopup} sx={{ color: '#64748b', fontWeight: 600, px: 3, py: 1, borderRadius: '10px', textTransform: 'none', '&:hover': { bgcolor: '#f1f5f9' } }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateCustomer}
+              variant="contained"
+              disabled={isSavingCustomer}
+              startIcon={isSavingCustomer ? <CircularProgress size={16} color="inherit" /> : null}
+              sx={{
+                background: 'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)',
+                color: '#fff',
+                fontWeight: 700,
+                fontSize: '0.9rem',
+                textTransform: 'none',
+                px: 3.5, py: 1.1,
+                borderRadius: '10px',
+                boxShadow: '0 4px 14px rgba(79, 70, 229, 0.38)',
+                '&:hover': { background: 'linear-gradient(135deg, #4338ca 0%, #312e81 100%)', boxShadow: '0 6px 20px rgba(79, 70, 229, 0.5)' }
+              }}
+            >
+              {isSavingCustomer ? 'Saving...' : (editingCustomer ? 'Save Changes' : 'Create Customer Account')}
+            </Button>
+          </Box>
         </DialogActions>
       </Dialog>
 
@@ -9969,101 +10406,126 @@ function SalesPageContent() {
           {selectedBill && (
             <Box id="printable-invoice" sx={{ width: '100%', bgcolor: '#ffffff', color: SALE_INVOICE_PRINT.bodyText, p: 2, '& .MuiTypography-root': { color: SALE_INVOICE_PRINT.bodyText }, '& .MuiTableCell-root': { color: SALE_INVOICE_PRINT.bodyText } }}>
               {/* Company Header */}
-              <Box sx={{ textAlign: 'center', py: 3, borderBottom: '2px solid #000' }}>
+              <Box sx={{
+                textAlign: 'center',
+                pt: 2.5,
+                pb: 2,
+                px: 2,
+                borderTop: '4px solid #0f172a',
+                borderBottom: '3px double #0f172a',
+                bgcolor: '#ffffff',
+                mb: 1
+              }}>
                 <Typography variant="h4" sx={{
                   fontWeight: 'bold',
-                  mb: 1,
-                  fontFamily: 'Arial, sans-serif',
-                  fontSize: { xs: '1.5rem', md: '2rem' },
-                  direction: 'rtl'
+                  mb: 1.25,
+                  fontFamily: '"Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", "Urdu Typesetting", serif !important',
+                  fontSize: { xs: '1.6rem', md: '2.1rem' },
+                  direction: 'rtl',
+                  color: '#0f172a',
+                  lineHeight: 1.8
                 }}>
                   اتفاق آئرن اینڈ سیمنٹ سٹور
                 </Typography>
                 <Typography variant="body2" sx={{
-                  mb: 1,
-                  fontSize: { xs: '0.75rem', md: '0.9rem' },
-                  direction: 'rtl'
+                  mt: 0.75,
+                  mb: 1.5,
+                  fontSize: '0.9rem',
+                  direction: 'rtl',
+                  color: '#d32f2f !important',
+                  fontWeight: 600
                 }}>
                   گجرات سرگودھا روڈ، پاہڑیانوالی
                 </Typography>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
-                  <PhoneIcon sx={{ color: '#25D366', fontSize: '1rem' }} />
-                  <Typography variant="body2">
-                    Ph:- 0346-7560306, 0300-7560306
+                <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, px: 1.75, py: 0.35, borderRadius: '20px', bgcolor: '#f8fafc', border: '1px solid #e2e8f0', mb: 1.75 }}>
+                  <PhoneIcon sx={{ color: '#10b981', fontSize: '0.95rem' }} />
+                  <Typography variant="body2" sx={{ color: '#1e293b', fontWeight: 600, fontSize: '0.85rem', letterSpacing: 0.5 }}>
+                    Ph:- 0300-7560306
                   </Typography>
                 </Box>
-                <Typography variant="h6" sx={{
-                  fontWeight: 'bold',
-                  textTransform: 'uppercase',
-                  letterSpacing: 1,
-                  mt: 2
-                }}>
-                  {selectedBill?.is_return || selectedBill?.bill_type === 'SALE_RETURN' ? 'SALE RETURN INVOICE' : 'SALE INVOICE'}
-                </Typography>
+                <Box sx={{ mt: 0.5 }}>
+                  <Typography variant="body2" sx={{
+                    display: 'inline-block',
+                    px: 3,
+                    py: 0.6,
+                    borderRadius: '6px',
+                    bgcolor: (selectedBill?.is_return || selectedBill?.bill_type === 'SALE_RETURN') ? '#991b1b' : '#0f172a',
+                    color: '#ffffff !important',
+                    fontWeight: 800,
+                    fontSize: '0.9rem',
+                    letterSpacing: 2,
+                    textTransform: 'uppercase'
+                  }}>
+                    {selectedBill?.is_return || selectedBill?.bill_type === 'SALE_RETURN' ? 'SALE RETURN INVOICE' : 'SALE INVOICE'}
+                  </Typography>
+                </Box>
               </Box>
 
               {/* Customer and Invoice Details */}
-              <Box sx={{ px: 3, py: 2, borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between' }}>
-                <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column' }}>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Customer Name:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }}>
+              <Box sx={{ px: 3, pt: 1.25, pb: 2, borderBottom: '1.5px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                {/* Left Side: Customer Details */}
+                <Box sx={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', pr: 3, alignItems: 'flex-start' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 0.75, flexWrap: 'nowrap' }}>
+                    <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Customer Name:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '1.05rem', color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {selectedBill.customer ? `${selectedBill.customer.cus_name}${selectedBill.customer.name_urdu ? ' ' + selectedBill.customer.name_urdu : ''}` : 'N/A'}
                     </Typography>
                   </Box>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Phone No:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 0.75, flexWrap: 'nowrap' }}>
+                    <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Phone No:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {selectedBill.customer?.cus_phone_no || 'N/A'}
                     </Typography>
                   </Box>
                   {selectedBill.customer?.cus_address && (
-                    <Box sx={{ display: 'flex' }}>
-                      <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Address:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'nowrap' }}>
+                      <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Address:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                         {selectedBill.customer.cus_address}
                       </Typography>
                     </Box>
                   )}
                 </Box>
-                <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column', pl: 4 }}>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Invoice No:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+
+                {/* Right Side: Invoice Meta Details */}
+                <Box sx={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', ml: 'auto', pl: 3, alignItems: 'flex-end', textAlign: 'right' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, mb: 0.75, width: '100%', flexWrap: 'nowrap' }}>
+                    <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Invoice No:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {getBillDisplayNo(selectedBill)}
                     </Typography>
                   </Box>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, mb: 0.75, width: '100%', flexWrap: 'nowrap' }}>
+                    <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>
                       {selectedBill?.is_return || selectedBill?.bill_type === 'SALE_RETURN' ? 'Return ID:' : 'Sale ID:'}
                     </Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {selectedBill?.is_return || selectedBill?.bill_type === 'SALE_RETURN' ? selectedBill.return_id : selectedBill.sale_id}
                     </Typography>
                   </Box>
                   {(selectedBill?.is_return || selectedBill?.bill_type === 'SALE_RETURN') && selectedBill.sale_id && (
-                    <Box sx={{ display: 'flex', mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Sale ID:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, mb: 0.75, width: '100%', flexWrap: 'nowrap' }}>
+                      <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Sale ID:</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                         {selectedBill.sale_id}
                       </Typography>
                     </Box>
                   )}
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Date:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, mb: 0.75, width: '100%', flexWrap: 'nowrap' }}>
+                    <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Date:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {formatDatePK(selectedBill?.created_at) || '—'}
                     </Typography>
                   </Box>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Time:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, mb: 0.75, width: '100%', flexWrap: 'nowrap' }}>
+                    <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Time:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {formatTimePK(selectedBill?.created_at) || '—'}
                     </Typography>
                   </Box>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Created By:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, width: '100%', flexWrap: 'nowrap' }}>
+                    <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Created By:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {getCreatedByName(selectedBill, currentUser)}
                     </Typography>
                   </Box>
@@ -10076,38 +10538,53 @@ function SalesPageContent() {
                 {(() => {
                   const details = selectedBill?.sale_details ? getSaleDetailsInAddOrder(selectedBill.sale_details) : [];
                   const hasAnySize = details.some(d => d.size && String(d.size).trim() !== '');
+                  const totalQty = details.reduce((sum, d) => sum + (parseFloat(d.qnty) || 0), 0);
+                  const totalItemAmt = details.reduce((sum, d) => sum + (parseFloat(d.total_amount) || 0), 0);
                   return (
-                    <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
-                      <Table size="small">
+                    <TableContainer component={Paper} variant="outlined" sx={{ mb: 2.5, border: '1px solid #cbd5e1', borderRadius: '4px', overflow: 'hidden', boxShadow: 'none' }}>
+                      <Table size="small" sx={{ tableLayout: 'fixed', width: '100%' }}>
                         <TableHead>
-                          <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.headerBg }}>
-                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>S#</TableCell>
-                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>Product Name</TableCell>
+                          <TableRow sx={{ bgcolor: '#9e9e9e' }}>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: '6%', borderRight: '1px solid #ffffff', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="center">S#</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: hasAnySize ? '36%' : '50%', borderRight: '1px solid #ffffff', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="left">Product Name</TableCell>
                             {hasAnySize && (
-                              <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="center">Size</TableCell>
+                              <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: '20%', borderRight: '1px solid #ffffff', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="center">Description</TableCell>
                             )}
-                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Qty</TableCell>
-                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Rate</TableCell>
-                            <TableCell sx={{ fontWeight: 'bold', color: SALE_INVOICE_PRINT.headerText, py: 0.75, px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}` }} align="right">Amount</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: '12%', borderRight: '1px solid #ffffff', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="center">Qty</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: '13%', borderRight: '1px solid #ffffff', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="center">Rate</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#000000 !important', py: 0.85, px: 1, fontSize: '0.875rem', width: '13%', borderBottom: '1px solid #cbd5e1', verticalAlign: 'middle' }} align="center">Amount</TableCell>
                           </TableRow>
                         </TableHead>
                         <TableBody>
                           {details.length > 0 ? (
-                            details.map((detail, index) => (
-                              <TableRow key={detail.sale_detail_id || index}>
-                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }}>{index + 1}</TableCell>
-                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }}>{detail.product?.pro_title || detail.product?.pro_name || detail.product?.prod_name || detail.pro_title || 'N/A'}</TableCell>
+                            <>
+                              {details.map((detail, index) => (
+                                <TableRow key={detail.sale_detail_id || index}>
+                                  <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{index + 1}</TableCell>
+                                  <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="left">{detail.product?.pro_title || detail.product?.pro_name || detail.product?.prod_name || detail.pro_title || 'N/A'}</TableCell>
+                                  {hasAnySize && (
+                                    <TableCell className="cell-normal" sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'normal !important', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="center">{detail.size || '—'}</TableCell>
+                                  )}
+                                  <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{detail.qnty || 0}</TableCell>
+                                  <TableCell className="cell-normal" sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'normal !important', color: '#000000', verticalAlign: 'middle' }} align="center">{parseFloat(detail.unit_rate || 0).toFixed(2)}</TableCell>
+                                  <TableCell sx={{ px: 1.25, py: 0.75, borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{parseFloat(detail.total_amount || 0).toFixed(0)}</TableCell>
+                                </TableRow>
+                              ))}
+                              {/* Total Row */}
+                              <TableRow sx={{ bgcolor: '#e0e0e0' }}>
+                                <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #ffffff', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center"></TableCell>
+                                <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #ffffff', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="left">Total</TableCell>
                                 {hasAnySize && (
-                                  <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="center">{detail.size || '—'}</TableCell>
+                                  <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #ffffff', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center"></TableCell>
                                 )}
-                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{detail.qnty || 0}</TableCell>
-                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{parseFloat(detail.unit_rate || 0).toFixed(2)}</TableCell>
-                                <TableCell sx={{ px: 1, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.95rem', fontWeight: 600 }} align="right">{parseFloat(detail.total_amount || 0).toFixed(0)}</TableCell>
+                                <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #ffffff', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{totalQty}</TableCell>
+                                <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #ffffff', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center"></TableCell>
+                                <TableCell sx={{ px: 1.25, py: 0.75, fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{parseFloat(totalItemAmt || 0).toFixed(0)}</TableCell>
                               </TableRow>
-                            ))
+                            </>
                           ) : (
                             <TableRow>
-                              <TableCell colSpan={hasAnySize ? 6 : 5} align="center" sx={{ py: 4 }}>
+                              <TableCell colSpan={hasAnySize ? 6 : 5} align="center" sx={{ py: 4, color: '#64748b' }}>
                                 No items found
                               </TableCell>
                             </TableRow>
@@ -10129,20 +10606,20 @@ function SalesPageContent() {
                       const totalBalance = prevBalance + currentBillAmount - payment;
 
                       return (
-                        <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #000', width: '100%' }}>
+                        <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #cbd5e1', borderRadius: '4px', overflow: 'hidden', width: '100%', boxShadow: 'none' }}>
                           <Table size="small">
                             <TableBody>
                               {prevBalance > 0 && (
                                 <TableRow>
-                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>سابقہ بقایا</TableCell>
-                                  <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>
+                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', color: '#000000', fontSize: '0.875rem' }}>سابقہ بقایا</TableCell>
+                                  <TableCell align="right" sx={{ px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontWeight: 'bold', color: '#000000', fontSize: '0.875rem' }}>
                                     {fmtAmt(prevBalance)}
                                   </TableCell>
                                 </TableRow>
                               )}
-                              <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.balanceTotalBg }}>
-                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>كل بقايا</TableCell>
-                                <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>
+                              <TableRow sx={{ bgcolor: '#9e9e9e' }}>
+                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.65, borderRight: '1px solid #ffffff', color: '#000000 !important', fontSize: '0.875rem' }}>كل بقايا</TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 'bold', px: 1.25, py: 0.65, color: '#000000 !important', fontSize: '0.9rem' }}>
                                   {fmtAmt(totalBalance)}
                                 </TableCell>
                               </TableRow>
@@ -10154,9 +10631,9 @@ function SalesPageContent() {
 
                     {/* Notes Section */}
                     {(selectedBill.notes || selectedBill.reference) && (
-                      <Box sx={{ mt: 1 }}>
-                        <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>
-                          <strong>Notes:</strong> {selectedBill.notes || selectedBill.reference}
+                      <Box sx={{ mt: 1, p: 1.25, bgcolor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '4px' }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.85rem', color: '#000000', fontWeight: 'bold' }}>
+                          <strong style={{ color: '#000000' }}>Notes:</strong> {selectedBill.notes || selectedBill.reference}
                         </Typography>
                       </Box>
                     )}
@@ -10164,36 +10641,36 @@ function SalesPageContent() {
 
                   {/* Right Side - Payment Summary */}
                   <Box sx={{ flex: '0 0 48%', display: 'flex', justifyContent: 'flex-end' }}>
-                    <TableContainer component={Paper} variant="outlined" sx={{ border: '1px solid #000', width: '100%', maxWidth: '100%' }}>
+                    <TableContainer component={Paper} variant="outlined" sx={{ border: '1px solid #cbd5e1', borderRadius: '4px', overflow: 'hidden', width: '100%', maxWidth: '100%', boxShadow: 'none' }}>
                       <Table size="small">
                         <TableBody>
                           <TableRow>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رقم بل</TableCell>
-                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', color: '#000000', fontSize: '0.875rem' }}>رقم بل</TableCell>
+                            <TableCell align="right" sx={{ px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontWeight: 'bold', color: '#000000', fontSize: '0.875rem' }}>
                               {fmtAmt(parseFloat(selectedBill.total_amount || 0) - parseFloat(selectedBill.labour_charges || 0) - parseFloat(selectedBill.shipping_amount || 0) + parseFloat(selectedBill.discount || 0))}
                             </TableCell>
                           </TableRow>
                           <TableRow>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>مزدوری</TableCell>
-                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', color: '#000000', fontSize: '0.875rem' }}>مزدوری</TableCell>
+                            <TableCell align="right" sx={{ px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontWeight: 'bold', color: '#000000', fontSize: '0.875rem' }}>
                               {fmtAmt(selectedBill.labour_charges)}
                             </TableCell>
                           </TableRow>
                           <TableRow>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>کرایہ</TableCell>
-                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', color: '#000000', fontSize: '0.875rem' }}>کرایہ</TableCell>
+                            <TableCell align="right" sx={{ px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontWeight: 'bold', color: '#000000', fontSize: '0.875rem' }}>
                               {fmtAmt(selectedBill.shipping_amount)}
                             </TableCell>
                           </TableRow>
-                          <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.grandTotalBg }}>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>كل رقم</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>
+                          <TableRow sx={{ bgcolor: '#9e9e9e' }}>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #ffffff', borderBottom: '1px solid #e0e0e0', fontSize: '0.875rem', color: '#000000 !important' }}>كل رقم</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontSize: '0.875rem', color: '#000000 !important' }}>
                               {fmtAmt(selectedBill.total_amount)}
                             </TableCell>
                           </TableRow>
                           {/* Show payment details - use cash_payment and bank_payment fields */}
                           {(() => {
-                            console.log('🧾 Receipt - Payment Details:', {
+                            console.log('Receipt - Payment Details:', {
                               has_cash_payment: selectedBill.hasOwnProperty('cash_payment'),
                               has_bank_payment: selectedBill.hasOwnProperty('bank_payment'),
                               has_bank_title: selectedBill.hasOwnProperty('bank_title'),
@@ -10208,19 +10685,15 @@ function SalesPageContent() {
 
                           {/* Determine cash and bank amounts - handle both new and old sales */}
                           {(() => {
-                            // For new sales, use cash_payment and bank_payment fields
-                            // For old sales, use payment and payment_type fields
                             let cashAmount = 0;
                             let bankAmount = 0;
                             let bankName = '';
 
                             if (selectedBill.hasOwnProperty('cash_payment') && selectedBill.hasOwnProperty('bank_payment')) {
-                              // NEW SALE: Has payment split fields
                               cashAmount = parseFloat(selectedBill.cash_payment || 0);
                               bankAmount = parseFloat(selectedBill.bank_payment || 0);
                               bankName = selectedBill.bank_title || selectedBill.debit_account?.cus_name || 'بینک';
                             } else {
-                              // OLD SALE: Use legacy payment field
                               if (selectedBill.payment_type === 'CASH' || !selectedBill.payment_type) {
                                 cashAmount = parseFloat(selectedBill.payment || 0);
                                 bankAmount = 0;
@@ -10231,17 +10704,16 @@ function SalesPageContent() {
                               }
                             }
 
-                            // Get previous balance at time of sale
                             const prevBalAmount = parseFloat(selectedBill.previous_balance || 0);
 
                             return (
                               <>
                                 {/* Always show cash payment row */}
                                 <TableRow>
-                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', color: '#000000', fontSize: '0.875rem' }}>
                                     نقد كيش
                                   </TableCell>
-                                  <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                  <TableCell align="right" sx={{ px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontWeight: 'bold', color: '#000000', fontSize: '0.875rem' }}>
                                     {fmtAmt(cashAmount)}
                                   </TableCell>
                                 </TableRow>
@@ -10249,10 +10721,10 @@ function SalesPageContent() {
                                 {/* Show bank payment row if bank payment exists */}
                                 {bankAmount > 0 && (
                                   <TableRow>
-                                    <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                    <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.6, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', color: '#000000', fontSize: '0.875rem' }}>
                                       {bankName}
                                     </TableCell>
-                                    <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>
+                                    <TableCell align="right" sx={{ px: 1.25, py: 0.6, borderBottom: '1px solid #e0e0e0', fontWeight: 'bold', color: '#000000', fontSize: '0.875rem' }}>
                                       {fmtAmt(bankAmount)}
                                     </TableCell>
                                   </TableRow>
@@ -10261,9 +10733,9 @@ function SalesPageContent() {
                               </>
                             );
                           })()}
-                          <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.balanceTotalBg }}>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.balanceTotalText }}>بقايا رقم</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.balanceTotalText }}>
+                          <TableRow sx={{ bgcolor: '#e0e0e0' }}>
+                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1.25, py: 0.65, borderRight: '1px solid #ffffff', fontSize: '0.875rem', color: '#000000 !important' }}>بقايا رقم</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1.25, py: 0.65, fontSize: '0.9rem', color: '#000000 !important' }}>
                               {fmtAmt(parseFloat(selectedBill.total_amount || 0) + parseFloat(selectedBill.previous_balance || 0) - parseFloat(selectedBill.payment || 0))}
                             </TableCell>
                           </TableRow>
@@ -10416,25 +10888,39 @@ function SalesPageContent() {
           body.print-a4 #printable-invoice-a4 thead .MuiTableRow-root,
           body.print-a4 #printable-invoice thead .MuiTableRow-root,
           body.print-existing #printable-invoice thead .MuiTableRow-root {
-            background-color: #ffffff !important;
+            background-color: #9e9e9e !important;
             color: #000000 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
 
           body.print-a4 #printable-invoice-a4 thead .MuiTableCell-root,
           body.print-a4 #printable-invoice thead .MuiTableCell-root,
           body.print-existing #printable-invoice thead .MuiTableCell-root {
-            background-color: #ffffff !important;
+            background-color: #9e9e9e !important;
             color: #000000 !important;
-            border-color: #000000 !important;
+            border-right: 1px solid #ffffff !important;
+            border-bottom: 1px solid #cbd5e1 !important;
             font-weight: bold !important;
-            border-bottom: 2px solid #000000 !important;
+            vertical-align: middle !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
 
           body.print-a4 #printable-invoice-a4 .MuiTableBody-root .MuiTableCell-root,
           body.print-a4 #printable-invoice .MuiTableBody-root .MuiTableCell-root,
           body.print-existing #printable-invoice .MuiTableBody-root .MuiTableCell-root {
             color: #000000 !important;
-            border-color: #000000 !important;
+            border-color: #e0e0e0 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          body.print-a4 #printable-invoice-a4 .cell-normal,
+          body.print-a4 #printable-invoice .cell-normal,
+          body.print-existing #printable-invoice .cell-normal,
+          .cell-normal {
+            font-weight: normal !important;
           }
 
           body.print-existing {
@@ -11634,14 +12120,14 @@ function SalesPageContent() {
           >
             {/* Header */}
             <Box sx={{ textAlign: 'center', pb: 1, borderBottom: '2px solid #000' }}>
-              <Typography sx={{ fontSize: '15px', fontWeight: '900', fontFamily: 'Arial, sans-serif', direction: 'rtl', color: '#000' }}>
+              <Typography sx={{ fontSize: '16px', fontWeight: '900', fontFamily: '"Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", "Urdu Typesetting", serif !important', direction: 'rtl', color: '#000', mb: 0.75 }}>
                 اتفاق آئرن اینڈ سیمنٹ سٹور
               </Typography>
-              <Typography sx={{ fontSize: '11px', direction: 'rtl', mt: 0.25, color: '#000' }}>
+              <Typography sx={{ fontSize: '11px', direction: 'rtl', mt: 0.75, mb: 0.5, color: '#d32f2f !important', fontWeight: 'bold' }}>
                 گجرات سرگودھا روڈ، پاہڑیانوالی
               </Typography>
               <Typography sx={{ fontSize: '11px', fontWeight: 'bold', mt: 0.25, color: '#000' }}>
-                Ph: 0346-7560306, 0300-7560306
+                Ph: 0300-7560306
               </Typography>
               <Typography
                 sx={{

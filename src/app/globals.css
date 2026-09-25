@@ -817,8 +817,9 @@ input[type="number"]::placeholder,
     box-shadow: none !important;
   }
   
-  /* Force all printed bill text to be bold and solid black for thermal printers */
-  body, html, table, td, th, div, span, p, label, b, strong, tr {
+  /* Force thermal printed bill text to be bold and solid black */
+  body.print-thermal,
+  body.print-thermal * {
     font-weight: 700 !important;
     color: #000000 !important;
     -webkit-print-color-adjust: exact !important;

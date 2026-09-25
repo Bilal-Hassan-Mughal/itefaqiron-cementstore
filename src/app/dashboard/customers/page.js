@@ -70,7 +70,7 @@ import {
   AttachMoney as AttachMoneyIcon
 } from '@mui/icons-material';
 import { useRouter } from 'next/navigation';
-import { Plus, Edit, Trash2, Check, X, Phone, Mail, MapPin, User, Building, CreditCard, Calendar, Search, Loader2, Users, TrendingUp, TrendingDown, Wallet, DollarSign, Filter, ArrowUp, ArrowUpDown, RotateCcw, ChevronDown, ChevronUp, SlidersHorizontal, ExternalLink } from 'lucide-react';
+import { Plus, Edit, Trash2, Check, X, Phone, Mail, MapPin, User, Building, CreditCard, Calendar, Search, Loader2, Users, TrendingUp, TrendingDown, Wallet, DollarSign, Filter, ArrowUp, ArrowUpDown, RotateCcw, ChevronDown, ChevronUp, SlidersHorizontal, ExternalLink, Tag, FileText, Languages, Info, Hash, Sparkles } from 'lucide-react';
 import { Fragment } from 'react';
 import DashboardLayout from '../components/dashboard-layout';
 import { openAccountLedgerTab, FINANCE_LEDGER_PATH } from '@/lib/ledger-tabs';
@@ -1314,8 +1314,8 @@ export default function CustomersPage() {
             <span><span className="inline-block w-3 h-3 rounded-full bg-red-200 mr-1 align-middle" />&gt; 6 months</span>
           </div>
         </div>
- 
-        {/* Full Replica of Sales Page Customer Modal */}
+
+        {/* Add / Edit Customer Modal Form */}
         <Dialog
           open={showCustomerForm}
           onClose={() => setShowCustomerForm(false)}
@@ -1323,451 +1323,784 @@ export default function CustomersPage() {
           fullWidth
           PaperProps={{
             sx: {
-              borderRadius: 3,
-              boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
-              minHeight: '80vh'
+              maxWidth: 820,
+              borderRadius: '16px',
+              boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)',
+              overflow: 'hidden',
+              border: '1px solid #cbd5e1'
             }
           }}
         >
           <DialogTitle sx={{
-            background: 'linear-gradient(45deg, #2196f3 30%, #9c27b0 90%)',
+            background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4338ca 100%)',
+            borderTop: '4px solid #6366f1',
             color: 'white',
+            px: 3, py: 2.2,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between'
           }}>
-            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.8 }}>
               <Avatar sx={{
-                bgcolor: 'rgba(255,255,255,0.2)',
-                mr: 2,
-                width: 48,
-                height: 48
+                bgcolor: 'rgba(255,255,255,0.12)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                width: 42, height: 42,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
               }}>
-                <PersonIcon />
+                <PersonIcon sx={{ fontSize: 24, color: '#fff' }} />
               </Avatar>
               <Box>
-                <Typography variant="h5" component="div" sx={{ fontWeight: 'bold' }}>
-                  {editingCustomer ? 'Edit Customer' : 'Add New Customer'}
+                <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1.1rem', letterSpacing: '-0.01em', lineHeight: 1.2 }}>
+                  {editingCustomer ? 'Edit Customer Account' : 'Add New Customer Account'}
                 </Typography>
-                <Typography variant="body2" sx={{ opacity: 0.9 }}>
-                  {editingCustomer ? 'Update customer profile' : 'Create a new customer profile'}
+                <Typography variant="caption" sx={{ opacity: 0.8, fontSize: '0.8rem' }}>
+                  {editingCustomer ? 'Update customer profile information' : 'Create a new customer profile and ledger account'}
                 </Typography>
               </Box>
             </Box>
             <IconButton
               onClick={() => setShowCustomerForm(false)}
-              sx={{ color: 'white' }}
+              sx={{ color: 'white', opacity: 0.8, '&:hover': { opacity: 1, bgcolor: 'rgba(255,255,255,0.15)' } }}
             >
               <CloseIcon />
             </IconButton>
           </DialogTitle>
 
-          <DialogContent sx={{ p: 3 }}>
-            <Box component="form" sx={{ mt: 2 }}>
-              {/* Quick Actions */}
-              <Box sx={{
-                bgcolor: 'grey.50',
-                borderRadius: 2,
-                p: 2,
-                border: 1,
-                borderColor: 'grey.200',
-                mb: 3
+          <DialogContent sx={{ p: 3, bgcolor: '#f8fafc' }}>
+            <Box component="form" sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, mt: 0.5 }}>
+              
+              {/* Quick Actions Bar */}
+              <Box sx={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 1.5, 
+                bgcolor: '#ffffff', 
+                py: 1.2, px: 2, 
+                borderRadius: '12px', 
+                border: '1px solid #e2e8f0',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                flexWrap: 'wrap'
               }}>
+                <Typography variant="body2" sx={{ fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', gap: 0.6, fontSize: '0.85rem' }}>
+                  <Sparkles size={16} color="#4f46e5" /> Quick Add:
+                </Typography>
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<BusinessIcon />}
-                    onClick={() => setShowCustomerCategoryPopup(true)}
-                    sx={{
-                      borderColor: 'success.main',
-                      color: 'success.main',
-                      '&:hover': {
-                        borderColor: 'success.dark',
-                        backgroundColor: 'success.light',
-                        color: 'success.dark'
-                      }
-                    }}
-                  >
-                    Add Account Category
+                  <Button size="small" variant="outlined" startIcon={<BusinessIcon sx={{ fontSize: '16px !important' }} />} onClick={() => setShowCustomerCategoryPopup(true)}
+                    sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 600, fontSize: '0.8rem', bgcolor: '#f0fdf4', borderColor: '#a7f3d0', color: '#047857', px: 1.5, py: 0.4, '&:hover': { bgcolor: '#dcfce7', borderColor: '#10b981' } }}>
+                    + Category
                   </Button>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<PersonIcon />}
-                    onClick={() => setShowCustomerTypePopup(true)}
-                    sx={{
-                      borderColor: 'secondary.main',
-                      color: 'secondary.main',
-                      '&:hover': {
-                        borderColor: 'secondary.dark',
-                        backgroundColor: 'secondary.light',
-                        color: 'secondary.dark'
-                      }
-                    }}
-                  >
-                    Add Type
+                  <Button size="small" variant="outlined" startIcon={<PersonIcon sx={{ fontSize: '16px !important' }} />} onClick={() => setShowCustomerTypePopup(true)}
+                    sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 600, fontSize: '0.8rem', bgcolor: '#f5f3ff', borderColor: '#ddd6fe', color: '#6d28d9', px: 1.5, py: 0.4, '&:hover': { bgcolor: '#ede9fe', borderColor: '#8b5cf6' } }}>
+                    + Type
                   </Button>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<LocationIcon />}
-                    onClick={() => setShowCityPopup(true)}
-                    sx={{
-                      borderColor: 'warning.main',
-                      color: 'warning.main',
-                      '&:hover': {
-                        borderColor: 'warning.dark',
-                        backgroundColor: 'warning.light',
-                        color: 'warning.dark'
-                      }
-                    }}
-                  >
-                    Add City
+                  <Button size="small" variant="outlined" startIcon={<LocationIcon sx={{ fontSize: '16px !important' }} />} onClick={() => setShowCityPopup(true)}
+                    sx={{ borderRadius: '8px', textTransform: 'none', fontWeight: 600, fontSize: '0.8rem', bgcolor: '#fffbeb', borderColor: '#fde68a', color: '#b45309', px: 1.5, py: 0.4, '&:hover': { bgcolor: '#fef3c7', borderColor: '#f59e0b' } }}>
+                    + City
                   </Button>
                 </Box>
               </Box>
 
-              <Grid container spacing={3}>
-                {/* First Row - Name, Primary Phone, Secondary Phone */}
-                <Grid item xs={12} md={4}>
-                  <TextField
-                    fullWidth
-                    required
-                    label="Account Name"
-                    name="cus_name"
-                    value={formData.cus_name}
-                    onChange={handleFormChange}
-                    sx={{ minWidth: 250 }}
-                    placeholder="Enter account name"
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <PersonIcon />
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
-                </Grid>
+              {/* Strict 2-Column CSS Grid Layout */}
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 2.2 }}>
+                {/* Row 1 */}
+                <TextField
+                  fullWidth
+                  required
+                  label="Account Name"
+                  name="cus_name"
+                  value={formData.cus_name}
+                  onChange={handleFormChange}
+                  placeholder="Enter account name"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#4f46e5', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(79, 70, 229, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#4f46e5', fontWeight: 700 } }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <User size={16} color="#4f46e5" />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
 
-                <Grid item xs={12} md={4}>
-                  <TextField
-                    fullWidth
-                    required
-                    label="Primary Phone"
-                    name="cus_phone_no"
-                    type="tel"
-                    value={formData.cus_phone_no}
-                    onChange={handleFormChange}
-                    sx={{ minWidth: 250 }}
-                    placeholder="Enter primary phone number"
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <PhoneIcon />
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
-                </Grid>
+                <TextField
+                  fullWidth
+                  required
+                  label="Primary Phone"
+                  name="cus_phone_no"
+                  type="tel"
+                  value={formData.cus_phone_no}
+                  onChange={handleFormChange}
+                  placeholder="Enter primary phone number"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#4f46e5', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(79, 70, 229, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#4f46e5', fontWeight: 700 } }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Phone size={16} color="#475569" />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
 
-                <Grid item xs={12} md={4}>
-                  <TextField
-                    fullWidth
-                    label="Secondary Phone"
-                    name="cus_phone_no2"
-                    type="tel"
-                    value={formData.cus_phone_no2}
-                    onChange={handleFormChange}
-                    sx={{ minWidth: 250 }}
-                    placeholder="Enter secondary phone number"
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <PhoneIcon />
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
-                </Grid>
+                {/* Row 2 */}
+                <TextField
+                  fullWidth
+                  label="Secondary Phone"
+                  name="cus_phone_no2"
+                  type="tel"
+                  value={formData.cus_phone_no2}
+                  onChange={handleFormChange}
+                  placeholder="Enter secondary phone number"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#4f46e5', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(79, 70, 229, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#4f46e5', fontWeight: 700 } }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#f8fafc', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Phone size={16} color="#94a3b8" />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
 
-                <Grid item xs={12}>
-                  <TextField
-                    fullWidth
-                    required
-                    label="Address"
-                    name="cus_address"
-                    value={formData.cus_address}
-                    onChange={handleFormChange}
-                    placeholder="Enter complete address"
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <LocationIcon />
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
-                </Grid>
+                <TextField
+                  fullWidth
+                  required
+                  label="Address"
+                  name="cus_address"
+                  value={formData.cus_address}
+                  onChange={handleFormChange}
+                  placeholder="Enter complete address"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#4f46e5', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(79, 70, 229, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#4f46e5', fontWeight: 700 } }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <MapPin size={16} color="#475569" />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
 
-                {/* Second Row - Customer Type, Category */}
-                <Grid item xs={12} md={4}>
-                  <Autocomplete
-                    fullWidth
-                    autoSelect={true}
-                    autoHighlight={true}
-                    openOnFocus={true}
-                    selectOnFocus={true}
-                    options={customerTypes.map(type => ({
-                      id: type.cus_type_id,
-                      title: type.cus_type_title
-                    }))}
-                    getOptionLabel={(option) => option.title || ''}
-                    value={(() => {
-                      return customerTypes.find(option => option.cus_type_id === formData.cus_type)
-                        ? { id: formData.cus_type, title: customerTypes.find(option => option.cus_type_id === formData.cus_type).cus_type_title }
-                        : null;
-                    })()}
-                    onChange={(event, newValue) => {
-                      setFormData(prev => ({
-                        ...prev,
-                        cus_type: newValue ? newValue.id : ''
-                      }));
-                    }}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Account Type"
-                        required
-                        onFocus={(e) => e.target.select()}
-                        sx={{ minWidth: 250 }}
-                        InputProps={{
-                          ...params.InputProps,
-                          startAdornment: (
-                            <InputAdornment position="start">
-                              <PersonIcon />
-                            </InputAdornment>
-                          ),
-                        }}
-                      />
-                    )}
-                  />
-                </Grid>
-
-                <Grid item xs={12} md={4}>
-                  <Autocomplete
-                    fullWidth
-                    autoSelect={true}
-                    autoHighlight={true}
-                    openOnFocus={true}
-                    selectOnFocus={true}
-                    options={customerCategories.map(category => ({
-                      id: category.cus_cat_id,
-                      title: category.cus_cat_title
-                    }))}
-                    getOptionLabel={(option) => option.title || ''}
-                    value={(() => {
-                      return customerCategories.find(option => option.cus_cat_id === formData.cus_category)
-                        ? { id: formData.cus_category, title: customerCategories.find(option => option.cus_cat_id === formData.cus_category).cus_cat_title }
-                        : null;
-                    })()}
-                    onChange={(event, newValue) => {
-                      setFormData(prev => ({
-                        ...prev,
-                        cus_category: newValue ? newValue.id : ''
-                      }));
-                    }}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Account Category"
-                        required
-                        onFocus={(e) => e.target.select()}
-                        sx={{ minWidth: 250 }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Tab' && params.inputProps?.ariaExpanded) {
-                            const firstCat = customerCategories && customerCategories.length ? customerCategories[0].cus_cat_id : '';
-                            if (!formData.cus_category && firstCat) setFormData(prev => ({ ...prev, cus_category: firstCat }));
+                {/* Row 3 - Account Category & Account Type */}
+                <Autocomplete
+                  fullWidth
+                  autoSelect={true}
+                  autoHighlight={true}
+                  openOnFocus={true}
+                  selectOnFocus={true}
+                  PaperComponent={(props) => (
+                    <Paper
+                      {...props}
+                      elevation={8}
+                      sx={{
+                        borderRadius: '12px',
+                        mt: 1,
+                        boxShadow: '0 12px 32px rgba(15, 23, 42, 0.16), 0 2px 8px rgba(15, 23, 42, 0.08)',
+                        border: '1px solid #e2e8f0',
+                        overflow: 'hidden',
+                        '& .MuiAutocomplete-listbox': {
+                          p: 1,
+                          maxHeight: '260px',
+                          '&::-webkit-scrollbar': { width: '6px' },
+                          '&::-webkit-scrollbar-thumb': { backgroundColor: '#cbd5e1', borderRadius: '4px' },
+                          '&::-webkit-scrollbar-thumb:hover': { backgroundColor: '#94a3b8' }
+                        },
+                        '& .MuiAutocomplete-option': {
+                          fontSize: '0.875rem',
+                          fontWeight: 500,
+                          py: 1.2,
+                          px: 2,
+                          borderRadius: '8px',
+                          mb: 0.5,
+                          transition: 'all 0.15s ease',
+                          color: '#334155',
+                          '&:hover': {
+                            backgroundColor: '#f1f5f9',
+                            color: '#0f172a'
+                          },
+                          '&[aria-selected="true"]': {
+                            backgroundColor: '#e0e7ff !important',
+                            color: '#4338ca',
+                            fontWeight: 600
                           }
-                        }}
-                        InputProps={{
-                          ...params.InputProps,
-                          startAdornment: (
-                            <InputAdornment position="start">
-                              <BusinessIcon />
-                            </InputAdornment>
-                          ),
-                        }}
-                      />
-                    )}
-                  />
-                </Grid>
+                        }
+                      }}
+                    />
+                  )}
+                  options={customerCategories.map(category => ({
+                    id: category.cus_cat_id,
+                    title: category.cus_cat_title
+                  }))}
+                  getOptionLabel={(option) => option.title || ''}
+                  value={(() => {
+                    return customerCategories.find(option => option.cus_cat_id === formData.cus_category)
+                      ? { id: formData.cus_category, title: customerCategories.find(option => option.cus_cat_id === formData.cus_category).cus_cat_title }
+                      : null;
+                  })()}
+                  onChange={(event, newValue) => {
+                    setFormData(prev => ({
+                      ...prev,
+                      cus_category: newValue ? newValue.id : ''
+                    }));
+                  }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Account Category"
+                      required
+                      placeholder="Select category"
+                      onFocus={(e) => e.target.select()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Tab' && params.inputProps?.ariaExpanded) {
+                          const firstCat = customerCategories && customerCategories.length ? customerCategories[0].cus_cat_id : '';
+                          if (!formData.cus_category && firstCat) setFormData(prev => ({ ...prev, cus_category: firstCat }));
+                        }
+                      }}
+                      sx={{
+                        bgcolor: '#ffffff',
+                        borderRadius: '10px',
+                        '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                        '& .MuiOutlinedInput-root': {
+                          borderRadius: '10px',
+                          backgroundColor: '#ffffff',
+                          fontSize: '0.9rem',
+                          '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                          '&:hover fieldset': { borderColor: '#818cf8' },
+                          '&.Mui-focused fieldset': { borderColor: '#059669', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(5, 150, 105, 0.12)' },
+                        },
+                        '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#059669', fontWeight: 700 } }
+                      }}
+                      InputProps={{
+                        ...params.InputProps,
+                        startAdornment: (
+                          <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                            <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#d1fae5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <Building size={16} color="#059669" />
+                            </Box>
+                          </InputAdornment>
+                        ),
+                      }}
+                    />
+                  )}
+                />
 
-                {/* Third Row - Reference, Account Info, City */}
-                <Grid item xs={12} md={4}>
-                  <TextField
-                    fullWidth
-                    label="Reference"
-                    name="cus_reference"
-                    value={formData.cus_reference}
-                    onChange={handleFormChange}
-                    sx={{ minWidth: 250 }}
-                    placeholder="Enter reference number"
-                  />
-                </Grid>
-
-                <Grid item xs={12} md={4}>
-                  <TextField
-                    fullWidth
-                    label="Account Info"
-                    name="cus_account_info"
-                    value={formData.cus_account_info}
-                    onChange={handleFormChange}
-                    sx={{ minWidth: 250 }}
-                    placeholder="Enter account information"
-                  />
-                </Grid>
-
-                <Grid item xs={12} md={4}>
-                  <Autocomplete
-                    fullWidth
-                    autoSelect={true}
-                    autoHighlight={true}
-                    openOnFocus={true}
-                    selectOnFocus={true}
-                    options={cities.map(city => ({
-                      id: city.city_id,
-                      title: city.city_name
-                    }))}
-                    getOptionLabel={(option) => option.title || ''}
-                    value={(() => {
-                      return cities.find(option => option.city_id === formData.city_id)
-                        ? { id: formData.city_id, title: cities.find(option => option.city_id === formData.city_id).city_name }
-                        : null;
-                    })()}
-                    onChange={(event, newValue) => {
-                      setFormData(prev => ({
-                        ...prev,
-                        city_id: newValue ? newValue.id : ''
-                      }));
-                    }}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="City"
-                        onFocus={(e) => e.target.select()}
-                        sx={{ minWidth: 250 }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Tab' && params.inputProps?.ariaExpanded) {
-                            const firstCity = cities && cities.length ? cities[0].city_id : '';
-                            if (!formData.city_id && firstCity) setFormData(prev => ({ ...prev, city_id: firstCity }));
+                <Autocomplete
+                  fullWidth
+                  autoSelect={true}
+                  autoHighlight={true}
+                  openOnFocus={true}
+                  selectOnFocus={true}
+                  PaperComponent={(props) => (
+                    <Paper
+                      {...props}
+                      elevation={8}
+                      sx={{
+                        borderRadius: '12px',
+                        mt: 1,
+                        boxShadow: '0 12px 32px rgba(15, 23, 42, 0.16), 0 2px 8px rgba(15, 23, 42, 0.08)',
+                        border: '1px solid #e2e8f0',
+                        overflow: 'hidden',
+                        '& .MuiAutocomplete-listbox': {
+                          p: 1,
+                          maxHeight: '260px',
+                          '&::-webkit-scrollbar': { width: '6px' },
+                          '&::-webkit-scrollbar-thumb': { backgroundColor: '#cbd5e1', borderRadius: '4px' },
+                          '&::-webkit-scrollbar-thumb:hover': { backgroundColor: '#94a3b8' }
+                        },
+                        '& .MuiAutocomplete-option': {
+                          fontSize: '0.875rem',
+                          fontWeight: 500,
+                          py: 1.2,
+                          px: 2,
+                          borderRadius: '8px',
+                          mb: 0.5,
+                          transition: 'all 0.15s ease',
+                          color: '#334155',
+                          '&:hover': {
+                            backgroundColor: '#f1f5f9',
+                            color: '#0f172a'
+                          },
+                          '&[aria-selected="true"]': {
+                            backgroundColor: '#e0e7ff !important',
+                            color: '#4338ca',
+                            fontWeight: 600
                           }
-                        }}
-                        InputProps={{
-                          ...params.InputProps,
-                          startAdornment: (
-                            <InputAdornment position="start">
-                              <LocationIcon />
-                            </InputAdornment>
-                          ),
-                        }}
-                      />
-                    )}
-                  />
-                </Grid>
+                        }
+                      }}
+                    />
+                  )}
+                  options={customerTypes.map(type => ({
+                    id: type.cus_type_id,
+                    title: type.cus_type_title
+                  }))}
+                  getOptionLabel={(option) => option.title || ''}
+                  value={(() => {
+                    return customerTypes.find(option => option.cus_type_id === formData.cus_type)
+                      ? { id: formData.cus_type, title: customerTypes.find(option => option.cus_type_id === formData.cus_type).cus_type_title }
+                      : null;
+                  })()}
+                  onChange={(event, newValue) => {
+                    setFormData(prev => ({
+                      ...prev,
+                      cus_type: newValue ? newValue.id : ''
+                    }));
+                  }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Account Type"
+                      required
+                      placeholder="Select type"
+                      onFocus={(e) => e.target.select()}
+                      sx={{
+                        bgcolor: '#ffffff',
+                        borderRadius: '10px',
+                        '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                        '& .MuiOutlinedInput-root': {
+                          borderRadius: '10px',
+                          backgroundColor: '#ffffff',
+                          fontSize: '0.9rem',
+                          '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                          '&:hover fieldset': { borderColor: '#818cf8' },
+                          '&.Mui-focused fieldset': { borderColor: '#7c3aed', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(124, 58, 237, 0.12)' },
+                        },
+                        '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#7c3aed', fontWeight: 700 } }
+                      }}
+                      InputProps={{
+                        ...params.InputProps,
+                        startAdornment: (
+                          <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                            <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#ede9fe', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <User size={16} color="#7c3aed" />
+                            </Box>
+                          </InputAdornment>
+                        ),
+                      }}
+                    />
+                  )}
+                />
 
-                {/* Fourth Row - CNIC, NTN, Balance */}
-                <Grid item xs={12} md={4}>
-                  <TextField
-                    fullWidth
-                    label="CNIC"
-                    name="CNIC"
-                    value={formData.CNIC}
-                    onChange={handleFormChange}
-                    sx={{ minWidth: 250 }}
-                    placeholder="Enter CNIC number"
-                  />
-                </Grid>
+                {/* Row 4 - City & Reference */}
+                <Autocomplete
+                  fullWidth
+                  autoSelect={true}
+                  autoHighlight={true}
+                  openOnFocus={true}
+                  selectOnFocus={true}
+                  PaperComponent={(props) => (
+                    <Paper
+                      {...props}
+                      elevation={8}
+                      sx={{
+                        borderRadius: '12px',
+                        mt: 1,
+                        boxShadow: '0 12px 32px rgba(15, 23, 42, 0.16), 0 2px 8px rgba(15, 23, 42, 0.08)',
+                        border: '1px solid #e2e8f0',
+                        overflow: 'hidden',
+                        '& .MuiAutocomplete-listbox': {
+                          p: 1,
+                          maxHeight: '260px',
+                          '&::-webkit-scrollbar': { width: '6px' },
+                          '&::-webkit-scrollbar-thumb': { backgroundColor: '#cbd5e1', borderRadius: '4px' },
+                          '&::-webkit-scrollbar-thumb:hover': { backgroundColor: '#94a3b8' }
+                        },
+                        '& .MuiAutocomplete-option': {
+                          fontSize: '0.875rem',
+                          fontWeight: 500,
+                          py: 1.2,
+                          px: 2,
+                          borderRadius: '8px',
+                          mb: 0.5,
+                          transition: 'all 0.15s ease',
+                          color: '#334155',
+                          '&:hover': {
+                            backgroundColor: '#f1f5f9',
+                            color: '#0f172a'
+                          },
+                          '&[aria-selected="true"]': {
+                            backgroundColor: '#e0e7ff !important',
+                            color: '#4338ca',
+                            fontWeight: 600
+                          }
+                        }
+                      }}
+                    />
+                  )}
+                  options={cities.map(city => ({
+                    id: city.city_id,
+                    title: city.city_name
+                  }))}
+                  getOptionLabel={(option) => option.title || ''}
+                  value={(() => {
+                    return cities.find(option => option.city_id === formData.city_id)
+                      ? { id: formData.city_id, title: cities.find(option => option.city_id === formData.city_id).city_name }
+                      : null;
+                  })()}
+                  onChange={(event, newValue) => {
+                    setFormData(prev => ({
+                      ...prev,
+                      city_id: newValue ? newValue.id : ''
+                    }));
+                  }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="City"
+                      placeholder="Select city"
+                      onFocus={(e) => e.target.select()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Tab' && params.inputProps?.ariaExpanded) {
+                          const firstCity = cities && cities.length ? cities[0].city_id : '';
+                          if (!formData.city_id && firstCity) setFormData(prev => ({ ...prev, city_id: firstCity }));
+                        }
+                      }}
+                      sx={{
+                        bgcolor: '#ffffff',
+                        borderRadius: '10px',
+                        '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                        '& .MuiOutlinedInput-root': {
+                          borderRadius: '10px',
+                          backgroundColor: '#ffffff',
+                          fontSize: '0.9rem',
+                          '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                          '&:hover fieldset': { borderColor: '#818cf8' },
+                          '&.Mui-focused fieldset': { borderColor: '#d97706', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(217, 119, 6, 0.12)' },
+                        },
+                        '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#d97706', fontWeight: 700 } }
+                      }}
+                      InputProps={{
+                        ...params.InputProps,
+                        startAdornment: (
+                          <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                            <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <MapPin size={16} color="#d97706" />
+                            </Box>
+                          </InputAdornment>
+                        ),
+                      }}
+                    />
+                  )}
+                />
 
-                <Grid item xs={12} md={4}>
-                  <TextField
-                    fullWidth
-                    label="NTN Number"
-                    name="NTN_NO"
-                    value={formData.NTN_NO}
-                    onChange={handleFormChange}
-                    sx={{ minWidth: 250 }}
-                    placeholder="Enter NTN number"
-                  />
-                </Grid>
+                <TextField
+                  fullWidth
+                  label="Reference"
+                  name="cus_reference"
+                  value={formData.cus_reference}
+                  onChange={handleFormChange}
+                  placeholder="Enter reference number"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#0284c7', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(2, 132, 199, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#0284c7', fontWeight: 700 } }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#e0f2fe', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Tag size={16} color="#0284c7" />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
 
-                <Grid item xs={12} md={4}>
-                  <TextField
-                    fullWidth
-                    disabled
-                    label="Initial Balance"
-                    name="cus_balance"
-                    type="number"
-                    inputProps={{ step: "0.01", readOnly: true }}
-                    value={formData.cus_balance}
-                    onChange={handleFormChange}
-                    sx={{ minWidth: 250 }}
-                    placeholder="Balance is non-editable"
-                    InputProps={{
-                      readOnly: true,
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <AttachMoneyIcon />
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
-                </Grid>
+                {/* Row 5 - CNIC & NTN Number */}
+                <TextField
+                  fullWidth
+                  label="CNIC"
+                  name="CNIC"
+                  value={formData.CNIC}
+                  onChange={handleFormChange}
+                  placeholder="Enter CNIC number"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#e11d48', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(225, 29, 72, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#e11d48', fontWeight: 700 } }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#ffe4e6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <CreditCard size={16} color="#e11d48" />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
 
-                {/* Fifth Row - Other, Name in Urdu */}
-                <Grid item xs={12} md={6}>
-                  <TextField
-                    fullWidth
-                    label="Other Information"
-                    name="other"
-                    value={formData.other}
-                    onChange={handleFormChange}
-                    sx={{ minWidth: 250 }}
-                    placeholder="Enter other information"
-                  />
-                </Grid>
+                <TextField
+                  fullWidth
+                  label="NTN Number"
+                  name="NTN_NO"
+                  value={formData.NTN_NO}
+                  onChange={handleFormChange}
+                  placeholder="Enter NTN number"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#0d9488', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(13, 148, 136, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#0d9488', fontWeight: 700 } }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#ccfbf1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Hash size={16} color="#0d9488" />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
 
-                <Grid item xs={12} md={6}>
-                  <TextField
-                    fullWidth
-                    label="Name in Urdu"
-                    name="name_urdu"
-                    value={formData.name_urdu}
-                    onChange={handleFormChange}
-                    sx={{ minWidth: 250 }}
-                    placeholder="Enter name in Urdu"
-                  />
-                </Grid>
-              </Grid>
+                {/* Row 6 - Initial Balance & Account Info */}
+                <TextField
+                  fullWidth
+                  disabled
+                  label="Initial Balance"
+                  name="cus_balance"
+                  type="number"
+                  inputProps={{ step: "0.01", readOnly: true }}
+                  value={formData.cus_balance}
+                  onChange={handleFormChange}
+                  placeholder="Balance is non-editable"
+                  sx={{
+                    bgcolor: '#f8fafc',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#f8fafc',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#e2e8f0', borderWidth: '1.5px' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#94a3b8', fontWeight: 500 }
+                  }}
+                  InputProps={{
+                    readOnly: true,
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <DollarSign size={16} color="#16a34a" />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+
+                <TextField
+                  fullWidth
+                  label="Account Info"
+                  name="cus_account_info"
+                  value={formData.cus_account_info}
+                  onChange={handleFormChange}
+                  placeholder="Enter account information"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#2563eb', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(37, 99, 235, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#2563eb', fontWeight: 700 } }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#dbeafe', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Info size={16} color="#2563eb" />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+
+                {/* Row 7 - Name in Urdu & Other Information */}
+                <TextField
+                  fullWidth
+                  label="Name in Urdu"
+                  name="name_urdu"
+                  value={formData.name_urdu}
+                  onChange={handleFormChange}
+                  placeholder="Enter name in Urdu"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#9333ea', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(147, 51, 234, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#9333ea', fontWeight: 700 } }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#f3e8ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Languages size={16} color="#9333ea" />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+
+                <TextField
+                  fullWidth
+                  label="Other Information"
+                  name="other"
+                  value={formData.other}
+                  onChange={handleFormChange}
+                  placeholder="Enter other information"
+                  sx={{
+                    bgcolor: '#ffffff',
+                    borderRadius: '10px',
+                    '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.9rem',
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#475569', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(71, 85, 105, 0.12)' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#475569', fontWeight: 700 } }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ mr: 0.8 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <FileText size={16} color="#475569" />
+                        </Box>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </Box>
             </Box>
           </DialogContent>
 
-          <DialogActions sx={{ p: 3, borderTop: 1, borderColor: 'divider' }}>
-            <Button onClick={() => setShowCustomerForm(false)} color="primary">
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSubmit}
-              variant="contained"
-              disabled={isSubmitting}
-              sx={{ bgcolor: '#6f42c1', '&:hover': { bgcolor: '#5a2d91' } }}
-            >
-              {isSubmitting ? (
-                <CircularProgress size={24} color="inherit" />
-              ) : (
-                editingCustomer ? 'Update Customer' : 'Create Customer'
-              )}
-            </Button>
+          <DialogActions sx={{ px: 3, py: 2.2, bgcolor: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600, fontSize: '0.82rem' }}>
+              Fields marked with <span style={{ color: '#ef4444', fontWeight: 700 }}>*</span> are required
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 1.5 }}>
+              <Button onClick={() => setShowCustomerForm(false)} sx={{ color: '#64748b', fontWeight: 600, px: 3, py: 1, borderRadius: '10px', textTransform: 'none', '&:hover': { bgcolor: '#f1f5f9' } }}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSubmit}
+                variant="contained"
+                disabled={isSubmitting}
+                sx={{
+                  background: 'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)',
+                  color: '#fff',
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  textTransform: 'none',
+                  px: 3.5, py: 1.1,
+                  borderRadius: '10px',
+                  boxShadow: '0 4px 14px rgba(79, 70, 229, 0.38)',
+                  '&:hover': { background: 'linear-gradient(135deg, #4338ca 0%, #312e81 100%)', boxShadow: '0 6px 20px rgba(79, 70, 229, 0.5)' }
+                }}
+              >
+                {isSubmitting ? (
+                  <CircularProgress size={20} color="inherit" />
+                ) : (
+                  editingCustomer ? 'Update Customer' : 'Create Customer'
+                )}
+              </Button>
+            </Box>
           </DialogActions>
         </Dialog>
 
