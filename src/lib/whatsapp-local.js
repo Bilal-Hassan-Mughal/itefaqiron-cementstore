@@ -3,12 +3,47 @@
  * capture document → clipboard → whatsapp:// protocol
  */
 
+const PLACEHOLDER_PHONE = /^(x+|n\/?a|none|null|0+|\-+)$/i;
+
+export function isUsablePhoneValue(phone) {
+  const raw = String(phone ?? '').trim();
+  if (!raw || PLACEHOLDER_PHONE.test(raw)) return false;
+  const digits = raw.replace(/\D/g, '');
+  return digits.length >= 10;
+}
+
+/** Pick first valid mobile from customer primary/secondary fields. */
+export function resolveCustomerWhatsAppPhone(customer, extraCandidates = []) {
+  const candidates = [
+    customer?.cus_phone_no,
+    customer?.cus_phone_no2,
+    ...extraCandidates,
+  ];
+  for (const value of candidates) {
+    if (!isUsablePhoneValue(value)) continue;
+    const formatted = formatWhatsAppPhone(value);
+    if (formatted) return formatted;
+  }
+  return null;
+}
+
+/** Display on invoices — skips placeholders like "X". */
+export function formatCustomerPhoneDisplay(customer) {
+  const candidates = [customer?.cus_phone_no, customer?.cus_phone_no2];
+  for (const value of candidates) {
+    if (isUsablePhoneValue(value)) return String(value).trim();
+  }
+  return 'N/A';
+}
+
 export function formatWhatsAppPhone(phone) {
   if (!phone) return null;
   let digits = String(phone).replace(/\D/g, '');
   if (!digits) return null;
   if (digits.startsWith('0')) digits = `92${digits.slice(1)}`;
   else if (digits.length === 10) digits = `92${digits}`;
+  else if (digits.length === 11 && digits.startsWith('3')) digits = `92${digits}`;
+  if (digits.length < 12) return null;
   return digits;
 }
 
@@ -45,6 +80,17 @@ export async function captureElementToCanvas(sourceEl) {
       logging: false,
       width: w,
       height: Math.max(clone.scrollHeight, h),
+      onclone: (doc) => {
+        doc.querySelectorAll('.invoice-store-phone').forEach((el) => {
+          el.style.visibility = 'visible';
+          el.style.display = 'block';
+          el.style.color = '#1e293b';
+          el.style.fontSize = '16px';
+          el.style.fontWeight = '700';
+          el.style.lineHeight = '1.4';
+          el.style.marginBottom = '12px';
+        });
+      },
     });
   } finally {
     if (clone.parentNode) clone.parentNode.removeChild(clone);
@@ -71,14 +117,16 @@ export async function copyBlobToClipboard(blob, mimeType) {
 }
 
 export function openWhatsAppDesktop(phone, text = '') {
-  const formatted = formatWhatsAppPhone(phone);
+  const formatted = /^\d{12,15}$/.test(String(phone || ''))
+    ? String(phone)
+    : formatWhatsAppPhone(phone);
   if (!formatted) return false;
 
-  const params = new URLSearchParams({ phone: formatted });
-  if (text?.trim()) params.set('text', text.trim());
+  const textQuery = text?.trim() ? `&text=${encodeURIComponent(text.trim())}` : '';
+  const href = `whatsapp://send?phone=${formatted}${textQuery}`;
 
   const anchor = document.createElement('a');
-  anchor.href = `whatsapp://send?${params.toString()}`;
+  anchor.href = href;
   anchor.style.display = 'none';
   document.body.appendChild(anchor);
   anchor.click();

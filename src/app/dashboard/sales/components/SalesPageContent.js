@@ -8,6 +8,11 @@ import DateFilterInput from '@/app/dashboard/components/date-filter-input';
 import { usePinAuth } from '@/app/hooks/usePinAuth';
 import BiometricAuthDialog from '@/app/dashboard/components/BiometricAuthDialog';
 import { openAccountLedgerTab, FINANCE_LEDGER_PATH, notifyLedgerDataChanged } from '@/lib/ledger-tabs';
+import {
+  formatCustomerPhoneDisplay,
+  formatWhatsAppPhone,
+  resolveCustomerWhatsAppPhone,
+} from '@/lib/whatsapp-local';
 import { SalesProvider } from './SalesContext';
 import { lazy } from 'react';
 
@@ -148,6 +153,7 @@ import {
   SALES_FILTER_GRID,
   SALES_FILTER_FIELD_SX,
   getBillTypeChipSx,
+  INVOICE_STORE_PHONE_LINE,
 } from './sale-utils';
 import SaleDropdownListbox, { SaleCustomerDropdownListbox } from './SaleDropdownListbox';
 
@@ -3110,18 +3116,48 @@ export default function SalesPageContent() {
   }, []);
 
   // Save current form as draft
+  const resolveBillWhatsAppPhone = useCallback((bill, customPhone) => {
+    if (customPhone) {
+      return formatWhatsAppPhone(customPhone) || resolveCustomerWhatsAppPhone({ cus_phone_no: customPhone });
+    }
+    let phone = resolveCustomerWhatsAppPhone(bill?.customer);
+    if (phone) return phone;
+    const cusId = bill?.cus_id ?? bill?.customer?.cus_id;
+    if (cusId && customers?.length) {
+      const row = customers.find((c) => Number(c.cus_id) === Number(cusId));
+      phone = resolveCustomerWhatsAppPhone(row);
+      if (phone) return phone;
+    }
+    return null;
+  }, [customers]);
+
   const handleSendWhatsApp = async (bill, customPhone, elementId = 'receipt-preview') => {
     try {
       setIsSendingWhatsApp(true);
       const { shareViaWhatsAppDesktop, whatsAppSuccessMessage } = await import('@/lib/whatsapp-local');
-      const phone = customPhone || bill?.customer?.cus_phone_no;
+      let phone = resolveBillWhatsAppPhone(bill, customPhone);
+      if (!phone) {
+        const manual = window.prompt(
+          'Customer phone is missing or invalid.\nEnter WhatsApp number (e.g. 0300-7560306):',
+          formatCustomerPhoneDisplay(bill?.customer) !== 'N/A' ? formatCustomerPhoneDisplay(bill?.customer) : ''
+        );
+        if (!manual?.trim()) {
+          showSnackbar('WhatsApp cancelled — phone number required', 'info');
+          return;
+        }
+        phone = formatWhatsAppPhone(manual) || resolveCustomerWhatsAppPhone({ cus_phone_no: manual });
+        if (!phone) {
+          showSnackbar('Invalid phone number. Use format 03XX-XXXXXXX', 'error');
+          return;
+        }
+      }
       const { opened } = await shareViaWhatsAppDesktop({
         elementId,
         phone,
       });
-      showSnackbar(`âœ… ${whatsAppSuccessMessage(opened)}`, 'success');
+      showSnackbar(whatsAppSuccessMessage(opened), 'success');
     } catch (err) {
-      showSnackbar(`âŒ WhatsApp error: ${err.message}`, 'error');
+      showSnackbar(`WhatsApp error: ${err.message}`, 'error');
     } finally {
       setIsSendingWhatsApp(false);
     }
@@ -3400,7 +3436,7 @@ export default function SalesPageContent() {
     <header class="company-header">
       <div class="urdu-name" style="font-family:'Noto Nastaliq Urdu','Jameel Noori Nastaleeq','Urdu Typesetting',serif !important;">Ø§ØªÙØ§Ù‚ Ø¢Ø¦Ø±Ù† Ø§ÛŒÙ†Úˆ Ø³ÛŒÙ…Ù†Ù¹ Ø³Ù¹ÙˆØ±</div>
       <div class="urdu-address">Ú¯Ø¬Ø±Ø§Øª Ø³Ø±Ú¯ÙˆØ¯Ú¾Ø§ Ø±ÙˆÚˆØŒ Ù¾Ø§ÛÚ‘ÛŒØ§Ù†ÙˆØ§Ù„ÛŒ</div>
-      <div class="phone">Ph: 0300-7560306</div>
+      <div class="phone">${INVOICE_STORE_PHONE_LINE.replace('Ph:- ', 'Ph: ')}</div>
       <div class="doc-title">Sales List Report</div>
     </header>
 

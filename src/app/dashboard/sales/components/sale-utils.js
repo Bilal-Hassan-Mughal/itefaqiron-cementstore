@@ -3,7 +3,10 @@
  * Extracted from the monolithic page.js for reuse across sale components.
  */
 
-import { BRAND } from '@/lib/brand-theme';
+import { BRAND, COMPANY } from '@/lib/brand-theme';
+
+/** Store phone line for sale invoice headers (print + WhatsApp capture). */
+export const INVOICE_STORE_PHONE_LINE = `Ph:- ${(COMPANY.phones || ['0346-7560306']).filter(Boolean).join(', ')}`;
 
 // ─── Cost Price Helpers ──────────────────────────────────────────────────────
 

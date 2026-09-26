@@ -8,6 +8,11 @@ import DateFilterInput from '../components/date-filter-input';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
 import { openAccountLedgerTab, FINANCE_LEDGER_PATH, notifyLedgerDataChanged } from '@/lib/ledger-tabs';
+import {
+  formatCustomerPhoneDisplay,
+  formatWhatsAppPhone,
+  resolveCustomerWhatsAppPhone,
+} from '@/lib/whatsapp-local';
 
 // Material-UI imports
 import {
@@ -91,7 +96,9 @@ import {
 } from '@mui/icons-material';
 
 import { getOfflineSalesQueue, saveOfflineSale, syncOfflineSalesQueue } from '@/lib/offline-sales-helper';
-import { BRAND } from '@/lib/brand-theme';
+import { BRAND, COMPANY } from '@/lib/brand-theme';
+
+const INVOICE_STORE_PHONE_LINE = `Ph:- ${(COMPANY.phones || ['0346-7560306']).filter(Boolean).join(', ')}`;
 
 // Sale-page "below cost" check must use cost rate (pro_cost_price), never purchase/crate.
 const getProductCostPrice = (product) => {
@@ -2589,7 +2596,17 @@ function SalesPageContent() {
               const fullBill = await detailRes.json();
               setCurrentBillData((prev) => (
                 prev?.sale_id === (fullBill.sale_id ?? savedSaleId)
-                  ? { ...prev, ...fullBill, previous_balance: prev.previous_balance ?? fullBill.previous_balance }
+                  ? {
+                    ...prev,
+                    ...fullBill,
+                    previous_balance: prev.previous_balance ?? fullBill.previous_balance,
+                    customer: {
+                      ...(prev.customer || {}),
+                      ...(fullBill.customer || {}),
+                      cus_phone_no: fullBill.customer?.cus_phone_no || prev.customer?.cus_phone_no,
+                      cus_phone_no2: fullBill.customer?.cus_phone_no2 || prev.customer?.cus_phone_no2,
+                    },
+                  }
                   : prev
               ));
             }
@@ -3607,11 +3624,41 @@ function SalesPageContent() {
   }, []);
 
   // Save current form as draft
+  const resolveBillWhatsAppPhone = useCallback((bill, customPhone) => {
+    if (customPhone) {
+      return formatWhatsAppPhone(customPhone) || resolveCustomerWhatsAppPhone({ cus_phone_no: customPhone });
+    }
+    let phone = resolveCustomerWhatsAppPhone(bill?.customer);
+    if (phone) return phone;
+    const cusId = bill?.cus_id ?? bill?.customer?.cus_id;
+    if (cusId && customers?.length) {
+      const row = customers.find((c) => Number(c.cus_id) === Number(cusId));
+      phone = resolveCustomerWhatsAppPhone(row);
+      if (phone) return phone;
+    }
+    return null;
+  }, [customers]);
+
   const handleSendWhatsApp = async (bill, customPhone, elementId = 'receipt-preview') => {
     try {
       setIsSendingWhatsApp(true);
       const { shareViaWhatsAppDesktop, whatsAppSuccessMessage } = await import('@/lib/whatsapp-local');
-      const phone = customPhone || bill?.customer?.cus_phone_no;
+      let phone = resolveBillWhatsAppPhone(bill, customPhone);
+      if (!phone) {
+        const manual = window.prompt(
+          'Customer phone is missing or invalid.\nEnter WhatsApp number (e.g. 0300-7560306):',
+          formatCustomerPhoneDisplay(bill?.customer) !== 'N/A' ? formatCustomerPhoneDisplay(bill?.customer) : ''
+        );
+        if (!manual?.trim()) {
+          showSnackbar('WhatsApp cancelled — phone number required', 'info');
+          return;
+        }
+        phone = formatWhatsAppPhone(manual) || resolveCustomerWhatsAppPhone({ cus_phone_no: manual });
+        if (!phone) {
+          showSnackbar('Invalid phone number. Use format 03XX-XXXXXXX', 'error');
+          return;
+        }
+      }
       const { opened } = await shareViaWhatsAppDesktop({
         elementId,
         phone,
@@ -3897,7 +3944,7 @@ function SalesPageContent() {
     <header class="company-header">
       <div class="urdu-name" style="font-family:'Noto Nastaliq Urdu','Jameel Noori Nastaleeq','Urdu Typesetting',serif !important;">اتفاق آئرن اینڈ سیمنٹ سٹور</div>
       <div class="urdu-address">گجرات سرگودھا روڈ، پاہڑیانوالی</div>
-      <div class="phone">Ph: 0300-7560306</div>
+      <div class="phone">${INVOICE_STORE_PHONE_LINE.replace('Ph:- ', 'Ph: ')}</div>
       <div class="doc-title">Sales List Report</div>
     </header>
 
@@ -8573,12 +8620,22 @@ function SalesPageContent() {
                 }}>
                   گجرات سرگودھا روڈ، پاہڑیانوالی
                 </Typography>
-                <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, px: 2, py: 0.5, borderRadius: '20px', bgcolor: '#f8fafc', border: '1px solid #e2e8f0', mb: 1.75 }}>
-                  <PhoneIcon sx={{ color: '#10b981', fontSize: '1.25rem' }} />
-                  <Typography variant="body2" sx={{ color: '#1e293b', fontWeight: 700, fontSize: '1.25rem', letterSpacing: 0.5 }}>
-                    Ph:- 0300-7560306
-                  </Typography>
-                </Box>
+                <Typography
+                  className="invoice-store-phone"
+                  variant="body2"
+                  component="div"
+                  sx={{
+                    mb: 1.75,
+                    fontWeight: 700,
+                    fontSize: '1.15rem',
+                    letterSpacing: 0.5,
+                    color: '#1e293b !important',
+                    WebkitPrintColorAdjust: 'exact',
+                    printColorAdjust: 'exact',
+                  }}
+                >
+                  {INVOICE_STORE_PHONE_LINE}
+                </Typography>
                 <Box sx={{ mt: 0.5 }}>
                   <Typography variant="body2" sx={{
                     display: 'inline-block',
@@ -8611,7 +8668,7 @@ function SalesPageContent() {
                   <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 0.75, flexWrap: 'nowrap' }}>
                     <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Phone No:</Typography>
                     <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
-                      {currentBillData.customer?.cus_phone_no || 'N/A'}
+                      {formatCustomerPhoneDisplay(currentBillData.customer)}
                     </Typography>
                   </Box>
                   {currentBillData.customer?.cus_address && (
@@ -8904,7 +8961,7 @@ function SalesPageContent() {
                     اتفاق آئرن اینڈ سیمنٹ سٹور
                   </Typography>
                   <Typography sx={{ fontSize: '11px', fontWeight: 'bold', color: '#16a34a !important' }}>گجرات سرگودھا روڈ، پاہڑیانوالی</Typography>
-                  <Typography sx={{ fontSize: '13px', fontWeight: 'bold' }}>Ph: 0300-7560306</Typography>
+                  <Typography className="invoice-store-phone" sx={{ fontSize: '13px', fontWeight: 'bold' }}>{INVOICE_STORE_PHONE_LINE.replace('Ph:- ', 'Ph: ')}</Typography>
                   <Typography
                     sx={{
                       mt: 0.5,
@@ -8933,6 +8990,9 @@ function SalesPageContent() {
                     {formatTimePK(currentBillData?.created_at) || '—'}
                   </Typography>
                   <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Cust: {currentBillData.customer?.cus_name || 'N/A'}</Typography>
+                  <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                    Phone: {formatCustomerPhoneDisplay(currentBillData.customer)}
+                  </Typography>
                   <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
                     Created By: {getCreatedByName(currentBillData, currentUser)}
                   </Typography>
@@ -9044,12 +9104,22 @@ function SalesPageContent() {
                   }}>
                     گجرات سرگودھا روڈ، پاہڑیانوالی
                   </Typography>
-                  <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, px: 2, py: 0.5, borderRadius: '20px', bgcolor: '#f8fafc', border: '1px solid #e2e8f0', mb: 1.75 }}>
-                    <PhoneIcon sx={{ color: '#10b981', fontSize: '1.25rem' }} />
-                    <Typography variant="body2" sx={{ color: '#1e293b', fontWeight: 700, fontSize: '1.25rem', letterSpacing: 0.5 }}>
-                      Ph:- 0300-7560306
-                    </Typography>
-                  </Box>
+                  <Typography
+                    className="invoice-store-phone"
+                    variant="body2"
+                    component="div"
+                    sx={{
+                      mb: 1.75,
+                      fontWeight: 700,
+                      fontSize: '1.15rem',
+                      letterSpacing: 0.5,
+                      color: '#1e293b !important',
+                      WebkitPrintColorAdjust: 'exact',
+                      printColorAdjust: 'exact',
+                    }}
+                  >
+                    {INVOICE_STORE_PHONE_LINE}
+                  </Typography>
                   <Box sx={{ mt: 0.5 }}>
                     <Typography variant="body2" sx={{
                       display: 'inline-block',
@@ -9082,7 +9152,7 @@ function SalesPageContent() {
                     <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 0.75, flexWrap: 'nowrap' }}>
                       <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Phone No:</Typography>
                       <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
-                        {currentBillData.customer?.cus_phone_no || 'N/A'}
+                        {formatCustomerPhoneDisplay(currentBillData.customer)}
                       </Typography>
                     </Box>
                     {currentBillData.customer?.cus_address && (
@@ -10456,12 +10526,22 @@ function SalesPageContent() {
                 }}>
                   گجرات سرگودھا روڈ، پاہڑیانوالی
                 </Typography>
-                <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, px: 2, py: 0.5, borderRadius: '20px', bgcolor: '#f8fafc', border: '1px solid #e2e8f0', mb: 1.75 }}>
-                  <PhoneIcon sx={{ color: '#10b981', fontSize: '1.25rem' }} />
-                  <Typography variant="body2" sx={{ color: '#1e293b', fontWeight: 700, fontSize: '1.25rem', letterSpacing: 0.5 }}>
-                    Ph:- 0300-7560306
-                  </Typography>
-                </Box>
+                <Typography
+                  className="invoice-store-phone"
+                  variant="body2"
+                  component="div"
+                  sx={{
+                    mb: 1.75,
+                    fontWeight: 700,
+                    fontSize: '1.15rem',
+                    letterSpacing: 0.5,
+                    color: '#1e293b !important',
+                    WebkitPrintColorAdjust: 'exact',
+                    printColorAdjust: 'exact',
+                  }}
+                >
+                  {INVOICE_STORE_PHONE_LINE}
+                </Typography>
                 <Box sx={{ mt: 0.5 }}>
                   <Typography variant="body2" sx={{
                     display: 'inline-block',
@@ -10494,7 +10574,7 @@ function SalesPageContent() {
                   <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 0.75, flexWrap: 'nowrap' }}>
                     <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Phone No:</Typography>
                     <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
-                      {selectedBill.customer?.cus_phone_no || 'N/A'}
+                      {formatCustomerPhoneDisplay(selectedBill.customer)}
                     </Typography>
                   </Box>
                   {selectedBill.customer?.cus_address && (
@@ -10785,9 +10865,9 @@ function SalesPageContent() {
               '&:hover': { bgcolor: '#1ebe5d' },
               color: 'white',
             }}
-            onClick={() => handleSendWhatsApp(selectedBill, selectedBill?.customer?.cus_phone_no, 'printable-invoice')}
-            disabled={isSendingWhatsApp || !selectedBill?.customer?.cus_phone_no}
-            title={selectedBill?.customer?.cus_phone_no ? 'Send invoice via WhatsApp Desktop' : 'Customer has no phone number'}
+            onClick={() => handleSendWhatsApp(selectedBill, null, 'printable-invoice')}
+            disabled={isSendingWhatsApp}
+            title="Send invoice via WhatsApp Desktop"
           >
             {isSendingWhatsApp ? 'Copying...' : 'WhatsApp'}
           </Button>
@@ -11070,6 +11150,15 @@ function SalesPageContent() {
           
           body.print-existing .MuiTypography-body2 {
             font-size: 12px !important;
+          }
+
+          body.print-a4 .invoice-store-phone,
+          body.print-existing .invoice-store-phone {
+            visibility: visible !important;
+            display: block !important;
+            font-size: 14px !important;
+            font-weight: 700 !important;
+            color: #1e293b !important;
           }
           
           /* Grid and spacing */
@@ -12146,8 +12235,8 @@ function SalesPageContent() {
               <Typography sx={{ fontSize: '11px', direction: 'rtl', mt: 0.75, mb: 0.5, color: '#16a34a !important', fontWeight: 'bold' }}>
                 گجرات سرگودھا روڈ، پاہڑیانوالی
               </Typography>
-              <Typography sx={{ fontSize: '14px', fontWeight: 'bold', mt: 0.25, color: '#000' }}>
-                Ph: 0300-7560306
+              <Typography className="invoice-store-phone" sx={{ fontSize: '14px', fontWeight: 'bold', mt: 0.25, color: '#000' }}>
+                {INVOICE_STORE_PHONE_LINE.replace('Ph:- ', 'Ph: ')}
               </Typography>
               <Typography
                 sx={{

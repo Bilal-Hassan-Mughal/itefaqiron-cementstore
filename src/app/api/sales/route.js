@@ -865,6 +865,7 @@ export async function GET(request) {
                     cus_id: true,
                     cus_name: true,
                     cus_phone_no: true,
+                    cus_phone_no2: true,
                     cus_address: true,
                     cus_balance: true,
                     name_urdu: true,

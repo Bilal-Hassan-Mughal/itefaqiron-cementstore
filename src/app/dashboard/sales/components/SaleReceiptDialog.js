@@ -21,7 +21,8 @@ import {
 import { Close as CloseIcon, Phone as PhoneIcon, Print as PrintIcon } from '@mui/icons-material';
 import { formatDatePK, formatTimePK, getCreatedByName } from '@/lib/date-helper';
 import { COMPANY } from '@/lib/brand-theme';
-import { SALE_INVOICE_PRINT, resolveSaleReceiptBalances } from './sale-utils';
+import { SALE_INVOICE_PRINT, resolveSaleReceiptBalances, INVOICE_STORE_PHONE_LINE } from './sale-utils';
+import { formatCustomerPhoneDisplay } from '@/lib/whatsapp-local';
 import { useSalesContext } from './SalesContext';
 
 export default function SaleReceiptDialog() {
@@ -97,7 +98,7 @@ export default function SaleReceiptDialog() {
                   <Box component="span" className="word-store" sx={{ display: 'inline-block' }}>سٹور</Box>
                 </Typography>
                 <Typography sx={{ fontSize: '11px', fontWeight: 'bold', color: '#16a34a !important' }}>گجرات سرگودھا روڈ، پاہڑیانوالی</Typography>
-                <Typography sx={{ fontSize: '13px', fontWeight: 'bold' }}>Ph: 0300-7560306</Typography>
+                <Typography className="invoice-store-phone" sx={{ fontSize: '13px', fontWeight: 'bold' }}>{INVOICE_STORE_PHONE_LINE.replace('Ph:- ', 'Ph: ')}</Typography>
                 <Typography
                   sx={{
                     mt: 0.5,
@@ -126,6 +127,9 @@ export default function SaleReceiptDialog() {
                   {formatTimePK(currentBillData?.created_at) || '—'}
                 </Typography>
                 <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Cust: {currentBillData.customer?.cus_name || 'N/A'}</Typography>
+                <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
+                  Phone: {formatCustomerPhoneDisplay(currentBillData.customer)}
+                </Typography>
                 <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>
                   Created By: {getCreatedByName(currentBillData, currentUser)}
                 </Typography>
@@ -253,12 +257,22 @@ export default function SaleReceiptDialog() {
                 }}>
                   گجرات سرگودھا روڈ، پاہڑیانوالی
                 </Typography>
-                <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, px: 2, py: 0.5, borderRadius: '20px', bgcolor: '#f8fafc', border: '1px solid #e2e8f0', mb: 1.75 }}>
-                  <PhoneIcon sx={{ color: '#10b981', fontSize: '1.25rem' }} />
-                  <Typography variant="body2" sx={{ color: '#1e293b', fontWeight: 700, fontSize: '1.25rem', letterSpacing: 0.5 }}>
-                    Ph:- 0300-7560306
-                  </Typography>
-                </Box>
+                <Typography
+                  className="invoice-store-phone"
+                  variant="body2"
+                  component="div"
+                  sx={{
+                    mb: 1.75,
+                    fontWeight: 700,
+                    fontSize: '1.15rem',
+                    letterSpacing: 0.5,
+                    color: '#1e293b !important',
+                    WebkitPrintColorAdjust: 'exact',
+                    printColorAdjust: 'exact',
+                  }}
+                >
+                  {INVOICE_STORE_PHONE_LINE}
+                </Typography>
                 <Box sx={{ mt: 0.5 }}>
                   <Typography variant="body2" sx={{
                     display: 'inline-block',
@@ -291,7 +305,7 @@ export default function SaleReceiptDialog() {
                   <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 0.75, flexWrap: 'nowrap' }}>
                     <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Phone No:</Typography>
                     <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
-                      {currentBillData.customer?.cus_phone_no || 'N/A'}
+                      {formatCustomerPhoneDisplay(currentBillData.customer)}
                     </Typography>
                   </Box>
                   {currentBillData.customer?.cus_address && (
