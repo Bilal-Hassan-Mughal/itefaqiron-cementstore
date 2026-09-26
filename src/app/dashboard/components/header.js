@@ -1,6 +1,6 @@
 'use client';
 
-import { Menu, Mail, Bell, Home, Plus, LogOut, UserPlus, BookOpen } from 'lucide-react';
+import { Menu, Mail, Bell, Home, Plus, LogOut, BookOpen } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { getStaffRoleName, canStaffAccessPath, getRoleDisplayName } from '@/lib/staff-access';
@@ -35,8 +35,6 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
 
   const viewParam = searchParams?.get('view');
   const typeParam = searchParams?.get('type');
-  const actionParam = searchParams?.get('action');
-
   const isNewSaleActive =
     pathname === '/dashboard/sales' &&
     typeParam !== 'return';
@@ -50,19 +48,7 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
     pathname === '/dashboard/orders' &&
     viewParam === 'create';
 
-  const isAddCustomerActive =
-    pathname === '/dashboard/customers' &&
-    actionParam === 'add';
-
   const isLedgerActive = pathname === '/dashboard/finance';
-
-  const handleAddCustomer = () => {
-    if (pathname === '/dashboard/customers') {
-      window.dispatchEvent(new CustomEvent('open-customer-form'));
-      return;
-    }
-    router.push('/dashboard/customers?action=add');
-  };
 
   const pageTitle = activeTab === 'dashboard'
     ? 'Dashboard'
@@ -81,9 +67,8 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
   const canNewPurchase = user && canStaffAccessPath(user, '/dashboard/purchases');
   const canOrders = user && canStaffAccessPath(user, '/dashboard/orders');
   const canLedger = user && canStaffAccessPath(user, '/dashboard/finance');
-  const canAddCustomerBtn = user && canStaffAccessPath(user, '/dashboard/customers');
   const canAddProduct = user && canStaffAccessPath(user, '/dashboard/products');
-  const hasHeaderActions = canNewSale || canNewPurchase || canOrders || canLedger || canAddCustomerBtn || canAddProduct;
+  const hasHeaderActions = canNewSale || canNewPurchase || canOrders || canLedger || canAddProduct;
 
   return (
     <header className="sticky top-0 z-30">
@@ -198,20 +183,6 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
             >
               <BookOpen className="w-4 h-4" strokeWidth={2.25} />
               <span className="hidden sm:inline">Ledger</span>
-            </button>
-            )}
-            {canAddCustomerBtn && (
-            <button
-              type="button"
-              onClick={handleAddCustomer}
-              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200 ${
-                isAddCustomerActive
-                  ? 'text-white bg-[#1347c4] border border-[#1A55E3]/40 shadow-[0_4px_12px_rgba(26,85,227,0.28)] ring-2 ring-[#1A55E3]/25 ring-offset-1'
-                  : 'text-white bg-[#1A55E3] border border-[#1A55E3]/30 shadow-[0_1px_2px_rgba(26,85,227,0.2)] hover:bg-[#1347c4] hover:shadow-[0_4px_12px_rgba(26,85,227,0.28)] active:bg-[#103da8]'
-              }`}
-            >
-              <UserPlus className="w-4 h-4" strokeWidth={2.25} />
-              <span className="hidden sm:inline">Add Customer</span>
             </button>
             )}
             {canAddProduct && (
