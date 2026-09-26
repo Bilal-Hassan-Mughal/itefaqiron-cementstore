@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect, useMemo, Suspense, useRef, useCallback, forwardRef } from 'react';
 import { formatDatePK, formatDateTimePK, formatTimePK, getCreatedByName, getPkDateString } from '@/lib/date-helper';
@@ -1104,6 +1104,7 @@ function SalesPageContent() {
   // Draft Sales state
   const [drafts, setDrafts] = useState([]);
   const [draftModalOpen, setDraftModalOpen] = useState(false);
+  const [clearingAllDrafts, setClearingAllDrafts] = useState(false);
   const [currentDraftId, setCurrentDraftId] = useState(null);
   const [draftSearchTerm, setDraftSearchTerm] = useState('');
   const [isSavingDraft, setIsSavingDraft] = useState(false);
@@ -4172,6 +4173,33 @@ function SalesPageContent() {
     setDraftModalOpen(true);
   };
 
+  const handleClearAllDrafts = async () => {
+    if (!drafts.length) return;
+    const confirmed = window.confirm(
+      `Delete all ${drafts.length} held draft bill(s)? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setClearingAllDrafts(true);
+    try {
+      const response = await fetch('/api/draft-sales?all=true', { method: 'DELETE' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        showSnackbar(data.error || 'Failed to clear drafts', 'error');
+        return;
+      }
+      setCurrentDraftId(null);
+      setDrafts([]);
+      showSnackbar(`✅ Cleared ${data.count ?? 0} draft bill(s)`, 'success');
+      await fetchDrafts();
+    } catch (error) {
+      console.error('❌ Error clearing all drafts:', error);
+      showSnackbar(`Error clearing drafts: ${error.message}`, 'error');
+    } finally {
+      setClearingAllDrafts(false);
+    }
+  };
+
   // ======================== END DRAFT SALES FUNCTIONS ========================
 
   // Handle viewing a bill
@@ -5597,11 +5625,11 @@ function SalesPageContent() {
                         [0, 25, 75, 150].forEach((delay) => {
                           setTimeout(() => {
                             const customerInput = document.getElementById('customer-search-dropdown-input') ||
-                                                  document.querySelector('input[placeholder*="Search by name"]');
+                              document.querySelector('input[placeholder*="Search by name"]');
                             if (customerInput) {
                               customerInput.focus();
                               if (typeof customerInput.select === 'function') {
-                                try { customerInput.select(); } catch (err) {}
+                                try { customerInput.select(); } catch (err) { }
                               }
                             }
                           }, delay);
@@ -5635,11 +5663,11 @@ function SalesPageContent() {
                             [0, 25, 75, 150].forEach((delay) => {
                               setTimeout(() => {
                                 const customerInput = document.getElementById('customer-search-dropdown-input') ||
-                                                      document.querySelector('input[placeholder*="Search by name"]');
+                                  document.querySelector('input[placeholder*="Search by name"]');
                                 if (customerInput) {
                                   customerInput.focus();
                                   if (typeof customerInput.select === 'function') {
-                                    try { customerInput.select(); } catch (err) {}
+                                    try { customerInput.select(); } catch (err) { }
                                   }
                                 }
                               }, delay);
@@ -7703,13 +7731,24 @@ function SalesPageContent() {
             )}
           </DialogContent>
           <DialogActions sx={{ p: 2, bgcolor: 'grey.50' }}>
+            {drafts.length > 0 && (
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={<DeleteIcon />}
+                disabled={clearingAllDrafts}
+                onClick={handleClearAllDrafts}
+                sx={{ mr: 'auto' }}
+              >
+                {clearingAllDrafts ? 'Clearing…' : 'Clear All'}
+              </Button>
+            )}
             <Button onClick={() => setDraftModalOpen(false)}>Close</Button>
             {drafts.length > 0 && (
               <Button
                 variant="text"
                 sx={{ color: '#f57c00' }}
                 onClick={() => {
-                  setDrafts([]);
                   fetchDrafts();
                 }}
               >
@@ -8521,30 +8560,22 @@ function SalesPageContent() {
                 bgcolor: '#ffffff',
                 mb: 1
               }}>
-                <Typography variant="h4" sx={{
-                  fontWeight: 'bold',
-                  mb: 1.25,
-                  fontFamily: '"Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", "Urdu Typesetting", serif !important',
-                  fontSize: { xs: '1.6rem', md: '2.1rem' },
-                  direction: 'rtl',
-                  color: '#0f172a',
-                  lineHeight: 1.8
-                }}>
+                <Typography variant="h4" sx={{ fontWeight: 900, mb: 1, fontFamily: 'Arial, sans-serif', direction: 'rtl', color: '#0f172a', fontSize: '2.2rem' }}>
                   اتفاق آئرن اینڈ سیمنٹ سٹور
                 </Typography>
                 <Typography variant="body2" sx={{
                   mt: 0.75,
                   mb: 1.5,
-                  fontSize: '0.9rem',
+                  fontSize: '0.95rem',
                   direction: 'rtl',
-                  color: '#d32f2f !important',
-                  fontWeight: 600
+                  color: '#16a34a !important',
+                  fontWeight: 700
                 }}>
                   گجرات سرگودھا روڈ، پاہڑیانوالی
                 </Typography>
-                <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, px: 1.75, py: 0.35, borderRadius: '20px', bgcolor: '#f8fafc', border: '1px solid #e2e8f0', mb: 1.75 }}>
-                  <PhoneIcon sx={{ color: '#10b981', fontSize: '0.95rem' }} />
-                  <Typography variant="body2" sx={{ color: '#1e293b', fontWeight: 600, fontSize: '0.85rem', letterSpacing: 0.5 }}>
+                <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, px: 2, py: 0.5, borderRadius: '20px', bgcolor: '#f8fafc', border: '1px solid #e2e8f0', mb: 1.75 }}>
+                  <PhoneIcon sx={{ color: '#10b981', fontSize: '1.25rem' }} />
+                  <Typography variant="body2" sx={{ color: '#1e293b', fontWeight: 700, fontSize: '1.25rem', letterSpacing: 0.5 }}>
                     Ph:- 0300-7560306
                   </Typography>
                 </Box>
@@ -8676,10 +8707,10 @@ function SalesPageContent() {
                                   <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{index + 1}</TableCell>
                                   <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="left">{detail.product?.pro_title || detail.pro_title || 'N/A'}</TableCell>
                                   {hasAnySize && (
-                                    <TableCell className="cell-normal" sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'normal !important', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="center">{detail.size || '—'}</TableCell>
+                                    <TableCell className="cell-normal" sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'normal !important', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="center">{String(detail.size ?? '').trim()}</TableCell>
                                   )}
                                   <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtRateQty(detail.qnty)}</TableCell>
-                                  <TableCell className="cell-normal" sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'normal !important', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtRateQty(detail.unit_rate)}</TableCell>
+                                  <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtRateQty(detail.unit_rate)}</TableCell>
                                   <TableCell sx={{ px: 1.25, py: 0.75, borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtAmt(detail.total_amount)}</TableCell>
                                 </TableRow>
                               ))}
@@ -8832,7 +8863,7 @@ function SalesPageContent() {
           }
         }}
       >
-        <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <DialogTitle sx={{ bgcolor: '#2e7d32', color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="h6" component="span" sx={{ fontWeight: 'bold' }}>
             {currentBillData?.is_return ? 'Sale Return Invoice' : 'Receipt'} - {getBillDisplayNo(currentBillData)}
           </Typography>
@@ -8869,9 +8900,11 @@ function SalesPageContent() {
                 }}
               >
                 <Box sx={{ textAlign: 'center', pb: 1, borderBottom: '1px solid #000' }}>
-                  <Typography sx={{ fontSize: '15px', fontWeight: 'bold', fontFamily: '"Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", "Urdu Typesetting", serif !important', lineHeight: 1.8 }}>اتفاق آئرن اینڈ سیمنٹ سٹور</Typography>
-                  <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>گجرات سرگودھا روڈ، پاہڑیانوالی</Typography>
-                  <Typography sx={{ fontSize: '10px', fontWeight: 'bold' }}>Ph: 0300-7560306</Typography>
+                  <Typography sx={{ fontWeight: 900, fontSize: '20px', fontFamily: 'Arial, sans-serif', direction: 'rtl', color: '#000' }}>
+                    اتفاق آئرن اینڈ سیمنٹ سٹور
+                  </Typography>
+                  <Typography sx={{ fontSize: '11px', fontWeight: 'bold', color: '#16a34a !important' }}>گجرات سرگودھا روڈ، پاہڑیانوالی</Typography>
+                  <Typography sx={{ fontSize: '13px', fontWeight: 'bold' }}>Ph: 0300-7560306</Typography>
                   <Typography
                     sx={{
                       mt: 0.5,
@@ -8998,30 +9031,22 @@ function SalesPageContent() {
                   bgcolor: '#ffffff',
                   mb: 1
                 }}>
-                  <Typography variant="h4" sx={{
-                    fontWeight: 'bold',
-                    mb: 1.25,
-                    fontFamily: '"Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", "Urdu Typesetting", serif !important',
-                    fontSize: { xs: '1.6rem', md: '2.1rem' },
-                    direction: 'rtl',
-                    color: '#0f172a',
-                    lineHeight: 1.8
-                  }}>
+                  <Typography variant="h4" sx={{ fontWeight: 900, mb: 1, fontFamily: 'Arial, sans-serif', direction: 'rtl', color: '#0f172a', fontSize: '2.2rem' }}>
                     اتفاق آئرن اینڈ سیمنٹ سٹور
                   </Typography>
                   <Typography variant="body2" sx={{
                     mt: 0.75,
                     mb: 1.5,
-                    fontSize: '0.9rem',
+                    fontSize: '0.95rem',
                     direction: 'rtl',
-                    color: '#d32f2f !important',
-                    fontWeight: 600
+                    color: '#16a34a !important',
+                    fontWeight: 700
                   }}>
                     گجرات سرگودھا روڈ، پاہڑیانوالی
                   </Typography>
-                  <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, px: 1.75, py: 0.35, borderRadius: '20px', bgcolor: '#f8fafc', border: '1px solid #e2e8f0', mb: 1.75 }}>
-                    <PhoneIcon sx={{ color: '#10b981', fontSize: '0.95rem' }} />
-                    <Typography variant="body2" sx={{ color: '#1e293b', fontWeight: 600, fontSize: '0.85rem', letterSpacing: 0.5 }}>
+                  <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, px: 2, py: 0.5, borderRadius: '20px', bgcolor: '#f8fafc', border: '1px solid #e2e8f0', mb: 1.75 }}>
+                    <PhoneIcon sx={{ color: '#10b981', fontSize: '1.25rem' }} />
+                    <Typography variant="body2" sx={{ color: '#1e293b', fontWeight: 700, fontSize: '1.25rem', letterSpacing: 0.5 }}>
                       Ph:- 0300-7560306
                     </Typography>
                   </Box>
@@ -9129,10 +9154,10 @@ function SalesPageContent() {
                                     <TableCell sx={{ px: 0.75, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{index + 1}</TableCell>
                                     <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="left">{detail.product?.pro_title || detail.pro_title || 'N/A'}</TableCell>
                                     {hasAnySize && (
-                                      <TableCell className="cell-normal" sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'normal !important', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="center">{detail.size || '—'}</TableCell>
+                                      <TableCell className="cell-normal" sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'normal !important', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="center">{String(detail.size ?? '').trim()}</TableCell>
                                     )}
                                     <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtRateQty(detail.qnty)}</TableCell>
-                                    <TableCell className="cell-normal" sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'normal !important', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtRateQty(detail.unit_rate)}</TableCell>
+                                    <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtRateQty(detail.unit_rate)}</TableCell>
                                     <TableCell sx={{ px: 1, py: 0.75, borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtAmt(detail.total_amount)}</TableCell>
                                   </TableRow>
                                 ))}
@@ -9555,12 +9580,12 @@ function SalesPageContent() {
 
                       return matchesName || matchesId || matchesOrderNo;
                     }).length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
-                          {orderSearchTerm ? 'No matching orders found' : 'No orders found'}
-                        </TableCell>
-                      </TableRow>
-                    )}
+                        <TableRow>
+                          <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
+                            {orderSearchTerm ? 'No matching orders found' : 'No orders found'}
+                          </TableCell>
+                        </TableRow>
+                      )}
                   </>
                 )}
               </TableBody>
@@ -10385,7 +10410,7 @@ function SalesPageContent() {
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          bgcolor: 'primary.main',
+          bgcolor: '#16a34a',
           color: 'white',
           py: 2,
           px: 3
@@ -10418,30 +10443,22 @@ function SalesPageContent() {
                 bgcolor: '#ffffff',
                 mb: 1
               }}>
-                <Typography variant="h4" sx={{
-                  fontWeight: 'bold',
-                  mb: 1.25,
-                  fontFamily: '"Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", "Urdu Typesetting", serif !important',
-                  fontSize: { xs: '1.6rem', md: '2.1rem' },
-                  direction: 'rtl',
-                  color: '#0f172a',
-                  lineHeight: 1.8
-                }}>
+                <Typography variant="h4" sx={{ fontWeight: 900, mb: 1, fontFamily: 'Arial, sans-serif', direction: 'rtl', color: '#0f172a', fontSize: '2.2rem' }}>
                   اتفاق آئرن اینڈ سیمنٹ سٹور
                 </Typography>
                 <Typography variant="body2" sx={{
                   mt: 0.75,
                   mb: 1.5,
-                  fontSize: '0.9rem',
+                  fontSize: '0.95rem',
                   direction: 'rtl',
-                  color: '#d32f2f !important',
-                  fontWeight: 600
+                  color: '#16a34a !important',
+                  fontWeight: 700
                 }}>
                   گجرات سرگودھا روڈ، پاہڑیانوالی
                 </Typography>
-                <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, px: 1.75, py: 0.35, borderRadius: '20px', bgcolor: '#f8fafc', border: '1px solid #e2e8f0', mb: 1.75 }}>
-                  <PhoneIcon sx={{ color: '#10b981', fontSize: '0.95rem' }} />
-                  <Typography variant="body2" sx={{ color: '#1e293b', fontWeight: 600, fontSize: '0.85rem', letterSpacing: 0.5 }}>
+                <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, px: 2, py: 0.5, borderRadius: '20px', bgcolor: '#f8fafc', border: '1px solid #e2e8f0', mb: 1.75 }}>
+                  <PhoneIcon sx={{ color: '#10b981', fontSize: '1.25rem' }} />
+                  <Typography variant="body2" sx={{ color: '#1e293b', fontWeight: 700, fontSize: '1.25rem', letterSpacing: 0.5 }}>
                     Ph:- 0300-7560306
                   </Typography>
                 </Box>
@@ -10566,10 +10583,10 @@ function SalesPageContent() {
                                   <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{index + 1}</TableCell>
                                   <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="left">{detail.product?.pro_title || detail.product?.pro_name || detail.product?.prod_name || detail.pro_title || 'N/A'}</TableCell>
                                   {hasAnySize && (
-                                    <TableCell className="cell-normal" sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'normal !important', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="center">{detail.size || '—'}</TableCell>
+                                    <TableCell className="cell-normal" sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'normal !important', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="center">{String(detail.size ?? '').trim()}</TableCell>
                                   )}
                                   <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{detail.qnty || 0}</TableCell>
-                                  <TableCell className="cell-normal" sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'normal !important', color: '#000000', verticalAlign: 'middle' }} align="center">{parseFloat(detail.unit_rate || 0).toFixed(2)}</TableCell>
+                                  <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{parseFloat(detail.unit_rate || 0).toFixed(2)}</TableCell>
                                   <TableCell sx={{ px: 1.25, py: 0.75, borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{parseFloat(detail.total_amount || 0).toFixed(0)}</TableCell>
                                 </TableRow>
                               ))}
@@ -12123,13 +12140,13 @@ function SalesPageContent() {
           >
             {/* Header */}
             <Box sx={{ textAlign: 'center', pb: 1, borderBottom: '2px solid #000' }}>
-              <Typography sx={{ fontSize: '16px', fontWeight: '900', fontFamily: '"Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", "Urdu Typesetting", serif !important', direction: 'rtl', color: '#000', mb: 0.75 }}>
+              <Typography sx={{ fontWeight: 900, fontSize: '20px', fontFamily: 'Arial, sans-serif', direction: 'rtl', color: '#000', mb: 0.75 }}>
                 اتفاق آئرن اینڈ سیمنٹ سٹور
               </Typography>
-              <Typography sx={{ fontSize: '11px', direction: 'rtl', mt: 0.75, mb: 0.5, color: '#d32f2f !important', fontWeight: 'bold' }}>
+              <Typography sx={{ fontSize: '11px', direction: 'rtl', mt: 0.75, mb: 0.5, color: '#16a34a !important', fontWeight: 'bold' }}>
                 گجرات سرگودھا روڈ، پاہڑیانوالی
               </Typography>
-              <Typography sx={{ fontSize: '11px', fontWeight: 'bold', mt: 0.25, color: '#000' }}>
+              <Typography sx={{ fontSize: '14px', fontWeight: 'bold', mt: 0.25, color: '#000' }}>
                 Ph: 0300-7560306
               </Typography>
               <Typography
@@ -12195,7 +12212,7 @@ function SalesPageContent() {
                       <Typography sx={{ fontSize: '11px', width: '35px', textAlign: 'center', color: '#000' }}>
                         {fmtRateQty(d.qnty)}
                       </Typography>
-                      <Typography sx={{ fontSize: '11px', width: '50px', textAlign: 'right', color: '#000' }}>
+                      <Typography sx={{ fontSize: '11px', fontWeight: 'bold', width: '50px', textAlign: 'right', color: '#000' }}>
                         {fmtRateQty(d.unit_rate)}
                       </Typography>
                       <Typography sx={{ fontSize: '11px', fontWeight: 'bold', width: '55px', textAlign: 'right', color: '#000' }}>

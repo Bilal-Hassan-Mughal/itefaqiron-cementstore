@@ -1,5 +1,41 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: 'Jameel Noori Nastaleeq';
+  src: url('https://cdn.jsdelivr.net/gh/zaheer-khasi/urdu-fonts/JameelNooriNastaleeq.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/gh/zaheer-khasi/urdu-fonts/JameelNooriNastaleeq.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+.nastaliq-text,
+.nastaliq-text * {
+  font-family: 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', 'Urdu Typesetting', serif !important;
+}
+
+/* Separate word CSS styles */
+.word-ittefaq {
+  font-family: 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', 'Urdu Typesetting', serif !important;
+  font-weight: 800 !important;
+}
+.word-iron {
+  font-family: 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', 'Urdu Typesetting', serif !important;
+  font-weight: 800 !important;
+}
+.word-and {
+  font-family: 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', 'Urdu Typesetting', serif !important;
+  font-weight: 800 !important;
+}
+.word-cement {
+  font-family: 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', 'Urdu Typesetting', serif !important;
+  font-weight: 800 !important;
+}
+.word-store {
+  font-family: 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', 'Urdu Typesetting', serif !important;
+  font-weight: 800 !important;
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;

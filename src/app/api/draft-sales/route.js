@@ -49,9 +49,9 @@ export async function GET(request) {
       return NextResponse.json(draft);
     }
 
-    // Fetch all active drafts
+    // Fetch all active drafts for this branch
     const drafts = await prisma.draftSale.findMany({
-      where: { is_active: true },
+      where: { is_active: true, branch_id: __branchScope.branchId },
       include: {
         customer: {
           select: {
@@ -168,6 +168,18 @@ export async function DELETE(request) {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
+    const deleteAll = searchParams.get('all') === 'true';
+
+    if (deleteAll) {
+      const result = await prisma.draftSale.deleteMany({
+        where: { branch_id: __branchScope.branchId, is_active: true },
+      });
+      return NextResponse.json({
+        success: true,
+        count: result.count,
+        message: `Deleted ${result.count} draft(s)`,
+      });
+    }
 
     if (!id) {
       return NextResponse.json(
