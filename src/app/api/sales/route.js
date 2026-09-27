@@ -492,7 +492,17 @@ export async function GET(request) {
     const listMode = searchParams.get('list') === 'true';
     const slimList = searchParams.get('slim') === 'true';
     const billTypeFilter = searchParams.get('bill_type');
+    const billTypesParam = searchParams.get('bill_types');
+    const billTypeIn = billTypesParam
+      ? billTypesParam.split(',').map((s) => s.trim()).filter(Boolean)
+      : null;
     const pageParam = searchParams.get('page');
+
+    const listBillTypeWhere = () => {
+      if (billTypeIn?.length) return { bill_type: { in: billTypeIn } };
+      if (billTypeFilter) return { bill_type: billTypeFilter };
+      return {};
+    };
 
     if (id) {
       // Fetch single sale
@@ -860,6 +870,7 @@ export async function GET(request) {
                 cash_payment: true,
                 bank_payment: true,
                 advance_payment: true,
+                store_id: true,
                 customer: {
                   select: {
                     cus_id: true,
@@ -890,14 +901,14 @@ export async function GET(request) {
               },
               where: {
                 branch_id: branchId,
-                ...(billTypeFilter ? { bill_type: billTypeFilter } : {}),
+                ...listBillTypeWhere(),
               },
               orderBy: { created_at: 'desc' },
             }
           : {
               where: {
                 branch_id: branchId,
-                ...(billTypeFilter ? { bill_type: billTypeFilter } : {}),
+                ...listBillTypeWhere(),
               },
               include: {
                 customer: {
@@ -957,7 +968,7 @@ export async function GET(request) {
 
         if (limit && limit > 0) {
           findOptions.take = limit;
-        } else if (listMode && !billTypeFilter) {
+        } else if (listMode && !billTypeFilter && !billTypeIn?.length) {
           findOptions.take = 500;
         }
 

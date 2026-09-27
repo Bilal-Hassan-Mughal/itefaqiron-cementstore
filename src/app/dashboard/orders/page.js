@@ -550,7 +550,8 @@ function OrdersPageContent() {
   const [customerTypes, setCustomerTypes] = useState([]);
   const [products, setProducts] = useState([]);
   const [stores, setStores] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [listLoading, setListLoading] = useState(true);
+  const formCatalogLoadedRef = useRef(false);
   const [savingBill, setSavingBill] = useState(false);
 
   // Filter state
@@ -1490,6 +1491,64 @@ function OrdersPageContent() {
     }));
   };
 
+  const resetOrderCreateForm = useCallback(() => {
+    setEditSaleId(null);
+    setFormSelectedCustomer(null);
+    setSelectedCustomerType(null);
+    setFormSelectedStore(stores.length > 0 ? stores[0] : null);
+    setProductTableData([]);
+    setPaymentData({
+      cash: '',
+      bank: '',
+      bankAccountId: '',
+      totalCashReceived: 0,
+      discount: '',
+      labour: '',
+      deliveryCharges: '',
+      notes: '',
+    });
+    setProductFormData({
+      quantity: '',
+      rate: '',
+      amount: 0,
+      stock: 0,
+    });
+    setFormSelectedProduct(null);
+    setTransportOptions([]);
+    setNewTransport({ amount: 0, accountId: '' });
+    setBillType('ORDER');
+    const initialState = {
+      formSelectedCustomer: null,
+      formSelectedStore: stores.length > 0 ? stores[0] : null,
+      productTableData: [],
+      paymentData: {
+        cash: '',
+        bank: '',
+        bankAccountId: '',
+        totalCashReceived: 0,
+        discount: '',
+        labour: '',
+        deliveryCharges: '',
+        notes: '',
+      },
+      billType: 'ORDER',
+      formSelectedProduct: null,
+      productFormData: {
+        quantity: '',
+        rate: '',
+        amount: 0,
+        stock: 0,
+      },
+      newTransport: { amount: 0, accountId: '' },
+      transportAccounts: [],
+      transportOptions: [],
+      timestamp: new Date().toLocaleTimeString(),
+      customerName: 'New Order',
+    };
+    setScreenStack([initialState]);
+    setCurrentScreenIndex(0);
+  }, [stores]);
+
   // Save bill to database
   const handleSaveBill = async () => {
     const hasCash = parseFloat(paymentData.cash || 0) > 0;
@@ -1588,7 +1647,7 @@ function OrdersPageContent() {
         loader_id: null,
         labour_charges: parseFloat(paymentData.labour) || 0, // Include labour charges
         shipping_amount: totalShippingAmount, // Include both transport and delivery charges
-        bill_type: billType || 'BILL',
+        bill_type: billType || 'ORDER',
         reference: paymentData.notes || null,
         previous_balance: prevBalanceAtSave,
         is_loaded_order: paymentData.isLoadedOrder || false, // Flag for converted orders
@@ -1682,9 +1741,12 @@ function OrdersPageContent() {
         setSavingBill(false);
         showSnackbar(successMessage, 'success');
 
+        resetOrderCreateForm();
+
         void (async () => {
           notifyLedgerDataChanged('order');
-          refreshSalesQuietly();
+          await refreshSalesQuietly();
+          await refreshCustomers();
           if (!savedSaleId) return;
           try {
             const detailRes = await fetch(`/api/sales?id=${savedSaleId}`);
@@ -1700,21 +1762,6 @@ function OrdersPageContent() {
             /* local receipt is enough */
           }
         })();
-
-        setFormSelectedCustomer(null);
-        setFormSelectedProduct(null);
-        setFormSelectedStore(null);
-        setProductTableData([]);
-        setPaymentData({
-          cash: 0,
-          bank: 0,
-          bankAccountId: '',
-          totalCashReceived: 0,
-          discount: 0,
-          labour: 0,
-          deliveryCharges: 0,
-          notes: ''
-        });
       } else {
         if (!isEditing) {
           setReceiptDialogOpen(false);
@@ -1737,11 +1784,16 @@ function OrdersPageContent() {
     }
   };
 
-  // Fetch data on component mount
   useEffect(() => {
-    console.log('🔍 Component mounted, calling fetchData...');
-    fetchData();
+    void fetchListBootstrap();
+    void fetchFormCatalog();
   }, []);
+
+  useEffect(() => {
+    if (currentView === 'create' && !formCatalogLoadedRef.current) {
+      void fetchFormCatalog();
+    }
+  }, [currentView]);
 
   // Re-fetch customers silently when another tab/page saves a customer
   const refreshCustomers = async () => {
@@ -2041,164 +2093,121 @@ function OrdersPageContent() {
     }
   };
 
-  // Fetch data
-  const fetchData = async () => {
+  /** Slim list: orders only, no line items (detail loaded on view/edit). */
+  const fetchOrdersSalesList = async () => {
+    const res = await fetch(
+      '/api/sales?list=true&slim=true&bill_types=ORDER,ORDER_TRASH',
+      { cache: 'no-store' }
+    );
+    if (!res.ok) {
+      console.error('Orders list failed:', res.status);
+      return [];
+    }
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  };
+
+  const parseCustomersJson = async (customersRes) => {
+    if (!customersRes.ok) {
+      setCustomers([]);
+      return;
+    }
+    const customersResponse = await customersRes.json();
+    const customersData = customersResponse.value || customersResponse;
+    setCustomers(Array.isArray(customersData) ? customersData : []);
+  };
+
+  const parseStoresJson = async (storesRes) => {
+    if (!storesRes.ok) {
+      setStores([]);
+      return;
+    }
+    const storesResponse = await storesRes.json();
+    const storesData = storesResponse.data || storesResponse;
+    setStores(Array.isArray(storesData) ? storesData : []);
+  };
+
+  /** List tab: orders + filter dropdowns only — do not wait for products/cities. */
+  const fetchListBootstrap = async () => {
+    setListLoading(true);
     try {
-      setLoading(true);
-      console.log('🔄 Starting to fetch data...');
-
-      // Fetch sales data first and separately to ensure it's not affected by other API failures
-      try {
-        const salesRes = await fetch('/api/sales');
-        console.log('📡 Sales API response status:', salesRes.status, salesRes.statusText);
-
-        if (salesRes.ok) {
-          const salesData = await salesRes.json();
-          console.log('🔍 Sales API response:', salesData);
-          console.log('🔍 Sales count:', salesData.length);
-          console.log('🔍 Sales data type:', typeof salesData);
-          console.log('🔍 Sales is array:', Array.isArray(salesData));
-
-          if (Array.isArray(salesData) && salesData.length > 0) {
-            console.log('🔍 First sale structure:', {
-              sale_id: salesData[0].sale_id,
-              hasCustomer: !!salesData[0].customer,
-              customerName: salesData[0].customer?.cus_name,
-              total_amount: salesData[0].total_amount,
-              keys: Object.keys(salesData[0])
-            });
-          }
-
-          if (!Array.isArray(salesData)) {
-            console.error('❌ Sales data is not an array!', salesData);
-            setSales([]);
-          } else {
-            setSales(salesData);
-          }
-        } else {
-          const errorText = await salesRes.text();
-          console.error('❌ Sales API error:', salesRes.status, salesRes.statusText);
-          console.error('❌ Error response:', errorText);
-          setSales([]);
-        }
-      } catch (salesError) {
-        console.error('❌ Sales fetch error:', salesError);
-        console.error('❌ Error stack:', salesError.stack);
-        setSales([]);
-      }
-
-      // Fetch other data in parallel
-      const [customersRes, productsRes, customerTypesRes, storesRes, customerCategoriesRes, citiesRes] = await Promise.all([
+      const ordersPromise = fetchOrdersSalesList();
+      const metaPromise = Promise.all([
         fetch('/api/customers?dropdown=true'),
-        fetch('/api/products?dropdown=true'),
-        fetch('/api/customer-types'),
         fetch('/api/stores'),
         fetch('/api/customer-category'),
-        fetch('/api/cities')
       ]);
 
-      // Fetch transport accounts after main data
-      await fetchTransportAccounts();
+      const ordersList = await ordersPromise;
+      setSales(ordersList);
+      setListLoading(false);
 
-      // Note: fetchBankAccounts will be called via auto-filter effect once customers, categories, and types are loaded
-
-      console.log('📡 All API calls completed');
-
-      if (customersRes.ok) {
-        const customersResponse = await customersRes.json();
-        console.log('🔍 Customers API response:', customersResponse);
-        console.log('🔍 Customers API response type:', typeof customersResponse);
-        console.log('🔍 Customers API response is array:', Array.isArray(customersResponse));
-        // Handle the API response format: {value: [...]} or direct array
-        const customersData = customersResponse.value || customersResponse;
-        console.log('🔍 Customers data after processing:', customersData);
-        console.log('🔍 Customers data type:', typeof customersData);
-        console.log('🔍 Customers data is array:', Array.isArray(customersData));
-        console.log('🔍 Customers count:', customersData.length);
-        if (customersData.length > 0) {
-          console.log('🔍 First customer:', customersData[0]);
-        }
-        const customersArray = Array.isArray(customersData) ? customersData : [];
-        setCustomers(customersArray);
-        console.log('🔍 Customers state set successfully');
-      } else {
-        console.error('❌ Customers API error:', customersRes.status, customersRes.statusText);
-        setCustomers([]);
-      }
-      if (productsRes.ok) {
-        const productsData = await productsRes.json();
-        console.log('🔍 Products data:', productsData);
-        console.log('🔍 Products count:', productsData.length);
-        if (productsData.length > 0) {
-          console.log('🔍 First product structure:', productsData[0]);
-        }
-        setProducts(productsData);
-      } else {
-        console.error('❌ Products API error:', productsRes.status);
-      }
-      if (customerTypesRes.ok) {
-        const customerTypesResponse = await customerTypesRes.json();
-        // Handle the API response format: {value: [...]}
-        const customerTypesData = customerTypesResponse.value || customerTypesResponse;
-        setCustomerTypes(customerTypesData || []);
-      } else {
-        console.error('❌ Customer types API error:', customerTypesRes.status);
-      }
-      if (storesRes.ok) {
-        const storesResponse = await storesRes.json();
-        console.log('🔍 Stores response:', storesResponse);
-        // Handle the API response format: {success: true, data: [...]}
-        const storesData = storesResponse.data || storesResponse;
-        console.log('🔍 Stores data:', storesData);
-        // Ensure storesData is an array
-        if (Array.isArray(storesData)) {
-          console.log('✅ Setting stores:', storesData);
-          setStores(storesData);
-        } else {
-          console.error('❌ Stores data is not an array:', storesData);
-          setStores([]);
-        }
-      } else {
-        console.error('❌ Stores API error:', storesRes.status);
-        setStores([]);
-      }
+      const [customersRes, storesRes, customerCategoriesRes] = await metaPromise;
+      await parseCustomersJson(customersRes);
+      await parseStoresJson(storesRes);
       if (customerCategoriesRes.ok) {
         const customerCategoriesData = await customerCategoriesRes.json();
         setCustomerCategories(customerCategoriesData || []);
       } else {
-        console.error('❌ Customer categories API error:', customerCategoriesRes.status);
         setCustomerCategories([]);
+      }
+    } catch (error) {
+      console.error('Error loading orders list:', error);
+      showSnackbar('Error loading orders list', 'error');
+    } finally {
+      setListLoading(false);
+    }
+  };
+
+  /** Create-order form catalogs — loaded in background after list. */
+  const fetchFormCatalog = async () => {
+    if (formCatalogLoadedRef.current) return;
+    try {
+      const [productsRes, customerTypesRes, citiesRes, customersRes] = await Promise.all([
+        fetch('/api/products?dropdown=true'),
+        fetch('/api/customer-types'),
+        fetch('/api/cities'),
+        fetch('/api/customers?dropdown=true'),
+      ]);
+      if (productsRes.ok) {
+        const productsData = await productsRes.json();
+        setProducts(Array.isArray(productsData) ? productsData : []);
+      }
+      if (customerTypesRes.ok) {
+        const customerTypesResponse = await customerTypesRes.json();
+        const customerTypesData = customerTypesResponse.value || customerTypesResponse;
+        setCustomerTypes(customerTypesData || []);
       }
       if (citiesRes.ok) {
         const citiesData = await citiesRes.json();
-        console.log('🔍 Cities data:', citiesData);
         setCities(citiesData || []);
-      } else {
-        console.error('❌ Cities API error:', citiesRes.status);
-        setCities([]);
       }
-
+      await parseCustomersJson(customersRes);
+      formCatalogLoadedRef.current = true;
     } catch (error) {
-      console.error('Error fetching data:', error);
-      showSnackbar('Error fetching data', 'error');
-    } finally {
-      setLoading(false);
+      console.error('Error loading order form catalogs:', error);
     }
+  };
+
+  const fetchData = async () => {
+    await Promise.all([fetchListBootstrap(), fetchFormCatalog()]);
   };
 
   const refreshSalesQuietly = async () => {
     try {
-      const salesRes = await fetch('/api/sales');
-      if (salesRes.ok) {
-        const salesData = await salesRes.json();
-        if (Array.isArray(salesData)) {
-          setSales(salesData);
-        }
-      }
+      const salesData = await fetchOrdersSalesList();
+      setSales(salesData);
     } catch (error) {
-      console.error('Failed to refresh sales list:', error);
+      console.error('Failed to refresh orders list:', error);
     }
   };
+
+  const handleCloseReceipt = useCallback(() => {
+    setReceiptDialogOpen(false);
+    resetOrderCreateForm();
+    void refreshSalesQuietly();
+    void refreshCustomers();
+  }, [resetOrderCreateForm]);
 
   // Handle viewing a bill
   const handleViewBill = async (sale) => {
@@ -2384,12 +2393,8 @@ function OrdersPageContent() {
       if (response.ok) {
         showSnackbar('Sale return processed successfully', 'success');
         handleCloseReturnDialog();
-        // Refresh sales list
-        const salesResponse = await fetch('/api/sales');
-        if (salesResponse.ok) {
-          const salesData = await salesResponse.json();
-          setSales(Array.isArray(salesData) ? salesData : []);
-        }
+        const salesData = await fetchOrdersSalesList();
+        setSales(salesData);
       } else {
         const errorData = await response.json();
         showSnackbar('Error: ' + (errorData.error || 'Failed to process return'), 'error');
@@ -2639,20 +2644,12 @@ function OrdersPageContent() {
     }
   };
 
-  // Filter sales based on search criteria
   const filteredSales = useMemo(() => {
-    console.log('🔍 Starting filter with sales count:', sales.length);
-    console.log('🔍 Sales is array?', Array.isArray(sales));
-    console.log('🔍 Filter criteria:', { searchTerm, filterCustomer, filterBillType, filterStore, filterPaymentType, filterMinAmount, filterMaxAmount, filterBalanceStatus, dateFrom, dateTo });
-
-    // Check if sales array has data
     if (!Array.isArray(sales) || sales.length === 0) {
-      console.log('🔍 No sales to filter - returning empty array');
       return [];
     }
 
-    console.log('🔍 Filtering', sales.length, 'sales...');
-    const filtered = sales.filter(sale => {
+    return sales.filter(sale => {
       // All filters are empty by default, so all sales should match
       const q = searchTerm.toLowerCase();
       const matchesSearch = searchTerm === '' ||
@@ -2669,8 +2666,8 @@ function OrdersPageContent() {
       const matchesBillType = filterBillType === '' ||
         sale.bill_type === filterBillType;
 
-      // Store filter - check if any sale detail has the store
       const matchesStore = filterStore === '' ||
+        sale.store_id?.toString() === filterStore ||
         (sale.sale_details && sale.sale_details.some(detail =>
           detail.store?.storeid?.toString() === filterStore ||
           detail.store_id?.toString() === filterStore
@@ -2700,93 +2697,11 @@ function OrdersPageContent() {
       const matchesDateTo = dateTo === '' ||
         (dateTo && sale.created_at && new Date(sale.created_at) <= new Date(dateTo));
 
-      const result = matchesSearch && matchesCustomer && matchesBillType && matchesStore &&
+      return matchesSearch && matchesCustomer && matchesBillType && matchesStore &&
         matchesPaymentType && matchesMinAmount && matchesMaxAmount &&
         matchesBalanceStatus && matchesDateFrom && matchesDateTo;
-
-      if (!result) {
-        console.log('🔍 Sale', sale.sale_id, 'filtered out:', {
-          matchesSearch,
-          matchesCustomer,
-          matchesBillType,
-          matchesStore,
-          matchesPaymentType,
-          matchesMinAmount,
-          matchesMaxAmount,
-          matchesBalanceStatus,
-          matchesDateFrom,
-          matchesDateTo,
-          hasCustomer: !!sale.customer,
-          saleData: { sale_id: sale.sale_id, total_amount: sale.total_amount }
-        });
-      }
-
-      return result;
     });
-
-    console.log('🔍 Filtered sales count:', filtered.length, 'out of', sales.length);
-    if (filtered.length > 0) {
-      console.log('🔍 First filtered sale:', filtered[0]);
-    }
-    return filtered;
   }, [sales, searchTerm, filterCustomer, filterBillType, filterStore, filterPaymentType, filterMinAmount, filterMaxAmount, filterBalanceStatus, dateFrom, dateTo]);
-
-  console.log('🔍 Filtered sales count:', filteredSales.length);
-  console.log('🔍 Sales state:', sales);
-  console.log('🔍 Sales state length:', sales.length);
-
-  // Debug sales state changes
-  useEffect(() => {
-    console.log('🔍 Sales state changed:', sales);
-    console.log('🔍 Sales length:', sales.length);
-    if (sales.length > 0) {
-      console.log('🔍 First sale:', sales[0]);
-    }
-  }, [sales]);
-
-  // Debug stores state changes
-  useEffect(() => {
-    console.log('🏪 Stores state changed:', stores);
-    console.log('🏪 Stores length:', stores.length);
-    console.log('🏪 Stores type:', typeof stores);
-    console.log('🏪 Is stores array:', Array.isArray(stores));
-  }, [stores]);
-
-  // Debug customers state changes for sales list
-  useEffect(() => {
-    console.log('👥 Sales List - Customers state changed:', customers);
-    console.log('👥 Sales List - Customers length:', customers.length);
-    if (customers.length > 0) {
-      console.log('👥 Sales List - First customer:', customers[0]);
-      console.log('👥 Sales List - All customer types:', customers.map(c => ({
-        name: c.cus_name,
-        type: c.customer_type?.cus_type_title,
-        cus_type: c.cus_type
-      })));
-    }
-  }, [customers]);
-
-  // Debug products state changes for new sale page
-  useEffect(() => {
-    console.log('📦 New Sale - Products state changed:', products);
-    console.log('📦 New Sale - Products length:', products.length);
-    if (products.length > 0) {
-      console.log('📦 New Sale - First product:', products[0]);
-    }
-  }, [products]);
-
-  // Debug customers state changes for new sale page
-  useEffect(() => {
-    console.log('👥 New Sale - Customers state changed:', customers);
-    console.log('👥 New Sale - Customers length:', customers.length);
-    if (customers.length > 0) {
-      console.log('👥 New Sale - First customer:', customers[0]);
-      console.log('👥 New Sale - Customer types:', customers.map(c => ({
-        name: c.cus_name,
-        type: c.customer_type?.cus_type_title
-      })));
-    }
-  }, [customers]);
 
   // Calculate stats for current mode (active orders or trashed orders)
   const modeBillType = showTrashOrders ? 'ORDER_TRASH' : 'ORDER';
@@ -2847,7 +2762,6 @@ function OrdersPageContent() {
 
   const handleEdit = async (sale) => {
     try {
-      setLoading(true);
       showSnackbar('Loading order details...', 'info');
 
       // Fetch full details
@@ -2954,77 +2868,18 @@ function OrdersPageContent() {
     } catch (e) {
       console.error('Error editing sale:', e);
       showSnackbar('Error loading sale details', 'error');
-    } finally {
-      setLoading(false);
     }
   };
 
   const handleNewOrder = () => {
-    // Reset all form states for a clean new order
-    setEditSaleId(null);
-    setFormSelectedCustomer(null);
-    setSelectedCustomerType(null);
-    setFormSelectedStore(stores.length > 0 ? stores[0] : null);
-    setProductTableData([]);
-    setPaymentData({
-      cash: '',
-      bank: '',
-      bankAccountId: '',
-      totalCashReceived: 0,
-      discount: '',
-      labour: '',
-      deliveryCharges: '',
-      notes: ''
-    });
-    setProductFormData({
-      quantity: '',
-      rate: '',
-      amount: 0,
-      stock: 0
-    });
-    setFormSelectedProduct(null);
-    setTransportOptions([]);
-    setNewTransport({ amount: 0, accountId: '' });
-    setBillType('ORDER');
-    
-    // Re-initialize screen stack for new order
-    const initialState = {
-      formSelectedCustomer: null,
-      formSelectedStore: stores.length > 0 ? stores[0] : null,
-      productTableData: [],
-      paymentData: {
-        cash: '',
-        bank: '',
-        bankAccountId: '',
-        totalCashReceived: 0,
-        discount: '',
-        labour: '',
-        deliveryCharges: '',
-        notes: ''
-      },
-      billType: 'ORDER',
-      formSelectedProduct: null,
-      productFormData: {
-        quantity: '',
-        rate: '',
-        amount: 0,
-        stock: 0
-      },
-      newTransport: { amount: 0, accountId: '' },
-      transportAccounts: [],
-      transportOptions: [],
-      timestamp: new Date().toLocaleTimeString(),
-      customerName: 'New Order'
-    };
-    setScreenStack([initialState]);
-    setCurrentScreenIndex(0);
-    
+    resetOrderCreateForm();
     setCurrentView('create');
   };
 
   const handleBackToList = () => {
     setEditSaleId(null);
     setCurrentView('list');
+    void refreshSalesQuietly();
   };
 
   const handleDelete = async (sale) => {
@@ -3097,24 +2952,6 @@ function OrdersPageContent() {
     setSortBy('created_at');
     setSortOrder('desc');
   };
-
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <Box
-          sx={{
-            minHeight: '100vh',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            bgcolor: 'background.default'
-          }}
-        >
-          <CircularProgress size={80} />
-        </Box>
-      </DashboardLayout>
-    );
-  }
 
   // Render Sales Create View
   const renderSalesCreateView = () => (
@@ -4685,7 +4522,7 @@ function OrdersPageContent() {
         {/* Receipt Dialog */}
         <Dialog
           open={receiptDialogOpen}
-          onClose={() => setReceiptDialogOpen(false)}
+          onClose={handleCloseReceipt}
           maxWidth="md"
           fullWidth
           PaperProps={{
@@ -4700,7 +4537,7 @@ function OrdersPageContent() {
               Receipt - {getBillDisplayNo(currentBillData)}
             </Typography>
             <IconButton
-              onClick={() => setReceiptDialogOpen(false)}
+              onClick={handleCloseReceipt}
               size="small"
               sx={{ color: 'white', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}
             >
@@ -4922,7 +4759,7 @@ function OrdersPageContent() {
           </DialogContent>
           <DialogActions sx={{ p: 3, bgcolor: 'grey.50', borderTop: '1px solid #e0e0e0' }} className="no-print">
             <Button
-              onClick={() => setReceiptDialogOpen(false)}
+              onClick={handleCloseReceipt}
               variant="outlined"
               sx={{ minWidth: 100 }}
             >
@@ -5463,7 +5300,16 @@ function OrdersPageContent() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {filteredSales.length === 0 ? (
+                  {listLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={12} align="center" sx={{ py: 8, border: '1px solid #cbd5e1' }}>
+                        <CircularProgress size={40} sx={{ mb: 1.5 }} />
+                        <Typography sx={{ fontWeight: 600, color: '#64748b', fontSize: '0.875rem' }}>
+                          Loading orders…
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredSales.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={12} align="center" sx={{ py: 6, border: '1px solid #cbd5e1' }}>
                         <ShoppingCartIcon sx={{ fontSize: 48, color: '#cbd5e1', mb: 1 }} />
