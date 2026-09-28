@@ -300,17 +300,17 @@ function isCustomerAccount(customer, customerCategories = []) {
   }
 
   const normCat = (catTitle || '').trim().toLowerCase();
-  if (normCat) {
-    const isNonCustomerCat = (
-      normCat.includes('bank') ||
-      normCat.includes('transport') ||
-      normCat.includes('transporter') ||
-      normCat.includes('cargo') ||
-      normCat.includes('vendor') ||
-      normCat.includes('supplier')
-    );
-    if (isNonCustomerCat) return false;
-  }
+  const typeTitle = (customer.customer_type?.cus_type_title || customer.cus_type_title || '').trim().toLowerCase();
+  const isNonCustomerLabel = (label) => (
+    label.includes('bank') ||
+    label.includes('transport') ||
+    label.includes('transporter') ||
+    label.includes('cargo') ||
+    label.includes('vendor') ||
+    label.includes('supplier')
+  );
+  if (normCat && isNonCustomerLabel(normCat)) return false;
+  if (typeTitle && isNonCustomerLabel(typeTitle)) return false;
 
   return true;
 }
@@ -2180,6 +2180,39 @@ function SalesPageContent() {
           return;
         }
 
+        const returnCustomerRecord =
+          formSelectedCustomer ||
+          selectedSaleForReturnMain?.customer ||
+          customers.find((c) => c.cus_id === returnCustomerId);
+        if (returnCustomerRecord && !isCustomerAccount(returnCustomerRecord, customerCategories)) {
+          showSnackbar(
+            'Return customer must be a buyer (e.g. Walk-in Customer) — not a Transport/Bank account. Pick the transporter under delivery transport.',
+            'error'
+          );
+          return;
+        }
+
+        const deliveryChargesPre = parseFloat(paymentData.deliveryCharges) || 0;
+        const linkedReturnSaleId = selectedSaleForReturnMain?.sale_id ?? null;
+        if (deliveryChargesPre > 0 && !linkedReturnSaleId) {
+          const hasTransport = transportOptions.some((t) => t.accountId);
+          if (!hasTransport) {
+            showSnackbar(
+              'Manual return: add a transport account under delivery (same as a normal sale) before saving.',
+              'error'
+            );
+            return;
+          }
+          const transportIds = transportOptions.map((t) => parseInt(t.accountId, 10)).filter(Boolean);
+          if (transportIds.includes(Number(returnCustomerId))) {
+            showSnackbar(
+              'Return customer and transport account must be different accounts.',
+              'error'
+            );
+            return;
+          }
+        }
+
         // Construct return payload matching /api/sale-returns expectation
         const totalAmount = calculateTotalAmount(); // Based on productTableData
         const discount = parseFloat(paymentData.discount) || 0;
@@ -2220,6 +2253,21 @@ function SalesPageContent() {
             total_amount: item.amount.toString(),
             discount: '0'
           })),
+          transport_details: (() => {
+            if (deliveryCharges <= 0 || transportOptions.length === 0) return [];
+            const totalDel = Math.max(deliveryCharges, calculateTransportTotal());
+            return transportOptions.map((transport) => {
+              let finalAmt = parseFloat(transport.amount || 0);
+              if (finalAmt <= 0 && totalDel > 0) {
+                finalAmt = totalDel / transportOptions.length;
+              }
+              return {
+                account_id: transport.accountId,
+                amount: finalAmt,
+                description: transport.description || 'Transport charges - Sale Return',
+              };
+            });
+          })(),
           updated_by: getCurrentUserId()
         };
 
@@ -2320,7 +2368,8 @@ function SalesPageContent() {
           setReceiptDialogOpen(false);
           setCurrentBillData(null);
           const errorData = await response.json();
-          showSnackbar('Error: ' + (errorData.error || 'Failed to process return'), 'error');
+          const apiErr = errorData.error || 'Failed to process return';
+          showSnackbar(apiErr.replace(/^Failed to (create|update) sale return:\s*/i, ''), 'error');
         }
         return; // Exit function
       }

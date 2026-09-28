@@ -8,6 +8,13 @@ import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
 import { notifyLedgerDataChanged } from '@/lib/ledger-tabs';
 
+function isTransportCustomerAccount(account) {
+  const cat = (account?.customer_category?.cus_cat_title || '').trim().toLowerCase();
+  const typ = (account?.customer_type?.cus_type_title || '').trim().toLowerCase();
+  const isTransportLabel = (n) => n === 'transport' || n === 'transporter' || n === 'transporters';
+  return isTransportLabel(cat) || isTransportLabel(typ);
+}
+
 // Material-UI imports
 import {
   Box,
@@ -202,8 +209,11 @@ export default function SaleReturnsPage() {
     shipping_amount: 0,
     labour_charges: 0,
     notes: '',
-    manual_sale_inv: ''
+    manual_sale_inv: '',
+    transport_account_id: ''
   });
+
+  const [transportAccounts, setTransportAccounts] = useState([]);
 
   // Manual Product Addition State
   const [manualProduct, setManualProduct] = useState(null);
@@ -265,7 +275,7 @@ export default function SaleReturnsPage() {
       fetch(`/api/customers?dropdown=true&type=${selectedFormType.cus_type_id}`)
         .then(res => res.json())
         .then(data => {
-          setFormCustomers(data || []);
+          setFormCustomers((data || []).filter((c) => !isTransportCustomerAccount(c)));
           setFormCustomersLoading(false);
         })
         .catch(err => {
@@ -289,7 +299,8 @@ export default function SaleReturnsPage() {
         fetch('/api/loaders?limit=500'),
         fetch('/api/customer-types'),
         fetch('/api/customer-category'),
-        fetch('/api/cities')
+        fetch('/api/cities'),
+        fetch('/api/customers?dropdown=true')
       ]);
 
       const data = await Promise.all(responses.map(res => res.json()));
@@ -300,8 +311,24 @@ export default function SaleReturnsPage() {
       setStores(data[3]?.data || data[3] || []);
       setLoaders(Array.isArray(data[4]) ? data[4] : (data[4]?.loaders || []));
       setCustomerTypes(data[5] || []);
-      setCustomerCategories(data[6] || []);
+      const categories = data[6] || [];
+      setCustomerCategories(categories);
       setCities(data[7] || []);
+
+      const accountsList = Array.isArray(data[8]) ? data[8] : [];
+      const catMap = new Map(categories.map((c) => [c.cus_cat_id, (c.cus_cat_title || '').trim().toLowerCase()]));
+      const isTransportLabel = (n) => n === 'transport' || n === 'transporter' || n === 'transporters';
+      const isCargoLabel = (n) => {
+        if (!n) return false;
+        if (n === 'cargo' || n === 'cargos') return true;
+        return n.split(/[\s/&,-]+/)[0] === 'cargo';
+      };
+      setTransportAccounts(accountsList.filter((account) => {
+        const cat = catMap.get(account.cus_category) || (account.customer_category?.cus_cat_title || '').trim().toLowerCase();
+        const typ = (account.customer_type?.cus_type_title || '').trim().toLowerCase();
+        if (isCargoLabel(cat) || isCargoLabel(typ)) return false;
+        return isTransportLabel(cat) || isTransportLabel(typ);
+      }));
     } catch (error) {
       console.error('Error fetching data:', error);
       setSnackbar({ open: true, message: 'Error fetching data', severity: 'error' });
@@ -458,6 +485,9 @@ export default function SaleReturnsPage() {
       labour_charges: parseFloat(fullSale.labour_charges || fullSale.labour || 0),
       payment: 0,
       manual_sale_inv: fullSale.sale_id.toString(),
+      transport_account_id: fullSale.transport_details?.[0]?.account_id
+        ? String(fullSale.transport_details[0].account_id)
+        : '',
       return_details: fullSale.sale_details?.map(detail => ({
         pro_id: detail.pro_id,
         store_id: detail.store_id || fullSale.store_id,
@@ -658,6 +688,20 @@ export default function SaleReturnsPage() {
       return;
     }
 
+    const shippingAmt = parseFloat(formData.shipping_amount) || 0;
+    const linkedSaleId = formData.sale_id ? parseInt(formData.sale_id, 10) : null;
+    if (shippingAmt > 0 && !linkedSaleId && !formData.transport_account_id) {
+      showSnackbar('Please select a transport account for delivery charges (manual return)', 'error');
+      return;
+    }
+    if (
+      formData.transport_account_id
+      && String(formData.cus_id) === String(formData.transport_account_id)
+    ) {
+      showSnackbar('Return customer must not be the transport account — pick Walk-in Customer (or the buyer) and choose transporter separately', 'error');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const url = '/api/sale-returns';
@@ -671,6 +715,13 @@ export default function SaleReturnsPage() {
         reference: formData.notes,
         return_details: returningItems,
         manual_sale_inv: formData.manual_sale_inv,
+        transport_details: shippingAmt > 0 && formData.transport_account_id
+          ? [{
+            account_id: parseInt(formData.transport_account_id, 10),
+            amount: shippingAmt,
+            description: 'Transport charges - Sale Return',
+          }]
+          : [],
         updated_by: 1 // Default user
       };
 
@@ -701,7 +752,8 @@ export default function SaleReturnsPage() {
           shipping_amount: 0,
           labour_charges: 0,
           notes: '',
-          manual_sale_inv: ''
+          manual_sale_inv: '',
+          transport_account_id: ''
         });
 
         showSnackbar(
@@ -1524,6 +1576,7 @@ export default function SaleReturnsPage() {
                                     <TextField
                                       {...params}
                                       label={formCustomersLoading ? "Loading..." : selectedFormType ? "Select Customer" : "Select Type First"}
+                                      helperText="Use the buyer / Walk-in Customer — not the transporter account"
                                       onFocus={(e) => e.target.select()}
                                       sx={STYLES.input}
                                       InputProps={{
@@ -1581,6 +1634,25 @@ export default function SaleReturnsPage() {
                             InputProps={{
                               startAdornment: <InputAdornment position="start">PKR</InputAdornment>
                             }}
+                          />
+                        </Grid>
+                        <Grid item xs={12} md={4}>
+                          <Autocomplete
+                            options={transportAccounts}
+                            getOptionLabel={(o) => o.cus_name || ''}
+                            value={transportAccounts.find((t) => String(t.cus_id) === String(formData.transport_account_id)) || null}
+                            onChange={(e, v) => setFormData((p) => ({ ...p, transport_account_id: v ? String(v.cus_id) : '' }))}
+                            autoHighlight
+                            openOnFocus
+                            renderInput={(params) => (
+                              <TextField
+                                {...params}
+                                label={formData.shipping_amount > 0 && !formData.sale_id ? 'Transport account (required)' : 'Transport account (optional)'}
+                                helperText="Posts transport credit on this account only"
+                                onFocus={(e) => e.target.select()}
+                                sx={STYLES.input}
+                              />
+                            )}
                           />
                         </Grid>
                         <Grid item xs={12} md={4}>

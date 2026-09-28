@@ -8,6 +8,71 @@ import { rejectIfDayClosed } from '@/lib/day-end-guard';
 
 export const dynamic = 'force-dynamic';
 
+function saleReturnBillNo(returnId) {
+  return `SR-${returnId}`;
+}
+
+function saleReturnBillNoVariants(returnId) {
+  const id = String(returnId);
+  return id.startsWith('SR-') ? [id] : [saleReturnBillNo(returnId), id];
+}
+
+function returnIdFromLedgerBillNo(billNo) {
+  const s = String(billNo || '');
+  return s.startsWith('SR-') ? s.slice(3) : s;
+}
+
+function ledgerBillNoWhere(returnId) {
+  return { bill_no: { in: saleReturnBillNoVariants(returnId) } };
+}
+
+function saleReturnHttpStatus(error) {
+  const msg = String(error?.message || '');
+  if (
+    msg.includes('Return customer cannot') ||
+    msg.includes('Transport account must') ||
+    msg.includes('Transport account is required') ||
+    msg.includes('Customer not found') ||
+    msg.includes('Sale not found') ||
+    msg.includes('Sale return not found') ||
+    msg.includes('Invalid return') ||
+    msg.includes('Return qty') ||
+    msg.includes('Missing required')
+  ) {
+    return 400;
+  }
+  return 500;
+}
+
+function isTransportCategoryTitle(title) {
+  const t = String(title || '').toLowerCase();
+  return t.includes('transport') || t.includes('transporter');
+}
+
+async function validateReturnCustomer(tx, cus_id, transport_details) {
+  const customer = await tx.customer.findUnique({
+    where: { cus_id },
+    include: { customer_category: true, customer_type: true },
+  });
+  if (!customer) {
+    throw new Error('Customer not found');
+  }
+  const catTitle = customer.customer_category?.cus_cat_title || '';
+  const typeTitle = customer.customer_type?.cus_type_title || '';
+  if (isTransportCategoryTitle(catTitle) || isTransportCategoryTitle(typeTitle)) {
+    throw new Error(
+      'Return customer cannot be a Transport account. Select the actual customer (e.g. Walk-in Customer), and pick the transporter separately.'
+    );
+  }
+  const transportIds = (transport_details || [])
+    .map((td) => parseInt(td.account_id, 10))
+    .filter((id) => Number.isFinite(id) && id > 0);
+  if (transportIds.includes(cus_id)) {
+    throw new Error('Transport account must be different from the return customer.');
+  }
+  return customer;
+}
+
 /** Resolves the correct opening balance for any customer/account at a target created_at timestamp. */
 async function resolveOpeningBalance(tx, cus_id, target_created_at) {
   const priorEntry = await tx.ledger.findFirst({
@@ -43,6 +108,166 @@ async function resolveOpeningBalance(tx, cus_id, target_created_at) {
   return parseFloat(customer?.cus_balance || 0);
 }
 
+/**
+ * Post transporter ledger on sale return.
+ * - Manual return (no linked sale): CREDIT transporter — same direction as a normal sale transport line.
+ * - Linked return (reversing original bill transport): DEBIT transporter — undo the original sale credit.
+ */
+async function postReturnTransportLedger(tx, {
+  returnId,
+  saleId,
+  shippingAmount,
+  transport_details,
+  customerName,
+  validatedUpdatedBy,
+  affectedCusIds,
+  entryTimestamp,
+}) {
+  const shipping = parseFloat(shippingAmount || 0);
+  if (shipping <= 0) return;
+
+  const targets = [];
+
+  if (Array.isArray(transport_details) && transport_details.length > 0) {
+    for (const td of transport_details) {
+      const accountId = parseInt(td.account_id, 10);
+      if (!Number.isFinite(accountId) || accountId <= 0) continue;
+      let amt = parseFloat(td.amount) || 0;
+      if (amt <= 0) {
+        amt = shipping / transport_details.length;
+      }
+      if (amt > 0) targets.push({ cus_id: accountId, amount: amt });
+    }
+  } else if (saleId) {
+    const originalTransportLedgerEntries = await tx.ledger.findMany({
+      where: {
+        bill_no: String(saleId),
+        details: { contains: 'Transport' },
+        credit_amount: { gt: 0 },
+      },
+      orderBy: { l_id: 'asc' },
+    });
+    for (const entry of originalTransportLedgerEntries) {
+      const amt = parseFloat(entry.credit_amount || 0);
+      if (amt > 0) targets.push({ cus_id: entry.cus_id, amount: amt });
+    }
+  }
+
+  if (targets.length === 0) {
+    console.warn(`Sale Return #${returnId}: delivery ${shipping} but no transport ledger targets`);
+    return;
+  }
+
+  const ts = entryTimestamp || new Date();
+  const isManualReturn = !saleId;
+  const useTransportCredit = isManualReturn;
+
+  for (const { cus_id, amount } of targets) {
+    const lineAmount = Number(parseFloat(amount).toFixed(2));
+    if (lineAmount <= 0) continue;
+
+    if (Array.isArray(affectedCusIds)) {
+      if (!affectedCusIds.includes(cus_id)) affectedCusIds.push(cus_id);
+    } else if (affectedCusIds?.add) {
+      affectedCusIds.add(cus_id);
+    }
+
+    const opening = await resolveOpeningBalance(tx, cus_id, ts);
+    const transportReturnEntry = createLedgerEntry({
+      cus_id,
+      opening_balance: opening,
+      debit_amount: useTransportCredit ? 0 : lineAmount,
+      credit_amount: useTransportCredit ? lineAmount : 0,
+      bill_no: saleReturnBillNo(returnId),
+      trnx_type: useTransportCredit ? 'CREDIT' : 'DEBIT',
+      details: useTransportCredit
+        ? `Transport Charges - Sale Return #${returnId} - ${customerName || 'Customer'} (Credit)`
+        : `Transport Charges - Sale Return #${returnId} - Original Bill #${saleId} (Debit/Reversal)`,
+      payments: 0,
+      updated_by: validatedUpdatedBy,
+      ledger_type: 'Sale Return',
+    });
+
+    const l_id_trans = await getNextId('ledger', 'l_id', tx);
+    await tx.ledger.create({
+      data: {
+        l_id: l_id_trans,
+        ...transportReturnEntry,
+      },
+    });
+  }
+}
+
+/**
+ * Customer sale-return bill lines (mirror sale bill on customer, separate transport account).
+ * - Credit gross product total (reverse of sale bill debit on products)
+ * - Debit delivery / labour / discount withheld from cash refund
+ * Net on customer: -(computedTotal - deductions) = -grandTotal
+ */
+async function createCustomerSaleReturnBillEntries(tx, {
+  cus_id,
+  returnId,
+  computedTotal,
+  shippingAmount,
+  labourChargesAmount,
+  discountAmount,
+  openingBalance,
+  validatedUpdatedBy,
+}) {
+  let running = parseFloat(openingBalance || 0);
+  const billNo = saleReturnBillNo(returnId);
+  const productTotal = parseFloat(computedTotal || 0);
+  const shipping = parseFloat(shippingAmount || 0);
+  const labour = parseFloat(labourChargesAmount || 0);
+  const discount = parseFloat(discountAmount || 0);
+  const deductions = shipping + labour + discount;
+
+  if (productTotal > 0) {
+    const billEntry = createLedgerEntry({
+      cus_id,
+      opening_balance: running,
+      debit_amount: 0,
+      credit_amount: productTotal,
+      bill_no: billNo,
+      trnx_type: 'CREDIT',
+      details: 'Sale Return Bill - SALE_RETURN - Customer Account (Credit)',
+      payments: 0,
+      updated_by: validatedUpdatedBy,
+      ledger_type: 'Sale Return',
+    });
+    const l_id_bill = await getNextId('ledger', 'l_id', tx);
+    await tx.ledger.create({
+      data: { l_id: l_id_bill, ...billEntry },
+    });
+    running = billEntry.closing_balance;
+  }
+
+  if (deductions > 0) {
+    const parts = [];
+    if (shipping > 0) parts.push(`Delivery: ${shipping}`);
+    if (labour > 0) parts.push(`Labour: ${labour}`);
+    if (discount > 0) parts.push(`Discount: ${discount}`);
+    const deductEntry = createLedgerEntry({
+      cus_id,
+      opening_balance: running,
+      debit_amount: deductions,
+      credit_amount: 0,
+      bill_no: billNo,
+      trnx_type: 'DEBIT',
+      details: `Sale Return - ${parts.join(', ')} (Debit)`,
+      payments: 0,
+      updated_by: validatedUpdatedBy,
+      ledger_type: 'Sale Return',
+    });
+    const l_id_ded = await getNextId('ledger', 'l_id', tx);
+    await tx.ledger.create({
+      data: { l_id: l_id_ded, ...deductEntry },
+    });
+    running = deductEntry.closing_balance;
+  }
+
+  return running;
+}
 
 // Chronologically recalculates all ledger entry opening/closing balances for a customer and updates their customer table balance.
 async function recalculateLedgerBalances(tx, cus_id) {
@@ -242,7 +467,7 @@ export async function GET(request) {
 
       const ledgerEntry = await prisma.ledger.findFirst({
         where: {
-          bill_no: String(saleReturn.return_id),
+          ...ledgerBillNoWhere(saleReturn.return_id),
           cus_id: saleReturn.cus_id,
           ledger_type: { contains: 'Return' }
         },
@@ -365,10 +590,10 @@ export async function GET(request) {
         }
       });
 
-      const returnIds = saleReturns.map(sr => String(sr.return_id));
+      const returnBillNos = saleReturns.flatMap((sr) => saleReturnBillNoVariants(sr.return_id));
       const ledgerEntries = await prisma.ledger.findMany({
         where: {
-          bill_no: { in: returnIds },
+          bill_no: { in: returnBillNos },
           ledger_type: { contains: 'Return' }
         },
         orderBy: { l_id: 'asc' },
@@ -377,7 +602,7 @@ export async function GET(request) {
 
       const ledgerMap = new Map();
       for (const entry of ledgerEntries) {
-        const key = `${entry.bill_no}_${entry.cus_id}`;
+        const key = `${returnIdFromLedgerBillNo(entry.bill_no)}_${entry.cus_id}`;
         if (!ledgerMap.has(key)) {
           ledgerMap.set(key, parseFloat(entry.opening_balance));
         }
@@ -439,6 +664,7 @@ export async function POST(request) {
       reference,
       return_details,
       manual_sale_inv,
+      transport_details,
       updated_by
     } = body;
 
@@ -454,6 +680,16 @@ export async function POST(request) {
     const discountAmount = parseFloat(discount || 0);
     const labourChargesAmount = parseFloat(labour_charges || 0);
     const shippingAmount = parseFloat(shipping_amount || 0);
+
+    const parsedSaleIdForPost = sale_id ? parseInt(sale_id, 10) : null;
+    const hasTransportDetails = Array.isArray(transport_details)
+      && transport_details.some((td) => td?.account_id && (parseFloat(td.amount) || shippingAmount) > 0);
+    if (shippingAmount > 0 && !parsedSaleIdForPost && !hasTransportDetails) {
+      return NextResponse.json(
+        { error: 'Transport account is required when delivery charges are set on a manual sale return (no linked invoice).' },
+        { status: 400 }
+      );
+    }
 
     // Grand Total = Product Total - Delivery Charges - Labour Charges - Discount
     const grandTotal = computedTotal - labourChargesAmount - shippingAmount - discountAmount;
@@ -514,14 +750,7 @@ export async function POST(request) {
         }
       }
 
-      // Get customer's current balance
-      const customer = await tx.customer.findUnique({
-        where: { cus_id }
-      });
-
-      if (!customer) {
-        throw new Error('Customer not found');
-      }
+      const customer = await validateReturnCustomer(tx, cus_id, transport_details);
 
       // Create sale return
       const saleReturn = await tx.saleReturn.create({
@@ -596,27 +825,18 @@ export async function POST(request) {
         // Track all affected customer account IDs for recalculating balances
         affectedCusIds = [cus_id];
 
-        // Create ledger entries for Sale Return
-        // Entry 1: Main return entry - Customer side (debit because return reduces customer's balance)
-        const l_id_sr = await getNextId('ledger', 'l_id', tx);
-        await tx.ledger.create({
-          data: {
-            l_id: l_id_sr,
-            cus_id,
-            opening_balance: customer.cus_balance,
-            debit_amount: 0,
-            credit_amount: grandTotal, // Sale return reduces customer balance (credit)
-            closing_balance: customer.cus_balance - grandTotal,
-            bill_no: saleReturn.return_id.toString(),
-            trnx_type: 'CREDIT',
-            ledger_type: 'Sale Return',
-            details: `Sale Return - Product: ${computedTotal}, Delivery: -${shippingAmount}, Labour: -${labourChargesAmount}, Discount: -${discountAmount}, Net: ${grandTotal}`,
-            payments: 0,
-            updated_by: validatedUpdatedBy
-          }
+        await createCustomerSaleReturnBillEntries(tx, {
+          cus_id,
+          returnId: saleReturn.return_id,
+          computedTotal,
+          shippingAmount,
+          labourChargesAmount,
+          discountAmount,
+          openingBalance: customer.cus_balance,
+          validatedUpdatedBy,
         });
 
-        // Entry 2: Refund entries - Handle CASH and BANK separately if both exist
+        // Refund entries - Handle CASH and BANK separately if both exist
         const specialAccounts = await getSpecialAccounts(tx);
 
         console.log('🔄 Refund Processing:', {
@@ -649,7 +869,7 @@ export async function POST(request) {
                 debit_amount: 0,
                 credit_amount: cashRefund,
                 closing_balance: cashAccount.cus_balance - cashRefund,
-                bill_no: saleReturn.return_id.toString(),
+                bill_no: saleReturnBillNo(saleReturn.return_id),
                 trnx_type: 'CREDIT',
                 ledger_type: 'Sale Return',
                 details: `Refund Paid Out (CASH) - Sale Return #${saleReturn.return_id} - Amount: ${cashRefund}`,
@@ -679,7 +899,7 @@ export async function POST(request) {
                 debit_amount: cashRefund,
                 credit_amount: 0,
                 closing_balance: customerAfterCash,
-                bill_no: saleReturn.return_id.toString(),
+                bill_no: saleReturnBillNo(saleReturn.return_id),
                 trnx_type: 'DEBIT',
                 ledger_type: 'Sale Return',
                 details: `Customer Balance Update - CASH Refund Received: ${cashRefund} for Sale Return #${saleReturn.return_id}`,
@@ -727,7 +947,7 @@ export async function POST(request) {
                 debit_amount: 0,
                 credit_amount: bankRefund,
                 closing_balance: bankAccount.cus_balance - bankRefund,
-                bill_no: saleReturn.return_id.toString(),
+                bill_no: saleReturnBillNo(saleReturn.return_id),
                 trnx_type: 'CREDIT',
                 ledger_type: 'Sale Return',
                 details: `Refund Paid Out (BANK) - Sale Return #${saleReturn.return_id} - Amount: ${bankRefund}`,
@@ -757,7 +977,7 @@ export async function POST(request) {
                 debit_amount: bankRefund,
                 credit_amount: 0,
                 closing_balance: customerAfterBank,
-                bill_no: saleReturn.return_id.toString(),
+                bill_no: saleReturnBillNo(saleReturn.return_id),
                 trnx_type: 'DEBIT',
                 ledger_type: 'Sale Return',
                 details: `Customer Balance Update - BANK Refund Received: ${bankRefund} for Sale Return #${saleReturn.return_id}`,
@@ -794,56 +1014,16 @@ export async function POST(request) {
           });
         }
 
-        // Re-adjust transporter account when original sale had transport charges (credit transport on return)
-        if (sale_id && shippingAmount > 0) {
-          const originalTransportLedgerEntries = await tx.ledger.findMany({
-            where: {
-              bill_no: sale_id.toString(),
-              details: { contains: 'Transport' },
-              credit_amount: { gt: 0 },
-            },
-            orderBy: { l_id: 'asc' },
-          });
-
-          const entriesToReverse = originalTransportLedgerEntries.length > 0
-            ? originalTransportLedgerEntries
-            : null;
-
-          if (entriesToReverse) {
-            for (const originalTransportLedgerEntry of entriesToReverse) {
-              const transportCusId = originalTransportLedgerEntry.cus_id;
-              const transportAmount = parseFloat(originalTransportLedgerEntry.credit_amount || 0);
-              if (transportAmount <= 0) continue;
-
-              if (!affectedCusIds.includes(transportCusId)) {
-                affectedCusIds.push(transportCusId);
-              }
-
-              const currentTransportBalance = await resolveOpeningBalance(tx, transportCusId, saleReturn.created_at);
-
-              const transportReturnEntry = createLedgerEntry({
-                cus_id: transportCusId,
-                opening_balance: currentTransportBalance,
-                debit_amount: 0,
-                credit_amount: Number(transportAmount.toFixed(2)),
-                bill_no: saleReturn.return_id.toString(),
-                trnx_type: 'CREDIT',
-                details: `Transport Charges - Sale Return #${saleReturn.return_id} - Original Bill #${sale_id} (Credit)`,
-                payments: 0,
-                updated_by: validatedUpdatedBy,
-                ledger_type: 'Sale Return',
-              });
-
-              const l_id_trans = await getNextId('ledger', 'l_id', tx);
-              await tx.ledger.create({
-                data: {
-                  l_id: l_id_trans,
-                  ...transportReturnEntry,
-                },
-              });
-            }
-          }
-        }
+        await postReturnTransportLedger(tx, {
+          returnId: saleReturn.return_id,
+          saleId: sale_id || null,
+          shippingAmount,
+          transport_details,
+          customerName: customer.cus_name,
+          validatedUpdatedBy,
+          affectedCusIds,
+          entryTimestamp: saleReturn.created_at,
+        });
       } // End of if (!isQuotationReturn)
 
       return { saleReturn, affectedCusIds: isQuotationReturn ? [] : affectedCusIds };
@@ -863,7 +1043,11 @@ export async function POST(request) {
     return NextResponse.json(result.saleReturn, { status: 201 });
   } catch (error) {
     console.error('Error creating sale return:', error);
-    return NextResponse.json({ error: 'Failed to create sale return: ' + error.message }, { status: 500 });
+    const status = saleReturnHttpStatus(error);
+    return NextResponse.json(
+      { error: error?.message || 'Failed to create sale return' },
+      { status }
+    );
   }
 }
 
@@ -898,6 +1082,7 @@ export async function PUT(request) {
       reference,
       return_details,
       manual_sale_inv,
+      transport_details,
       updated_by
     } = body;
 
@@ -921,6 +1106,19 @@ export async function PUT(request) {
     const cashRefund = parseFloat(cash_return || 0);
     const bankRefund = parseFloat(bank_return || 0);
 
+    const parsedSaleIdPut = (sale_id && typeof sale_id === 'string' && !sale_id.startsWith('SR-'))
+      ? parseInt(sale_id, 10)
+      : (typeof sale_id === 'number' && !isNaN(sale_id) ? sale_id : null);
+
+    const hasTransportDetailsPut = Array.isArray(transport_details)
+      && transport_details.some((td) => td?.account_id && (parseFloat(td.amount) || shippingAmount) > 0);
+    if (shippingAmount > 0 && !parsedSaleIdPut && !hasTransportDetailsPut) {
+      return NextResponse.json(
+        { error: 'Transport account is required when delivery charges are set on a manual sale return (no linked invoice).' },
+        { status: 400 }
+      );
+    }
+
     const validatedUpdatedBy = await resolveUpdatedByUserId(request, updated_by, prisma);
 
     const result = await prisma.$transaction(async (tx) => {
@@ -939,7 +1137,7 @@ export async function PUT(request) {
 
       // Collect affected account IDs
       const oldEntries = await tx.ledger.findMany({
-        where: { bill_no: targetReturnId.toString() },
+        where: ledgerBillNoWhere(targetReturnId),
         select: { cus_id: true }
       });
       const affectedCusIds = new Set(oldEntries.map(e => e.cus_id));
@@ -969,7 +1167,7 @@ export async function PUT(request) {
 
       // 4. Delete old ledger entries & return details
       await tx.ledger.deleteMany({
-        where: { bill_no: targetReturnId.toString() }
+        where: ledgerBillNoWhere(targetReturnId)
       });
       await tx.saleReturnDetail.deleteMany({
         where: { return_id: targetReturnId }
@@ -1039,27 +1237,18 @@ export async function PUT(request) {
         }
       }
 
-      // 7. Get fresh customer balance for ledger
-      const customer = await tx.customer.findUnique({ where: { cus_id } });
-      const cusBal = parseFloat(customer?.cus_balance || 0);
+      const customer = await validateReturnCustomer(tx, cus_id, transport_details);
+      const cusBal = parseFloat(customer.cus_balance || 0);
 
-      // Ledger Entry 1: Customer Credit for Return
-      const l_id_sr = await getNextId('ledger', 'l_id', tx);
-      await tx.ledger.create({
-        data: {
-          l_id: l_id_sr,
-          cus_id,
-          opening_balance: cusBal,
-          debit_amount: 0,
-          credit_amount: grandTotal,
-          closing_balance: cusBal - grandTotal,
-          bill_no: targetReturnId.toString(),
-          trnx_type: 'CREDIT',
-          ledger_type: 'Sale Return',
-          details: `Sale Return - Product: ${computedTotal}, Delivery: -${shippingAmount}, Labour: -${labourChargesAmount}, Discount: -${discountAmount}, Net: ${grandTotal}`,
-          payments: 0,
-          updated_by: validatedUpdatedBy
-        }
+      await createCustomerSaleReturnBillEntries(tx, {
+        cus_id,
+        returnId: targetReturnId,
+        computedTotal,
+        shippingAmount,
+        labourChargesAmount,
+        discountAmount,
+        openingBalance: cusBal,
+        validatedUpdatedBy,
       });
 
       // Special accounts for refund
@@ -1080,7 +1269,7 @@ export async function PUT(request) {
               debit_amount: 0,
               credit_amount: cashRefund,
               closing_balance: cashAccount.cus_balance - cashRefund,
-              bill_no: targetReturnId.toString(),
+              bill_no: saleReturnBillNo(targetReturnId),
               trnx_type: 'CREDIT',
               ledger_type: 'Sale Return',
               details: `Refund Paid Out (CASH) - Sale Return #${targetReturnId} - Amount: ${cashRefund}`,
@@ -1103,7 +1292,7 @@ export async function PUT(request) {
               debit_amount: cashRefund,
               credit_amount: 0,
               closing_balance: cusBal - grandTotal + cashRefund,
-              bill_no: targetReturnId.toString(),
+              bill_no: saleReturnBillNo(targetReturnId),
               trnx_type: 'DEBIT',
               ledger_type: 'Sale Return',
               details: `Customer Balance Update - CASH Refund Received: ${cashRefund} for Sale Return #${targetReturnId}`,
@@ -1138,7 +1327,7 @@ export async function PUT(request) {
               debit_amount: 0,
               credit_amount: bankRefund,
               closing_balance: bankAccount.cus_balance - bankRefund,
-              bill_no: targetReturnId.toString(),
+              bill_no: saleReturnBillNo(targetReturnId),
               trnx_type: 'CREDIT',
               ledger_type: 'Sale Return',
               details: `Refund Paid Out (BANK) - Sale Return #${targetReturnId} - Amount: ${bankRefund}`,
@@ -1162,7 +1351,7 @@ export async function PUT(request) {
               debit_amount: bankRefund,
               credit_amount: 0,
               closing_balance: customerAfterBank,
-              bill_no: targetReturnId.toString(),
+              bill_no: saleReturnBillNo(targetReturnId),
               trnx_type: 'DEBIT',
               ledger_type: 'Sale Return',
               details: `Customer Balance Update - BANK Refund Received: ${bankRefund} for Sale Return #${targetReturnId}`,
@@ -1189,6 +1378,22 @@ export async function PUT(request) {
         });
       }
 
+      const customerForTransport = await tx.customer.findUnique({
+        where: { cus_id },
+        select: { cus_name: true },
+      });
+
+      await postReturnTransportLedger(tx, {
+        returnId: targetReturnId,
+        saleId: parsedSaleId ?? existingReturn.sale_id ?? null,
+        shippingAmount,
+        transport_details,
+        customerName: customerForTransport?.cus_name,
+        validatedUpdatedBy,
+        affectedCusIds,
+        entryTimestamp: updatedReturn.updated_at || updatedReturn.created_at,
+      });
+
       return { saleReturn: updatedReturn, affectedCusIds: Array.from(affectedCusIds) };
     }, {
       timeout: 60000,
@@ -1205,7 +1410,11 @@ export async function PUT(request) {
     return NextResponse.json(result.saleReturn, { status: 200 });
   } catch (error) {
     console.error('Error updating sale return:', error);
-    return NextResponse.json({ error: 'Failed to update sale return: ' + error.message }, { status: 500 });
+    const status = saleReturnHttpStatus(error);
+    return NextResponse.json(
+      { error: error?.message || 'Failed to update sale return' },
+      { status }
+    );
   }
 }
 
@@ -1241,7 +1450,7 @@ export async function DELETE(request) {
 
       // Get affected customer accounts from ledger before deletion
       const entries = await tx.ledger.findMany({
-        where: { bill_no: id.toString() },
+        where: ledgerBillNoWhere(id),
         select: { cus_id: true }
       });
       const affected = [...new Set(entries.map(e => e.cus_id))];
@@ -1275,7 +1484,7 @@ export async function DELETE(request) {
 
       // Delete ledger entries for this return
       await tx.ledger.deleteMany({
-        where: { bill_no: id.toString() }
+        where: ledgerBillNoWhere(id)
       });
 
       // Delete return details

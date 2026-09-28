@@ -878,8 +878,23 @@ export default function DashboardContent({ activeTab }) {
       if (filters.fromDate) params.set('fromDate', filters.fromDate);
       if (filters.toDate) params.set('toDate', filters.toDate);
       const res = await fetch(`/api/dashboard/monthly-analytics?${params}`);
-      const json = await res.json();
-      if (json?.success) setRows(json.data?.[key] || []);
+      const text = await res.text();
+      if (!text?.trim()) {
+        console.error(`Error fetching ${key}: empty response (HTTP ${res.status})`);
+        return;
+      }
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        console.error(`Error fetching ${key}: invalid JSON (HTTP ${res.status})`, text.slice(0, 120));
+        return;
+      }
+      if (!res.ok || !json?.success) {
+        console.error(`Error fetching ${key}:`, json?.error || `HTTP ${res.status}`);
+        return;
+      }
+      setRows(json.data?.[key] || []);
     } catch (err) {
       console.error(`Error fetching ${key}:`, err);
     } finally {
