@@ -98,7 +98,7 @@ import {
 import { getOfflineSalesQueue, saveOfflineSale, syncOfflineSalesQueue } from '@/lib/offline-sales-helper';
 import { BRAND, COMPANY } from '@/lib/brand-theme';
 
-const INVOICE_STORE_PHONE_LINE = `Ph:- ${(COMPANY.phones || ['0346-7560306']).filter(Boolean).join(', ')}`;
+const INVOICE_STORE_PHONE_LINE = `Ph:- ${(COMPANY.phones || ['0300-7560306']).filter(Boolean).join(', ')}`;
 
 // Sale-page "below cost" check must use cost rate (pro_cost_price), never purchase/crate.
 const getProductCostPrice = (product) => {
