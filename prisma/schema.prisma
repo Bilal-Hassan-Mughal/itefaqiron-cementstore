@@ -1097,6 +1097,8 @@ model Employee {
   department    String?
   join_date     DateTime          @db.Date
   basic_salary             Decimal           @default(0.00) @db.Decimal(10, 2)
+  /** Signed: + = employee owes company, − = company owes employee (pre-system balance) */
+  opening_balance          Decimal           @default(0.00) @db.Decimal(12, 2)
   allowed_leaves_per_month Int               @default(2)
   allowed_absents_per_month Int              @default(0)
   status                   EmpStatus         @default(ACTIVE)
@@ -1106,9 +1108,29 @@ model Employee {
   attendance    Attendance[]
   payrolls      Payroll[]
   advances      EmployeeAdvance[]
+  ledger_entries EmployeeLedger[]
 
   @@index([branch_id], map: "employees_branch_id_fkey")
   @@map("employees")
+}
+
+model EmployeeLedger {
+  el_id           Int      @id @default(autoincrement())
+  branch_id       Int      @default(1)
+  emp_id          Int
+  created_at      DateTime @default(now())
+  trnx_type       String   @db.VarChar(32)
+  bill_no         String?  @db.VarChar(64)
+  details         String?  @db.Text
+  debit_amount    Decimal  @default(0.00) @db.Decimal(12, 2)
+  credit_amount   Decimal  @default(0.00) @db.Decimal(12, 2)
+  opening_balance Decimal  @default(0.00) @db.Decimal(12, 2)
+  closing_balance Decimal  @default(0.00) @db.Decimal(12, 2)
+  employee        Employee @relation(fields: [emp_id], references: [emp_id], onDelete: Cascade)
+
+  @@index([emp_id, created_at])
+  @@index([branch_id])
+  @@map("employee_ledger")
 }
 
 model Attendance {

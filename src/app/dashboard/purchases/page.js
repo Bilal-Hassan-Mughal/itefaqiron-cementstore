@@ -6252,28 +6252,29 @@ function PurchasesPageContent() {
                 {/* Row 6 - Opening Balance & Account Info */}
                 <TextField
                   fullWidth
-                  disabled
                   label="Opening Balance"
                   name="cus_balance"
                   type="number"
-                  inputProps={{ readOnly: true }}
+                  inputProps={{ step: '0.01' }}
                   value={customerFormData.cus_balance}
                   onChange={handleCustomerFormChange}
-                  placeholder="Balance is non-editable"
+                  placeholder="0 — optional"
+                  helperText="Set starting balance for this supplier account"
                   sx={{
-                    bgcolor: '#f8fafc',
+                    bgcolor: '#ffffff',
                     borderRadius: '10px',
                     '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
                     '& .MuiOutlinedInput-root': {
                       borderRadius: '10px',
-                      backgroundColor: '#f8fafc',
+                      backgroundColor: '#ffffff',
                       fontSize: '0.9rem',
-                      '& fieldset': { borderColor: '#e2e8f0', borderWidth: '1.5px' },
+                      '& fieldset': { borderColor: '#cbd5e1', borderWidth: '1.5px' },
+                      '&:hover fieldset': { borderColor: '#818cf8' },
+                      '&.Mui-focused fieldset': { borderColor: '#16a34a', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(22, 163, 74, 0.12)' },
                     },
-                    '& .MuiInputLabel-root': { color: '#94a3b8', fontWeight: 500 }
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, '&.Mui-focused': { color: '#16a34a', fontWeight: 700 } }
                   }}
                   InputProps={{
-                    readOnly: true,
                     startAdornment: (
                       <InputAdornment position="start" sx={{ mr: 0.8 }}>
                         <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

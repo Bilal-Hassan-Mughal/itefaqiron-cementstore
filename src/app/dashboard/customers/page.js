@@ -1938,28 +1938,33 @@ export default function CustomersPage() {
                 {/* Row 6 - Initial Balance & Account Info */}
                 <TextField
                   fullWidth
-                  disabled
-                  label="Initial Balance"
+                  disabled={!!editingCustomer}
+                  label={editingCustomer ? 'Account Balance' : 'Opening Balance'}
                   name="cus_balance"
                   type="number"
-                  inputProps={{ step: "0.01", readOnly: true }}
+                  inputProps={{ step: '0.01', ...(editingCustomer ? { readOnly: true } : {}) }}
                   value={formData.cus_balance}
                   onChange={handleFormChange}
-                  placeholder="Balance is non-editable"
+                  placeholder={editingCustomer ? 'Use ledger to adjust balance' : '0 — optional'}
+                  helperText={editingCustomer ? 'Balance is managed via ledger transactions' : 'Set starting balance when creating the account'}
                   sx={{
-                    bgcolor: '#f8fafc',
+                    bgcolor: editingCustomer ? '#f8fafc' : '#ffffff',
                     borderRadius: '10px',
                     '& .MuiFormLabel-asterisk': { color: '#ef4444 !important', fontWeight: 700 },
                     '& .MuiOutlinedInput-root': {
                       borderRadius: '10px',
-                      backgroundColor: '#f8fafc',
+                      backgroundColor: editingCustomer ? '#f8fafc' : '#ffffff',
                       fontSize: '0.9rem',
-                      '& fieldset': { borderColor: '#e2e8f0', borderWidth: '1.5px' },
+                      '& fieldset': { borderColor: editingCustomer ? '#e2e8f0' : '#cbd5e1', borderWidth: '1.5px' },
+                      ...(!editingCustomer && {
+                        '&:hover fieldset': { borderColor: '#818cf8' },
+                        '&.Mui-focused fieldset': { borderColor: '#16a34a', borderWidth: '2px', boxShadow: '0 0 0 3.5px rgba(22, 163, 74, 0.12)' },
+                      }),
                     },
-                    '& .MuiInputLabel-root': { color: '#94a3b8', fontWeight: 500 }
+                    '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 500, ...(!editingCustomer && { '&.Mui-focused': { color: '#16a34a', fontWeight: 700 } }) }
                   }}
                   InputProps={{
-                    readOnly: true,
+                    readOnly: !!editingCustomer,
                     startAdornment: (
                       <InputAdornment position="start" sx={{ mr: 0.8 }}>
                         <Box sx={{ width: 30, height: 30, borderRadius: '7px', bgcolor: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

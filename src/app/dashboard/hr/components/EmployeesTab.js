@@ -6,13 +6,15 @@ import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Paper, IconButton, Dialog, DialogContent, DialogActions,
   Chip, InputAdornment, MenuItem, Alert, Snackbar,
-  FormControl, InputLabel, Select, Stack, Avatar, Divider, CircularProgress,
+  FormControl, InputLabel, Select, Stack, CircularProgress,
 } from '@mui/material';
 import {
   Add, Edit, Delete, Search, Person, Work, AttachMoney, Phone, Badge,
   Home, Business, CalendarToday, Close, Save, CheckCircle, EventAvailable,
+  HelpOutline, Block,
 } from '@mui/icons-material';
 import { BRAND } from '@/lib/brand-theme';
+import { useHrRefresh, useHrRefreshVersion, HR_KEYS } from '../context/HrRefreshContext';
 
 const CARD_SX = {
   borderRadius: '12px',
@@ -47,15 +49,24 @@ const FILTER_SX = {
 };
 
 const SECTION_SX = {
-  p: 2,
-  borderRadius: '12px',
-  border: '1px solid #e2e8f0',
-  bgcolor: '#fafbfd',
+  p: 2.25,
+  borderRadius: '14px',
+  border: '1px solid #dce3ed',
+  bgcolor: '#ffffff',
+  boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+};
+
+const DIALOG_HEADER_SX = {
+  px: 2.5,
+  py: 2,
+  bgcolor: '#1A55E3',
+  color: '#fff',
 };
 
 const EMPTY_FORM = {
   emp_name: '', emp_phone: '', emp_cnic: '', emp_address: '',
-  designation: '', department: '', join_date: '', basic_salary: '', status: 'ACTIVE',
+  designation: '', department: '', join_date: '', basic_salary: '', opening_balance: '',
+  status: 'ACTIVE',
   allowed_leaves_per_month: '2', allowed_absents_per_month: '0',
 };
 
@@ -96,11 +107,15 @@ export default function EmployeesTab() {
   const [deleteDialog, setDeleteDialog] = useState({ open: false, id: null, name: '' });
   const [snack, setSnack] = useState({ open: false, msg: '', severity: 'success' });
   const [loading, setLoading] = useState(false);
+  const employeesVersion = useHrRefreshVersion(HR_KEYS.employees);
+  const { invalidateEmployeeData } = useHrRefresh();
 
-  useEffect(() => { fetchEmployees(); }, []);
+  useEffect(() => { fetchEmployees(); }, [employeesVersion]);
+
+  const employeeList = Array.isArray(employees) ? employees : [];
 
   useEffect(() => {
-    let list = employees;
+    let list = employeeList;
     if (statusFilter !== 'ALL') list = list.filter((e) => e.status === statusFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -111,14 +126,19 @@ export default function EmployeesTab() {
       );
     }
     setFiltered(list);
-  }, [employees, search, statusFilter]);
+  }, [employeeList, search, statusFilter]);
 
   async function fetchEmployees() {
     try {
       const res = await fetch('/api/employees');
-      setEmployees(await res.json());
-    } catch {
-      setSnack({ open: true, msg: 'Failed to load employees', severity: 'error' });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to load employees');
+      }
+      setEmployees(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setEmployees([]);
+      setSnack({ open: true, msg: err.message || 'Failed to load employees', severity: 'error' });
     }
   }
 
@@ -152,6 +172,7 @@ export default function EmployeesTab() {
         department: emp.department || '',
         join_date: emp.join_date ? emp.join_date.split('T')[0] : '',
         basic_salary: String(emp.basic_salary),
+        opening_balance: emp.opening_balance != null ? String(emp.opening_balance) : '',
         status: emp.status,
         allowed_leaves_per_month: String(emp.allowed_leaves_per_month ?? 2),
         allowed_absents_per_month: String(emp.allowed_absents_per_month ?? 0),
@@ -179,7 +200,7 @@ export default function EmployeesTab() {
       }
       setSnack({ open: true, msg: mode === 'add' ? 'Employee added' : 'Employee updated', severity: 'success' });
       setDialog((d) => ({ ...d, open: false }));
-      fetchEmployees();
+      invalidateEmployeeData();
     } catch {
       setSnack({ open: true, msg: 'Network error', severity: 'error' });
     } finally {
@@ -197,22 +218,18 @@ export default function EmployeesTab() {
       }
       setSnack({ open: true, msg: 'Employee deleted', severity: 'success' });
       setDeleteDialog({ open: false, id: null, name: '' });
-      fetchEmployees();
+      invalidateEmployeeData();
     } finally {
       setLoading(false);
     }
   }
 
-  const active = employees.filter((e) => e.status === 'ACTIVE').length;
+  const active = employeeList.filter((e) => e.status === 'ACTIVE').length;
 
-  const formPreview = useMemo(() => {
-    const name = dialog.data.emp_name.trim();
+  const salaryPreviewLabel = useMemo(() => {
     const salary = parseFloat(dialog.data.basic_salary || 0);
-    return {
-      initials: name ? name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase() : '?',
-      salaryLabel: salary > 0 ? fmtAmt(salary) : '—',
-    };
-  }, [dialog.data.emp_name, dialog.data.basic_salary]);
+    return salary > 0 ? fmtAmt(salary) : '—';
+  }, [dialog.data.basic_salary]);
 
   const updateForm = (key, value) => {
     setDialog((d) => ({ ...d, data: { ...d.data, [key]: value } }));
@@ -221,10 +238,10 @@ export default function EmployeesTab() {
   return (    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 1.5 }}>
         {[
-          { label: 'Total', value: employees.length, color: '#1A55E3' },
+          { label: 'Total', value: employeeList.length, color: '#1A55E3' },
           { label: 'Active', value: active, color: '#00a868' },
-          { label: 'Inactive', value: employees.length - active, color: '#64748b' },
-          { label: 'Total Basic Salary', value: fmtAmt(employees.filter((e) => e.status === 'ACTIVE').reduce((s, e) => s + parseFloat(e.basic_salary || 0), 0)), color: '#5E6EED' },
+          { label: 'Inactive', value: employeeList.length - active, color: '#64748b' },
+          { label: 'Total Basic Salary', value: fmtAmt(employeeList.filter((e) => e.status === 'ACTIVE').reduce((s, e) => s + parseFloat(e.basic_salary || 0), 0)), color: '#5E6EED' },
         ].map((c) => (
           <Card key={c.label} sx={CARD_SX}>
             <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
@@ -264,14 +281,14 @@ export default function EmployeesTab() {
             <Table stickyHeader size="small">
               <TableHead>
                 <TableRow sx={{ bgcolor: '#e8effd' }}>
-                  {['#', 'Employee', 'Designation', 'Join Date', 'Basic Salary', 'Leave / Absent', 'Status', 'Actions'].map((h) => (
+                  {['#', 'Employee', 'Designation', 'Join Date', 'Basic Salary', 'Ledger Bal.', 'Leave / Absent', 'Status', 'Actions'].map((h) => (
                     <TableCell key={h} sx={{ fontWeight: 700, color: '#1347c4', fontSize: '0.72rem', borderColor: '#cbd5e1' }}>{h}</TableCell>
                   ))}
                 </TableRow>
               </TableHead>
               <TableBody>
                 {filtered.length === 0 ? (
-                  <TableRow><TableCell colSpan={8} align="center" sx={{ py: 4, color: '#94a3b8' }}>No employees found</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={9} align="center" sx={{ py: 4, color: '#94a3b8' }}>No employees found</TableCell></TableRow>
                 ) : filtered.map((emp, i) => (
                   <TableRow key={emp.emp_id} hover>
                     <TableCell sx={{ borderColor: '#cbd5e1' }}>{i + 1}</TableCell>
@@ -282,6 +299,14 @@ export default function EmployeesTab() {
                     <TableCell sx={{ borderColor: '#cbd5e1' }}>{emp.designation || '—'}</TableCell>
                     <TableCell sx={{ borderColor: '#cbd5e1' }}>{emp.join_date ? new Date(emp.join_date).toLocaleDateString('en-GB') : '—'}</TableCell>
                     <TableCell sx={{ borderColor: '#cbd5e1', fontWeight: 700, fontFamily: 'monospace' }}>{fmtAmt(emp.basic_salary)}</TableCell>
+                    <TableCell sx={{
+                      borderColor: '#cbd5e1',
+                      fontWeight: 700,
+                      fontFamily: 'monospace',
+                      color: parseFloat(emp.ledger_balance ?? emp.opening_balance ?? 0) > 0 ? '#b91c1c' : parseFloat(emp.ledger_balance ?? emp.opening_balance ?? 0) < 0 ? '#15803d' : '#64748b',
+                    }}>
+                      {fmtAmt(emp.ledger_balance ?? emp.opening_balance ?? 0)}
+                    </TableCell>
                     <TableCell sx={{ borderColor: '#cbd5e1', fontSize: '0.78rem', fontWeight: 700, color: '#475569' }}>
                       {emp.allowed_leaves_per_month ?? 2}L · {emp.allowed_absents_per_month ?? 0}A
                     </TableCell>
@@ -303,61 +328,67 @@ export default function EmployeesTab() {
       <Dialog
         open={dialog.open}
         onClose={() => !loading && setDialog((d) => ({ ...d, open: false }))}
-        maxWidth="md"
+        maxWidth="sm"
         fullWidth
+        scroll="paper"
         PaperProps={{
           sx: {
             borderRadius: '16px',
             overflow: 'hidden',
             boxShadow: '0 24px 48px rgba(15, 23, 42, 0.18)',
+            maxHeight: '92vh',
           },
         }}
       >
-        {/* Header */}
-        <Box
-          sx={{
-            px: 3,
-            py: 2.25,
-            background: 'linear-gradient(135deg, #1A55E3 0%, #5E6EED 100%)',
-            color: '#fff',
-          }}
-        >
-          <Stack direction="row" alignItems="center" justifyContent="space-between">
-            <Stack direction="row" spacing={2} alignItems="center">
-              <Avatar
+        <Box sx={DIALOG_HEADER_SX}>
+          <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={1}>
+            <Stack direction="row" spacing={1.5} alignItems="flex-start" sx={{ flex: 1, minWidth: 0 }}>
+              <IconButton
+                size="small"
+                aria-label="Form help"
                 sx={{
-                  width: 52,
-                  height: 52,
-                  bgcolor: 'rgba(255,255,255,0.2)',
-                  border: '2px solid rgba(255,255,255,0.35)',
-                  fontWeight: 800,
-                  fontSize: '1.1rem',
+                  mt: 0.25,
+                  color: '#fff',
+                  bgcolor: 'rgba(255,255,255,0.12)',
+                  border: '1px solid rgba(255,255,255,0.22)',
+                  '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' },
                 }}
+                onClick={() => setSnack({
+                  open: true,
+                  severity: 'info',
+                  msg: 'Fill personal and job details, then salary and leave limits. Active staff appear in attendance and payroll.',
+                })}
               >
-                {formPreview.initials}
-              </Avatar>
+                <HelpOutline sx={{ fontSize: 20 }} />
+              </IconButton>
               <Box>
-                <Typography sx={{ fontWeight: 800, fontSize: '1.15rem', lineHeight: 1.2 }}>
+                <Typography sx={{ fontWeight: 800, fontSize: '1.125rem', lineHeight: 1.25 }}>
                   {dialog.mode === 'add' ? 'Register New Employee' : 'Edit Employee Profile'}
                 </Typography>
-                <Typography sx={{ fontSize: '0.8125rem', opacity: 0.9, mt: 0.35 }}>
+                <Typography sx={{ fontSize: '0.8125rem', opacity: 0.92, mt: 0.5, lineHeight: 1.45 }}>
                   {dialog.mode === 'add'
                     ? 'Add staff details for attendance and payroll processing'
-                    : 'Update employee information and salary'}
+                    : 'Update employee information, salary and ledger opening'}
                 </Typography>
               </Box>
             </Stack>
             <IconButton
               onClick={() => setDialog((d) => ({ ...d, open: false }))}
               disabled={loading}
-              sx={{ color: '#fff', bgcolor: 'rgba(255,255,255,0.15)', '&:hover': { bgcolor: 'rgba(255,255,255,0.25)' } }}
+              aria-label="Close"
+              sx={{
+                color: '#fff',
+                bgcolor: 'rgba(255,255,255,0.12)',
+                border: '1px solid rgba(255,255,255,0.22)',
+                '&:hover': { bgcolor: 'rgba(255,255,255,0.22)' },
+              }}
             >
-              <Close />
+              <Close fontSize="small" />
             </IconButton>
           </Stack>
         </Box>
 
-        <DialogContent sx={{ px: 3, py: 3, bgcolor: '#f8fafc' }}>
+        <DialogContent sx={{ px: 2.5, py: 2.5, bgcolor: '#f1f5f9' }}>
           <Stack spacing={2.5}>
             {/* Personal */}
             <Box sx={SECTION_SX}>
@@ -502,6 +533,23 @@ export default function EmployeesTab() {
                       label="Employment Status"
                       value={dialog.data.status}
                       onChange={(e) => updateForm('status', e.target.value)}
+                      renderValue={(v) => (
+                        v === 'ACTIVE' ? (
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <CheckCircle sx={{ fontSize: 18, color: '#059669' }} />
+                            <Typography component="span" sx={{ fontSize: '0.875rem', fontWeight: 600 }}>
+                              Active — included in payroll
+                            </Typography>
+                          </Stack>
+                        ) : (
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <Block sx={{ fontSize: 18, color: '#94a3b8' }} />
+                            <Typography component="span" sx={{ fontSize: '0.875rem', fontWeight: 600 }}>
+                              Inactive — excluded from payroll
+                            </Typography>
+                          </Stack>
+                        )
+                      )}
                     >
                       <MenuItem value="ACTIVE">
                         <Stack direction="row" spacing={1} alignItems="center">
@@ -511,7 +559,7 @@ export default function EmployeesTab() {
                       </MenuItem>
                       <MenuItem value="INACTIVE">
                         <Stack direction="row" spacing={1} alignItems="center">
-                          <Box sx={{ width: 18, height: 18, borderRadius: '50%', bgcolor: '#94a3b8' }} />
+                          <Block sx={{ fontSize: 18, color: '#94a3b8' }} />
                           <span>Inactive — excluded from payroll</span>
                         </Stack>
                       </MenuItem>
@@ -521,9 +569,8 @@ export default function EmployeesTab() {
               </Grid>
             </Box>
 
-            {/* Salary */}
-            <Box sx={{ ...SECTION_SX, bgcolor: '#eef0fe', borderColor: '#c7d2fe' }}>
-              <SectionHeader icon={AttachMoney} title="Salary" subtitle="Monthly basic pay for payroll calculation" />
+            <Box sx={SECTION_SX}>
+              <SectionHeader icon={AttachMoney} title="Salary & ledger" subtitle="Monthly basic pay and pre-system balance" />
               <Grid container spacing={2} alignItems="center">
                 <Grid item xs={12} sm={7}>
                   <TextField
@@ -549,22 +596,40 @@ export default function EmployeesTab() {
                     sx={{
                       p: 2,
                       borderRadius: '10px',
-                      bgcolor: '#fff',
-                      border: '1px solid #c7d2fe',
+                      bgcolor: '#f8fafc',
+                      border: '1px solid #e2e8f0',
                       textAlign: 'center',
                     }}
                   >
                     <Typography sx={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>Monthly Basic</Typography>
                     <Typography sx={{ fontSize: '1.5rem', fontWeight: 900, color: '#1A55E3', fontFamily: 'monospace' }}>
-                      {formPreview.salaryLabel}
+                      {salaryPreviewLabel}
                     </Typography>
                   </Box>
+                </Grid>
+                <Grid item xs={12}>
+                  <TextField
+                    fullWidth
+                    label="Opening Balance (pre-system)"
+                    type="number"
+                    inputProps={{ step: '0.01' }}
+                    value={dialog.data.opening_balance}
+                    onChange={(e) => updateForm('opening_balance', e.target.value)}
+                    sx={FIELD_SX}
+                    helperText="+ = employee owes (pre-system advances). − = you owe them. Current total balance = opening + advances (see Employee Ledger)."
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <AttachMoney sx={{ fontSize: 20, color: '#16a34a' }} />
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
                 </Grid>
               </Grid>
             </Box>
 
-            {/* Leave & Absent Policy */}
-            <Box sx={{ ...SECTION_SX, bgcolor: '#f0fdf4', borderColor: '#bbf7d0' }}>
+            <Box sx={SECTION_SX}>
               <SectionHeader
                 icon={EventAvailable}
                 title="Leave & Absent Allowance"
@@ -600,24 +665,27 @@ export default function EmployeesTab() {
           </Stack>
         </DialogContent>
 
-        <Divider />
-
         <DialogActions
           sx={{
-            px: 3,
+            px: 2.5,
             py: 2,
             bgcolor: '#fff',
+            borderTop: '1px solid #e2e8f0',
             justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 1,
           }}
         >
-          <Typography sx={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-            <Box component="span" sx={{ color: '#dc2626' }}>*</Box> Full name is required
+          <Typography sx={{ fontSize: '0.8125rem', color: '#64748b' }}>
+            <Box component="span" sx={{ color: '#dc2626', fontWeight: 700 }}>*</Box>
+            {' '}
+            Full name is required
           </Typography>
-          <Stack direction="row" spacing={1.5}>
+          <Stack direction="row" spacing={1.25} alignItems="center">
             <Button
               onClick={() => setDialog((d) => ({ ...d, open: false }))}
               disabled={loading}
-              sx={{ textTransform: 'none', color: '#64748b', fontWeight: 600, px: 2.5 }}
+              sx={{ textTransform: 'none', color: '#475569', fontWeight: 600, px: 2 }}
             >
               Cancel
             </Button>
@@ -629,13 +697,13 @@ export default function EmployeesTab() {
               sx={{
                 textTransform: 'none',
                 fontWeight: 700,
-                px: 3,
+                px: 2.75,
                 py: 1,
                 borderRadius: '10px',
-                bgcolor: BRAND.primary.blue,
-                background: `linear-gradient(180deg, ${BRAND.primary.blue} 0%, #1347c4 100%)`,
-                boxShadow: '0 4px 14px rgba(26,85,227,0.28)',
-                '&:hover': { filter: 'brightness(1.05)' },
+                bgcolor: '#1A55E3',
+                boxShadow: '0 2px 8px rgba(26, 85, 227, 0.35)',
+                '&:hover': { bgcolor: '#1347c4' },
+                '&.Mui-disabled': { bgcolor: '#94a3b8', color: '#fff' },
               }}
             >
               {dialog.mode === 'add' ? 'Save Employee' : 'Update Employee'}

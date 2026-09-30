@@ -11,10 +11,14 @@ import {
 import {
   CheckCircle, Print, ChevronLeft, ChevronRight,
   Today as TodayIcon, Payments, AccountBalanceWallet, Undo,
-  Visibility, Download, ReceiptLong, Close,
+  Download, ReceiptLong, Close,
 } from '@mui/icons-material';
 import { BRAND, COMPANY } from '@/lib/brand-theme';
-import { calcPayroll, calcTotalPayable, getDaysInMonth, getMonthDayMeta, resolveMonthGrossEarned, toDateKey } from '@/lib/hr-payroll';
+import {
+  calcTotalPayable, getDaysInMonth, getMonthDayMeta, previewClearancePayroll, resolveMonthAttendanceNet,
+  resolveMonthGrossEarned, resolveMonthNetPay, toDateKey,
+} from '@/lib/hr-payroll';
+import { useHrRefresh, useHrRefreshVersion, HR_KEYS } from '../context/HrRefreshContext';
 
 const NAVY = '#0f172a';
 const PRIMARY = BRAND.primary.blue;
@@ -41,288 +45,495 @@ const fmtDate = (d) => {
 const fmtDed = (v) => `- ${fmtAmt(v)}`;
 const fmtAdd = (v) => fmtAmt(v);
 
-/** A4 portrait: 210 x 297 mm, same layout for preview, print and PDF */
-const PAYSLIP_PAGE = { w: '210mm', h: '297mm', pad: '10mm 12mm 16mm 12mm' };
+/** Plain-language employee ledger balance for salary clearance (no confusing +/- numbers). */
+function describeEmployeeLedgerBalance(signed) {
+  const n = parseFloat(signed || 0);
+  if (n > 0.009) {
+    return {
+      headline: 'Employee owes company',
+      sub: 'Advance / opening — taken back from salary',
+      amount: n,
+      amountText: fmtAmt(n),
+      chip: 'Deduct from salary',
+      bg: '#fef2f2',
+      border: '#fecaca',
+      color: '#b91c1c',
+      deductLine: true,
+      addLine: false,
+    };
+  }
+  if (n < -0.009) {
+    const amt = Math.abs(n);
+    return {
+      headline: 'Company owes employee',
+      sub: 'You pay this amount with this salary',
+      amount: amt,
+      amountText: fmtAmt(amt),
+      chip: 'Add to payment',
+      bg: '#f0fdf4',
+      border: '#bbf7d0',
+      color: '#15803d',
+      deductLine: false,
+      addLine: true,
+    };
+  }
+  return {
+    headline: 'Ledger settled',
+    sub: 'No opening or advance balance to adjust',
+    amount: 0,
+    amountText: fmtAmt(0),
+    chip: 'No adjustment',
+    bg: '#f8fafc',
+    border: '#e2e8f0',
+    color: '#64748b',
+    deductLine: false,
+    addLine: false,
+  };
+}
+
+/**
+ * Signed employee ledger for receipt amount column.
+ * + balance = employee owes → shown as minus (کٹوتی from salary).
+ * − balance = company owes employee → shown as plus (اضافہ to salary).
+ */
+function payslipAccountIsEmpty(signed) {
+  const n = parseFloat(signed);
+  return signed == null || Number.isNaN(n) || Math.abs(n) < 0.009;
+}
+
+function payslipEmployeeAccountDisplay(signed) {
+  const n = parseFloat(signed);
+  if (payslipAccountIsEmpty(signed)) {
+    return { html: '—', cls: '' };
+  }
+  if (n > 0.009) {
+    return {
+      html: `${fmtDed(n)} <span class="acct-tag">کٹوتی</span>`,
+      cls: 'ded-amt',
+    };
+  }
+  return {
+    html: `+ ${fmtAmt(Math.abs(n))} <span class="acct-tag">اضافہ</span>`,
+    cls: 'earn-amt',
+  };
+}
+
+function resolveReceiptAdvanceDeduction(payroll, monthlySalaryAmount, monthNet, attDed, otherDed, bonus, deductedAdvances) {
+  if (deductedAdvances.length > 0) {
+    return deductedAdvances.reduce((s, a) => s + parseFloat(a.amount || 0), 0);
+  }
+  const snap = payroll.clearance_snapshot || {};
+  const stored = parseFloat(payroll.advance_deduction ?? snap.advance_this_month ?? 0);
+  const implied = Math.max(
+    0,
+    Math.round((monthlySalaryAmount - attDed - otherDed + bonus - monthNet) * 100) / 100
+  );
+  if (implied > 0.009 && (stored <= 0.009 || Math.abs(stored - implied) > 0.02)) return implied;
+  return stored;
+}
+
+function payslipPaymentMethodUr(method) {
+  const m = String(method || '').toUpperCase();
+  if (m === 'CASH') return 'نقد';
+  if (m === 'BANK') return 'بینک';
+  if (m === 'PARTIAL') return 'نقد + بینک';
+  return method || '—';
+}
+
+function resolvePayslipPrevPeriod(payroll) {
+  const snap = payroll.clearance_snapshot || {};
+  const pm = payroll.prev_month ?? snap.prev_month;
+  const py = payroll.prev_year ?? snap.prev_year;
+  if (pm && py) {
+    return `${MONTHS[parseInt(pm, 10) - 1] || '-'} ${py}`;
+  }
+  return null;
+}
+
+function ClearanceSummaryRow({ label, hint, value, valueColor = '#0f172a', prefix = '' }) {
+  return (
+    <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
+      <Box>
+        <Typography sx={{ fontSize: '0.8125rem', color: '#64748b' }}>{label}</Typography>
+        {hint && (
+          <Typography sx={{ fontSize: '0.68rem', color: '#94a3b8', mt: 0.25 }}>{hint}</Typography>
+        )}
+      </Box>
+      <Typography sx={{ fontWeight: 800, fontFamily: 'monospace', color: valueColor, whiteSpace: 'nowrap' }}>
+        {prefix}{value}
+      </Typography>
+    </Stack>
+  );
+}
+
+/** A5 portrait: 148 x 210 mm — salary clearance receipt */
+const PAYSLIP_PAGE = { w: '148mm', h: '210mm', pad: '5mm 6mm 5mm 6mm' };
+
+const PAYSLIP_URDU_FONT = "'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', 'Urdu Typesetting', 'Noto Sans Arabic', serif";
+
+/** Bilingual payslip labels (English + Urdu) */
+const PAYSLIP_I18N = {
+  docTitleEn: 'Salary Invoice',
+  docTitleUr: 'تنخواہ کی رسید',
+  docSubEn: 'Employee Salary Payment Receipt',
+  docSubUr: 'ملازم کی تنخواہ کی ادائیگی',
+  receiptNo: ['Receipt No', 'رسید نمبر'],
+  paymentDate: ['Payment Date', 'ادائیگی کی تاریخ'],
+  salaryPeriod: ['Salary Month', 'تنخواہ کا مہینہ'],
+  status: ['Status', 'حالت'],
+  paid: ['PAID', 'ادا شدہ'],
+  employeeDetails: ['Employee Details', 'ملازم کی تفصیل'],
+  basic: ['Basic Salary', 'بنیادی تنخواہ'],
+  dailyRate: ['Daily Rate', 'یومیہ شرح'],
+  salaryBreakdown: ['Salary Breakdown', 'تنخواہ کی تفصیل'],
+  salaryCalculation: ['Salary Calculation', 'تنخواہ کا حساب'],
+  paymentDetails: ['Payment Details', 'ادائیگی کی تفصیل'],
+  balancesSection: ['Previous Salary & Employee Account', 'پچھلی تنخواہ اور ملازم اکاؤنٹ'],
+  description: ['Description', 'تفصیل'],
+  amount: ['Amount (Rs)', 'رقم (روپے)'],
+  attendance: ['Attendance Summary', 'حاضری کا خلاصہ'],
+  cashPaid: ['Cash Paid', 'نقد ادائیگی'],
+  bankPaid: ['Bank Paid', 'بینک ادائیگی'],
+  paymentMethod: ['Payment Method', 'ادائیگی کا طریقہ'],
+  reference: ['Reference', 'حوالہ'],
+  amountPaid: ['Total Paid', 'کل ادائیگی'],
+  empSign: ['Employee Signature', 'ملازم کے دستخط'],
+  authSign: ['Authorized Signature & Stamp', 'مجاز دستخط و مہر'],
+  present: ['Present', 'حاضر'],
+  leave: ['Leave', 'رخصت'],
+  absent: ['Absent', 'غیر حاضر'],
+  half: ['Half', 'آدھا دن'],
+  paidDays: ['Paid Days', 'ادا شدہ دن'],
+  excess: ['Excess', 'اضافی'],
+};
+
+const PAYSLIP_ROW_UR = {
+  attendanceSalary: 'حاضری تنخواہ',
+  bonus: 'بونس / انعام',
+  attDed: 'حاضری کٹوتی',
+  extraDed: 'اضافی کٹوتی',
+  advanceDed: 'ایڈوانس کی کٹوتی',
+  netMonth: 'خالص تنخواہ (اس مہینے)',
+  companyBal: 'کمپنی کا بقایا',
+  prevBal: 'پچھلے مہینے کا بیلنس',
+  prevBalUnpaid: 'پچھلے مہینے کی غیر ادا تنخواہ',
+  empAcctBefore: 'ادائیگی سے پہلے ملازم اکاؤنٹ',
+  empAcctAfter: 'ادائیگی کے بعد ملازم اکاؤنٹ',
+  totalPaymentDue: 'کل ادائیگی واجب',
+  advWithSal: 'تنخواہ کے ساتھ ایڈوانس',
+  totalDue: 'کل واجب الادا',
+  amountPaid: 'ادا شدہ رقم (نقد/بینک)',
+};
 
 const PAYSLIP_STYLES = `
   .salary-payslip-sheet {
     width: ${PAYSLIP_PAGE.w};
-    height: ${PAYSLIP_PAGE.h};
-    max-height: ${PAYSLIP_PAGE.h};
+    max-width: ${PAYSLIP_PAGE.w};
+    min-height: ${PAYSLIP_PAGE.h};
     margin: 0 auto;
     background: #fff;
-    overflow: hidden;
-    box-shadow: 0 2px 16px rgba(15, 23, 42, 0.08);
-    page-break-after: avoid;
+    border: 1.5px solid #0f172a;
+    box-shadow: 0 2px 12px rgba(15, 23, 42, 0.06);
     page-break-inside: avoid;
+    break-inside: avoid;
   }
   .salary-payslip-root * { box-sizing: border-box; }
   .salary-payslip-root {
+    direction: rtl;
     font-family: 'Segoe UI', system-ui, Arial, sans-serif;
     width: 100%;
-    height: 100%;
+    min-height: ${PAYSLIP_PAGE.h};
     padding: ${PAYSLIP_PAGE.pad};
-    color: #1e293b;
+    color: #0f172a;
     background: #fff;
-    font-size: 9pt;
-    line-height: 1.45;
+    font-size: 8pt;
+    line-height: 1.4;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+  }
+  .salary-payslip-root .inv-main {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .salary-payslip-root .ur-label {
+    font-family: ${PAYSLIP_URDU_FONT};
+    direction: rtl;
+    font-weight: 600;
+    color: #1e293b;
+    font-size: 8pt;
+    line-height: 1.45;
+  }
+  .salary-payslip-root .ur-label.ur-bold {
+    font-weight: 800;
+    color: #0f172a;
   }
   .salary-payslip-root .inv-accent {
-    height: 4px;
-    background: linear-gradient(90deg, #1A55E3 0%, #3b82f6 100%);
-    border-radius: 2px;
+    height: 3px;
+    background: linear-gradient(90deg, #1A55E3, #0f172a);
+    margin-bottom: 6px;
     flex-shrink: 0;
   }
-  .salary-payslip-root .inv-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 14px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #e2e8f0;
+  .salary-payslip-root .co-head {
+    text-align: center;
+    padding-bottom: 5px;
+    margin-bottom: 6px;
+    border-bottom: 2px solid #0f172a;
     flex-shrink: 0;
   }
-  .salary-payslip-root .inv-top h1 {
-    font-size: 15pt; margin: 0 0 4px; font-weight: 800; line-height: 1.2; color: #0f172a;
+  .salary-payslip-root .co-head .urdu-name {
+    font-family: ${PAYSLIP_URDU_FONT};
+    font-size: 13pt;
+    font-weight: 800;
+    margin: 0;
+    line-height: 1.35;
+    color: #0f172a;
   }
-  .salary-payslip-root .inv-top .co-sub {
-    color: #64748b; font-size: 8pt; line-height: 1.4; max-width: 98mm;
+  .salary-payslip-root .co-head .co-phone {
+    font-size: 7.5pt;
+    font-weight: 700;
+    color: #475569;
+    margin: 2px 0 0;
+    direction: ltr;
+    unicode-bidi: embed;
   }
-  .salary-payslip-root .inv-top .co-phone {
-    color: #475569; font-size: 8pt; margin-top: 3px; font-weight: 600;
-  }
-  .salary-payslip-root .inv-title-box {
-    text-align: right; flex-shrink: 0;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    padding: 8px 12px;
-    min-width: 52mm;
-  }
-  .salary-payslip-root .inv-title-box .doc-title {
-    font-size: 10pt; font-weight: 800; letter-spacing: 0.04em; color: #1A55E3;
-    text-transform: uppercase; margin-bottom: 6px;
-  }
-  .salary-payslip-root .inv-title-box .doc-meta {
-    font-size: 8pt; color: #64748b; line-height: 1.55;
-  }
-  .salary-payslip-root .inv-title-box .doc-meta strong { color: #0f172a; font-weight: 700; }
-  .salary-payslip-root .badge-paid {
-    display: inline-block; background: #dcfce7; color: #166534;
-    font-size: 7pt; font-weight: 700; padding: 2px 8px; border-radius: 999px;
-    margin-top: 4px; letter-spacing: 0.03em;
-  }
-  .salary-payslip-root .emp-bar {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 10px;
-    align-items: center;
-    padding: 10px 12px;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
+  .salary-payslip-root .title-strip {
+    text-align: center;
+    background: #0f172a;
+    padding: 6px 10px;
+    margin-bottom: 0;
     flex-shrink: 0;
   }
-  .salary-payslip-root .emp-bar .lbl {
-    font-size: 7pt; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.06em; color: #94a3b8; margin-bottom: 2px;
+  .salary-payslip-root .title-strip .en {
+    font-size: 10pt;
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #fff;
+    font-family: system-ui, Arial, sans-serif;
+    direction: ltr;
   }
-  .salary-payslip-root .emp-bar .name { font-size: 11pt; font-weight: 800; color: #0f172a; }
-  .salary-payslip-root .emp-bar .sub { font-size: 8pt; color: #64748b; font-weight: 500; margin-top: 2px; }
-  .salary-payslip-root .emp-meta {
-    display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end;
+  .salary-payslip-root .title-strip .ur-sub {
+    font-family: ${PAYSLIP_URDU_FONT};
+    font-size: 9pt;
+    font-weight: 700;
+    color: #e2e8f0;
+    margin-top: 2px;
   }
-  .salary-payslip-root .emp-meta span {
-    font-size: 7.5pt; font-weight: 600; padding: 4px 8px; border-radius: 6px;
-    background: #fff; color: #334155; border: 1px solid #e2e8f0; white-space: nowrap;
+  .salary-payslip-root .meta-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0;
+    border: 1px solid #64748b;
+    table-layout: fixed;
   }
-  .salary-payslip-root .inv-body {
-    display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 10px;
-    flex: 1; min-height: 0; align-items: stretch;
+  .salary-payslip-root .meta-table td {
+    padding: 5px 8px;
+    border: 1px solid #cbd5e1;
+    vertical-align: middle;
+    font-size: 7.5pt;
+    line-height: 1.35;
   }
-  .salary-payslip-root .inv-left, .salary-payslip-root .inv-right {
-    display: flex; flex-direction: column; gap: 8px; min-height: 0;
+  .salary-payslip-root .meta-table .mk {
+    width: 26%;
+    background: #e2e8f0;
+    font-family: ${PAYSLIP_URDU_FONT};
+    font-weight: 800;
+    color: #1e293b;
+    text-align: right;
+    padding-right: 10px;
   }
-  .salary-payslip-root .inv-panel {
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    overflow: hidden;
+  .salary-payslip-root .meta-table .mv {
+    width: 24%;
+    font-weight: 800;
+    color: #0f172a;
+    text-align: center;
+    direction: ltr;
+    unicode-bidi: embed;
     background: #fff;
   }
-  .salary-payslip-root .panel-head {
-    font-size: 8pt; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
-    color: #334155; padding: 6px 10px; background: #f1f5f9;
-    border-bottom: 1px solid #e2e8f0;
+  .salary-payslip-root .meta-table tr.meta-emp td {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+  .salary-payslip-root .meta-table .emp-name {
+    font-weight: 900;
+    font-size: 8.5pt;
+    text-align: center;
+    direction: ltr;
+    unicode-bidi: embed;
   }
   .salary-payslip-root .inv-table {
-    width: 100%; border-collapse: collapse;
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    border: 1px solid #64748b;
+    margin: 0;
   }
-  .salary-payslip-root .inv-table th {
-    background: #fafbfd; color: #64748b; font-size: 7pt; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 10px;
-    border-bottom: 1px solid #e2e8f0; text-align: left;
+  .salary-payslip-root .inv-table col.col-desc { width: 56%; }
+  .salary-payslip-root .inv-table col.col-amt { width: 44%; }
+  .salary-payslip-root .inv-table thead th {
+    background: #1e3a5f;
+    color: #fff !important;
+    font-size: 8.5pt;
+    font-weight: 900;
+    padding: 6px 10px;
+    border: 1px solid #1e3a5f;
+    font-family: ${PAYSLIP_URDU_FONT};
+    text-align: center;
   }
-  .salary-payslip-root .inv-table th.amt { text-align: right; width: 78px; }
-  .salary-payslip-root .inv-table td {
-    padding: 5px 10px; border-bottom: 1px solid #f1f5f9; font-size: 8.5pt; vertical-align: top;
+  .salary-payslip-root .inv-table thead th .ur-label {
+    color: #fff !important;
+    font-weight: 900;
   }
-  .salary-payslip-root .inv-table tr:nth-child(even) td { background: #fafbfd; }
-  .salary-payslip-root .inv-table td .detail {
-    color: #64748b; font-size: 7pt; line-height: 1.4; font-weight: 400; margin-top: 1px;
+  .salary-payslip-root .inv-table tbody td {
+    padding: 5px 10px;
+    border-bottom: 1px solid #cbd5e1;
+    vertical-align: middle;
+    font-size: 8pt;
+    min-height: 22px;
   }
-  .salary-payslip-root .inv-table td.amt {
-    text-align: right; font-weight: 700; white-space: nowrap; font-size: 8.5pt; color: #0f172a;
+  .salary-payslip-root .inv-table tbody tr.data-row:nth-child(even) td {
+    background: #f8fafc;
   }
-  .salary-payslip-root .inv-table tr:last-child td { border-bottom: none; }
-  .salary-payslip-root .inv-table .earn-amt { color: #059669; }
-  .salary-payslip-root .inv-table .ded-amt { color: #dc2626; }
+  .salary-payslip-root .inv-table td.desc {
+    text-align: right;
+    padding-right: 10px;
+    border-left: 1px solid #e2e8f0;
+  }
+  .salary-payslip-root .inv-table td.amt,
+  .salary-payslip-root .inv-table td.val {
+    text-align: right;
+    direction: ltr;
+    unicode-bidi: embed;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    padding-left: 8px;
+    padding-right: 10px;
+    white-space: nowrap;
+  }
+  .salary-payslip-root .inv-table td.val {
+    font-weight: 700;
+    font-size: 7.5pt;
+    color: #334155;
+    line-height: 1.3;
+    white-space: normal;
+  }
+  .salary-payslip-root .inv-table .earn-amt { color: #047857; }
+  .salary-payslip-root .inv-table .ded-amt { color: #b91c1c; }
+  .salary-payslip-root .inv-table td.amt .acct-tag {
+    font-family: ${PAYSLIP_URDU_FONT};
+    font-size: 7pt;
+    font-weight: 800;
+    margin-left: 6px;
+    direction: rtl;
+    unicode-bidi: embed;
+    color: inherit;
+    opacity: 0.95;
+  }
+  .salary-payslip-root .inv-table tr.sep td {
+    background: #334155;
+    color: #fff !important;
+    padding: 5px 10px;
+    font-size: 8.5pt;
+    font-weight: 900;
+    text-align: center;
+    border: 1px solid #334155;
+    font-family: ${PAYSLIP_URDU_FONT};
+  }
+  .salary-payslip-root .inv-table tr.sep td .ur-label {
+    color: #fff !important;
+    font-weight: 900;
+  }
   .salary-payslip-root .inv-table tr.net-row td {
-    background: #eff6ff; font-weight: 800; font-size: 9pt;
-    border-top: 2px solid #bfdbfe; border-bottom: none;
+    background: #dbeafe;
+    border-top: 2px solid #1A55E3;
+    border-bottom: 2px solid #1A55E3;
   }
-  .salary-payslip-root .inv-table tr.net-row td.amt { color: #1A55E3; }
+  .salary-payslip-root .inv-table tr.net-row td.desc .ur-label { font-weight: 900; }
+  .salary-payslip-root .inv-table tr.net-row td.amt {
+    color: #1A55E3;
+    font-size: 9pt;
+    font-weight: 900;
+  }
   .salary-payslip-root .inv-table tr.total-row td {
-    background: #ecfdf5; font-weight: 800; font-size: 9pt;
-    border-top: 2px solid #86efac;
+    background: #d1fae5;
+    border-top: 2px solid #059669;
   }
-  .salary-payslip-root .inv-table tr.total-row td.amt { color: #059669; font-size: 10pt; }
-  .salary-payslip-root .inv-table tr.prev-row td.amt { color: #7c3aed; }
-  .salary-payslip-root .inv-table tr.advws-row td.amt { color: #ea580c; }
-  .salary-payslip-root .pay-strip {
-    display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 8px;
+  .salary-payslip-root .inv-table tr.total-row td.desc .ur-label { font-weight: 900; }
+  .salary-payslip-root .inv-table tr.total-row td.amt {
+    color: #047857;
+    font-size: 9.5pt;
+    font-weight: 900;
   }
-  .salary-payslip-root .pay-box {
-    border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px; background: #fafbfd;
-  }
-  .salary-payslip-root .pay-box .pl {
-    font-size: 7pt; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.04em;
-  }
-  .salary-payslip-root .pay-box .pv {
-    font-size: 9pt; font-weight: 700; color: #0f172a; margin-top: 3px;
-  }
-  .salary-payslip-root .pay-total-bar {
-    display: flex; justify-content: space-between; align-items: center;
-    margin: 0 8px 8px; padding: 10px 12px;
-    background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);
-    border: 1px solid #86efac; border-radius: 8px;
+  .salary-payslip-root .inv-footer {
+    margin-top: auto;
+    padding-top: 10px;
     flex-shrink: 0;
   }
-  .salary-payslip-root .pay-total-bar .pl {
-    font-size: 8pt; font-weight: 800; color: #065f46; text-transform: uppercase; letter-spacing: 0.03em;
-  }
-  .salary-payslip-root .pay-total-bar .pv { font-size: 13pt; font-weight: 800; color: #059669; }
-  .salary-payslip-root .pay-total-bar .sub {
-    font-size: 7pt; color: #047857; font-weight: 500; margin-top: 2px;
-  }
-  .salary-payslip-root .att-meta-line {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;
-    font-size: 7pt; color: #64748b; padding: 6px 8px; background: #fafbfd;
-    border-bottom: 1px solid #e2e8f0;
-  }
-  .salary-payslip-root .att-meta-line span { font-weight: 500; }
-  .salary-payslip-root .att-meta-line strong { color: #0f172a; font-weight: 700; }
-  .salary-payslip-root .att-strip {
-    display: grid; grid-template-columns: repeat(6, 1fr);
-    border-bottom: 1px solid #e2e8f0;
-  }
-  .salary-payslip-root .att-cell {
-    padding: 6px 2px; text-align: center; background: #fff; border-right: 1px solid #f1f5f9;
-  }
-  .salary-payslip-root .att-cell:last-child { border-right: none; }
-  .salary-payslip-root .att-cell .n { font-size: 10pt; font-weight: 800; line-height: 1; color: #0f172a; }
-  .salary-payslip-root .att-cell .l {
-    font-size: 6pt; font-weight: 600; color: #94a3b8; text-transform: uppercase;
-    margin-top: 3px; letter-spacing: 0.02em;
-  }
-  .salary-payslip-root .att-cell.green .n { color: #15803d; }
-  .salary-payslip-root .att-cell.orange .n { color: #ea580c; }
-  .salary-payslip-root .att-cell.red .n { color: #dc2626; }
-  .salary-payslip-root .att-cell.amber .n { color: #ca8a04; }
-  .salary-payslip-root .att-month-cal {
-    border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;
-    flex: 1; display: flex; flex-direction: column; min-height: 0; background: #fff;
-  }
-  .salary-payslip-root .att-cal-legend {
-    display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 4px 8px;
-    background: #fafbfd; border-bottom: 1px solid #e2e8f0;
-    font-size: 6.5pt; font-weight: 600; color: #64748b;
-  }
-  .salary-payslip-root .att-cal-legend span { display: inline-flex; align-items: center; gap: 4px; }
-  .salary-payslip-root .att-cal-legend .dot {
-    width: 8px; height: 8px; border-radius: 2px; display: inline-block; flex-shrink: 0;
-  }
-  .salary-payslip-root .att-cal-weekdays {
-    display: grid; grid-template-columns: repeat(7, 1fr); background: #f8fafc;
-    border-bottom: 1px solid #e2e8f0;
-  }
-  .salary-payslip-root .att-cal-weekdays div {
-    text-align: center; font-size: 6.5pt; font-weight: 700; color: #94a3b8;
-    padding: 3px 0; text-transform: uppercase;
-  }
-  .salary-payslip-root .att-cal-grid {
-    display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px;
-    background: #f1f5f9; flex: 1;
-  }
-  .salary-payslip-root .att-cal-pad { background: #fafafa; min-height: 17px; }
-  .salary-payslip-root .att-cal-day {
-    background: #fff; min-height: 17px; padding: 2px 1px; text-align: center;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-  }
-  .salary-payslip-root .att-cal-day .d { font-size: 5.5pt; font-weight: 600; color: #cbd5e1; line-height: 1; }
-  .salary-payslip-root .att-cal-day .s {
-    font-size: 6pt; font-weight: 700; line-height: 1; padding: 1px 3px; border-radius: 2px; min-width: 11px;
-  }
-  .salary-payslip-root .att-cal-day.muted { background: #fafafa; }
-  .salary-payslip-root .att-cal-day.muted .d { color: #e2e8f0; }
-  .salary-payslip-root .att-cal-day.st-PRESENT .s { color: #15803d; background: #dcfce7; }
-  .salary-payslip-root .att-cal-day.st-ABSENT .s { color: #dc2626; background: #fee2e2; }
-  .salary-payslip-root .att-cal-day.st-LEAVE .s { color: #ea580c; background: #ffedd5; }
-  .salary-payslip-root .att-cal-day.st-HALF_DAY .s { color: #ca8a04; background: #fef9c3; }
-  .salary-payslip-root .att-cal-day.st-HOLIDAY .s { color: #475569; background: #e2e8f0; font-size: 5pt; }
-  .salary-payslip-root .att-cal-day.st-UNMARKED .s { color: #94a3b8; background: #f8fafc; font-weight: 600; }
-  .salary-payslip-root .dot.st-PRESENT { background: #86efac; }
-  .salary-payslip-root .dot.st-ABSENT { background: #fca5a5; }
-  .salary-payslip-root .dot.st-LEAVE { background: #fdba74; }
-  .salary-payslip-root .dot.st-HALF_DAY { background: #fde047; }
-  .salary-payslip-root .dot.st-HOLIDAY { background: #cbd5e1; }
-  .salary-payslip-root .dot.st-UNMARKED { background: #e2e8f0; }
-  .salary-payslip-root .inv-footer {
-    flex-shrink: 0; margin-top: auto; padding-top: 8px;
-  }
   .salary-payslip-root .sign {
-    display: flex; justify-content: space-between; gap: 20px;
-    font-size: 8pt; color: #64748b; margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
   }
   .salary-payslip-root .sign span {
-    flex: 1; border-top: 1px solid #cbd5e1; padding-top: 6px;
-    text-align: center; font-weight: 600;
+    flex: 1;
+    border-top: 1.5px solid #64748b;
+    padding-top: 28px;
+    text-align: center;
+    font-weight: 800;
+    font-size: 7.5pt;
+    font-family: ${PAYSLIP_URDU_FONT};
+    color: #475569;
   }
   .salary-payslip-root .foot {
-    font-size: 7pt; color: #94a3b8; text-align: center; margin: 0; padding-top: 2px;
+    font-size: 6.5pt;
+    color: #94a3b8;
+    text-align: center;
+    margin: 0;
+    direction: ltr;
+  }
+`;
+
+/** WhatsApp / PDF capture — full receipt, scaled to A5 in PDF step */
+const PAYSLIP_WA_CAPTURE_STYLES = `
+  .salary-payslip-sheet.salary-wa-capture {
+    overflow: visible !important;
+    box-shadow: none !important;
   }
 `;
 
 const PAYSLIP_PRINT_STYLES = `
-  @page { size: A4 portrait; margin: 0; }
+  @page { size: 148mm 210mm; margin: 0; }
   @media print {
     html, body {
-      margin: 0 !important; padding: 0 !important; width: ${PAYSLIP_PAGE.w} !important;
-      height: ${PAYSLIP_PAGE.h} !important; background: #fff !important;
-      -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      width: ${PAYSLIP_PAGE.w} !important;
+      background: #fff !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
     }
     .salary-payslip-sheet {
-      width: ${PAYSLIP_PAGE.w} !important; height: ${PAYSLIP_PAGE.h} !important;
-      max-height: ${PAYSLIP_PAGE.h} !important; margin: 0 !important;
-      box-shadow: none !important; page-break-after: avoid !important; page-break-inside: avoid !important;
+      width: ${PAYSLIP_PAGE.w} !important;
+      max-width: ${PAYSLIP_PAGE.w} !important;
+      margin: 0 auto !important;
+      box-shadow: none !important;
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+      border: 1.5px solid #0f172a !important;
     }
   }
 `;
 
 function getPayslipStylesheet() {
   return `${PAYSLIP_STYLES}${PAYSLIP_PRINT_STYLES}`;
+}
+
+function payslipUr(ur, bold = true) {
+  return `<span class="ur-label${bold ? ' ur-bold' : ''}">${escapeHtml(ur)}</span>`;
 }
 
 function escapeHtml(str) {
@@ -365,6 +576,27 @@ async function enrichPayrollWithAttendance(payroll) {
   } catch {
     return payroll;
   }
+}
+
+/** Attendance + snapshot balance fields for receipt print / PDF / WhatsApp. */
+async function enrichPayrollForReceipt(payroll) {
+  let row = await enrichPayrollWithAttendance(payroll);
+  const snap = row.clearance_snapshot || {};
+  row = {
+    ...row,
+    previous_balance: row.previous_balance ?? snap.previous_balance,
+    prev_month: row.prev_month ?? snap.prev_month ?? null,
+    prev_year: row.prev_year ?? snap.prev_year ?? null,
+    ledger_payable_credit: row.ledger_payable_credit ?? snap.ledger_payable_credit,
+    employee_ledger_closing_before:
+      row.employee_ledger_closing_before
+      ?? snap.employee_ledger_closing_before
+      ?? snap.employee_ledger_closing
+      ?? row.employee_ledger_closing,
+    employee_ledger_closing_after:
+      row.employee_ledger_closing_after ?? snap.employee_ledger_closing_after,
+  };
+  return row;
 }
 
 function receiptStatusForDay(month, year, day, attendanceByDay, joinDate) {
@@ -435,232 +667,197 @@ function buildPayslipBody(payroll) {
   const period = `${monthLabel} ${payroll.year || ''}`.trim();
   const totalDaysInMonth = getDaysInMonth(payroll.month, payroll.year);
   const printed = new Date().toLocaleString('en-GB');
-  const monthNet = parseFloat(payroll.month_net ?? payroll.net_salary ?? 0);
+  const monthNet = resolveMonthNetPay(payroll);
   const prevBal = parseFloat(payroll.previous_balance ?? payroll.previous_balance_paid ?? 0);
   const advanceWithSalary = parseFloat(payroll.advance_with_salary || 0);
-  const totalPaid = parseFloat(payroll.total_payable ?? monthNet + prevBal + advanceWithSalary);
+  const ledgerPayableCredit = parseFloat(
+    payroll.ledger_payable_credit
+    ?? payroll.clearance_snapshot?.ledger_payable_credit
+    ?? 0
+  );
+  const cashPaid = parseFloat(payroll.cash_amount || 0);
+  const bankPaid = parseFloat(payroll.bank_amount || 0);
+  const totalDue = parseFloat(
+    payroll.total_payable
+    ?? monthNet + prevBal + advanceWithSalary + ledgerPayableCredit
+  );
+  const amountPaidActual = parseFloat(
+    payroll.amount_paid
+    ?? payroll.clearance_snapshot?.amount_paid
+    ?? (cashPaid + bankPaid)
+  );
+  const totalPaid = amountPaidActual > 0.009 ? amountPaidActual : totalDue;
   const payDate = payroll.payment_date || payroll.cleared_at;
   const receiptNo = payroll.payroll_id ? `SR-${String(payroll.payroll_id).padStart(5, '0')}` : '-';
-  const dailyRate = parseFloat(payroll.daily_rate ?? payroll.deduction_per_day ?? 0);
   const paidDays = parseFloat(payroll.paid_days ?? payroll.days_present ?? 0);
   const attDed = parseFloat(payroll.total_deduction || 0);
   const otherDed = parseFloat(payroll.other_deduction || 0);
   const bonus = parseFloat(payroll.bonus || 0);
-  const cashPaid = parseFloat(payroll.cash_amount || 0);
-  const bankPaid = parseFloat(payroll.bank_amount || 0);
   const paymentMethod = payroll.payment_method || (cashPaid > 0 && bankPaid > 0 ? 'PARTIAL' : bankPaid > 0 ? 'BANK' : 'CASH');
   const phones = (COMPANY.phones || []).join(', ');
-  const attendancePay = Math.round(paidDays * dailyRate * 100) / 100;
-  const grossEarned = resolveMonthGrossEarned(payroll);
+  const monthlySalaryAmount = resolveMonthGrossEarned(payroll);
 
   const deductedAdvances = Array.isArray(payroll.deducted_advances) ? payroll.deducted_advances : [];
-  const advanceDedTotal = deductedAdvances.length > 0
-    ? deductedAdvances.reduce((s, a) => s + parseFloat(a.amount || 0), 0)
-    : parseFloat(payroll.advance_deduction || payroll.advance_this_month || 0);
-
-  const excessLeave = parseFloat(payroll.excess_leaves || 0);
-  const excessAbsent = parseFloat(payroll.excess_absents || 0);
-  const advanceWithSalaryDate = payroll.advance_with_salary_date || payDate;
-
-  const prevPeriod = payroll.prev_month && payroll.prev_year
-    ? `${MONTHS[parseInt(payroll.prev_month, 10) - 1] || '-'} ${payroll.prev_year}`
-    : null;
-
-  const br = (label, detail, amount, cls = '', rowCls = '') =>
-    `<tr class="${rowCls}">
-      <td><strong>${label}</strong>${detail ? `<br><span class="detail">${detail}</span>` : ''}</td>
-      <td class="amt ${cls}">${amount}</td>
-    </tr>`;
-
-  let breakdownRows = '';
-  breakdownRows += br(
-    'Attendance Salary',
-    `${escapeHtml(period)}. ${fmtNum(paidDays)} days paid at ${fmtAmt(dailyRate)}/day. Basic ${fmtAmt(payroll.basic_salary)}`,
-    fmtAmt(attendancePay),
-    'earn-amt'
-  );
-  if (bonus > 0) {
-    breakdownRows += br('Bonus / Incentive', 'Added at salary clearance', fmtAdd(bonus), 'earn-amt');
-  }
-  if (attDed > 0) {
-    const attParts = [];
-    if (excessLeave > 0) attParts.push(`${fmtNum(excessLeave)} excess leave`);
-    if (excessAbsent > 0) attParts.push(`${fmtNum(excessAbsent)} excess absent`);
-    breakdownRows += br(
-      'Attendance Deduction',
-      `${attParts.join(', ') || 'Unpaid days'} at ${fmtAmt(dailyRate)}/day`,
-      fmtDed(attDed),
-      'ded-amt'
-    );
-  }
-  if (otherDed > 0) {
-    breakdownRows += br(
-      'Extra Deduction',
-      payroll.deduction_reason ? escapeHtml(payroll.deduction_reason) : 'Deduction at clearance',
-      fmtDed(otherDed),
-      'ded-amt'
-    );
-  }
-  if (deductedAdvances.length > 0) {
-    deductedAdvances.forEach((a) => {
-      breakdownRows += br(
-        'Advance Deducted',
-        `Taken ${fmtDate(a.advance_date)}${a.reason ? `. ${escapeHtml(a.reason)}` : ''}`,
-        fmtDed(a.amount),
-        'ded-amt'
-      );
-    });
-  } else if (advanceDedTotal > 0) {
-    breakdownRows += br(
-      'Advance Deducted',
-      'Pending advance recovered from this month salary',
-      fmtDed(advanceDedTotal),
-      'ded-amt'
-    );
-  }
-
-  breakdownRows += br(
-    'Net Pay (This Month)',
-    `Earned ${fmtAmt(attendancePay)}${bonus > 0 ? `, Bonus ${fmtAmt(bonus)}` : ''}${attDed > 0 ? `, Att Ded ${fmtAmt(attDed)}` : ''}${otherDed > 0 ? `, Extra Ded ${fmtAmt(otherDed)}` : ''}${advanceDedTotal > 0 ? `, Adv Ded ${fmtAmt(advanceDedTotal)}` : ''}`,
-    fmtAmt(monthNet),
-    '',
-    'net-row'
+  const advanceDedTotal = resolveReceiptAdvanceDeduction(
+    payroll,
+    monthlySalaryAmount,
+    monthNet,
+    attDed,
+    otherDed,
+    bonus,
+    deductedAdvances
   );
 
-  if (prevBal > 0) {
-    breakdownRows += br(
-      'Previous Month Balance',
-      prevPeriod
-        ? `Unpaid salary from ${escapeHtml(prevPeriod)}, paid with this clearance`
-        : 'Unpaid salary from previous month, paid with this clearance',
-      fmtAmt(prevBal),
-      'prev-row',
-      'prev-row'
-    );
+  const snap = payroll.clearance_snapshot || {};
+  const prevPeriod = resolvePayslipPrevPeriod(payroll);
+  const ledgerBeforeRaw = payroll.employee_ledger_closing_before
+    ?? snap.employee_ledger_closing_before
+    ?? snap.employee_ledger_closing
+    ?? payroll.employee_ledger_closing;
+  const ledgerAfterRaw = payroll.employee_ledger_closing_after ?? snap.employee_ledger_closing_after;
+  const ledgerBefore = ledgerBeforeRaw != null && ledgerBeforeRaw !== '' ? parseFloat(ledgerBeforeRaw) : NaN;
+  const ledgerAfter = ledgerAfterRaw != null && ledgerAfterRaw !== '' ? parseFloat(ledgerAfterRaw) : NaN;
+
+  const fv = (labelHtml, valueHtml, rowCls = '') =>
+    `<tr class="data-row ${rowCls}"><td class="desc">${labelHtml}</td><td class="val">${valueHtml}</td></tr>`;
+  const br = (labelHtml, amount, cls = '', rowCls = '') =>
+    `<tr class="data-row ${rowCls}"><td class="desc">${labelHtml}</td><td class="amt ${cls}">${amount}</td></tr>`;
+
+  const presentDays = fmtNum(payroll.days_present ?? payroll.present_days);
+  const leaveDays = fmtNum(payroll.leaves_taken ?? payroll.leave_days);
+  const absentDays = fmtNum(payroll.absent_days ?? payroll.absents_taken);
+  const halfDays = parseFloat(payroll.half_days ?? 0);
+  const attSummary = halfDays > 0
+    ? `${presentDays} / ${leaveDays} / ${absentDays} / ${fmtNum(halfDays)} / ${fmtNum(paidDays)}`
+    : `${presentDays} / ${leaveDays} / ${absentDays} / ${fmtNum(paidDays)}`;
+  const attSummaryLbl = halfDays > 0
+    ? 'حاضری / رخصت / غیر حاضری / آدھا دن / ادا شدہ'
+    : 'حاضری / رخصت / غیر حاضری / ادا شدہ';
+
+  let rows = '';
+  rows += `<tr class="sep"><td colspan="2">${payslipUr(PAYSLIP_I18N.salaryCalculation[1])}</td></tr>`;
+  rows += br(payslipUr(PAYSLIP_I18N.basic[1]), fmtAmt(payroll.basic_salary));
+  rows += fv(payslipUr(attSummaryLbl, false), escapeHtml(attSummary));
+  rows += br(payslipUr(PAYSLIP_ROW_UR.attendanceSalary), fmtAmt(monthlySalaryAmount), 'earn-amt');
+  if (bonus > 0.009) rows += br(payslipUr(PAYSLIP_ROW_UR.bonus), fmtAdd(bonus), 'earn-amt');
+  if (attDed > 0.009) rows += br(payslipUr(PAYSLIP_ROW_UR.attDed), fmtDed(attDed), 'ded-amt');
+  if (otherDed > 0.009) {
+    rows += br(payslipUr(PAYSLIP_ROW_UR.extraDed), fmtDed(otherDed), 'ded-amt');
+  }
+  if (advanceDedTotal > 0.009) {
+    rows += br(payslipUr(PAYSLIP_ROW_UR.advanceDed), fmtDed(advanceDedTotal), 'ded-amt');
+  }
+  rows += br(payslipUr(PAYSLIP_ROW_UR.netMonth), fmtAmt(monthNet), '', 'net-row');
+
+  const balanceLines = [];
+  if (prevBal > 0.009) {
+    const prevBalUr = prevPeriod
+      ? `${PAYSLIP_ROW_UR.prevBalUnpaid} (${prevPeriod})`
+      : PAYSLIP_ROW_UR.prevBalUnpaid;
+    balanceLines.push(br(payslipUr(prevBalUr), fmtAmt(prevBal), 'earn-amt'));
+  }
+  if (!payslipAccountIsEmpty(ledgerBefore)) {
+    const acctBefore = payslipEmployeeAccountDisplay(ledgerBefore);
+    balanceLines.push(br(payslipUr(PAYSLIP_ROW_UR.empAcctBefore), acctBefore.html, acctBefore.cls));
+  }
+  if (ledgerPayableCredit > 0.009) {
+    balanceLines.push(br(payslipUr(PAYSLIP_ROW_UR.companyBal), fmtAdd(ledgerPayableCredit), 'earn-amt'));
+  }
+  if (advanceWithSalary > 0.009) {
+    balanceLines.push(br(payslipUr(PAYSLIP_ROW_UR.advWithSal), fmtAmt(advanceWithSalary), 'earn-amt'));
+  }
+  if (balanceLines.length > 0 || Math.abs(totalDue - monthNet) > 0.009) {
+    rows += `<tr class="sep"><td colspan="2">${payslipUr(PAYSLIP_I18N.balancesSection[1])}</td></tr>`;
+    rows += balanceLines.join('');
+    rows += br(payslipUr(PAYSLIP_ROW_UR.totalPaymentDue), fmtAmt(totalDue), '', 'net-row');
+  }
+  if (!payslipAccountIsEmpty(ledgerAfter)) {
+    const acctAfter = payslipEmployeeAccountDisplay(ledgerAfter);
+    if (balanceLines.length === 0 && Math.abs(totalDue - monthNet) <= 0.009) {
+      rows += `<tr class="sep"><td colspan="2">${payslipUr(PAYSLIP_I18N.balancesSection[1])}</td></tr>`;
+    }
+    rows += br(payslipUr(PAYSLIP_ROW_UR.empAcctAfter), acctAfter.html, acctAfter.cls);
   }
 
-  if (advanceWithSalary > 0) {
-    breakdownRows += br(
-      'Advance Paid With Salary',
-      `Given ${fmtDate(advanceWithSalaryDate)}${payroll.advance_reason ? `. ${escapeHtml(payroll.advance_reason)}` : ''}. Recovered next month`,
-      fmtAmt(advanceWithSalary),
-      'advws-row',
-      'advws-row'
-    );
+  rows += `<tr class="sep"><td colspan="2">${payslipUr('ادائیگی')}</td></tr>`;
+  rows += br(payslipUr(PAYSLIP_I18N.cashPaid[1]), cashPaid > 0.009 ? fmtAmt(cashPaid) : '—');
+  rows += br(payslipUr(PAYSLIP_I18N.bankPaid[1]), bankPaid > 0.009 ? fmtAmt(bankPaid) : '—');
+  rows += br(payslipUr(PAYSLIP_I18N.paymentMethod[1]), escapeHtml(payslipPaymentMethodUr(paymentMethod)));
+  if (payroll.payment_reference) {
+    rows += fv(payslipUr(PAYSLIP_I18N.reference[1]), escapeHtml(payroll.payment_reference));
   }
+  rows += br(payslipUr(PAYSLIP_ROW_UR.amountPaid), fmtAmt(totalPaid), 'earn-amt', 'total-row');
 
-  breakdownRows += br(
-    'Total Paid to Employee',
-    `Net pay${prevBal > 0 ? ', previous balance' : ''}${advanceWithSalary > 0 ? ', advance with salary' : ''}. Cash/bank at clearance`,
-    fmtAmt(totalPaid),
-    '',
-    'total-row'
-  );
+  const dash = '—';
+  const companyUr = COMPANY.nameUr || 'اتفاق آئرن اینڈ سیمنٹ سٹور';
+  const statusText = payroll.status === 'PAID' ? PAYSLIP_I18N.paid[1] : (payroll.status || PAYSLIP_I18N.paid[1]);
 
-  const attSidebar = `
-    <div class="att-month-cal">
-      <div class="panel-head">Attendance - ${escapeHtml(period)}</div>
-      <div class="att-meta-line">
-        <span>Days: <strong>${totalDaysInMonth}</strong></span>
-        <span>Work: <strong>${payroll.total_days ?? '-'}</strong></span>
-        <span>Rate: <strong>${fmtAmt(dailyRate)}</strong></span>
-        <span>Paid: <strong>${fmtNum(paidDays)}</strong></span>
-        <span>Allow L/A: <strong>${payroll.allowed_leaves ?? 0}/${payroll.allowed_absents ?? 0}</strong></span>
-        <span>Gross: <strong>${fmtAmt(grossEarned)}</strong></span>
-      </div>
-      <div class="att-strip">
-        <div class="att-cell green"><div class="n">${fmtNum(payroll.days_present ?? payroll.present_days)}</div><div class="l">Present</div></div>
-        <div class="att-cell orange"><div class="n">${fmtNum(payroll.leaves_taken ?? payroll.leave_days)}</div><div class="l">Leave</div></div>
-        <div class="att-cell red"><div class="n">${fmtNum(payroll.absent_days ?? payroll.absents_taken)}</div><div class="l">Absent</div></div>
-        <div class="att-cell amber"><div class="n">${payroll.half_days ?? 0}</div><div class="l">Half</div></div>
-        <div class="att-cell"><div class="n">${fmtNum(paidDays)}</div><div class="l">Paid</div></div>
-        <div class="att-cell"><div class="n">${fmtNum(excessLeave + excessAbsent)}</div><div class="l">Excess</div></div>
-      </div>
-      ${buildMonthAttendanceGridHtml(
-        payroll.month,
-        payroll.year,
-        payroll.attendance_by_day || {},
-        payroll.employee_join_date || payroll.employee?.join_date,
-        true
-      )}
-    </div>`;
-
-  const dash = '-';
-  const empDept = emp.department ? `, ${escapeHtml(emp.department)}` : '';
+  const empPhone = emp.emp_phone ? escapeHtml(emp.emp_phone) : '';
+  const empDesig = emp.designation ? escapeHtml(emp.designation) : '';
 
   return `<div class="salary-payslip-sheet"><div class="salary-payslip-root" id="salary-payslip-preview">
   <div class="inv-accent"></div>
-  <div class="inv-top">
-    <div>
-      <h1>${escapeHtml(COMPANY.name || 'Itefaq Iron & Cement Store')}</h1>
-      <div class="co-sub">${escapeHtml(COMPANY.address || '')}</div>
-      ${phones ? `<div class="co-phone">Phone: ${escapeHtml(phones)}</div>` : ''}
-    </div>
-    <div class="inv-title-box">
-      <div class="doc-title">Salary Receipt</div>
-      <div class="doc-meta">
-        Receipt No: <strong>${receiptNo}</strong><br>
-        Payment Date: <strong>${fmtDate(payDate)}</strong><br>
-        Salary Period: <strong>${escapeHtml(period)}</strong><br>
-        Status: <span class="badge-paid">${payroll.status || 'PAID'}</span>
-      </div>
-    </div>
+  <div class="co-head">
+    <p class="urdu-name">${companyUr}</p>
+    ${phones ? `<p class="co-phone">${escapeHtml(phones)}</p>` : ''}
   </div>
 
-  <div class="emp-bar">
-    <div>
-      <div class="lbl">Employee Details</div>
-      <div class="name">${escapeHtml(emp.emp_name || dash)}</div>
-      <div class="sub">${escapeHtml(emp.designation || dash)}${empDept}</div>
-    </div>
-    <div class="emp-meta">
-      <span>Basic ${fmtAmt(payroll.basic_salary)}</span>
-      <span>Daily Rate ${fmtAmt(dailyRate)}</span>
-    </div>
+  <div class="title-strip">
+    <div class="en">${PAYSLIP_I18N.docTitleEn}</div>
+    <div class="ur-sub">${PAYSLIP_I18N.docTitleUr}</div>
   </div>
 
-  <div class="inv-body">
-    <div class="inv-left">
-      <div class="inv-panel">
-        <div class="panel-head">Salary Breakdown</div>
-        <table class="inv-table">
-          <thead><tr><th>Description</th><th class="amt">Amount (Rs)</th></tr></thead>
-          <tbody>${breakdownRows}</tbody>
-        </table>
-      </div>
-      <div class="inv-panel">
-        <div class="panel-head">Payment Details</div>
-        <div class="pay-strip">
-          <div class="pay-box"><div class="pl">Cash Paid</div><div class="pv">${cashPaid > 0 ? fmtAmt(cashPaid) : dash}</div></div>
-          <div class="pay-box"><div class="pl">Bank Paid</div><div class="pv">${bankPaid > 0 ? fmtAmt(bankPaid) : dash}</div></div>
-          <div class="pay-box"><div class="pl">Payment Method</div><div class="pv">${paymentMethod}</div></div>
-          <div class="pay-box"><div class="pl">Reference</div><div class="pv">${payroll.payment_reference ? escapeHtml(payroll.payment_reference) : dash}</div></div>
-        </div>
-        <div class="pay-total-bar">
-          <div>
-            <div class="pl">Total Paid to Employee</div>
-            <div class="sub">Net ${fmtAmt(monthNet)}${prevBal > 0 ? `, Prev ${fmtAmt(prevBal)}` : ''}${advanceWithSalary > 0 ? `, Adv ${fmtAmt(advanceWithSalary)}` : ''}</div>
-          </div>
-          <div class="pv">${fmtAmt(totalPaid)}</div>
-        </div>
-      </div>
-    </div>
-    <div class="inv-right">${attSidebar}</div>
+  <div class="inv-main">
+  <table class="meta-table">
+    <tbody>
+      <tr>
+        <td class="mk">${payslipUr(PAYSLIP_I18N.salaryPeriod[1])}</td>
+        <td class="mv">${escapeHtml(period)}</td>
+        <td class="mk">${payslipUr(PAYSLIP_I18N.receiptNo[1])}</td>
+        <td class="mv">${escapeHtml(receiptNo)}</td>
+      </tr>
+      <tr>
+        <td class="mk">${payslipUr(PAYSLIP_I18N.paymentDate[1])}</td>
+        <td class="mv">${escapeHtml(fmtDate(payDate))}</td>
+        <td class="mk">${payslipUr(PAYSLIP_I18N.status[1])}</td>
+        <td class="mv">${escapeHtml(statusText)}</td>
+      </tr>
+      <tr class="meta-emp">
+        <td class="mk">${payslipUr('نام ملازم')}</td>
+        <td class="mv emp-name" colspan="3">${escapeHtml(emp.emp_name || dash)}${empDesig ? ` · ${empDesig}` : ''}${empPhone ? ` · ${empPhone}` : ''}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <table class="inv-table">
+    <colgroup>
+      <col class="col-desc" />
+      <col class="col-amt" />
+    </colgroup>
+    <thead>
+      <tr>
+        <th>${payslipUr('تفصیل')}</th>
+        <th>${payslipUr('رقم (روپے)')}</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
   </div>
 
   <div class="inv-footer">
     <div class="sign">
-      <span>Employee Signature</span>
-      <span>Authorized Signature and Stamp</span>
+      <span>${payslipUr(PAYSLIP_I18N.empSign[1])}</span>
+      <span>${payslipUr(PAYSLIP_I18N.authSign[1])}</span>
     </div>
-    <p class="foot">${escapeHtml(COMPANY.nameShort || 'Itefaq Iron Store')} | Salary Receipt | ${escapeHtml(period)} | Generated ${printed}</p>
+    <p class="foot">${escapeHtml(receiptNo)} · ${printed}</p>
   </div>
 </div></div>`;
 }
 
 function buildPayslipHtml(payroll) {
   const emp = payroll.employee || {};
-  return `<!DOCTYPE html><html><head><title>Salary Receipt - ${emp.emp_name || ''}</title>
+  return `<!DOCTYPE html><html lang="ur"><head><meta charset="utf-8"><title>${PAYSLIP_I18N.docTitleEn} - ${emp.emp_name || ''}</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400..700&family=Noto+Sans+Arabic:wght@400;700&display=swap" rel="stylesheet">
 <style>${getPayslipStylesheet()}</style></head><body style="margin:0;padding:0">
 ${buildPayslipBody(payroll)}
 </body></html>`;
@@ -673,17 +870,107 @@ function payslipFileName(payroll) {
   return `Salary-Receipt-${receiptNo}-${name}.pdf`;
 }
 
+async function mountSalaryReceiptForCapture(payroll) {
+  const enriched = await enrichPayrollForReceipt(payroll);
+  const printable = document.getElementById('printable-salary-payslip');
+  if (!printable) throw new Error('Print container not found');
+
+  printable.innerHTML = `<style>${getPayslipStylesheet()}${PAYSLIP_WA_CAPTURE_STYLES}</style>${buildPayslipBody(enriched)}`;
+  printable.style.display = 'block';
+  printable.style.position = 'fixed';
+  printable.style.left = '-12000px';
+  printable.style.top = '0';
+  printable.style.width = PAYSLIP_PAGE.w;
+  printable.style.height = 'auto';
+  printable.style.overflow = 'visible';
+  printable.style.background = '#fff';
+  printable.style.zIndex = '-1';
+  printable.style.pointerEvents = 'none';
+
+  const sheet = printable.querySelector('.salary-payslip-sheet');
+  if (!sheet) throw new Error('Receipt layout not found');
+  sheet.classList.add('salary-wa-capture');
+
+  await new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+  if (document.fonts?.ready) {
+    try {
+      await document.fonts.ready;
+    } catch {
+      /* ignore */
+    }
+  }
+  await new Promise((r) => setTimeout(r, 120));
+
+  return { printable, sheet, enriched };
+}
+
+function unmountSalaryReceiptCapture(printable) {
+  if (!printable) return;
+  printable.innerHTML = '';
+  printable.style.display = 'none';
+  printable.style.position = '';
+  printable.style.left = '';
+  printable.style.top = '';
+  printable.style.width = '';
+  printable.style.height = '';
+  printable.style.overflow = '';
+  printable.style.background = '';
+  printable.style.zIndex = '';
+  printable.style.pointerEvents = '';
+}
+
+async function captureSalaryReceiptCanvas(payroll) {
+  const { printable, sheet } = await mountSalaryReceiptForCapture(payroll);
+  try {
+    const html2canvas = (await import('html2canvas')).default;
+    const w = Math.max(sheet.scrollWidth, sheet.offsetWidth, 559);
+    const h = Math.max(sheet.scrollHeight, sheet.offsetHeight, 400);
+
+    return await html2canvas(sheet, {
+      scale: 2,
+      backgroundColor: '#ffffff',
+      logging: false,
+      useCORS: true,
+      scrollX: 0,
+      scrollY: 0,
+      width: w,
+      height: h,
+      windowWidth: w,
+      windowHeight: h,
+      foreignObjectRendering: false,
+      onclone: (doc) => {
+        const clonedSheet = doc.querySelector('.salary-payslip-sheet');
+        if (clonedSheet) {
+          clonedSheet.style.height = 'auto';
+          clonedSheet.style.maxHeight = 'none';
+          clonedSheet.style.overflow = 'visible';
+        }
+        doc.querySelectorAll(
+          '.urdu, .urdu-name, .urdu-addr, .ph-ur, .lbl-ur, .row-ur, .th-ur, .meta-lbl .ur, .doc-title-ur, .doc-sub .urdu'
+        ).forEach((el) => {
+          el.style.fontFamily = PAYSLIP_URDU_FONT;
+          el.style.direction = 'rtl';
+        });
+      },
+    });
+  } finally {
+    unmountSalaryReceiptCapture(printable);
+  }
+}
+
 async function downloadPayslipPdf(payroll) {
   const printable = document.getElementById('printable-salary-payslip');
   if (!printable) throw new Error('Print container not found');
 
-  printable.innerHTML = `<style>${getPayslipStylesheet()}</style>${buildPayslipBody(payroll)}`;
+  printable.innerHTML = `<style>${getPayslipStylesheet()}${PAYSLIP_WA_CAPTURE_STYLES}</style>${buildPayslipBody(payroll)}`;
   printable.style.display = 'block';
   printable.style.position = 'fixed';
   printable.style.left = '-10000px';
   printable.style.top = '0';
-  printable.style.width = '210mm';
-  printable.style.height = '297mm';
+  printable.style.width = PAYSLIP_PAGE.w;
+  printable.style.height = PAYSLIP_PAGE.h;
   printable.style.overflow = 'visible';
   printable.style.background = '#fff';
   printable.style.zIndex = '-1';
@@ -696,10 +983,13 @@ async function downloadPayslipPdf(payroll) {
 
     const sheet = printable.querySelector('.salary-payslip-sheet');
     if (!sheet) throw new Error('Receipt layout not found');
+    sheet.classList.add('salary-wa-capture');
 
     const html2canvas = (await import('html2canvas')).default;
     const jsPDF = (await import('jspdf')).default;
 
+    const w = Math.max(sheet.scrollWidth, sheet.offsetWidth, 559);
+    const h = Math.max(sheet.scrollHeight, sheet.offsetHeight, 400);
     const canvas = await html2canvas(sheet, {
       scale: 2,
       backgroundColor: '#ffffff',
@@ -707,16 +997,16 @@ async function downloadPayslipPdf(payroll) {
       useCORS: true,
       scrollX: 0,
       scrollY: 0,
-      width: sheet.scrollWidth,
-      height: sheet.scrollHeight,
-      windowWidth: sheet.scrollWidth,
-      windowHeight: sheet.scrollHeight,
+      width: w,
+      height: h,
+      windowWidth: w,
+      windowHeight: h,
       foreignObjectRendering: false,
     });
 
-    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-    const pageW = 210;
-    const pageH = 297;
+    const doc = new jsPDF({ unit: 'mm', format: 'a5', orientation: 'portrait' });
+    const pageW = 148;
+    const pageH = 210;
     const imgData = canvas.toDataURL('image/png');
     let renderW = pageW;
     let renderH = (canvas.height * renderW) / canvas.width;
@@ -725,8 +1015,7 @@ async function downloadPayslipPdf(payroll) {
       renderW = (canvas.width * renderH) / canvas.height;
     }
     const x = (pageW - renderW) / 2;
-    const y = 0;
-    doc.addImage(imgData, 'PNG', x, y, renderW, renderH);
+    doc.addImage(imgData, 'PNG', x, 0, renderW, renderH);
     doc.save(payslipFileName(payroll));
   } finally {
     printable.innerHTML = '';
@@ -746,9 +1035,7 @@ async function downloadPayslipPdf(payroll) {
 function openPayslipPrintWindow(payroll) {
   const w = window.open('', '_blank', 'width=820,height=900');
   if (!w) return false;
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Salary Receipt</title>
-<style>${getPayslipStylesheet()}</style></head>
-<body style="margin:0;padding:0;background:#fff">${buildPayslipBody(payroll)}</body></html>`);
+  w.document.write(buildPayslipHtml(payroll));
   w.document.close();
   w.focus();
   setTimeout(() => {
@@ -760,7 +1047,48 @@ function openPayslipPrintWindow(payroll) {
 
 function printPayslipFromPreview(payroll) {
   if (!payroll) return Promise.resolve(false);
-  return enrichPayrollWithAttendance(payroll).then((enriched) => openPayslipPrintWindow(enriched));
+  return enrichPayrollForReceipt(payroll).then((enriched) => openPayslipPrintWindow(enriched));
+}
+
+async function fetchPaidPayrollRow(empId, m, y) {
+  const res = await fetch(`/api/payroll?month=${m}&year=${y}&emp_id=${empId}`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  const row = Array.isArray(data) ? data[0] : data;
+  return row?.status === 'PAID' ? row : null;
+}
+
+function buildReceiptRowFromClearance(payroll, data, form) {
+  const snap = data.clearance_snapshot || {};
+  return {
+    ...payroll,
+    payroll_id: data.payroll_id ?? payroll.payroll_id,
+    status: 'PAID',
+    month: payroll.month,
+    year: payroll.year,
+    month_net: data.month_net ?? payroll.net_salary,
+    net_salary: data.net_salary ?? payroll.net_salary,
+    total_payable: data.total_payable,
+    amount_paid: data.amount_paid ?? snap.amount_paid,
+    previous_balance: data.previous_balance ?? payroll.previous_balance,
+    prev_month: snap.prev_month ?? payroll.prev_month,
+    prev_year: snap.prev_year ?? payroll.prev_year,
+    ledger_payable_credit: data.ledger_payable_credit ?? snap.ledger_payable_credit,
+    employee_ledger_closing_before: snap.employee_ledger_closing_before ?? snap.employee_ledger_closing,
+    employee_ledger_closing_after: snap.employee_ledger_closing_after,
+    clearance_snapshot: snap,
+    bonus: parseFloat(form.bonus || payroll.bonus || 0),
+    other_deduction: parseFloat(form.extra_deduction || payroll.other_deduction || 0),
+    advance_with_salary: parseFloat(form.advance_with_salary || 0),
+    cash_amount: snap.cash_amount ?? parseFloat(form.cash_amount || 0),
+    bank_amount: snap.bank_amount ?? parseFloat(form.bank_amount || 0),
+    payment_method: snap.payment_method,
+    payment_reference: form.payment_reference,
+    payment_date: snap.cleared_at || new Date().toISOString().slice(0, 10),
+    advance_deduction: payroll.advance_deduction,
+    deduction_reason: form.deduction_reason,
+    advance_reason: form.advance_reason,
+  };
 }
 
 function buildSalarySheetHtml(rows, month, year, totals) {
@@ -828,7 +1156,7 @@ function PayslipPreviewContent({ payroll: initialPayroll }) {
       return undefined;
     }
     setLoadingAtt(true);
-    enrichPayrollWithAttendance(initialPayroll).then((data) => {
+    enrichPayrollForReceipt(initialPayroll).then((data) => {
       if (!cancelled) {
         setPayroll(data);
         setLoadingAtt(false);
@@ -849,17 +1177,21 @@ function PayslipPreviewContent({ payroll: initialPayroll }) {
   return (
     <>
       <style>{getPayslipStylesheet()}</style>
-      <Box
-        sx={{
-          display: 'flex',
-          justifyContent: 'center',
-          py: 2,
-          px: 1,
-          bgcolor: '#e2e8f0',
-          borderRadius: '8px',
-        }}
-        dangerouslySetInnerHTML={{ __html: buildPayslipBody(payroll) }}
-      />
+      <Box sx={{ display: 'flex', justifyContent: 'center', py: 2, px: 1, bgcolor: '#e2e8f0', borderRadius: '8px', overflow: 'auto' }}>
+        <Box
+          id="salary-receipt-preview"
+          sx={{
+            '& .salary-payslip-sheet': {
+              height: 'auto',
+              maxHeight: 'none',
+              overflow: 'visible',
+            },
+            '& .salary-payslip-root': { height: 'auto' },
+            '& .salary-payslip-sheet': { boxShadow: '0 4px 24px rgba(15,23,42,0.12)' },
+          }}
+          dangerouslySetInnerHTML={{ __html: buildPayslipBody(payroll) }}
+        />
+      </Box>
     </>
   );
 }
@@ -921,6 +1253,9 @@ export default function SalaryTab({ view = 'sheet' }) {
   const [advances, setAdvances] = useState([]);
   const [loadingPayrolls, setLoadingPayrolls] = useState(false);
   const [clearingId, setClearingId] = useState(null);
+  const [printingReceiptId, setPrintingReceiptId] = useState(null);
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+  const [whatsAppPayrollId, setWhatsAppPayrollId] = useState(null);
   const [clearConfirm, setClearConfirm] = useState(null);
   const [clearForm, setClearForm] = useState({
     paymentMethod: 'CASH',
@@ -943,19 +1278,35 @@ export default function SalaryTab({ view = 'sheet' }) {
   const [snack, setSnack] = useState({ open: false, msg: '', severity: 'success' });
 
   const showSnack = (msg, severity = 'success') => setSnack({ open: true, msg, severity });
+  const payrollVersion = useHrRefreshVersion(HR_KEYS.payroll);
+  const advancesVersion = useHrRefreshVersion(HR_KEYS.advances);
+  const employeesVersion = useHrRefreshVersion(HR_KEYS.employees);
+  const { invalidatePayrollFlow } = useHrRefresh();
 
   useEffect(() => {
-    if (!isReceiptView) {
-      fetch('/api/employees').then((r) => r.json()).then(setEmployees).catch(() => {});
-      fetchAdvances();
-    }
+    if (isReceiptView) return;
+    const url = isClearanceView || useLiveCalc ? '/api/employees' : '/api/employees?lite=true';
+    fetch(url)
+      .then(async (r) => {
+        const data = await r.json();
+        setEmployees(Array.isArray(data) ? data : []);
+      })
+      .catch(() => setEmployees([]));
+  }, [isReceiptView, isClearanceView, useLiveCalc, employeesVersion]);
+
+  useEffect(() => {
+    if (isReceiptView) return;
+    fetchAdvances();
+  }, [isReceiptView, advancesVersion]);
+
+  useEffect(() => {
     if (isClearanceView) {
       fetch('/api/customers?dropdown=true')
         .then((r) => r.json())
         .then((data) => setPaymentAccounts(Array.isArray(data) ? data : []))
         .catch(() => {});
     }
-  }, [isReceiptView, isClearanceView]);
+  }, [isClearanceView]);
 
   const cashAccountsList = useMemo(() => paymentAccounts.filter((account) => {
     const typeTitle = account.customer_type?.cus_type_title?.toLowerCase() || '';
@@ -969,42 +1320,51 @@ export default function SalaryTab({ view = 'sheet' }) {
     return typeTitle.includes('bank') && catTitle.includes('bank');
   }), [paymentAccounts]);
 
+  useEffect(() => {
+    if (!clearConfirm?.emp_id) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/employee-ledger?emp_id=${clearConfirm.emp_id}`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const signedClosing = parseFloat(data.closing_balance ?? data.ledger_balance ?? 0);
+        const openingBal = parseFloat(data.employee?.opening_balance ?? 0);
+        const recover = Math.max(0, signedClosing);
+        const payableCredit = Math.max(0, -signedClosing);
+        setClearConfirm((prev) => {
+          if (!prev || prev.emp_id !== clearConfirm.emp_id) return prev;
+          return {
+            ...prev,
+            employee_opening_balance: openingBal,
+            employee_ledger_closing: signedClosing,
+            ledger_payable_credit: payableCredit,
+            employee_ledger_balance: recover,
+            ledger_receivable: recover,
+            advance_deduction: recover > 0.009 ? recover : prev.advance_deduction,
+          };
+        });
+      } catch {
+        /* keep payroll row values */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [clearConfirm?.emp_id, clearConfirm?.payroll_id, month, year]);
+
   const clearancePreview = useMemo(() => {
     if (!clearConfirm) return null;
-    const derived = calcPayroll({
-      basic_salary: clearConfirm.basic_salary,
-      total_days: clearConfirm.total_days,
-      salary_divisor_days: getDaysInMonth(month, year),
-      days_present: clearConfirm.days_present,
-      leaves_taken: clearConfirm.leaves_taken,
-      absents_taken: clearConfirm.absents_taken,
-      absent_days: clearConfirm.absent_days,
-      allowed_leaves: clearConfirm.allowed_leaves,
-      allowed_absents: clearConfirm.allowed_absents,
-      advance_deduction: clearConfirm.advance_deduction,
-      bonus: parseFloat(clearForm.bonus || 0),
-      other_deduction: parseFloat(clearForm.extra_deduction || 0),
-    });
-    const prevBal = parseFloat(clearConfirm.previous_balance || 0);
-    const advanceWithSalary = parseFloat(clearForm.advance_with_salary || 0);
-    const salaryPayable = calcTotalPayable({ monthNet: derived.net_salary, previousBalance: prevBal });
-    const grandTotal = calcTotalPayable({
-      monthNet: derived.net_salary,
-      previousBalance: prevBal,
-      advanceWithSalary,
-    });
-    return { derived, prevBal, salaryPayable, advanceWithSalary, grandTotal };
+    const preview = previewClearancePayroll(clearConfirm, clearForm, month, year);
+    if (!preview) return null;
+    return {
+      ...preview,
+      salaryPayable: calcTotalPayable({
+        monthNet: preview.derived.net_salary,
+        previousBalance: preview.prevBal,
+        ledgerPayableCredit: preview.ledgerPayableCredit,
+      }),
+      recoveryDeduction: preview.accountRecovery,
+    };
   }, [clearConfirm, clearForm, month, year]);
-
-  useEffect(() => {
-    if (!clearConfirm || !clearancePreview) return;
-    const total = clearancePreview.grandTotal;
-    if (clearForm.paymentMethod === 'CASH') {
-      setClearForm((f) => ({ ...f, cash_amount: total > 0 ? String(total) : '', bank_amount: '' }));
-    } else if (clearForm.paymentMethod === 'BANK') {
-      setClearForm((f) => ({ ...f, bank_amount: total > 0 ? String(total) : '', cash_amount: '' }));
-    }
-  }, [clearConfirm, clearancePreview?.grandTotal, clearForm.paymentMethod]);
 
   const fetchPayrolls = useCallback(async () => {
     setLoadingPayrolls(true);
@@ -1028,7 +1388,7 @@ export default function SalaryTab({ view = 'sheet' }) {
 
   useEffect(() => {
     fetchPayrolls();
-  }, [fetchPayrolls]);
+  }, [fetchPayrolls, payrollVersion]);
 
   async function fetchAdvances() {
     try {
@@ -1065,6 +1425,8 @@ export default function SalaryTab({ view = 'sheet' }) {
         body: JSON.stringify({
           clearance: true,
           ...payroll,
+          month: payroll.month ?? month,
+          year: payroll.year ?? year,
           bonus: parseFloat(clearForm.bonus || 0),
           other_deduction: parseFloat(clearForm.extra_deduction || 0),
           deduction_reason: clearForm.deduction_reason,
@@ -1083,11 +1445,15 @@ export default function SalaryTab({ view = 'sheet' }) {
         throw new Error(err.error || 'Clearance failed');
       }
       const data = await res.json();
-      const paidAmt = data.total_payable ?? payroll.total_payable ?? payroll.net_salary;
-      showSnack(`Salary cleared: ${payroll.employee?.emp_name} — ${fmtAmt(paidAmt)}`);
+      const paidAmt = data.amount_paid ?? data.total_payable ?? payroll.total_payable ?? payroll.net_salary;
       setClearConfirm(null);
-      fetchPayrolls();
-      fetchAdvances();
+      invalidatePayrollFlow();
+      let receiptRow = await fetchPaidPayrollRow(payroll.emp_id, month, year);
+      if (!receiptRow) {
+        receiptRow = buildReceiptRowFromClearance(payroll, data, clearForm);
+      }
+      openPayslipPreview(receiptRow);
+      showSnack(`Cleared: ${payroll.employee?.emp_name} — ${fmtAmt(paidAmt)}. Use Print, WhatsApp, or PDF in receipt preview.`, 'success');
     } catch (err) {
       showSnack(err.message || 'Failed to clear salary', 'error');
     } finally {
@@ -1114,7 +1480,23 @@ export default function SalaryTab({ view = 'sheet' }) {
       advance_reason: '',
       payment_reference: '',
     });
-    setClearConfirm(payroll);
+    setClearConfirm({
+      ...payroll,
+      month: payroll.month ?? month,
+      year: payroll.year ?? year,
+    });
+  }
+
+  function fillClearancePaymentTotal() {
+    if (!clearancePreview) return;
+    const total = clearancePreview.grandTotal;
+    if (clearForm.paymentMethod === 'BANK') {
+      setClearForm((f) => ({ ...f, bank_amount: total > 0 ? String(total) : '', cash_amount: '' }));
+    } else if (clearForm.paymentMethod === 'PARTIAL') {
+      setClearForm((f) => ({ ...f, cash_amount: total > 0 ? String(total) : '', bank_amount: '' }));
+    } else {
+      setClearForm((f) => ({ ...f, cash_amount: total > 0 ? String(total) : '', bank_amount: '' }));
+    }
   }
 
   async function handleUndoClearance(payroll) {
@@ -1141,8 +1523,7 @@ export default function SalaryTab({ view = 'sheet' }) {
       }
       showSnack(`Clearance undone: ${payroll.employee?.emp_name}`);
       setUndoConfirm(null);
-      fetchPayrolls();
-      fetchAdvances();
+      invalidatePayrollFlow();
     } catch (err) {
       showSnack(err.message || 'Failed to undo clearance', 'error');
     } finally {
@@ -1158,17 +1539,105 @@ export default function SalaryTab({ view = 'sheet' }) {
     setPayslipPreview(payroll);
   }
 
+  async function openReceiptPreview(payroll) {
+    if (!payroll?.emp_id && !payroll?.payroll_id) return;
+    setPrintingReceiptId(payroll.payroll_id ?? payroll.emp_id);
+    try {
+      let row = payroll;
+      if (payroll.emp_id) {
+        const fresh = await fetchPaidPayrollRow(
+          payroll.emp_id,
+          payroll.month ?? month,
+          payroll.year ?? year
+        );
+        if (fresh) {
+          row = {
+            ...payroll,
+            ...fresh,
+            employee: { ...payroll.employee, ...fresh.employee },
+          };
+        }
+      }
+      openPayslipPreview(row);
+    } catch (err) {
+      showSnack(err.message || 'Could not open receipt', 'error');
+    } finally {
+      setPrintingReceiptId(null);
+    }
+  }
+
   async function handlePrintPayslip() {
     if (!payslipPreview) return;
     const opened = await printPayslipFromPreview(payslipPreview);
-    if (opened === false) showSnack('Allow pop-ups to print receipt', 'warning');
+    if (opened === false) showSnack('Allow pop-ups to print A5 receipt', 'warning');
   }
+
+  async function handleSendSalaryWhatsApp(payroll) {
+    if (!payroll) return;
+    setIsSendingWhatsApp(true);
+    setWhatsAppPayrollId(payroll.payroll_id ?? payroll.emp_id);
+    try {
+      const {
+        shareCanvasViaWhatsAppDesktop,
+        whatsAppSuccessMessage,
+        formatWhatsAppPhone,
+        resolveEmployeeWhatsAppPhone,
+      } = await import('@/lib/whatsapp-local');
+
+      let phone = resolveEmployeeWhatsAppPhone(payroll.employee);
+      if (!phone) {
+        const manual = window.prompt(
+          'Employee phone is missing or invalid.\nEnter WhatsApp number (e.g. 0300-1234567):',
+          payroll.employee?.emp_phone || ''
+        );
+        if (!manual?.trim()) {
+          showSnack('WhatsApp cancelled — phone number required', 'info');
+          return;
+        }
+        phone = formatWhatsAppPhone(manual) || resolveEmployeeWhatsAppPhone({ emp_phone: manual });
+        if (!phone) {
+          showSnack('Invalid phone number. Use format 03XX-XXXXXXX', 'error');
+          return;
+        }
+      }
+
+      let row = payroll;
+      if (payroll.status === 'PAID' && payroll.emp_id) {
+        const fresh = await fetchPaidPayrollRow(
+          payroll.emp_id,
+          payroll.month ?? month,
+          payroll.year ?? year
+        );
+        if (fresh) {
+          row = {
+            ...payroll,
+            ...fresh,
+            employee: { ...payroll.employee, ...fresh.employee },
+          };
+        }
+      }
+
+      showSnack('Preparing full salary invoice for WhatsApp…', 'info');
+      const canvas = await captureSalaryReceiptCanvas(row);
+      if (!canvas) throw new Error('Could not capture salary invoice');
+
+      const period = `${MONTHS[(payroll.month || month) - 1]} ${payroll.year ?? year}`;
+      const { opened } = await shareCanvasViaWhatsAppDesktop(canvas, phone);
+      showSnack(`${whatsAppSuccessMessage(opened)} Paste (Ctrl+V) in chat — full ${period} invoice copied`, 'success');
+    } catch (err) {
+      showSnack(`WhatsApp error: ${err.message}`, 'error');
+    } finally {
+      setIsSendingWhatsApp(false);
+      setWhatsAppPayrollId(null);
+    }
+  }
+
 
   async function handleDownloadPayslipPdf() {
     if (!payslipPreview) return;
     setDownloadingPayslipPdf(true);
     try {
-      const enriched = await enrichPayrollWithAttendance(payslipPreview);
+      const enriched = await enrichPayrollForReceipt(payslipPreview);
       await downloadPayslipPdf(enriched);
       showSnack('PDF downloaded', 'success');
     } catch (err) {
@@ -1185,17 +1654,18 @@ export default function SalaryTab({ view = 'sheet' }) {
       return;
     }
     showSnack('Loading attendance for receipts…', 'info');
-    const enriched = await Promise.all(displayPayrolls.map((p) => enrichPayrollWithAttendance(p)));
+    const enriched = await Promise.all(displayPayrolls.map((p) => enrichPayrollForReceipt(p)));
     const w = window.open('', '_blank', 'width=900,height=700');
     if (!w) return;
     const printExtra = `
-      @page { size: A4 portrait; margin: 0; }
+      @page { size: A5 portrait; margin: 0; }
       html, body { margin: 0; padding: 0; background: #fff; }
       .salary-payslip-sheet { page-break-after: always; break-after: page; }
       .salary-payslip-sheet:last-child { page-break-after: auto; break-after: auto; }
     `;
     const pages = enriched.map((p) => buildPayslipBody(p)).join('');
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Salary Receipts</title>
+    w.document.write(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${PAYSLIP_I18N.docTitleEn}</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400..700&family=Noto+Sans+Arabic:wght@400;700&display=swap" rel="stylesheet">
 <style>${getPayslipStylesheet()}${printExtra}</style></head><body style="margin:0;padding:0">${pages}</body></html>`);
     w.document.close();
     w.focus();
@@ -1235,7 +1705,7 @@ export default function SalaryTab({ view = 'sheet' }) {
 
   const sheetTotals = useMemo(() => ({
     grossEarned: pendingPayrolls.reduce((s, p) => s + resolveMonthGrossEarned(p), 0),
-    net: pendingPayrolls.reduce((s, p) => s + parseFloat(p.month_net ?? p.net_salary ?? 0), 0),
+    net: pendingPayrolls.reduce((s, p) => s + resolveMonthAttendanceNet(p), 0),
     basic: pendingPayrolls.reduce((s, p) => s + parseFloat(p.basic_salary || 0), 0),
     pending: pendingPayrolls.filter((p) => p.status === 'PENDING').reduce((s, p) => s + parseFloat(p.total_payable ?? p.net_salary ?? 0), 0),
     paid: displayPayrolls.filter((p) => p.status === 'PAID').reduce((s, p) => s + parseFloat(p.total_payable ?? p.net_salary ?? 0), 0),
@@ -1438,11 +1908,13 @@ export default function SalaryTab({ view = 'sheet' }) {
                             Adv w/ Salary
                           </TableCell>
                         )}
-                        <TableCell align="right" sx={{ ...thSx, bgcolor: '#1e3a8a' }}>Net Pay</TableCell>
+                        <TableCell align="right" sx={{ ...thSx, bgcolor: '#1e3a8a' }} title="This month salary (attendance), before employee account recovery">
+                          Net Pay
+                        </TableCell>
                         <TableCell align="right" sx={{ ...thSx, bgcolor: '#0d9488' }}>Total Pay</TableCell>
                         <TableCell align="center" sx={thSx}>Status</TableCell>
                         {isClearanceView && (
-                          <TableCell align="center" sx={{ ...thSx, minWidth: 120 }}>Action</TableCell>
+                          <TableCell align="center" sx={{ ...thSx, minWidth: 248 }}>Action</TableCell>
                         )}
                         {isReceiptView && (
                           <TableCell align="center" sx={{ ...thSx, minWidth: 90 }}>Paid On</TableCell>
@@ -1505,7 +1977,9 @@ export default function SalaryTab({ view = 'sheet' }) {
                               {parseFloat(p.previous_balance) > 0 ? fmtAmt(p.previous_balance) : '—'}
                             </TableCell>
                             <TableCell align="right" sx={{ borderBottom: '1px solid #eef2f6', color: '#b45309', fontWeight: 600, fontSize: '0.8125rem' }}>
-                              {parseFloat(p.advance_this_month || p.advance_deduction) > 0 ? fmtAmt(p.advance_this_month || p.advance_deduction) : '—'}
+                              {parseFloat(p.advance_deduction ?? p.employee_ledger_balance ?? p.advance_this_month ?? 0) > 0
+                                ? fmtAmt(p.advance_deduction ?? p.employee_ledger_balance ?? p.advance_this_month)
+                                : '—'}
                             </TableCell>
                             {(isClearanceView || isReceiptView) && (
                               <TableCell align="right" sx={{ borderBottom: '1px solid #eef2f6', color: '#ea580c', fontWeight: 700, fontSize: '0.8125rem', bgcolor: 'rgba(234,88,12,0.05)' }}>
@@ -1513,7 +1987,7 @@ export default function SalaryTab({ view = 'sheet' }) {
                               </TableCell>
                             )}
                             <TableCell align="right" sx={{ borderBottom: '1px solid #eef2f6', fontWeight: 900, color: PRIMARY, fontSize: '0.875rem', bgcolor: 'rgba(26,85,227,0.06)' }}>
-                              {fmtAmt(p.month_net ?? p.net_salary)}
+                              {fmtAmt(resolveMonthAttendanceNet(p))}
                             </TableCell>
                             <TableCell align="right" sx={{ borderBottom: '1px solid #eef2f6', fontWeight: 900, color: '#0d9488', fontSize: '0.875rem', bgcolor: 'rgba(13,148,136,0.06)' }}>
                               {fmtAmt(p.total_payable ?? p.net_salary)}
@@ -1524,25 +1998,47 @@ export default function SalaryTab({ view = 'sheet' }) {
                             {!isReceiptView && isClearanceView && (
                               <TableCell align="center" sx={{ borderBottom: '1px solid #eef2f6' }}>
                                 {p.status === 'PAID' ? (
-                                  <Button
-                                    size="small"
-                                    variant="outlined"
-                                    disabled={undoingId === p.payroll_id}
-                                    onClick={() => openUndoConfirm(p)}
-                                    startIcon={undoingId === p.payroll_id ? <CircularProgress size={14} color="inherit" /> : <Undo sx={{ fontSize: 16 }} />}
-                                    sx={{
-                                      textTransform: 'none',
-                                      fontWeight: 700,
-                                      borderRadius: '8px',
-                                      borderColor: '#fca5a5',
-                                      color: '#dc2626',
-                                      fontSize: '0.72rem',
-                                      px: 1.5,
-                                      '&:hover': { borderColor: '#dc2626', bgcolor: '#fef2f2' },
-                                    }}
-                                  >
-                                    Undo
-                                  </Button>
+                                  <Stack direction="row" spacing={0.5} justifyContent="center" flexWrap="wrap" useFlexGap>
+                                    <Button
+                                      size="small"
+                                      variant="contained"
+                                      disabled={printingReceiptId === (p.payroll_id ?? p.emp_id)}
+                                      onClick={() => openReceiptPreview(p)}
+                                      startIcon={printingReceiptId === (p.payroll_id ?? p.emp_id) ? <CircularProgress size={14} color="inherit" /> : <ReceiptLong sx={{ fontSize: 15 }} />}
+                                      sx={{
+                                        textTransform: 'none',
+                                        fontWeight: 700,
+                                        borderRadius: '8px',
+                                        bgcolor: PRIMARY,
+                                        fontSize: '0.68rem',
+                                        px: 1,
+                                        minWidth: 0,
+                                        '&:hover': { bgcolor: '#1547c4' },
+                                      }}
+                                    >
+                                      Receipt
+                                    </Button>
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      disabled={undoingId === p.payroll_id}
+                                      onClick={() => openUndoConfirm(p)}
+                                      startIcon={undoingId === p.payroll_id ? <CircularProgress size={14} color="inherit" /> : <Undo sx={{ fontSize: 15 }} />}
+                                      sx={{
+                                        textTransform: 'none',
+                                        fontWeight: 700,
+                                        borderRadius: '8px',
+                                        borderColor: '#fca5a5',
+                                        color: '#dc2626',
+                                        fontSize: '0.68rem',
+                                        px: 1,
+                                        minWidth: 0,
+                                        '&:hover': { borderColor: '#dc2626', bgcolor: '#fef2f2' },
+                                      }}
+                                    >
+                                      Undo
+                                    </Button>
+                                  </Stack>
                                 ) : (
                                   <Button
                                     size="small"
@@ -1574,21 +2070,21 @@ export default function SalaryTab({ view = 'sheet' }) {
                               <TableCell align="center" sx={{ borderBottom: '1px solid #eef2f6' }}>
                                 <Button
                                   size="small"
-                                  variant="outlined"
-                                  startIcon={<Visibility sx={{ fontSize: 16 }} />}
-                                  onClick={() => openPayslipPreview(p)}
+                                  variant="contained"
+                                  disabled={printingReceiptId === (p.payroll_id ?? p.emp_id)}
+                                  onClick={() => openReceiptPreview(p)}
+                                  startIcon={printingReceiptId === (p.payroll_id ?? p.emp_id) ? <CircularProgress size={14} color="inherit" /> : <ReceiptLong sx={{ fontSize: 16 }} />}
                                   sx={{
                                     textTransform: 'none',
                                     fontWeight: 700,
                                     borderRadius: '8px',
                                     fontSize: '0.72rem',
-                                    borderColor: PRIMARY,
-                                    color: PRIMARY,
+                                    bgcolor: PRIMARY,
                                     px: 1.25,
-                                    '&:hover': { bgcolor: 'rgba(26,85,227,0.06)' },
+                                    '&:hover': { bgcolor: '#1547c4' },
                                   }}
                                 >
-                                  View
+                                  Receipt
                                 </Button>
                               </TableCell>
                             )}
@@ -1729,75 +2225,166 @@ export default function SalaryTab({ view = 'sheet' }) {
         <DialogContent dividers>
           {clearConfirm && clearancePreview && (
             <Stack spacing={2} sx={{ pt: 0.5 }}>
+              <Alert severity="info" sx={{ borderRadius: '10px', py: 0.5 }}>
+                <Typography sx={{ fontWeight: 700, fontSize: '0.85rem' }}>
+                  {MONTHS[(clearConfirm.month ?? month) - 1]} {clearConfirm.year ?? year} — monthly clearance only
+                </Typography>
+                <Typography sx={{ fontSize: '0.75rem', mt: 0.25 }}>
+                  Totals below are for this salary month. Enter the cash/bank amount you pay now (not auto-deducted from accounts).
+                </Typography>
+              </Alert>
               <Box>
                 <Typography sx={{ fontWeight: 800, fontSize: '1rem' }}>{clearConfirm.employee?.emp_name}</Typography>
                 <Typography sx={{ fontSize: '0.8rem', color: '#64748b' }}>
-                  {MONTHS[month - 1]} {year} · {clearConfirm.employee?.designation || 'Employee'}
+                  {MONTHS[(clearConfirm.month ?? month) - 1]} {clearConfirm.year ?? year} · {clearConfirm.employee?.designation || 'Employee'}
                 </Typography>
               </Box>
 
-              <Box sx={{ bgcolor: '#f8fafc', borderRadius: '12px', p: 2, border: '1px solid #e8edf4' }}>
-                <Stack spacing={1}>
-                  <Stack direction="row" justifyContent="space-between">
-                    <Typography sx={{ fontSize: '0.8125rem', color: '#64748b' }}>Earned This Month</Typography>
-                    <Typography sx={{ fontWeight: 800, color: '#059669' }}>
-                      {fmtAmt(clearancePreview.derived.gross_earned ?? resolveMonthGrossEarned(clearConfirm))}
-                    </Typography>
-                  </Stack>
-                  {parseFloat(clearForm.bonus || 0) > 0 && (
-                    <Stack direction="row" justifyContent="space-between">
-                      <Typography sx={{ fontSize: '0.8125rem', color: '#64748b' }}>Bonus</Typography>
-                      <Typography sx={{ fontWeight: 700, color: '#16a34a' }}>+ {fmtAmt(clearForm.bonus)}</Typography>
-                    </Stack>
-                  )}
-                  {parseFloat(clearancePreview.derived.total_deduction || 0) > 0 && (
-                    <Stack direction="row" justifyContent="space-between">
-                      <Typography sx={{ fontSize: '0.8125rem', color: '#64748b' }}>Attendance Deduction</Typography>
-                      <Typography sx={{ fontWeight: 700, color: '#dc2626' }}>
-                        − {fmtAmt(clearancePreview.derived.total_deduction)}
+              {(() => {
+                const ledger = describeEmployeeLedgerBalance(clearancePreview.signedClosing);
+                const openingDiffers =
+                  Math.abs(clearancePreview.openingBal) >= 0.01
+                  && Math.abs(clearancePreview.openingBal - clearancePreview.signedClosing) >= 0.01;
+                const recoveryAmt = clearancePreview.recoveryDeduction ?? clearancePreview.ledgerOwed;
+                return (
+                  <Stack spacing={2}>
+                    <Box
+                      sx={{
+                        p: 2,
+                        borderRadius: '12px',
+                        bgcolor: ledger.bg,
+                        border: `1px solid ${ledger.border}`,
+                      }}
+                    >
+                      <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                        <Box>
+                          <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            Employee account (from ledger)
+                          </Typography>
+                          <Typography sx={{ fontWeight: 900, fontSize: '1.05rem', color: ledger.color, mt: 0.5 }}>
+                            {ledger.headline}
+                          </Typography>
+                          <Typography sx={{ fontSize: '0.78rem', color: '#475569', mt: 0.25 }}>{ledger.sub}</Typography>
+                          {openingDiffers && (
+                            <Typography sx={{ fontSize: '0.68rem', color: '#94a3b8', mt: 1 }}>
+                              Pre-system opening: {clearancePreview.openingBal > 0
+                                ? `employee owed ${fmtAmt(clearancePreview.openingBal)}`
+                                : clearancePreview.openingBal < 0
+                                  ? `company owed ${fmtAmt(Math.abs(clearancePreview.openingBal))}`
+                                  : fmtAmt(0)}
+                              {' · '}After advances/receipts, net {ledger.amountText} ({ledger.headline.toLowerCase()})
+                            </Typography>
+                          )}
+                        </Box>
+                        <Box sx={{ textAlign: 'right' }}>
+                          <Typography sx={{ fontWeight: 900, fontSize: '1.35rem', fontFamily: 'monospace', color: ledger.color }}>
+                            {ledger.amountText}
+                          </Typography>
+                          <Chip
+                            size="small"
+                            label={ledger.chip}
+                            sx={{ mt: 0.75, fontWeight: 700, fontSize: '0.65rem', bgcolor: '#fff', color: ledger.color, border: `1px solid ${ledger.border}` }}
+                          />
+                        </Box>
+                      </Stack>
+                    </Box>
+
+                    <Box sx={{ bgcolor: '#f8fafc', borderRadius: '12px', p: 2, border: '1px solid #e8edf4' }}>
+                      <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', mb: 1.25 }}>
+                        How much to pay
                       </Typography>
-                    </Stack>
-                  )}
-                  {parseFloat(clearForm.extra_deduction || 0) > 0 && (
-                    <Stack direction="row" justifyContent="space-between">
-                      <Typography sx={{ fontSize: '0.8125rem', color: '#64748b' }}>Extra Deduction</Typography>
-                      <Typography sx={{ fontWeight: 700, color: '#be123c' }}>
-                        − {fmtAmt(clearForm.extra_deduction)}
-                      </Typography>
-                    </Stack>
-                  )}
-                  {parseFloat(clearConfirm.advance_this_month || clearConfirm.advance_deduction || 0) > 0 && (
-                    <Stack direction="row" justifyContent="space-between">
-                      <Typography sx={{ fontSize: '0.8125rem', color: '#64748b' }}>Advance Deducted</Typography>
-                      <Typography sx={{ fontWeight: 700, color: '#b45309' }}>
-                        − {fmtAmt(clearConfirm.advance_this_month || clearConfirm.advance_deduction)}
-                      </Typography>
-                    </Stack>
-                  )}
-                  <Stack direction="row" justifyContent="space-between" sx={{ pt: 0.5, borderTop: '1px dashed #e2e8f0' }}>
-                    <Typography sx={{ fontSize: '0.8125rem', fontWeight: 800, color: '#64748b' }}>Net Pay (This Month)</Typography>
-                    <Typography sx={{ fontWeight: 900, color: PRIMARY }}>{fmtAmt(clearancePreview.derived.net_salary)}</Typography>
+                      <Stack spacing={1.1}>
+                        <ClearanceSummaryRow
+                          label="Salary earned this month"
+                          hint="Before employee account adjustment"
+                          value={fmtAmt(clearancePreview.derived.gross_earned ?? resolveMonthGrossEarned(clearConfirm))}
+                          valueColor="#059669"
+                        />
+                        {parseFloat(clearForm.bonus || 0) > 0 && (
+                          <ClearanceSummaryRow label="Bonus" value={fmtAmt(clearForm.bonus)} valueColor="#16a34a" prefix="+ " />
+                        )}
+                        {parseFloat(clearancePreview.derived.total_deduction || 0) > 0 && (
+                          <ClearanceSummaryRow
+                            label="Attendance deduction"
+                            hint="Extra leave / absent days"
+                            value={fmtAmt(clearancePreview.derived.total_deduction)}
+                            valueColor="#dc2626"
+                            prefix="− "
+                          />
+                        )}
+                        {parseFloat(clearForm.extra_deduction || 0) > 0 && (
+                          <ClearanceSummaryRow label="Extra deduction" value={fmtAmt(clearForm.extra_deduction)} valueColor="#be123c" prefix="− " />
+                        )}
+                        {recoveryAmt > 0 && (
+                          <ClearanceSummaryRow
+                            label="Less: employee balance"
+                            hint="Net ledger (+ opening, advances − receipts). Not full advance if company owed opening."
+                            value={fmtAmt(recoveryAmt)}
+                            valueColor="#b45309"
+                            prefix="− "
+                          />
+                        )}
+                        <ClearanceSummaryRow
+                          label="This month net (attendance)"
+                          hint={`${MONTHS[(clearancePreview.month ?? month) - 1]} ${clearancePreview.year ?? year} — before employee account`}
+                          value={fmtAmt(clearancePreview.monthNetAttendance)}
+                          valueColor={PRIMARY}
+                        />
+                        <ClearanceSummaryRow
+                          label="Net pay this month"
+                          hint="After employee account balance is applied"
+                          value={fmtAmt(clearancePreview.derived.net_salary)}
+                          valueColor="#0d9488"
+                        />
+                        {ledger.addLine && (
+                          <ClearanceSummaryRow
+                            label="Plus: pay company balance"
+                            hint="Amount you already owed this employee"
+                            value={fmtAmt(clearancePreview.ledgerPayableCredit)}
+                            valueColor="#15803d"
+                            prefix="+ "
+                          />
+                        )}
+                        {clearancePreview.prevBal > 0 && (
+                          <ClearanceSummaryRow
+                            label="Plus: unpaid last month salary"
+                            hint="Previous month net not yet paid"
+                            value={fmtAmt(clearancePreview.prevBal)}
+                            valueColor="#7c3aed"
+                            prefix="+ "
+                          />
+                        )}
+                        {clearancePreview.advanceWithSalary > 0 && (
+                          <ClearanceSummaryRow
+                            label="Plus: new advance with this payment"
+                            hint="Extra cash now — recovered next payroll"
+                            value={fmtAmt(clearancePreview.advanceWithSalary)}
+                            valueColor="#ea580c"
+                            prefix="+ "
+                          />
+                        )}
+                        <Box sx={{ pt: 1.25, mt: 0.5, borderTop: '2px solid #cbd5e1' }}>
+                          <Stack direction="row" justifyContent="space-between" alignItems="center">
+                            <Box>
+                              <Typography sx={{ fontWeight: 900, fontSize: '0.95rem' }}>Total salary due (this month)</Typography>
+                              <Typography sx={{ fontSize: '0.68rem', color: '#64748b' }}>
+                                {ledger.addLine && recoveryAmt <= 0
+                                  ? `Salary ${fmtAmt(clearancePreview.derived.net_salary)} + owed ${fmtAmt(clearancePreview.ledgerPayableCredit)}`
+                                  : recoveryAmt > 0
+                                    ? `Salary after deducting employee balance`
+                                    : 'This month net plus any items above · you choose how much to pay below'}
+                              </Typography>
+                            </Box>
+                            <Typography sx={{ fontWeight: 900, color: '#0d9488', fontSize: '1.25rem', fontFamily: 'monospace' }}>
+                              {fmtAmt(clearancePreview.grandTotal)}
+                            </Typography>
+                          </Stack>
+                        </Box>
+                      </Stack>
+                    </Box>
                   </Stack>
-                  {clearancePreview.prevBal > 0 && (
-                    <Stack direction="row" justifyContent="space-between">
-                      <Typography sx={{ fontSize: '0.8125rem', color: '#64748b' }}>Previous Balance</Typography>
-                      <Typography sx={{ fontWeight: 800, color: '#7c3aed' }}>{fmtAmt(clearancePreview.prevBal)}</Typography>
-                    </Stack>
-                  )}
-                  {clearancePreview.advanceWithSalary > 0 && (
-                    <Stack direction="row" justifyContent="space-between">
-                      <Typography sx={{ fontSize: '0.8125rem', color: '#64748b' }}>Advance with salary</Typography>
-                      <Typography sx={{ fontWeight: 700, color: '#ea580c' }}>{fmtAmt(clearancePreview.advanceWithSalary)}</Typography>
-                    </Stack>
-                  )}
-                  <Stack direction="row" justifyContent="space-between" sx={{ pt: 1, borderTop: '1px dashed #e2e8f0' }}>
-                    <Typography sx={{ fontWeight: 900 }}>Total Payable</Typography>
-                    <Typography sx={{ fontWeight: 900, color: '#0d9488', fontSize: '1.1rem' }}>
-                      {fmtAmt(clearancePreview.grandTotal)}
-                    </Typography>
-                  </Stack>
-                </Stack>
-              </Box>
+                );
+              })()}
 
               <Divider><Typography sx={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 700 }}>ADJUSTMENTS</Typography></Divider>
 
@@ -1877,20 +2464,87 @@ export default function SalaryTab({ view = 'sheet' }) {
                 />
               )}
 
+              <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1}>
+                <Typography sx={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600 }}>
+                  Salary due: {fmtAmt(clearancePreview.grandTotal)}
+                </Typography>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={fillClearancePaymentTotal}
+                  sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '8px' }}
+                >
+                  Fill full due amount
+                </Button>
+              </Stack>
+
+              {clearForm.paymentMethod === 'CASH' && (
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Cash amount you pay (Rs)"
+                  type="number"
+                  required
+                  value={clearForm.cash_amount}
+                  onChange={(e) => setClearForm((f) => ({ ...f, cash_amount: e.target.value, bank_amount: '' }))}
+                  helperText="Type the amount — only this much is deducted from the cash account"
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: '10px' } }}
+                />
+              )}
+
+              {clearForm.paymentMethod === 'BANK' && (
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Bank amount you pay (Rs)"
+                  type="number"
+                  required
+                  value={clearForm.bank_amount}
+                  onChange={(e) => setClearForm((f) => ({ ...f, bank_amount: e.target.value, cash_amount: '' }))}
+                  helperText="Type the amount — only this much is deducted from the bank account"
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: '10px' } }}
+                />
+              )}
+
               {clearForm.paymentMethod === 'PARTIAL' && (
                 <Stack direction="row" spacing={1.5}>
                   <TextField
-                    fullWidth size="small" label="Cash Amount" type="number"
+                    fullWidth
+                    size="small"
+                    label="Cash amount (Rs)"
+                    type="number"
                     value={clearForm.cash_amount}
                     onChange={(e) => setClearForm((f) => ({ ...f, cash_amount: e.target.value }))}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: '10px' } }}
                   />
                   <TextField
-                    fullWidth size="small" label="Bank Amount" type="number"
+                    fullWidth
+                    size="small"
+                    label="Bank amount (Rs)"
+                    type="number"
                     value={clearForm.bank_amount}
                     onChange={(e) => setClearForm((f) => ({ ...f, bank_amount: e.target.value }))}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: '10px' } }}
                   />
                 </Stack>
               )}
+
+              {(() => {
+                const payingNow = Math.round(
+                  (parseFloat(clearForm.cash_amount || 0) + parseFloat(clearForm.bank_amount || 0)) * 100
+                ) / 100;
+                const due = clearancePreview.grandTotal;
+                if (payingNow <= 0.009) return null;
+                const partial = due - payingNow > 0.01;
+                return (
+                  <Box sx={{ p: 1.5, borderRadius: '10px', bgcolor: partial ? '#fffbeb' : '#ecfdf5', border: `1px solid ${partial ? '#fcd34d' : '#6ee7b7'}` }}>
+                    <Typography sx={{ fontWeight: 800, fontSize: '0.9rem', color: partial ? '#b45309' : '#047857' }}>
+                      Paying now: {fmtAmt(payingNow)}
+                      {partial ? ` · Remaining due: ${fmtAmt(due - payingNow)}` : payingNow + 0.01 < due ? '' : ' (full amount)'}
+                    </Typography>
+                  </Box>
+                );
+              })()}
 
               <TextField
                 fullWidth size="small" label="Payment Reference (optional)"
@@ -1938,7 +2592,7 @@ export default function SalaryTab({ view = 'sheet' }) {
             <ReceiptLong />
             <Box>
               <Typography sx={{ fontWeight: 900, fontSize: '1rem', lineHeight: 1.2 }}>
-                Salary Payment Invoice
+                {PAYSLIP_I18N.docTitleEn} (A5) · {PAYSLIP_I18N.docTitleUr}
               </Typography>
               {payslipPreview && (
                 <Typography sx={{ fontSize: '0.75rem', opacity: 0.85, fontWeight: 600 }}>
@@ -1972,6 +2626,20 @@ export default function SalaryTab({ view = 'sheet' }) {
           </Button>
           <Button
             variant="contained"
+            disabled={!payslipPreview || isSendingWhatsApp}
+            onClick={() => payslipPreview && handleSendSalaryWhatsApp(payslipPreview)}
+            sx={{
+              textTransform: 'none',
+              fontWeight: 700,
+              borderRadius: '10px',
+              bgcolor: '#25D366',
+              '&:hover': { bgcolor: '#1da851' },
+            }}
+          >
+            {isSendingWhatsApp ? 'Sending…' : '📲 WhatsApp'}
+          </Button>
+          <Button
+            variant="contained"
             startIcon={<Print />}
             disabled={!payslipPreview}
             onClick={handlePrintPayslip}
@@ -1983,7 +2651,7 @@ export default function SalaryTab({ view = 'sheet' }) {
               '&:hover': { bgcolor: '#1547c4' },
             }}
           >
-            Print
+            Print A5
           </Button>
         </DialogActions>
       </Dialog>

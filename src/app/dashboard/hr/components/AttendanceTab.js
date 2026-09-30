@@ -12,6 +12,7 @@ import {
 } from '@mui/icons-material';
 import { BRAND, COMPANY } from '@/lib/brand-theme';
 import { getDaysInMonth } from '@/lib/hr-payroll';
+import { useHrRefresh, useHrRefreshVersion, HR_KEYS } from '../context/HrRefreshContext';
 
 const NAVY = '#0f172a';
 const NAVY_MID = '#1e293b';
@@ -192,6 +193,8 @@ export default function AttendanceTab() {
   const scrollContainerRef = useRef(null);
 
   const showSnack = (msg, severity = 'success') => setSnack({ open: true, msg, severity });
+  const attendanceVersion = useHrRefreshVersion(HR_KEYS.attendance);
+  const { invalidate } = useHrRefresh();
 
   const fetchSheet = useCallback(async () => {
     setLoadingSheet(true);
@@ -211,7 +214,7 @@ export default function AttendanceTab() {
 
   useEffect(() => {
     fetchSheet();
-  }, [fetchSheet]);
+  }, [fetchSheet, attendanceVersion]);
 
   const { month, year } = monthYear;
   const dayMeta = useMemo(
@@ -401,7 +404,7 @@ export default function AttendanceTab() {
       });
       if (!res.ok) throw new Error('Save failed');
       showSnack(`Saved ${payload.length} attendance record(s)`);
-      fetchSheet();
+      invalidate([HR_KEYS.attendance, HR_KEYS.payroll, HR_KEYS.summary]);
     } catch {
       showSnack('Failed to save sheet', 'error');
     } finally {

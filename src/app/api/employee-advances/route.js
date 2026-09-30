@@ -4,6 +4,11 @@ import { initBranchScope } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
 import { createLedgerEntry } from '@/lib/ledger-helper';
 import { getNextId } from '@/lib/id-helper';
+import {
+  ensureEmployeeLedgerSchema,
+  recordEmployeeAdvanceDebit,
+  recordEmployeeAdvanceReversalCredit,
+} from '@/lib/employee-ledger';
 
 function advanceLedgerBillNo(advanceId) {
   return `ADV-${advanceId}`;
@@ -241,7 +246,10 @@ export async function POST(request) {
     const advDate = advance_date ? advance_date : new Date().toISOString().split('T')[0];
     const reasonText = reason ? String(reason).replace(/'/g, "''") : '';
 
+    await ensureEmployeeLedgerSchema(prisma);
+
     const advance = await prisma.$transaction(async (tx) => {
+      // Keep ledger updates to append-only entries; full reconcile belongs outside interactive transactions.
       await tx.$executeRawUnsafe(`
         INSERT INTO employee_advances (emp_id, amount, advance_date, payment_mode, account_id, reason, status, created_at, updated_at)
         VALUES (${empId}, ${amt}, '${advDate}', '${payMode}', ${accId}, ${reasonText ? `'${reasonText}'` : 'NULL'}, 'PENDING', NOW(), NOW())
@@ -263,6 +271,16 @@ export async function POST(request) {
         paymentMode: payMode,
         reference: payment_reference || null,
         reason: reason || null,
+      });
+
+      await recordEmployeeAdvanceDebit(tx, {
+        branchId,
+        empId: empId,
+        empName: emp.emp_name,
+        advanceId,
+        amount: amt,
+        reason: reason || null,
+        advanceDate: advDate,
       });
 
       return {
@@ -366,8 +384,17 @@ export async function DELETE(request) {
       return NextResponse.json({ error: 'Pending advance not found or already settled' }, { status: 404 });
     }
 
+    await ensureEmployeeLedgerSchema(prisma);
+
     await prisma.$transaction(async (tx) => {
       await reverseAdvanceLedger(tx, id, { empName: row.emp_name || '' });
+      await recordEmployeeAdvanceReversalCredit(tx, {
+        branchId,
+        empId: row.emp_id,
+        empName: row.emp_name || '',
+        advanceId: id,
+        amount: parseFloat(row.amount || 0),
+      });
       await tx.$executeRawUnsafe(`DELETE FROM employee_advances WHERE advance_id = ${id}`);
     });
 

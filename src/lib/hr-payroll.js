@@ -114,7 +114,8 @@ export function detectBranchOffDays(employees, attendanceRecords, month, year, a
  * Aggregate one employee's month for payroll.
  * - PRESENT / HOLIDAY (off day) = full paid day, no deduction
  * - LEAVE = leave unit (allowed leaves applied in calcPayroll)
- * - ABSENT / unmarked = absent unit (allowed absents applied in calcPayroll)
+ * - ABSENT = absent unit (allowed absents applied in calcPayroll)
+ * - Unmarked (no record) = present — full month pay unless explicitly absent/leave
  * - HALF_DAY = 0.5 paid present (shown in Half column; not counted as absent)
  * - offDays: branch off-day headers — unmarked cells treated as HOLIDAY (paid)
  */
@@ -204,8 +205,8 @@ export function aggregateAttendanceForPayroll({
         absentDays += 1;
         break;
       default:
-        absentUnits += 1;
-        absentDays += 1;
+        presentUnits += 1;
+        presentDays += 1;
         break;
     }
   }
@@ -270,8 +271,114 @@ export function splitPendingAdvances(advances = [], month, year) {
   };
 }
 
-export function calcTotalPayable({ monthNet = 0, previousBalance = 0, advanceWithSalary = 0 } = {}) {
-  const total = parseFloat(monthNet || 0) + parseFloat(previousBalance || 0) + parseFloat(advanceWithSalary || 0);
+/** Prefer ledger closing; if unset/zero, use employees.opening_balance (pre-system). */
+export function resolveEmployeeReceivableBalance(ledgerClosing, openingBalance) {
+  const ledger = parseFloat(ledgerClosing ?? 0);
+  const opening = parseFloat(openingBalance ?? 0);
+  if (Math.abs(ledger) >= 0.01) return ledger;
+  return opening;
+}
+
+/**
+ * Amount to recover from salary this month (+ = employee owes on ledger).
+ * Pending advances are already on the ledger when synced — do not double-count with max(pending).
+ */
+export function resolvePayrollAdvanceDeduction(ledgerClosing, openingBalance, pendingAdvanceSum = 0) {
+  const signed = resolveEmployeeReceivableBalance(ledgerClosing, openingBalance);
+  const fromLedger = Math.max(0, signed);
+  const pending = Math.max(0, parseFloat(pendingAdvanceSum || 0));
+  if (fromLedger > 0.009) return fromLedger;
+  return pending;
+}
+
+/** + = employee owes (deduct from pay). − = company owes (add to cash payable). */
+export function splitEmployeeLedgerForPayroll(signedBalance) {
+  const signed = parseFloat(signedBalance ?? 0);
+  return {
+    signed,
+    recoverFromSalary: Math.max(0, signed),
+    addToPayable: Math.max(0, -signed),
+  };
+}
+
+/**
+ * Salary clearance preview — same month attendance + account balance rules as POST /api/payroll clearance.
+ */
+export function previewClearancePayroll(row, form = {}, tabMonth, tabYear) {
+  if (!row) return null;
+  const m = parseInt(row.month ?? tabMonth, 10);
+  const y = parseInt(row.year ?? tabYear, 10);
+  const openingBal = parseFloat(row.employee_opening_balance ?? row.employee?.opening_balance ?? 0);
+  const ledgerLoaded = row.employee_ledger_closing != null
+    && !Number.isNaN(parseFloat(row.employee_ledger_closing));
+  const signedClosing = ledgerLoaded
+    ? resolveEmployeeReceivableBalance(row.employee_ledger_closing, openingBal)
+    : resolveEmployeeReceivableBalance(0, openingBal);
+  const pendingSum = parseFloat(row.advance_previous || 0) + parseFloat(row.advance_this_month || 0);
+  const accountRecovery = ledgerLoaded
+    ? resolvePayrollAdvanceDeduction(row.employee_ledger_closing, openingBal, pendingSum)
+    : parseFloat(row.advance_deduction ?? 0)
+      || resolvePayrollAdvanceDeduction(0, openingBal, pendingSum);
+  const { addToPayable: ledgerPayableCredit } = splitEmployeeLedgerForPayroll(signedClosing);
+
+  const attendanceInput = {
+    basic_salary: row.basic_salary,
+    total_days: row.total_days,
+    days_present: row.days_present,
+    leaves_taken: row.leaves_taken,
+    absents_taken: row.absents_taken,
+    absent_days: row.absent_days ?? row.absents_taken,
+    allowed_leaves: row.allowed_leaves,
+    allowed_absents: row.allowed_absents ?? 0,
+    bonus: parseFloat(form.bonus || 0),
+    other_deduction: parseFloat(form.extra_deduction || 0),
+  };
+
+  const derived = calcPayroll(buildPayrollCalcInput({
+    ...attendanceInput,
+    advance_deduction: accountRecovery,
+  }, m, y));
+  const monthNetAttendance = Math.max(
+    0,
+    Math.round((derived.gross_earned - derived.total_deduction) * 100) / 100
+  );
+
+  const prevBal = parseFloat(row.previous_balance || 0);
+  const advanceWithSalary = parseFloat(form.advance_with_salary || 0);
+  const grandTotal = calcTotalPayable({
+    monthNet: derived.net_salary,
+    previousBalance: prevBal,
+    advanceWithSalary,
+    ledgerPayableCredit,
+  });
+
+  return {
+    month: m,
+    year: y,
+    derived,
+    monthNetAttendance,
+    accountRecovery: derived.advance_deduction,
+    ledgerPayableCredit,
+    signedClosing,
+    openingBal,
+    prevBal,
+    advanceWithSalary,
+    grandTotal,
+    ledgerOwed: Math.max(0, signedClosing),
+  };
+}
+
+export function calcTotalPayable({
+  monthNet = 0,
+  previousBalance = 0,
+  advanceWithSalary = 0,
+  ledgerPayableCredit = 0,
+} = {}) {
+  const total =
+    parseFloat(monthNet || 0)
+    + parseFloat(previousBalance || 0)
+    + parseFloat(advanceWithSalary || 0)
+    + parseFloat(ledgerPayableCredit || 0);
   return Math.max(0, Math.round(total * 100) / 100);
 }
 
@@ -288,6 +395,36 @@ export function resolveMonthGrossEarned(row = {}) {
   return Math.max(0, Math.round((net + advance) * 100) / 100);
 }
 
+/** This month's salary from attendance (after excess leave/absent ded, before employee account/advance). */
+export function resolveMonthAttendanceNet(row = {}) {
+  if (row.month_net_attendance != null && !Number.isNaN(parseFloat(row.month_net_attendance))) {
+    return parseFloat(row.month_net_attendance);
+  }
+  const gross = resolveMonthGrossEarned(row);
+  const attDed = parseFloat(row.total_deduction ?? 0);
+  return Math.max(0, Math.round((gross - attDed) * 100) / 100);
+}
+
+/** Net pay for this month after attendance, advance/ledger recovery, bonus, and other deductions. */
+export function resolveMonthNetPay(row = {}) {
+  const snap = row.clearance_snapshot;
+  if (snap?.month_net != null && !Number.isNaN(parseFloat(snap.month_net))) {
+    return parseFloat(snap.month_net);
+  }
+  if (row.month_net != null && !Number.isNaN(parseFloat(row.month_net))) {
+    return parseFloat(row.month_net);
+  }
+  if (row.net_salary != null && !Number.isNaN(parseFloat(row.net_salary))) {
+    return parseFloat(row.net_salary);
+  }
+  const gross = resolveMonthGrossEarned(row);
+  const attDed = parseFloat(row.total_deduction ?? 0);
+  const advance = parseFloat(row.advance_deduction ?? row.advance_this_month ?? snap?.advance_this_month ?? 0);
+  const bonus = parseFloat(row.bonus ?? 0);
+  const other = parseFloat(row.other_deduction ?? 0);
+  return Math.max(0, Math.round((gross - attDed - advance + bonus - other) * 100) / 100);
+}
+
 export function parseClearancePayment(body = {}, totalDue = 0) {
   const paymentMethod = body.paymentMethod || body.payment_method || 'CASH';
   const due = Math.max(0, parseFloat(totalDue || 0));
@@ -295,35 +432,43 @@ export function parseClearancePayment(body = {}, totalDue = 0) {
   let bankAmt = 0;
 
   if (paymentMethod === 'CASH') {
-    cashAmt = due;
+    cashAmt = parseFloat(body.cash_amount ?? body.cashAmt ?? 0);
+    if (due > 0.009 && cashAmt <= 0.009) {
+      return { error: 'Enter the cash amount you are paying (do not auto-deduct — type the amount)' };
+    }
   } else if (paymentMethod === 'BANK') {
-    bankAmt = due;
+    bankAmt = parseFloat(body.bank_amount ?? body.bankAmt ?? 0);
+    if (due > 0.009 && bankAmt <= 0.009) {
+      return { error: 'Enter the bank amount you are paying (do not auto-deduct — type the amount)' };
+    }
   } else if (paymentMethod === 'PARTIAL') {
     cashAmt = parseFloat(body.cash_amount || 0);
     bankAmt = parseFloat(body.bank_amount || 0);
-    if (Math.abs(cashAmt + bankAmt - due) > 0.01) {
-      return { error: 'Cash + bank amounts must equal total payable' };
+    if (due > 0.009 && cashAmt + bankAmt <= 0.009) {
+      return { error: 'Enter cash and/or bank amounts to pay' };
     }
   } else {
     return { error: 'Invalid payment method' };
   }
 
-  if (due > 0) {
-    if ((paymentMethod === 'CASH' || paymentMethod === 'PARTIAL') && cashAmt > 0 && !body.paid_from_account_id) {
-      return { error: 'Cash account is required' };
-    }
-    if ((paymentMethod === 'BANK' || paymentMethod === 'PARTIAL') && bankAmt > 0 && !body.bank_account_id) {
-      return { error: 'Bank account is required' };
-    }
-    if (paymentMethod === 'PARTIAL' && (cashAmt <= 0 || bankAmt <= 0)) {
-      return { error: 'Both cash and bank amounts are required for split payment' };
-    }
+  const paidTotal = Math.round((cashAmt + bankAmt) * 100) / 100;
+  if (due > 0.009 && paidTotal > due + 0.01) {
+    return { error: `Payment (${paidTotal}) cannot exceed total payable (${due})` };
+  }
+
+  if (cashAmt > 0.009 && !body.paid_from_account_id) {
+    return { error: 'Cash account is required when paying from cash' };
+  }
+  if (bankAmt > 0.009 && !body.bank_account_id) {
+    return { error: 'Bank account is required when paying from bank' };
   }
 
   return {
     paymentMethod,
     cashAmt,
     bankAmt,
+    paidTotal,
+    totalDue: due,
     paid_from_account_id: body.paid_from_account_id ? parseInt(body.paid_from_account_id, 10) : null,
     bank_account_id: body.bank_account_id ? parseInt(body.bank_account_id, 10) : null,
     payment_reference: body.payment_reference || null,
@@ -588,7 +733,7 @@ export function summarizeGridMonth({ daysInMonth, month, year, joinDate, getStat
  * Day-based salary calculation.
  * Daily rate = basic_salary / days in calendar month.
  * Paid days = present (incl. 0.5 per half-day) + allowed leaves + allowed full absents.
- * Net = (paid days × daily rate) − advances + bonus − other deductions.
+ * Net = (paid days × daily rate) − excess attendance deduction − advances + bonus − other deductions.
  */
 export function calcPayroll({
   basic_salary,
@@ -662,7 +807,7 @@ export function calcPayroll({
   const earned = paidDays * perDay;
   const totalDeduction = (excessLeaves + excessAbsents) * perDay;
   const grossEarned = Math.round((earned + bonusAmt - othDeduction) * 100) / 100;
-  const net = Math.max(0, Math.round((grossEarned - advDeduction) * 100) / 100);
+  const net = Math.max(0, Math.round((grossEarned - totalDeduction - advDeduction) * 100) / 100);
 
   return {
     days_present: present,

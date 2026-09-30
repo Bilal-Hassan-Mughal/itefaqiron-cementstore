@@ -1,5 +1,6 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { Suspense, useEffect, useState, useMemo, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -27,10 +28,20 @@ import {
 } from '@mui/icons-material';
 import DashboardLayout from '../components/dashboard-layout';
 import { BRAND, COMPANY } from '@/lib/brand-theme';
-import EmployeesTab from './components/EmployeesTab';
-import AttendanceTab from './components/AttendanceTab';
-import SalaryTab from './components/SalaryTab';
-import SalaryAdvanceTab from './components/SalaryAdvanceTab';
+import { HrRefreshProvider, useHrRefresh, useHrRefreshVersion, HR_KEYS } from './context/HrRefreshContext';
+
+const hrTabLoader = () => (
+  <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+    <CircularProgress size={32} sx={{ color: BRAND.primary.blue }} />
+  </Box>
+);
+
+const EmployeesTab = dynamic(() => import('./components/EmployeesTab'), { loading: hrTabLoader });
+const AttendanceTab = dynamic(() => import('./components/AttendanceTab'), { loading: hrTabLoader });
+const SalaryTab = dynamic(() => import('./components/SalaryTab'), { loading: hrTabLoader });
+const SalaryAdvanceTab = dynamic(() => import('./components/SalaryAdvanceTab'), { loading: hrTabLoader });
+const EmployeeLedgerTab = dynamic(() => import('./components/EmployeeLedgerTab'), { loading: hrTabLoader });
+const EmployeeReceiveTab = dynamic(() => import('./components/EmployeeReceiveTab'), { loading: hrTabLoader });
 
 const LEGACY_TAB_MAP = {
   employees: 'employees',
@@ -80,6 +91,22 @@ const HR_MODULES = [
     icon: AccountBalanceWallet,
     accent: '#FF0854',
     tint: '#ffe8f0',
+  },
+  {
+    id: 'employee-ledger',
+    title: 'Employee Ledger',
+    description: 'Opening balances, advances, receipts, and salary deductions.',
+    icon: AccountBalanceWallet,
+    accent: '#0d9488',
+    tint: '#ccfbf1',
+  },
+  {
+    id: 'employee-receive',
+    title: 'Receive Payment',
+    description: 'Record cash/bank received from employees with printable PDF receipts.',
+    icon: PaymentsIcon,
+    accent: '#059669',
+    tint: '#d1fae5',
   },
   {
     id: 'salary-receipt',
@@ -254,7 +281,9 @@ function HrPageContent() {
     [activeModule]
   );
 
-  const isFlatModule = ['attendance', 'salary-sheet', 'salary-clearance', 'salary-advance', 'salary-receipt'].includes(activeModule);
+  const isFlatModule = ['attendance', 'salary-sheet', 'salary-clearance', 'salary-advance', 'employee-ledger', 'employee-receive', 'salary-receipt'].includes(activeModule);
+  const summaryVersion = useHrRefreshVersion(HR_KEYS.summary);
+  const { invalidate } = useHrRefresh();
 
   useEffect(() => {
     if (activeModule) return;
@@ -262,41 +291,16 @@ function HrPageContent() {
     async function loadStats() {
       setLoadingStats(true);
       try {
-        const now = new Date();
-        const month = now.getMonth() + 1;
-        const year = now.getFullYear();
-
-        const [empRes, payRes, advRes] = await Promise.all([
-          fetch('/api/employees'),
-          fetch(`/api/payroll?calculate=true&month=${month}&year=${year}`),
-          fetch('/api/employee-advances'),
-        ]);
-
-        let activeEmployees = 0;
-        let monthlyPayroll = 0;
-
-        if (empRes.ok) {
-          const emps = await empRes.json();
-          const active = emps.filter((e) => e.status === 'ACTIVE');
-          activeEmployees = active.length;
-          monthlyPayroll = active.reduce((s, e) => s + parseFloat(e.basic_salary || 0), 0);
+        const res = await fetch('/api/hr/summary');
+        if (res.ok) {
+          const data = await res.json();
+          setStats({
+            activeEmployees: data.activeEmployees ?? 0,
+            monthlyPayroll: data.monthlyPayroll ?? 0,
+            pendingClearance: data.pendingClearance ?? 0,
+            advanceBalance: data.advanceBalance ?? 0,
+          });
         }
-
-        let pendingClearance = 0;
-        if (payRes.ok) {
-          const payrolls = await payRes.json();
-          pendingClearance = payrolls.filter((p) => p.status === 'PENDING').length;
-        }
-
-        let advanceBalance = 0;
-        if (advRes.ok) {
-          const advances = await advRes.json();
-          advanceBalance = advances
-            .filter((a) => a.status === 'PENDING')
-            .reduce((s, a) => s + parseFloat(a.amount || 0), 0);
-        }
-
-        setStats({ activeEmployees, monthlyPayroll, pendingClearance, advanceBalance });
       } catch {
         /* optional */
       } finally {
@@ -304,27 +308,22 @@ function HrPageContent() {
       }
     }
     loadStats();
-  }, [activeModule]);
+  }, [activeModule, summaryVersion]);
 
   const openModule = (moduleId) => {
     if (moduleId === activeModule) return;
-    setContentVisible(false);
-    setTimeout(() => {
-      router.push(`/dashboard/hr?module=${moduleId}`, { scroll: false });
-      setContentVisible(true);
-      setTimeout(() => {
-        contentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 80);
-    }, 160);
+    router.push(`/dashboard/hr?module=${moduleId}`, { scroll: false });
+    setContentVisible(true);
+    requestAnimationFrame(() => {
+      contentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   };
 
   const backToHub = () => {
-    setContentVisible(false);
-    setTimeout(() => {
-      router.push('/dashboard/hr', { scroll: false });
-      setContentVisible(true);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }, 160);
+    router.push('/dashboard/hr', { scroll: false });
+    setContentVisible(true);
+    invalidate([HR_KEYS.summary, HR_KEYS.employees, HR_KEYS.payroll, HR_KEYS.advances, HR_KEYS.ledger]);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const renderModuleContent = () => {
@@ -339,6 +338,10 @@ function HrPageContent() {
         return <SalaryTab view="clearance" />;
       case 'salary-advance':
         return <SalaryAdvanceTab />;
+      case 'employee-ledger':
+        return <EmployeeLedgerTab />;
+      case 'employee-receive':
+        return <EmployeeReceiveTab />;
       case 'salary-receipt':
         return <SalaryTab view="receipt" />;
       default:
@@ -565,7 +568,9 @@ export default function HrPage() {
         </DashboardLayout>
       }
     >
-      <HrPageContent />
+      <HrRefreshProvider>
+        <HrPageContent />
+      </HrRefreshProvider>
     </Suspense>
   );
 }

@@ -12,6 +12,7 @@ import {
   TrendingUp, FilterList, Search,
 } from '@mui/icons-material';
 import { BRAND } from '@/lib/brand-theme';
+import { useHrRefresh, useHrRefreshVersion, HR_KEYS } from '../context/HrRefreshContext';
 
 const NAVY = '#0f172a';
 const PRIMARY = BRAND.primary.blue;
@@ -95,6 +96,9 @@ export default function SalaryAdvanceTab() {
   const [snack, setSnack] = useState({ open: false, msg: '', severity: 'success' });
 
   const showSnack = (msg, severity = 'success') => setSnack({ open: true, msg, severity });
+  const advancesVersion = useHrRefreshVersion(HR_KEYS.advances);
+  const employeesVersion = useHrRefreshVersion(HR_KEYS.employees);
+  const { invalidatePayrollFlow } = useHrRefresh();
 
   const activeEmployees = useMemo(
     () => employees.filter((e) => e.status === 'ACTIVE'),
@@ -173,6 +177,9 @@ export default function SalaryAdvanceTab() {
     [activeEmployees, form.emp_id]
   );
 
+  const selectedEmpLedgerBal = selectedEmployee
+    ? parseFloat(selectedEmployee.ledger_balance ?? pendingByEmp[selectedEmployee.emp_id] ?? 0)
+    : 0;
   const selectedEmpPending = selectedEmployee ? (pendingByEmp[selectedEmployee.emp_id] || 0) : 0;
 
   const fetchData = useCallback(async () => {
@@ -183,7 +190,10 @@ export default function SalaryAdvanceTab() {
         fetch('/api/employee-advances'),
         fetch('/api/customers?dropdown=true'),
       ]);
-      if (empRes.ok) setEmployees(await empRes.json());
+      if (empRes.ok) {
+        const data = await empRes.json();
+        setEmployees(Array.isArray(data) ? data : []);
+      }
       if (advRes.ok) setAdvances(await advRes.json());
       if (accRes.ok) {
         const data = await accRes.json();
@@ -198,7 +208,7 @@ export default function SalaryAdvanceTab() {
 
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+  }, [fetchData, advancesVersion, employeesVersion]);
 
   useEffect(() => {
     if (form.paymentMethod !== 'CASH' || form.paid_from_account_id || cashAccountsList.length === 0) return;
@@ -254,7 +264,7 @@ export default function SalaryAdvanceTab() {
       const data = await res.json();
       showSnack(`Advance issued: ${fmtAmt(amount)} to ${selectedEmployee?.emp_name || 'employee'}`);
       setForm(emptyForm());
-      fetchData();
+      invalidatePayrollFlow();
       return data;
     } catch (err) {
       showSnack(err.message || 'Failed to issue advance', 'error');
@@ -279,7 +289,7 @@ export default function SalaryAdvanceTab() {
         throw new Error(err.error || 'Cancel failed');
       }
       showSnack('Advance cancelled');
-      fetchData();
+      invalidatePayrollFlow();
     } catch (err) {
       showSnack(err.message || 'Failed to cancel advance', 'error');
     } finally {
@@ -370,9 +380,9 @@ export default function SalaryAdvanceTab() {
                         <Typography sx={{ fontWeight: 700, fontSize: '0.875rem' }}>{option.emp_name}</Typography>
                         <Typography sx={{ fontSize: '0.72rem', color: '#64748b' }}>
                           {option.designation || '—'} · Basic {fmtAmt(option.basic_salary)}
-                          {(pendingByEmp[option.emp_id] || 0) > 0 && (
+                          {parseFloat(option.ledger_balance ?? 0) !== 0 && (
                             <Box component="span" sx={{ color: ADVANCE, fontWeight: 700 }}>
-                              {' '}· Pending {fmtAmt(pendingByEmp[option.emp_id])}
+                              {' '}· Bal {fmtAmt(option.ledger_balance)}
                             </Box>
                           )}
                         </Typography>
@@ -390,8 +400,15 @@ export default function SalaryAdvanceTab() {
                         <Typography sx={{ fontSize: '0.8125rem', fontWeight: 700 }}>{fmtAmt(selectedEmployee.basic_salary)}</Typography>
                       </Stack>
                       <Stack direction="row" justifyContent="space-between">
-                        <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>Current pending advance</Typography>
-                        <Typography sx={{ fontSize: '0.8125rem', fontWeight: 800, color: selectedEmpPending > 0 ? ADVANCE : '#15803d' }}>
+                        <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>Employee ledger balance</Typography>
+                        <Typography sx={{ fontSize: '0.8125rem', fontWeight: 800, color: selectedEmpLedgerBal > 0 ? ADVANCE : selectedEmpLedgerBal < 0 ? '#15803d' : '#64748b' }}>
+                          {fmtAmt(selectedEmpLedgerBal)}
+                          {selectedEmpLedgerBal > 0 ? ' (owes)' : selectedEmpLedgerBal < 0 ? ' (we owe)' : ''}
+                        </Typography>
+                      </Stack>
+                      <Stack direction="row" justifyContent="space-between">
+                        <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>Pending advances only</Typography>
+                        <Typography sx={{ fontSize: '0.8125rem', fontWeight: 700, color: selectedEmpPending > 0 ? ADVANCE : '#64748b' }}>
                           {selectedEmpPending > 0 ? fmtAmt(selectedEmpPending) : 'None'}
                         </Typography>
                       </Stack>

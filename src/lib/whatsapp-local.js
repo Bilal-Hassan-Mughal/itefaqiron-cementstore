@@ -12,6 +12,14 @@ export function isUsablePhoneValue(phone) {
   return digits.length >= 10;
 }
 
+/** Employee salary receipt — uses emp_phone from employee register. */
+export function resolveEmployeeWhatsAppPhone(employee) {
+  return resolveCustomerWhatsAppPhone({
+    cus_phone_no: employee?.emp_phone,
+    cus_phone_no2: employee?.phone,
+  });
+}
+
 /** Pick first valid mobile from customer primary/secondary fields. */
 export function resolveCustomerWhatsAppPhone(customer, extraCandidates = []) {
   const candidates = [

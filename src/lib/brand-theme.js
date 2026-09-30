@@ -11,6 +11,7 @@ export const COMPANY = {
   nameUr: 'اتفاق آئرن اینڈ سیمنٹ سٹور',
   tagline: 'Iron, Cement & Building Materials',
   address: 'Gujrat Sargodha Road, Pahrian Wali',
+  addressUr: 'گجرات سرگودھا روڈ، پاہڑیانوالی',
   phones: ['0300-7560306'],
 };
 
