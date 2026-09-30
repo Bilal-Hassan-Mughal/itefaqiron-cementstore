@@ -34,11 +34,10 @@ export const PURCHASE_SHEET_PRINT_HIDE_CSS = `
   }
 `;
 /**
- * A5 pagination tuned for readable type (not micro-fonts):
- * page 1 has header + supplier block → fewer rows; continuation pages fit more rows.
+ * A5 pagination: page 1 = full header + supplier block (27 lines); continuation = mini header only.
  */
-export const PURCHASE_FIRST_PAGE_MAX_ITEMS = 20;
-export const PURCHASE_NEXT_PAGE_MAX_ITEMS = 23;
+export const PURCHASE_FIRST_PAGE_MAX_ITEMS = 27;
+export const PURCHASE_NEXT_PAGE_MAX_ITEMS = 30;
 
 export function purchaseDetailStartIndexForPage(pageIdx, pages) {
   if (Array.isArray(pages) && pages.length > 0) {
@@ -132,8 +131,8 @@ export const PURCHASE_A4_PRINT_CSS = `
   .pi-header-full {
     text-align: center;
     border-bottom: 2px solid #0f172a;
-    padding: 6px 0 8px;
-    margin-bottom: 8px;
+    padding: 4px 0 5px;
+    margin-bottom: 5px;
   }
   .pi-header-full .pi-ur {
     font-size: 17px;
@@ -153,7 +152,7 @@ export const PURCHASE_A4_PRINT_CSS = `
   }
   .pi-header-full .pi-phone {
     font-weight: 700;
-    margin: 0 0 4px;
+    margin: 0 0 2px;
     font-size: 10.5px;
     color: #334155;
   }
@@ -174,8 +173,8 @@ export const PURCHASE_A4_PRINT_CSS = `
     justify-content: space-between;
     align-items: center;
     border-bottom: 1px solid #94a3b8;
-    padding-bottom: 5px;
-    margin-bottom: 7px;
+    padding-bottom: 4px;
+    margin-bottom: 5px;
     font-size: 10.5px;
     font-weight: 700;
     color: #334155;
@@ -183,16 +182,16 @@ export const PURCHASE_A4_PRINT_CSS = `
   .pi-meta {
     display: flex;
     justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 8px;
-    padding-bottom: 6px;
+    gap: 6px;
+    margin-bottom: 4px;
+    padding-bottom: 3px;
     border-bottom: 1px solid #e2e8f0;
     font-size: 10px;
     line-height: 1.35;
   }
   .pi-meta-col { flex: 1; min-width: 0; }
   .pi-meta-right { text-align: right; }
-  .pi-meta-row { margin: 0 0 4px; }
+  .pi-meta-row { margin: 0 0 2px; }
   .pi-meta-row:last-child { margin-bottom: 0; }
   .pi-meta-label { color: #64748b; font-weight: 600; margin-right: 4px; }
   .pi-meta-value { color: #0f172a; font-weight: 700; }
@@ -205,18 +204,18 @@ export const PURCHASE_A4_PRINT_CSS = `
   .pi-table th,
   .pi-table td {
     border: 1px solid #cbd5e1;
-    padding: 4px 6px;
+    padding: 2px 4px;
     vertical-align: middle;
     word-wrap: break-word;
     font-size: 10px;
-    line-height: 1.3;
+    line-height: 1.22;
   }
   .pi-table th {
     background: #475569;
     color: #fff;
     font-weight: 700;
     font-size: 10px;
-    padding: 5px 6px;
+    padding: 3px 4px;
   }
   .pi-table tbody tr:nth-child(even) { background: #f8fafc; }
   .pi-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -228,15 +227,15 @@ export const PURCHASE_A4_PRINT_CSS = `
   }
   .pi-footer {
     display: flex;
-    gap: 8px;
-    margin-top: 8px;
+    gap: 6px;
+    margin-top: 6px;
     align-items: flex-start;
   }
   .pi-footer-col { flex: 1; min-width: 0; }
-  .pi-sum-table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+  .pi-sum-table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
   .pi-sum-table td {
     border: 1px solid #cbd5e1;
-    padding: 3px 6px;
+    padding: 2px 5px;
     font-size: 10px;
     line-height: 1.3;
   }
@@ -666,4 +665,65 @@ export function PurchaseInvoiceA4Document({ bill, ctx }) {
       </div>
     </>
   );
+}
+
+const LEDGER_NON_PURCHASE_BILL_PREFIX = /^(PAY|PR|SR|JRN|EXP|REB)-/i;
+const PURCHASE_LEDGER_BILL_PREFIX = /^(?:PUR|PURCHASE|INC|incity)-(\d+)$/i;
+
+/** Resolve internal purchase id (pur_id) from a finance/supplier ledger row. */
+export function resolvePurchasePurIdFromLedgerEntry(entry) {
+  if (!entry) return null;
+  const ref = String(entry.bill_no || '').trim();
+  const details = String(entry.details || '');
+
+  const fromDetails = details.match(/Purchase\s*#\s*(\d+)/i);
+  if (fromDetails) {
+    const n = parseInt(fromDetails[1], 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  if (ref) {
+    const prefixed = ref.match(PURCHASE_LEDGER_BILL_PREFIX);
+    if (prefixed) {
+      const n = parseInt(prefixed[1], 10);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    if (/^\d+$/.test(ref)) {
+      const n = parseInt(ref, 10);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  }
+
+  return null;
+}
+
+/** True when the ledger row should open the purchase invoice viewer (not sale/payment/etc.). */
+export function ledgerEntryOpensPurchaseInvoice(entry) {
+  if (!entry?.bill_no) return false;
+  const ref = String(entry.bill_no).trim();
+  if (!ref || LEDGER_NON_PURCHASE_BILL_PREFIX.test(ref)) return false;
+
+  const details = String(entry.details || '').toLowerCase();
+  const ledgerType = String(entry.ledger_type || '').toLowerCase();
+  const trnxType = String(entry.trnx_type || '').toUpperCase();
+
+  if (ledgerType === 'purchase return' || details.includes('purchase return')) return false;
+
+  if (trnxType === 'PURCHASE') return true;
+  if (ledgerType === 'purchase') return true;
+  if (PURCHASE_LEDGER_BILL_PREFIX.test(ref)) return true;
+
+  const purchaseHint =
+    details.includes('purchase #') ||
+    details.includes('purchase invoice') ||
+    details.includes('purchase from') ||
+    details.includes('purchase update') ||
+    details.includes('out delivery - purchase') ||
+    details.includes('out labour - purchase') ||
+    details.includes('incity charges payment') ||
+    details.includes('cargo/out charges') ||
+    /cash payment for purchase/i.test(entry.details || '') ||
+    /bank payment for purchase/i.test(entry.details || '');
+
+  return purchaseHint && resolvePurchasePurIdFromLedgerEntry(entry) != null;
 }

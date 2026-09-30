@@ -1,7 +1,21 @@
 'use client';
 
 import { useState, useEffect, Fragment, useMemo, useRef, useCallback, forwardRef } from 'react';
-import { getCreatedByName, parseAppDateTime } from '@/lib/date-helper';
+import { getCreatedByName, parseAppDateTime, formatDatePK, formatTimePK } from '@/lib/date-helper';
+import {
+  PurchaseInvoiceA4Document,
+  buildPurchaseA4PrintHtml,
+  downloadPurchaseInvoicePdf,
+  mountPurchasePrintHtml,
+  removePurchasePrintMount,
+  PURCHASE_INVOICE_PAGE_AT_PAGE,
+  PURCHASE_SHEET_PRINT_HIDE_CSS,
+  resolvePurchasePurIdFromLedgerEntry,
+  ledgerEntryOpensPurchaseInvoice,
+} from '../purchases/purchase-invoice-a4-print';
+
+const PURCHASE_LEDGER_SHEET_MODE = 'A5';
+const PURCHASE_LEDGER_PREVIEW_MAX_WIDTH = '148mm';
 import {
   Plus,
   Edit,
@@ -1178,6 +1192,7 @@ export default function FinancePage() {
   // Purchase viewer state (opened when clicking the eye / Bill)
   const [viewingPurchase, setViewingPurchase] = useState(null);
   const [viewPurchaseDialogOpen, setViewPurchaseDialogOpen] = useState(false);
+  const [isDownloadingLedgerPurchasePdf, setIsDownloadingLedgerPurchasePdf] = useState(false);
   // Sale/Order/Quote invoice viewer (from ledger; numeric bill_no = sale_id)
   const [viewingSale, setViewingSale] = useState(null);
   const [viewSaleDialogOpen, setViewSaleDialogOpen] = useState(false);
@@ -1216,6 +1231,17 @@ export default function FinancePage() {
   const [isSendingPaymentWhatsApp, setIsSendingPaymentWhatsApp] = useState(false);
   const [isDownloadingLedgerPdf, setIsDownloadingLedgerPdf] = useState(false);
   const [isSendingSaleWhatsApp, setIsSendingSaleWhatsApp] = useState(false);
+
+  const purchaseLedgerPrintCtx = useMemo(() => ({
+    fmtAmt,
+    formatDatePK,
+    formatTimePK,
+    phoneLine: `Ph:- ${(COMPANY.phones || ['0300-7560306']).join(', ')}`,
+    getInvoiceNet,
+    getInvoiceRemainingDue,
+    getSupplierBalanceAfterBill,
+    createdByFor: (bill) => getCreatedByName(bill, currentUser),
+  }), [currentUser]);
 
   // Inline Cell Editing States & Handlers
   const [inlineEditing, setInlineEditing] = useState(null); // { l_id, field, value }
@@ -1798,26 +1824,18 @@ export default function FinancePage() {
       return;
     }
 
-    // 7. Check if Supplier / Purchase
-    const categoryId = entry.customer?.cus_category;
-    const category = customerCategories.find(c => String(c.cus_cat_id) === String(categoryId));
-    const title = (category?.cus_cat_title || '').toLowerCase();
-    const isSupplier = title.includes('supplier') || title.includes('creditor');
-
-    const isPurchase = (trnxType === 'PURCHASE' || 
-                        ledgerType === 'purchase' || 
-                        ledgerType === 'purchase return' ||
-                        details.includes('purchase'));
-
-    const cleanRef = ref.replace(/^[A-Za-z]+-/, '');
-
-    if (isPurchase || isSupplier) {
-      const isReturnVariant = details.includes('purchase return') || ledgerType === 'purchase return';
-      handleViewPurchase(cleanRef || ref, isReturnVariant);
-      return;
+    // 7. Purchase invoice (pur_id from bill_no or "Purchase #…" in particulars)
+    if (ledgerEntryOpensPurchaseInvoice(entry)) {
+      const purId = resolvePurchasePurIdFromLedgerEntry(entry);
+      if (purId) {
+        const isReturnVariant = details.includes('purchase return') || ledgerType === 'purchase return';
+        handleViewPurchase(purId, isReturnVariant);
+        return;
+      }
     }
 
     // 8. Default to Sale / Order / Quotation
+    const cleanRef = ref.replace(/^[A-Za-z]+-/, '');
     handleViewSale(cleanRef || ref);
   };
 
@@ -1837,12 +1855,13 @@ export default function FinancePage() {
     }
   };
 
-  const handleViewPurchase = async (billNo, isReturnVariant = false) => {
-    if (!billNo) return;
+  const handleViewPurchase = async (purId, isReturnVariant = false) => {
+    const id = typeof purId === 'number' ? purId : parseInt(String(purId || '').replace(/\D/g, ''), 10);
+    if (!id || Number.isNaN(id)) return;
     try {
-      const res = await fetch(`/api/purchases?id=${billNo}`);
+      const res = await fetch(`/api/purchases?id=${id}`);
       if (!res.ok) {
-        console.warn('Purchase not found for bill:', billNo);
+        console.warn('Purchase not found for pur_id:', id);
         return;
       }
       let purchaseData = await res.json();
@@ -1883,32 +1902,69 @@ export default function FinancePage() {
     }
   };
 
-  const handlePrintPurchaseReceipt = (mode = 'A4') => {
+  const handleDownloadLedgerPurchasePdf = async (bill) => {
+    if (!bill) return;
+    setIsDownloadingLedgerPurchasePdf(true);
     try {
-      const className = mode === 'THERMAL' ? 'print-thermal' : 'print-a4';
+      await downloadPurchaseInvoicePdf(bill, purchaseLedgerPrintCtx);
+    } catch (e) {
+      console.error('PDF download error (ledger purchase):', e);
+    } finally {
+      setIsDownloadingLedgerPurchasePdf(false);
+    }
+  };
+
+  const handlePrintPurchaseReceipt = (mode = PURCHASE_LEDGER_SHEET_MODE) => {
+    try {
       const isThermal = mode === 'THERMAL';
-      const printableContainer = isThermal
-        ? document.getElementById('printable-invoice-thermal-finance')
-        : document.getElementById('printable-invoice-a4-finance');
+      const className = isThermal ? 'print-thermal-ledger-purchase' : 'print-a4-ledger-purchase';
+      const containerId = isThermal ? 'printable-invoice-thermal-finance' : 'printable-invoice-a4-finance';
+      const printableContainer = document.getElementById(containerId);
       if (!printableContainer) return;
 
-      if (!isThermal) {
-        const preview = document.getElementById('purchase-invoice-ledger');
-        if (preview) printableContainer.innerHTML = preview.innerHTML;
+      const styleId = 'dynamic-print-style-finance-purchase';
+      let styleEl = document.getElementById(styleId);
+      if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = styleId;
+        document.head.appendChild(styleEl);
       }
 
-      const styleId = 'dynamic-print-style-finance';
-      let styleEl = document.getElementById(styleId);
-      if (!styleEl) { styleEl = document.createElement('style'); styleEl.id = styleId; document.head.appendChild(styleEl); }
-      styleEl.textContent = isThermal
-        ? `@media print { @page { size: 80mm portrait !important; margin: 0 !important; } body { margin: 0 !important; padding: 0 !important; } }`
-        : `@media print { @page { size: A4 portrait !important; margin: 0.5cm 1cm !important; } }`;
-      document.body.classList.add(className);
+      if (!isThermal && viewingPurchase) {
+        mountPurchasePrintHtml(buildPurchaseA4PrintHtml(viewingPurchase, purchaseLedgerPrintCtx));
+        styleEl.textContent = `@media print { @page { size: ${PURCHASE_INVOICE_PAGE_AT_PAGE}; margin: 0.5cm 1cm; } } ${PURCHASE_SHEET_PRINT_HIDE_CSS}`;
+        document.body.classList.add('purchase-sheet-print');
+      } else {
+        const preview = document.getElementById('purchase-invoice-ledger');
+        if (preview) printableContainer.innerHTML = preview.innerHTML;
+        printableContainer.style.position = 'fixed';
+        printableContainer.style.left = '0';
+        printableContainer.style.top = '0';
+        printableContainer.style.display = 'block';
+        printableContainer.style.zIndex = '9999';
+        printableContainer.style.backgroundColor = 'white';
+        styleEl.textContent = isThermal
+          ? `@media print { @page { size: 80mm portrait !important; margin: 0 !important; } body { margin: 0 !important; padding: 0 !important; } }`
+          : `@media print { @page { size: ${PURCHASE_INVOICE_PAGE_AT_PAGE}; margin: 0.5cm 1cm !important; } }`;
+        document.body.classList.add(className);
+      }
+
       setTimeout(() => {
         window.print();
         setTimeout(() => {
-          document.body.classList.remove('print-thermal');
-          document.body.classList.remove('print-a4');
+          if (!isThermal && viewingPurchase) {
+            removePurchasePrintMount();
+            document.body.classList.remove('purchase-sheet-print');
+          } else {
+            printableContainer.style.position = '';
+            printableContainer.style.left = '';
+            printableContainer.style.top = '';
+            printableContainer.style.display = 'none';
+            printableContainer.style.zIndex = '';
+            printableContainer.style.backgroundColor = '';
+            document.body.classList.remove('print-thermal-ledger-purchase');
+            document.body.classList.remove('print-a4-ledger-purchase');
+          }
           if (styleEl) styleEl.remove();
         }, 150);
       }, 150);
@@ -5683,7 +5739,7 @@ export default function FinancePage() {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Receipt />
             <Typography variant="h6" sx={{ fontWeight: 'bold', color: 'white' }}>
-              Bill Details - #{viewingPurchase?.sequentialId || viewingPurchase?.pur_id}
+              Purchase Receipt - #{viewingPurchase?.sequentialId || viewingPurchase?.pur_id}
             </Typography>
           </Box>
           <IconButton
@@ -5695,340 +5751,30 @@ export default function FinancePage() {
           </IconButton>
         </DialogTitle>
 
-        <DialogContent sx={{ p: 0, bgcolor: 'white', maxHeight: '80vh', overflow: 'auto' }}>
+        <DialogContent sx={{ p: 2, bgcolor: '#f5f5f5', maxHeight: '80vh', overflow: 'auto' }}>
           {viewingPurchase && (
-            <Box id="purchase-invoice-ledger" sx={{ width: '100%', bgcolor: 'white' }}>
-              {/* Company Header */}
-              <Box sx={{ textAlign: 'center', py: 3, borderBottom: '2px solid #000' }}>
-                <Typography variant="h4" sx={{
-                  fontWeight: 'bold',
-                  mb: 1,
-                  fontFamily: 'Arial, sans-serif',
-                  fontSize: { xs: '1.5rem', md: '2rem' },
-                  direction: 'rtl'
-                }}>
-                  اتفاق آئرن اینڈ سیمنٹ سٹور
-                </Typography>
-                <Typography variant="body2" sx={{
-                  mb: 1,
-                  fontSize: { xs: '0.75rem', md: '0.9rem' },
-                  direction: 'rtl'
-                }}>
-                  گجرات سرگودھا روڈ، پاہڑیانوالی
-                </Typography>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 1 }}>
-                  <span style={{ fontSize: '1rem', color: '#25D366', marginRight: '4px' }}>📞</span>
-                  <Typography variant="body2">
-                    Ph:- 0346-7560306, 0300-7560306
-                  </Typography>
-                </Box>
-                <Typography variant="h6" sx={{
-                  fontWeight: 'bold',
-                  textTransform: 'uppercase',
-                  letterSpacing: 1,
-                  mt: 2
-                }}>
-                  {viewingPurchase._isReturnVariant ? 'PURCHASE RETURN INVOICE' : (viewingPurchase.bill_type || 'PURCHASE INVOICE')}
-                </Typography>
-              </Box>
-
-              {/* Customer and Invoice Details */}
-              <Box sx={{ px: 3, py: 2, borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between' }}>
-                <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column' }}>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Supplier Name:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }}>
-                      {viewingPurchase.customer ? `${viewingPurchase.customer.cus_name}${viewingPurchase.customer.name_urdu ? ' ' + viewingPurchase.customer.name_urdu : ''}` : 'N/A'}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Phone No:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                      {viewingPurchase.customer?.cus_phone_no || 'N/A'}
-                    </Typography>
-                  </Box>
-                  {viewingPurchase.customer?.cus_address && (
-                    <Box sx={{ display: 'flex' }}>
-                      <Typography variant="body2" sx={{ width: '130px', flexShrink: 0 }}>Address:</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {viewingPurchase.customer.cus_address}
-                      </Typography>
-                    </Box>
-                  )}
-                </Box>
-                <Box sx={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column', pl: 4 }}>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Invoice No:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                      #{viewingPurchase?.sequentialId || viewingPurchase?.pur_id}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Date:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                      {viewingPurchase.created_at ? new Date(viewingPurchase.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Time:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                      {viewingPurchase.created_at ? new Date(viewingPurchase.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : '—'}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', mb: 0.5 }}>
-                    <Typography variant="body2" sx={{ width: '100px', flexShrink: 0 }}>Created By:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                      {getCreatedByName(viewingPurchase, currentUser)}
-                    </Typography>
-                  </Box>
-                </Box>
-              </Box>
-
-              {/* Product Table and Payment Summary - Full Width */}
-              <Box sx={{ px: 3, py: 2 }}>
-                {/* Product Details Table - Full Width */}
-                <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow sx={{ bgcolor: '#9e9e9e' }}>
-                        <TableCell sx={{ fontWeight: 'bold', color: 'white', py: 1, px: 1, border: '1px solid #bbb' }}>S#</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', color: 'white', py: 1, px: 1, border: '1px solid #bbb' }}>Product Name</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', color: 'white', py: 1, px: 1, border: '1px solid #bbb' }} align="right">Qty</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', color: 'white', py: 1, px: 1, border: '1px solid #bbb' }} align="right">Rate</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', color: 'white', py: 1, px: 1, border: '1px solid #bbb' }} align="right">Amount</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {viewingPurchase.purchase_details && viewingPurchase.purchase_details.length > 0 ? (
-                        <>
-                          {viewingPurchase.purchase_details.map((detail, index) => (
-                            <TableRow key={detail.pur_detail_id || index}>
-                              <TableCell sx={{ px: 1, border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: 600 }}>{index + 1}</TableCell>
-                              <TableCell sx={{ px: 1, border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: 600 }}>{detail.product?.pro_title || detail.pro_title || 'N/A'}</TableCell>
-                              <TableCell sx={{ px: 1, border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtAmt(detail.qnty || 0)}</TableCell>
-                              <TableCell sx={{ px: 1, border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtAmt(detail.crate || detail.unit_rate || detail.rate || 0)}</TableCell>
-                              <TableCell sx={{ px: 1, border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtAmt(detail.total_amount || detail.amount || 0)}</TableCell>
-                            </TableRow>
-                          ))}
-                        </>
-                      ) : (
-                        <TableRow>
-                          <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                            No items found
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-
-                {/* Payment Summary - Below Product Details */}
-                <Box sx={{ mt: 2, width: '100%', display: 'flex', justifyContent: 'space-between', gap: 2 }}>
-                  {/* Left Side - Balance Section */}
-                  <Box sx={{ flex: '0 0 48%', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <TableContainer component={Paper} variant="outlined" sx={{ border: '1px solid #000', width: '100%' }}>
-                      <Table size="small">
-                        <TableBody>
-                          <TableRow>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>سابقہ بقایا</TableCell>
-                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>
-                              {fmtAmt(viewingPurchase.previous_customer_balance ?? viewingPurchase.customer?.cus_balance ?? 0)}
-                            </TableCell>
-                          </TableRow>
-                          <TableRow>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>موجوده بقايا</TableCell>
-                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>
-                              {fmtAmt(getInvoiceRemainingDue(viewingPurchase))}
-                            </TableCell>
-                          </TableRow>
-                          <TableRow sx={{ bgcolor: '#f5f5f5' }}>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>كل بقایا</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>
-                              {fmtAmt(getSupplierBalanceAfterBill(viewingPurchase))}
-                            </TableCell>
-                          </TableRow>
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-
-                    {/* Outer Cargo Charges - conditional */}
-                    {(parseFloat(viewingPurchase.out_labour_amount || 0) > 0 || parseFloat(viewingPurchase.out_delivery_amount || 0) > 0) && (
-                      <TableContainer component={Paper} variant="outlined" sx={{ border: '1px solid #000', width: '100%' }}>
-                        <Table size="small">
-                          <TableHead>
-                            <TableRow sx={{ bgcolor: '#e3f2fd' }}>
-                              <TableCell colSpan={2} sx={{ fontWeight: 'bold', textAlign: 'center', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem', color: '#1976d2' }}>بیرونی کرایہ و مزدوری</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {parseFloat(viewingPurchase.out_labour_amount || 0) > 0 && (
-                              <TableRow>
-                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>مزدوری</TableCell>
-                                <TableCell align="right" sx={{ px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>{fmtAmt(viewingPurchase.out_labour_amount)}</TableCell>
-                              </TableRow>
-                            )}
-                            {parseFloat(viewingPurchase.out_delivery_amount || 0) > 0 && (
-                              <TableRow>
-                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>کرایہ</TableCell>
-                                <TableCell align="right" sx={{ px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>{fmtAmt(viewingPurchase.out_delivery_amount)}</TableCell>
-                              </TableRow>
-                            )}
-                            <TableRow sx={{ bgcolor: '#e3f2fd' }}>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>کل بیرونی خرچہ</TableCell>
-                              <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>{fmtAmt(parseFloat(viewingPurchase.out_labour_amount || 0) + parseFloat(viewingPurchase.out_delivery_amount || 0))}</TableCell>
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
-                    )}
-
-                    {/* Incity Charges - conditional */}
-                    {(parseFloat(viewingPurchase.incity_own_labour || 0) > 0 || parseFloat(viewingPurchase.incity_own_delivery || 0) > 0) && (
-                      <TableContainer component={Paper} variant="outlined" sx={{ border: '1px solid #000', width: '100%' }}>
-                        <Table size="small">
-                          <TableHead>
-                            <TableRow sx={{ bgcolor: '#fff3e0' }}>
-                              <TableCell colSpan={2} sx={{ fontWeight: 'bold', textAlign: 'center', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem', color: '#e65100' }}>اندرونی کرایہ و مزدوری</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {parseFloat(viewingPurchase.incity_own_labour || 0) > 0 && (
-                              <TableRow>
-                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>مزدوری</TableCell>
-                                <TableCell align="right" sx={{ px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>{fmtAmt(viewingPurchase.incity_own_labour)}</TableCell>
-                              </TableRow>
-                            )}
-                            {parseFloat(viewingPurchase.incity_own_delivery || 0) > 0 && (
-                              <TableRow>
-                                <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>کرایہ</TableCell>
-                                <TableCell align="right" sx={{ px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>{fmtAmt(viewingPurchase.incity_own_delivery)}</TableCell>
-                              </TableRow>
-                            )}
-                            <TableRow sx={{ bgcolor: '#fff3e0' }}>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>کل اندرونی خرچہ</TableCell>
-                              <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>{fmtAmt(parseFloat(viewingPurchase.incity_own_labour || 0) + parseFloat(viewingPurchase.incity_own_delivery || 0))}</TableCell>
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
-                    )}
-
-                    {/* Notes Section */}
-                    {viewingPurchase.notes && (
-                      <Box sx={{ mt: 1 }}>
-                        <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>
-                          <strong>Notes:</strong> {viewingPurchase.notes}
-                        </Typography>
-                      </Box>
-                    )}
-                  </Box>
-
-                  {/* Right Side - Payment Summary */}
-                  <Box sx={{ flex: '0 0 48%', display: 'flex', justifyContent: 'flex-end' }}>
-                    <TableContainer component={Paper} variant="outlined" sx={{ border: '1px solid #000', width: '100%', maxWidth: '100%' }}>
-                      <Table size="small">
-                        <TableBody>
-                          <TableRow>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>رقم بل</TableCell>
-                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>
-                              {fmtAmt(viewingPurchase.total_amount || 0)}
-                            </TableCell>
-                          </TableRow>
-                          <TableRow>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>مزدوری</TableCell>
-                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>
-                              {fmtAmt(viewingPurchase.labour_amount || 0)}
-                            </TableCell>
-                          </TableRow>
-                          <TableRow>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>کرایہ</TableCell>
-                            <TableCell align="right" sx={{ px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>
-                              {fmtAmt(viewingPurchase.transport_amount || 0)}
-                            </TableCell>
-                          </TableRow>
-                          {parseFloat(viewingPurchase.discount || 0) > 0 && (
-                            <TableRow>
-                              <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>رعایت (Discount)</TableCell>
-                              <TableCell align="right" sx={{ px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>
-                                -{fmtAmt(viewingPurchase.discount || 0)}
-                              </TableCell>
-                            </TableRow>
-                          )}
-                          <TableRow sx={{ bgcolor: '#f5f5f5' }}>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>كل رقم</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>
-                              {fmtAmt(getInvoiceNet(viewingPurchase))}
-                            </TableCell>
-                          </TableRow>
-
-                          {/* Determine cash and bank amounts */}
-                          {(() => {
-                            let cashAmount = parseFloat(viewingPurchase.cash_payment || 0);
-                            let bankAmount = parseFloat(viewingPurchase.bank_payment || 0);
-                            let bankName = viewingPurchase.bank_title || 'بینک';
-
-                            return (
-                              <>
-                                <TableRow>
-                                  <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>
-                                    نقد كيش
-                                  </TableCell>
-                                  <TableCell align="right" sx={{ px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>
-                                    {fmtAmt(cashAmount)}
-                                  </TableCell>
-                                </TableRow>
-
-                                {bankAmount > 0 && (
-                                  <TableRow>
-                                    <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>
-                                      {bankName}
-                                    </TableCell>
-                                    <TableCell align="right" sx={{ px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>
-                                      {fmtAmt(bankAmount)}
-                                    </TableCell>
-                                  </TableRow>
-                                )}
-                              </>
-                            );
-                          })()}
-                          <TableRow sx={{ bgcolor: '#f5f5f5' }}>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>كل رقم وصول</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: '1px solid #ddd', fontSize: '0.875rem' }}>
-                              {fmtAmt(parseFloat(viewingPurchase.payment || 0))}
-                            </TableCell>
-                          </TableRow>
-                          <TableRow sx={{ bgcolor: '#1e293b' }}>
-                            <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: '1px solid #475569', fontSize: '0.875rem', color: '#ffffff' }}>بقايا رقم</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: '1px solid #475569', fontSize: '0.875rem', color: '#facc15' }}>
-                              {fmtAmt(getInvoiceRemainingDue(viewingPurchase))}
-                            </TableCell>
-                          </TableRow>
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  </Box>
-                </Box>
-              </Box>
+            <Box
+              id="purchase-invoice-ledger"
+              sx={{ width: '100%', maxWidth: PURCHASE_LEDGER_PREVIEW_MAX_WIDTH, mx: 'auto', bgcolor: 'white', p: 3, mt: 1 }}
+            >
+              <PurchaseInvoiceA4Document bill={viewingPurchase} ctx={purchaseLedgerPrintCtx} />
             </Box>
           )}
         </DialogContent>
 
-        <DialogActions sx={{ p: 2, borderTop: 1, borderColor: 'divider', bgcolor: '#f5f5f5' }}>
+        <DialogActions sx={{ p: 2, borderTop: 1, borderColor: 'divider', bgcolor: '#f5f5f5', flexWrap: 'wrap', gap: 1 }}>
           <Button onClick={() => { setViewPurchaseDialogOpen(false); setViewingPurchase(null); }} variant="outlined">Close</Button>
           <Button
-            variant="contained"
-            startIcon={<Print />}
-            sx={{ bgcolor: 'primary.main', '&:hover': { bgcolor: 'primary.dark' } }}
-            onClick={() => handlePrintPurchaseReceipt('A4')}
+            startIcon={isDownloadingLedgerPurchasePdf ? <CircularProgress size={16} /> : <Download size={16} />}
+            onClick={() => handleDownloadLedgerPurchasePdf(viewingPurchase)}
+            disabled={!viewingPurchase || isDownloadingLedgerPurchasePdf}
           >
-            Print Bill
+            {isDownloadingLedgerPurchasePdf ? 'PDF…' : 'Download PDF'}
           </Button>
-          <Button
-            variant="contained"
-            startIcon={<Print />}
-            sx={{ bgcolor: 'secondary.main', '&:hover': { bgcolor: 'secondary.dark' } }}
-            onClick={() => handlePrintPurchaseReceipt('THERMAL')}
-          >
+          <Button variant="contained" startIcon={<Print />} onClick={() => handlePrintPurchaseReceipt(PURCHASE_LEDGER_SHEET_MODE)}>
+            Print A5
+          </Button>
+          <Button variant="contained" color="secondary" startIcon={<Print />} onClick={() => handlePrintPurchaseReceipt('THERMAL')}>
             Print Thermal
           </Button>
         </DialogActions>
