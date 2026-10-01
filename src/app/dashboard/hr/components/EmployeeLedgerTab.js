@@ -1,17 +1,18 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import {
   Box, Typography, Card, CardContent, TextField, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, Paper, MenuItem, FormControl, InputLabel,
+  TableContainer, TableRow, Paper, MenuItem, FormControl, InputLabel,
   Select, Chip, CircularProgress, InputAdornment, Button, Stack, ToggleButton,
-  ToggleButtonGroup, IconButton, Tooltip, Collapse,
+  ToggleButtonGroup, IconButton, Tooltip, Divider, Grid,
 } from '@mui/material';
 import {
-  Search, AccountBalance, Refresh, FilterList, Payments, ClearAll, ExpandMore, ExpandLess,
+  Search, AccountBalance, Refresh, FilterList, ClearAll, PictureAsPdf, PersonSearch,
 } from '@mui/icons-material';
 import { BRAND } from '@/lib/brand-theme';
+import { downloadEmployeeLedgerPdf } from '@/lib/employee-ledger-pdf';
 import { useHrRefreshVersion, HR_KEYS } from '../context/HrRefreshContext';
 
 const CARD_SX = {
@@ -21,13 +22,22 @@ const CARD_SX = {
   bgcolor: '#ffffff',
 };
 
+const FILTER_PANEL_SX = {
+  p: 2,
+  borderRadius: '12px',
+  bgcolor: '#f8fafc',
+  border: '1px solid #e2e8f0',
+};
+
 const FIELD_SX = {
   '& .MuiOutlinedInput-root': {
     borderRadius: '10px',
     fontSize: '0.8125rem',
+    bgcolor: '#fff',
     '& fieldset': { borderColor: '#cbd5e1' },
     '&.Mui-focused fieldset': { borderColor: BRAND.supporting.periwinkle },
   },
+  '& .MuiInputLabel-root': { fontSize: '0.8125rem' },
 };
 
 const ENTRY_TYPES = [
@@ -72,18 +82,17 @@ function typeLabel(type) {
   return found?.label || type || '—';
 }
 
-function buildTransactionsQuery({ empId, from, to, type, reconcile }) {
+function buildTransactionsQuery({ empId, from, to, type, q }) {
   const p = new URLSearchParams({ transactions: 'true' });
   if (empId) p.set('emp_id', empId);
   if (from) p.set('from', from);
   if (to) p.set('to', to);
   if (type && type !== 'ALL') p.set('type', type);
-  if (reconcile) p.set('reconcile', 'true');
+  if (q && String(q).trim()) p.set('q', String(q).trim());
   return p.toString();
 }
 
 export default function EmployeeLedgerTab() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const scrollRef = useRef(null);
 
@@ -93,17 +102,23 @@ export default function EmployeeLedgerTab() {
   const [closingBalance, setClosingBalance] = useState(null);
   const [loadingSummary, setLoadingSummary] = useState(true);
   const [loadingEntries, setLoadingEntries] = useState(true);
-  const [showBalances, setShowBalances] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   const [balanceFilter, setBalanceFilter] = useState('ALL');
-  const [empSearch, setEmpSearch] = useState('');
+  const [empPickerSearch, setEmpPickerSearch] = useState('');
 
   const [entryFrom, setEntryFrom] = useState('');
   const [entryTo, setEntryTo] = useState('');
   const [entryType, setEntryType] = useState('ALL');
   const [entrySearch, setEntrySearch] = useState('');
+  const [entrySearchDebounced, setEntrySearchDebounced] = useState('');
 
   const ledgerVersion = useHrRefreshVersion(HR_KEYS.ledger);
+
+  useEffect(() => {
+    const t = setTimeout(() => setEntrySearchDebounced(entrySearch.trim()), 450);
+    return () => clearTimeout(t);
+  }, [entrySearch]);
 
   const summaryByEmpId = useMemo(() => {
     const map = new Map();
@@ -111,18 +126,17 @@ export default function EmployeeLedgerTab() {
     return map;
   }, [summary]);
 
-  const loadSummary = useCallback(async (reconcile = false) => {
+  const loadSummary = useCallback(async () => {
     setLoadingSummary(true);
     try {
-      const q = reconcile ? '?summary=true&reconcile=true' : '?summary=true';
-      const res = await fetch(`/api/employee-ledger${q}`);
+      const res = await fetch('/api/employee-ledger?summary=true');
       if (res.ok) setSummary(await res.json());
     } finally {
       setLoadingSummary(false);
     }
   }, []);
 
-  const loadTransactions = useCallback(async (reconcile = false) => {
+  const loadTransactions = useCallback(async () => {
     setLoadingEntries(true);
     try {
       const qs = buildTransactionsQuery({
@@ -130,7 +144,7 @@ export default function EmployeeLedgerTab() {
         from: entryFrom || undefined,
         to: entryTo || undefined,
         type: entryType,
-        reconcile,
+        q: entrySearchDebounced || undefined,
       });
       const res = await fetch(`/api/employee-ledger?${qs}`);
       if (res.ok) {
@@ -141,7 +155,7 @@ export default function EmployeeLedgerTab() {
     } finally {
       setLoadingEntries(false);
     }
-  }, [selectedEmpId, entryFrom, entryTo, entryType]);
+  }, [selectedEmpId, entryFrom, entryTo, entryType, entrySearchDebounced]);
 
   useEffect(() => { loadSummary(); }, [loadSummary, ledgerVersion]);
 
@@ -174,11 +188,10 @@ export default function EmployeeLedgerTab() {
     return { receivable, payable, owesCount, settledCount, total: summary.length };
   }, [summary]);
 
-  const allowedEmpIds = useMemo(() => {
-    if (balanceFilter === 'ALL' && !empSearch.trim()) return null;
+  const filteredSummary = useMemo(() => {
     let list = summary;
-    if (empSearch.trim()) {
-      const q = empSearch.toLowerCase();
+    if (empPickerSearch.trim()) {
+      const q = empPickerSearch.toLowerCase();
       list = list.filter(
         (e) =>
           e.emp_name.toLowerCase().includes(q) ||
@@ -189,79 +202,107 @@ export default function EmployeeLedgerTab() {
     if (balanceFilter === 'OWES') list = list.filter((e) => parseFloat(e.closing_balance || 0) > 0.009);
     if (balanceFilter === 'WE_OWE') list = list.filter((e) => parseFloat(e.closing_balance || 0) < -0.009);
     if (balanceFilter === 'ZERO') list = list.filter((e) => Math.abs(parseFloat(e.closing_balance || 0)) < 0.01);
-    return new Set(list.map((e) => String(e.emp_id)));
-  }, [summary, balanceFilter, empSearch]);
+    return list;
+  }, [summary, balanceFilter, empPickerSearch]);
+
+  const employeesForSelect = useMemo(() => {
+    if (!selectedEmpId) return filteredSummary;
+    const sel = summaryByEmpId.get(String(selectedEmpId));
+    if (!sel) return filteredSummary;
+    if (filteredSummary.some((e) => String(e.emp_id) === String(selectedEmpId))) return filteredSummary;
+    return [sel, ...filteredSummary];
+  }, [filteredSummary, selectedEmpId, summaryByEmpId]);
+
+  const allowedEmpIds = useMemo(() => {
+    if (!selectedEmpId && (balanceFilter !== 'ALL' || empPickerSearch.trim())) {
+      return new Set(filteredSummary.map((e) => String(e.emp_id)));
+    }
+    return null;
+  }, [selectedEmpId, balanceFilter, empPickerSearch, filteredSummary]);
 
   const visibleEntries = useMemo(() => {
-    let rows = entries;
-    if (allowedEmpIds) {
-      rows = rows.filter((r) => allowedEmpIds.has(String(r.emp_id)));
-    }
-    if (entrySearch.trim()) {
-      const q = entrySearch.toLowerCase();
-      rows = rows.filter(
-        (r) =>
-          (r.bill_no || '').toLowerCase().includes(q) ||
-          (r.details || '').toLowerCase().includes(q) ||
-          (r.emp_name || '').toLowerCase().includes(q) ||
-          String(r.trnx_type || '').toLowerCase().includes(q)
-      );
-    }
-    return rows;
-  }, [entries, allowedEmpIds, entrySearch]);
+    if (!allowedEmpIds) return entries;
+    return entries.filter((r) => allowedEmpIds.has(String(r.emp_id)));
+  }, [entries, allowedEmpIds]);
 
   const selectedEmployee = selectedEmpId ? summaryByEmpId.get(String(selectedEmpId)) : null;
   const closingMeta = selectedEmployee
     ? balanceMeta(closingBalance ?? selectedEmployee.closing_balance)
     : null;
 
-  const entryTotals = useMemo(() => {
-    return visibleEntries.reduce(
+  const entryTotals = useMemo(() => (
+    visibleEntries.reduce(
       (acc, r) => ({
         debit: acc.debit + parseFloat(r.debit_amount || 0),
         credit: acc.credit + parseFloat(r.credit_amount || 0),
       }),
       { debit: 0, credit: 0 }
-    );
-  }, [visibleEntries]);
+    )
+  ), [visibleEntries]);
 
-  const employeePickerList = useMemo(() => {
-    let list = summary;
-    if (empSearch.trim()) {
-      const q = empSearch.toLowerCase();
-      list = list.filter(
-        (e) =>
-          e.emp_name.toLowerCase().includes(q) ||
-          (e.designation || '').toLowerCase().includes(q) ||
-          (e.department || '').toLowerCase().includes(q)
-      );
+  const activeFilterChips = useMemo(() => {
+    const chips = [];
+    if (selectedEmpId && selectedEmployee) {
+      chips.push({ key: 'emp', label: selectedEmployee.emp_name, clear: () => setSelectedEmpId('') });
     }
-    return list;
-  }, [summary, empSearch]);
+    if (entryFrom) chips.push({ key: 'from', label: `From ${entryFrom}`, clear: () => setEntryFrom('') });
+    if (entryTo) chips.push({ key: 'to', label: `To ${entryTo}`, clear: () => setEntryTo('') });
+    if (entryType !== 'ALL') chips.push({ key: 'type', label: typeLabel(entryType), clear: () => setEntryType('ALL') });
+    if (entrySearchDebounced) chips.push({ key: 'q', label: `Search: ${entrySearchDebounced}`, clear: () => setEntrySearch('') });
+    if (!selectedEmpId && balanceFilter !== 'ALL') {
+      const lbl = { OWES: 'Employee owes', WE_OWE: 'Company owes', ZERO: 'Settled' }[balanceFilter];
+      chips.push({ key: 'bal', label: lbl, clear: () => setBalanceFilter('ALL') });
+    }
+    if (!selectedEmpId && empPickerSearch.trim()) {
+      chips.push({ key: 'pick', label: `Staff: ${empPickerSearch.trim()}`, clear: () => setEmpPickerSearch('') });
+    }
+    return chips;
+  }, [
+    selectedEmpId, selectedEmployee, entryFrom, entryTo, entryType,
+    entrySearchDebounced, balanceFilter, empPickerSearch,
+  ]);
 
-  const clearEntryFilters = () => {
+  const resetAllFilters = () => {
+    setSelectedEmpId('');
     setEntryFrom('');
     setEntryTo('');
     setEntryType('ALL');
     setEntrySearch('');
-  };
-
-  const clearEmpFilters = () => {
     setBalanceFilter('ALL');
-    setEmpSearch('');
+    setEmpPickerSearch('');
   };
 
-  const handleRefresh = async (reconcile = false) => {
-    await loadSummary(reconcile);
-    await loadTransactions(reconcile);
+  const handleRefresh = async () => {
+    await loadSummary();
+    await loadTransactions();
   };
 
-  const goReceivePayment = () => {
-    const q = selectedEmpId ? `?module=employee-receive&emp_id=${selectedEmpId}` : '?module=employee-receive';
-    router.push(`/dashboard/hr${q}`);
+  const filterSummaryForPdf = useMemo(() => {
+    const parts = activeFilterChips.map((c) => c.label);
+    return parts.join(' · ') || 'none';
+  }, [activeFilterChips]);
+
+  const handleDownloadPdf = async () => {
+    if (visibleEntries.length === 0) return;
+    setPdfLoading(true);
+    try {
+      await downloadEmployeeLedgerPdf({
+        entries: visibleEntries,
+        employee: selectedEmployee,
+        closingBalance,
+        showEmployeeColumn: !selectedEmpId,
+        filterSummary: filterSummaryForPdf,
+        entryTypes: ENTRY_TYPES,
+      });
+    } catch (err) {
+      console.error('Employee ledger PDF:', err);
+    } finally {
+      setPdfLoading(false);
+    }
   };
 
   const showEmployeeColumn = !selectedEmpId;
+  const colSpan = showEmployeeColumn ? 8 : 7;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -285,15 +326,10 @@ export default function EmployeeLedgerTab() {
       </Box>
 
       <Card sx={CARD_SX}>
-        <CardContent sx={{ p: 2 }}>
-          <Stack direction="row" flexWrap="wrap" gap={1.5} alignItems="center" sx={{ mb: 2 }}>
-            <AccountBalance sx={{ color: '#0d9488' }} />
-            <Typography sx={{ fontWeight: 800, fontSize: '1rem' }}>Employee ledger</Typography>
-            <Chip
-              size="small"
-              label={selectedEmpId ? 'One account' : 'All employees'}
-              sx={{ fontWeight: 700, bgcolor: '#f1f5f9' }}
-            />
+        <CardContent sx={{ p: { xs: 1.5, md: 2 } }}>
+          <Stack direction="row" flexWrap="wrap" gap={1} alignItems="center" sx={{ mb: 2 }}>
+            <AccountBalance sx={{ color: '#1347c4' }} />
+            <Typography sx={{ fontWeight: 800, fontSize: '1.05rem', color: '#0f172a' }}>Employee ledger</Typography>
             {selectedEmployee && closingMeta && (
               <Chip
                 size="small"
@@ -302,141 +338,205 @@ export default function EmployeeLedgerTab() {
               />
             )}
             <Box sx={{ flex: 1 }} />
-            <Tooltip title="Refresh">
-              <IconButton size="small" onClick={() => handleRefresh(false)} disabled={loadingSummary || loadingEntries}>
+            <Tooltip title="Refresh data">
+              <IconButton size="small" onClick={handleRefresh} disabled={loadingSummary || loadingEntries}>
                 <Refresh sx={{ fontSize: 20 }} />
               </IconButton>
             </Tooltip>
-            <Button size="small" onClick={() => handleRefresh(true)} disabled={loadingSummary || loadingEntries} sx={{ textTransform: 'none', fontSize: '0.72rem' }}>
-              Repair
-            </Button>
             <Button
               size="small"
-              variant="outlined"
-              startIcon={<Payments />}
-              onClick={goReceivePayment}
-              disabled={!selectedEmpId}
-              sx={{ textTransform: 'none', fontWeight: 700, borderColor: '#0d9488', color: '#0d9488' }}
+              variant="contained"
+              startIcon={pdfLoading ? <CircularProgress size={16} color="inherit" /> : <PictureAsPdf />}
+              onClick={handleDownloadPdf}
+              disabled={pdfLoading || loadingEntries || visibleEntries.length === 0}
+              sx={{ textTransform: 'none', fontWeight: 700, bgcolor: '#1347c4', '&:hover': { bgcolor: '#1e3a8a' } }}
             >
-              Receive payment
+              Download PDF
             </Button>
           </Stack>
 
-          <Typography sx={{ fontSize: '0.75rem', color: '#64748b', mb: 2 }}>
-            Oldest entries at top, latest at bottom. Default view shows every employee&apos;s transactions; pick an account to focus one ledger.
-          </Typography>
-
-          <Stack spacing={1.5} sx={{ mb: 2 }}>
-            <Stack direction="row" flexWrap="wrap" gap={1} alignItems="center">
-              <FilterList sx={{ fontSize: 18, color: '#64748b' }} />
-              <Typography sx={{ fontWeight: 700, fontSize: '0.85rem' }}>Filters</Typography>
+          <Box sx={FILTER_PANEL_SX}>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+              <FilterList sx={{ fontSize: 20, color: '#1347c4' }} />
+              <Typography sx={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a' }}>Filters</Typography>
+              <Typography sx={{ fontSize: '0.75rem', color: '#64748b', flex: 1 }}>
+                Date and type load from server · search matches bill #, details, employee name
+              </Typography>
+              <Button
+                size="small"
+                startIcon={<ClearAll />}
+                onClick={resetAllFilters}
+                sx={{ textTransform: 'none', fontWeight: 600, color: '#64748b' }}
+              >
+                Reset all
+              </Button>
             </Stack>
 
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
-              <FormControl size="small" sx={{ minWidth: 240, flex: 1, maxWidth: 360, ...FIELD_SX }}>
-                <InputLabel>Employee account</InputLabel>
-                <Select
-                  label="Employee account"
-                  value={selectedEmpId}
-                  onChange={(e) => setSelectedEmpId(e.target.value)}
-                >
-                  <MenuItem value="">
-                    <strong>All employees — all transactions</strong>
-                  </MenuItem>
-                  {employeePickerList.map((e) => {
-                    const meta = balanceMeta(e.closing_balance);
-                    return (
-                      <MenuItem key={e.emp_id} value={String(e.emp_id)}>
-                        {e.emp_name}
-                        {e.designation ? ` · ${e.designation}` : ''}
-                        {' — '}
-                        {fmtAmt(e.closing_balance)} ({meta.label})
-                      </MenuItem>
-                    );
-                  })}
-                </Select>
-              </FormControl>
+            <Grid container spacing={1.5}>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth size="small" sx={FIELD_SX}>
+                  <InputLabel>Employee account</InputLabel>
+                  <Select
+                    label="Employee account"
+                    value={selectedEmpId}
+                    onChange={(e) => setSelectedEmpId(e.target.value)}
+                    MenuProps={{ PaperProps: { sx: { maxHeight: 360 } } }}
+                  >
+                    <MenuItem value="">
+                      <Typography sx={{ fontWeight: 700, fontSize: '0.8125rem' }}>All employees</Typography>
+                    </MenuItem>
+                    {employeesForSelect.map((e) => {
+                      const meta = balanceMeta(e.closing_balance);
+                      return (
+                        <MenuItem key={e.emp_id} value={String(e.emp_id)}>
+                          <Stack direction="row" justifyContent="space-between" width="100%" spacing={1}>
+                            <Typography sx={{ fontSize: '0.8125rem', fontWeight: 600 }}>
+                              {e.emp_name}
+                              {e.designation ? ` · ${e.designation}` : ''}
+                            </Typography>
+                            <Typography sx={{ fontSize: '0.75rem', color: meta.color, fontWeight: 700, fontFamily: 'monospace' }}>
+                              {fmtAmt(e.closing_balance)}
+                            </Typography>
+                          </Stack>
+                        </MenuItem>
+                      );
+                    })}
+                  </Select>
+                </FormControl>
+              </Grid>
 
-              <TextField
-                size="small"
-                type="date"
-                label="From"
-                InputLabelProps={{ shrink: true }}
-                value={entryFrom}
-                onChange={(e) => setEntryFrom(e.target.value)}
-                sx={{ width: 140, ...FIELD_SX }}
-              />
-              <TextField
-                size="small"
-                type="date"
-                label="To"
-                InputLabelProps={{ shrink: true }}
-                value={entryTo}
-                onChange={(e) => setEntryTo(e.target.value)}
-                sx={{ width: 140, ...FIELD_SX }}
-              />
-              <FormControl size="small" sx={{ minWidth: 160, ...FIELD_SX }}>
-                <InputLabel>Type</InputLabel>
-                <Select label="Type" value={entryType} onChange={(e) => setEntryType(e.target.value)}>
-                  {ENTRY_TYPES.map((t) => (
-                    <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <TextField
-                size="small"
-                placeholder="Bill #, particulars, name…"
-                value={entrySearch}
-                onChange={(e) => setEntrySearch(e.target.value)}
-                sx={{ flex: 1, minWidth: 160, ...FIELD_SX }}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <Search sx={{ fontSize: 18, color: '#94a3b8' }} />
-                    </InputAdornment>
-                  ),
-                }}
-              />
-              <Button size="small" startIcon={<ClearAll />} onClick={clearEntryFilters} sx={{ textTransform: 'none' }}>
-                Clear dates & search
-              </Button>
-            </Box>
-
-            {!selectedEmpId && (
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
-                <ToggleButtonGroup
-                  exclusive
-                  size="small"
-                  value={balanceFilter}
-                  onChange={(_, v) => v && setBalanceFilter(v)}
-                  sx={{ flexWrap: 'wrap', gap: 0.5, '& .MuiToggleButton-root': { textTransform: 'none', fontWeight: 600, fontSize: '0.72rem', px: 1.25, py: 0.35, borderRadius: '8px !important', border: '1px solid #cbd5e1 !important' } }}
-                >
-                  <ToggleButton value="ALL">All balances</ToggleButton>
-                  <ToggleButton value="OWES" sx={{ '&.Mui-selected': { bgcolor: '#fef2f2', color: '#b91c1c' } }}>Employee owes</ToggleButton>
-                  <ToggleButton value="WE_OWE" sx={{ '&.Mui-selected': { bgcolor: '#f0fdf4', color: '#15803d' } }}>We owe</ToggleButton>
-                  <ToggleButton value="ZERO">Settled</ToggleButton>
-                </ToggleButtonGroup>
+              <Grid item xs={12} md={6}>
                 <TextField
+                  fullWidth
                   size="small"
-                  placeholder="Narrow by employee name…"
-                  value={empSearch}
-                  onChange={(e) => setEmpSearch(e.target.value)}
-                  sx={{ width: 220, ...FIELD_SX }}
+                  label="Find in account list"
+                  placeholder="Name, designation, department…"
+                  value={empPickerSearch}
+                  onChange={(e) => setEmpPickerSearch(e.target.value)}
+                  sx={FIELD_SX}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <PersonSearch sx={{ fontSize: 20, color: '#94a3b8' }} />
+                      </InputAdornment>
+                    ),
+                  }}
                 />
-                <Button size="small" onClick={clearEmpFilters} sx={{ textTransform: 'none' }}>Clear balance filters</Button>
-              </Box>
+              </Grid>
+
+              <Grid item xs={6} sm={4} md={3}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  type="date"
+                  label="From date"
+                  InputLabelProps={{ shrink: true }}
+                  value={entryFrom}
+                  onChange={(e) => setEntryFrom(e.target.value)}
+                  sx={FIELD_SX}
+                />
+              </Grid>
+              <Grid item xs={6} sm={4} md={3}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  type="date"
+                  label="To date"
+                  InputLabelProps={{ shrink: true }}
+                  value={entryTo}
+                  onChange={(e) => setEntryTo(e.target.value)}
+                  sx={FIELD_SX}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4} md={3}>
+                <FormControl fullWidth size="small" sx={FIELD_SX}>
+                  <InputLabel>Transaction type</InputLabel>
+                  <Select label="Transaction type" value={entryType} onChange={(e) => setEntryType(e.target.value)}>
+                    {ENTRY_TYPES.map((t) => (
+                      <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Search transactions"
+                  placeholder="Bill #, particulars…"
+                  value={entrySearch}
+                  onChange={(e) => setEntrySearch(e.target.value)}
+                  sx={FIELD_SX}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <Search sx={{ fontSize: 18, color: '#94a3b8' }} />
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </Grid>
+
+              {!selectedEmpId && (
+                <Grid item xs={12}>
+                  <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', mb: 0.75, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Account balance (all-employees view)
+                  </Typography>
+                  <ToggleButtonGroup
+                    exclusive
+                    size="small"
+                    value={balanceFilter}
+                    onChange={(_, v) => v && setBalanceFilter(v)}
+                    sx={{
+                      flexWrap: 'wrap',
+                      gap: 0.75,
+                      '& .MuiToggleButtonGroup-grouped': { border: '1px solid #cbd5e1 !important', mx: 0 },
+                      '& .MuiToggleButton-root': {
+                        textTransform: 'none',
+                        fontWeight: 600,
+                        fontSize: '0.78rem',
+                        px: 1.5,
+                        py: 0.5,
+                        borderRadius: '8px !important',
+                      },
+                    }}
+                  >
+                    <ToggleButton value="ALL">All</ToggleButton>
+                    <ToggleButton value="OWES" sx={{ '&.Mui-selected': { bgcolor: '#fef2f2', color: '#b91c1c' } }}>Employee owes</ToggleButton>
+                    <ToggleButton value="WE_OWE" sx={{ '&.Mui-selected': { bgcolor: '#f0fdf4', color: '#15803d' } }}>Company owes</ToggleButton>
+                    <ToggleButton value="ZERO">Settled</ToggleButton>
+                  </ToggleButtonGroup>
+                </Grid>
+              )}
+            </Grid>
+
+            {activeFilterChips.length > 0 && (
+              <Stack direction="row" flexWrap="wrap" gap={0.75} sx={{ mt: 2, pt: 1.5, borderTop: '1px dashed #cbd5e1' }}>
+                <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', alignSelf: 'center', mr: 0.5 }}>
+                  Active:
+                </Typography>
+                {activeFilterChips.map((c) => (
+                  <Chip
+                    key={c.key}
+                    size="small"
+                    label={c.label}
+                    onDelete={c.clear}
+                    sx={{ fontWeight: 600, fontSize: '0.72rem', bgcolor: '#fff', border: '1px solid #e2e8f0' }}
+                  />
+                ))}
+              </Stack>
             )}
-          </Stack>
+          </Box>
 
           {selectedEmployee && (
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 1, mb: 2 }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 1, mt: 2 }}>
               {[
                 { label: 'Opening (pre-system)', value: fmtAmt(selectedEmployee.opening_balance) },
-                { label: 'Total debit (shown)', value: fmtAmt(entryTotals.debit), color: '#b91c1c' },
-                { label: 'Total credit (shown)', value: fmtAmt(entryTotals.credit), color: '#15803d' },
+                { label: 'Total debit (filtered)', value: fmtAmt(entryTotals.debit), color: '#b91c1c' },
+                { label: 'Total credit (filtered)', value: fmtAmt(entryTotals.credit), color: '#15803d' },
                 { label: 'Closing balance', value: fmtAmt(closingBalance ?? selectedEmployee.closing_balance), color: closingMeta?.color },
               ].map((s) => (
-                <Box key={s.label} sx={{ p: 1.25, borderRadius: '10px', bgcolor: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                <Box key={s.label} sx={{ p: 1.25, borderRadius: '10px', bgcolor: '#fff', border: '1px solid #e2e8f0' }}>
                   <Typography sx={{ fontSize: '0.65rem', color: '#64748b', fontWeight: 600 }}>{s.label}</Typography>
                   <Typography sx={{ fontSize: '0.95rem', fontWeight: 800, fontFamily: 'monospace', color: s.color || '#0f172a' }}>{s.value}</Typography>
                 </Box>
@@ -444,74 +544,31 @@ export default function EmployeeLedgerTab() {
             </Box>
           )}
 
-          <Stack direction="row" alignItems="center" sx={{ mb: 1 }}>
-            <Typography sx={{ fontWeight: 700, fontSize: '0.85rem' }}>
-              Transactions
-            </Typography>
-            <Chip size="small" label={visibleEntries.length} sx={{ ml: 1, height: 22, fontWeight: 700 }} />
-            {(loadingSummary || loadingEntries) && <CircularProgress size={18} sx={{ ml: 1.5, color: BRAND.primary.blue }} />}
-            <Box sx={{ flex: 1 }} />
-            <Button
-              size="small"
-              endIcon={showBalances ? <ExpandLess /> : <ExpandMore />}
-              onClick={() => setShowBalances((v) => !v)}
-              sx={{ textTransform: 'none', fontSize: '0.75rem' }}
-            >
-              Employee balances
-            </Button>
-          </Stack>
+          <Divider sx={{ my: 2 }} />
 
-          <Collapse in={showBalances}>
-            <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0', mb: 2, maxHeight: 220 }}>
-              <Table size="small" stickyHeader>
-                <TableHead>
-                  <TableRow sx={{ bgcolor: '#f8fafc' }}>
-                    {['Employee', 'Balance', 'Status', ''].map((h) => (
-                      <TableCell key={h || 'action'} sx={{ fontWeight: 700, fontSize: '0.68rem', py: 0.75 }}>{h}</TableCell>
-                    ))}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {summary.slice(0, 50).map((e) => {
-                    const meta = balanceMeta(e.closing_balance);
-                    return (
-                      <TableRow key={e.emp_id} hover>
-                        <TableCell sx={{ fontSize: '0.8125rem', fontWeight: 600 }}>{e.emp_name}</TableCell>
-                        <TableCell sx={{ fontFamily: 'monospace', fontWeight: 700, color: meta.color, fontSize: '0.8125rem' }}>
-                          {fmtAmt(e.closing_balance)}
-                        </TableCell>
-                        <TableCell>
-                          <Chip size="small" label={meta.label} sx={{ bgcolor: meta.bg, color: meta.color, height: 20, fontSize: '0.62rem', fontWeight: 700 }} />
-                        </TableCell>
-                        <TableCell align="right">
-                          <Button size="small" onClick={() => setSelectedEmpId(String(e.emp_id))} sx={{ textTransform: 'none', fontSize: '0.72rem' }}>
-                            View ledger
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Collapse>
+          <Stack direction="row" alignItems="center" sx={{ mb: 1 }}>
+            <Typography sx={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a' }}>Transactions</Typography>
+            <Chip size="small" label={visibleEntries.length} sx={{ ml: 1, height: 22, fontWeight: 700, bgcolor: '#e8effd', color: '#1347c4' }} />
+            {(loadingSummary || loadingEntries) && <CircularProgress size={18} sx={{ ml: 1.5, color: BRAND.primary.blue }} />}
+            <Typography sx={{ ml: 1.5, fontSize: '0.72rem', color: '#94a3b8' }}>Oldest first · scroll for latest</Typography>
+          </Stack>
 
           <TableContainer
             ref={scrollRef}
             component={Paper}
             elevation={0}
-            sx={{ border: '1px solid #cbd5e1', maxHeight: { xs: 420, md: 520 }, bgcolor: '#fafbfc' }}
+            sx={{ border: '1px solid #cbd5e1', borderRadius: '10px', maxHeight: { xs: 440, md: 540 }, bgcolor: '#fff' }}
           >
             <Table size="small" stickyHeader>
               <TableHead>
-                <TableRow sx={{ bgcolor: '#e8effd' }}>
+                <TableRow sx={{ bgcolor: '#1347c4' }}>
                   {(showEmployeeColumn
                     ? ['Date', 'Employee', 'Type', 'Bill #', 'Particulars', 'Debit', 'Credit', 'Balance']
                     : ['Date', 'Type', 'Bill #', 'Particulars', 'Debit', 'Credit', 'Balance']
                   ).map((h) => (
                     <TableCell
                       key={h}
-                      sx={{ fontWeight: 700, fontSize: '0.68rem', color: '#1347c4', py: 1 }}
+                      sx={{ fontWeight: 700, fontSize: '0.68rem', color: '#fff', py: 1.1, borderBottom: 'none' }}
                       align={['Debit', 'Credit', 'Balance'].includes(h) ? 'right' : 'left'}
                     >
                       {h}
@@ -522,21 +579,25 @@ export default function EmployeeLedgerTab() {
               <TableBody>
                 {loadingEntries && visibleEntries.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={showEmployeeColumn ? 8 : 7} align="center" sx={{ py: 6 }}>
+                    <TableCell colSpan={colSpan} align="center" sx={{ py: 6 }}>
                       <CircularProgress size={28} sx={{ color: BRAND.primary.blue }} />
                     </TableCell>
                   </TableRow>
                 ) : visibleEntries.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={showEmployeeColumn ? 8 : 7} align="center" sx={{ py: 4, color: '#94a3b8' }}>
+                    <TableCell colSpan={colSpan} align="center" sx={{ py: 4, color: '#94a3b8' }}>
                       No transactions match your filters
                     </TableCell>
                   </TableRow>
                 ) : (
-                  visibleEntries.map((row) => {
+                  visibleEntries.map((row, idx) => {
                     const chip = typeChipStyle(row.trnx_type);
                     return (
-                      <TableRow key={row.el_id} hover sx={{ '&:last-child td': { borderBottom: 'none' } }}>
+                      <TableRow
+                        key={row.el_id}
+                        hover
+                        sx={{ bgcolor: idx % 2 === 0 ? '#fff' : '#f8fafc', '&:last-child td': { borderBottom: 'none' } }}
+                      >
                         <TableCell sx={{ fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
                           {row.created_at ? new Date(row.created_at).toLocaleDateString('en-GB') : '—'}
                         </TableCell>
@@ -545,7 +606,7 @@ export default function EmployeeLedgerTab() {
                             <Button
                               size="small"
                               onClick={() => setSelectedEmpId(String(row.emp_id))}
-                              sx={{ textTransform: 'none', fontWeight: 700, fontSize: '0.8125rem', p: 0, minWidth: 0, justifyContent: 'flex-start' }}
+                              sx={{ textTransform: 'none', fontWeight: 700, fontSize: '0.8125rem', p: 0, minWidth: 0, justifyContent: 'flex-start', color: '#1347c4' }}
                             >
                               {row.emp_name || '—'}
                             </Button>
