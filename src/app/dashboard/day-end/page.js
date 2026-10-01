@@ -172,7 +172,13 @@ export default function DayEndPage() {
         setCloseReadiness(data.closeReadiness || null);
 
         setOpeningCash(data.summary?.openingCash?.toString() || '0');
-        setClosingCash(data.dayEnd?.closing_cash !== null && data.dayEnd?.closing_cash !== undefined ? data.dayEnd.closing_cash?.toString() : '');
+        const ledgerClose =
+          data.summary?.expectedCashInHand ??
+          data.dayEnd?.cash_in_hand ??
+          data.dayEnd?.closing_cash;
+        setClosingCash(
+          ledgerClose !== null && ledgerClose !== undefined ? String(ledgerClose) : ''
+        );
         setNotes(data.dayEnd?.notes || '');
       }
     } catch (error) {
@@ -215,6 +221,13 @@ export default function DayEndPage() {
     fetchDayEndData(selectedDate);
   }, [selectedDate]);
 
+  useEffect(() => {
+    if (dayEndData?.status === 'CLOSED') return;
+    if (summary?.expectedCashInHand != null) {
+      setClosingCash(String(summary.expectedCashInHand));
+    }
+  }, [summary?.expectedCashInHand, dayEndData?.status]);
+
   const todayPk = getPkDateString();
   const handlePrevDay = () => setSelectedDate(shiftPkDate(selectedDate, -1));
   const handleNextDay = () => {
@@ -231,11 +244,6 @@ export default function DayEndPage() {
       if (closeReadiness.previousOpenDate) setSelectedDate(closeReadiness.previousOpenDate);
       return;
     }
-    if (closingCash === '' || closingCash === null) {
-      alert('Please enter physical closing cash amount before closing the day.');
-      return;
-    }
-
     if (selectedDate > getPkDateString()) {
       alert('Cannot close a future date.');
       return;
@@ -259,8 +267,6 @@ export default function DayEndPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           business_date: selectedDate,
-          opening_cash: openingCash,
-          closing_cash: closingCash,
           notes: notes,
           closed_by: dayEndUser?.user_id || dayEndUser?.id || null,
           action: 'CLOSE_DAY'
@@ -269,7 +275,7 @@ export default function DayEndPage() {
 
       if (response.ok) {
         const data = await response.json();
-        alert(data.warning ? `Day Closed Successfully!\n\n${data.warning}` : 'Day Closed Successfully!');
+        alert('Day closed successfully. Closing cash matches Cash Report ledger.');
         if (data.nextRequiredDate && data.nextRequiredDate !== selectedDate) {
           setSelectedDate(data.nextRequiredDate);
         } else {
@@ -350,6 +356,12 @@ export default function DayEndPage() {
     }
     return Math.round((effectiveClosingCash - effectiveExpectedCash) * 100) / 100;
   }, [effectiveClosingCash, effectiveExpectedCash, isClosed, summary?.variance]);
+
+  const bankAccountsLiveTotal = useMemo(() => {
+    const accounts = accountBalances?.bankAccounts;
+    if (!accounts?.length) return 0;
+    return accounts.reduce((sum, acc) => sum + parseFloat(acc.balance || 0), 0);
+  }, [accountBalances?.bankAccounts]);
 
   // SVG Chart Maximum calculation for Sales vs Purchases line chart
   const maxTrendVal = useMemo(() => {
@@ -559,9 +571,7 @@ export default function DayEndPage() {
                 Rs. {formatCurrency(effectiveExpectedCash)}
               </h3>
               <p className="text-[11px] text-slate-400 font-medium">
-                {summary?.openingCashSource === 'PREV_CLOSED'
-                  ? 'Cash in hand · carried from last close'
-                  : 'Cash in hand · matches Cash Report'}
+                Cash in hand · matches Cash Report ledger
               </p>
             </div>
           </div>
@@ -628,14 +638,7 @@ export default function DayEndPage() {
 
             <div className="space-y-3.5">
               <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
-                <span className="font-semibold text-slate-600">
-                  Opening Cash
-                  {summary?.openingCashSource === 'LEDGER'
-                    ? ' (from Cash Report ledger)'
-                    : summary?.openingCashFromDate
-                      ? ` (${summary.openingCashSource === 'FROZEN' ? 'frozen' : 'last close'} ${summary.openingCashFromDate})`
-                      : ''}
-                </span>
+                <span className="font-semibold text-slate-600">Opening Cash (Cash Report ledger)</span>
                 <span className="font-bold text-slate-900">Rs. {formatCurrency(effectiveOpeningCash)}</span>
               </div>
               <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
@@ -820,6 +823,14 @@ export default function DayEndPage() {
                     <p className="text-xs text-slate-400 text-center py-2">No bank accounts found</p>
                   )}
                 </div>
+                {accountBalances?.bankAccounts?.length > 0 && (
+                  <div className="flex justify-between items-center text-xs py-2.5 px-3 mt-2 bg-indigo-50/90 rounded-xl border border-indigo-200/70">
+                    <span className="font-extrabold text-indigo-900 uppercase tracking-wide">Total of banks</span>
+                    <span className="font-black text-sm text-indigo-800">
+                      Rs. {formatCurrency(bankAccountsLiveTotal)}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -842,40 +853,28 @@ export default function DayEndPage() {
                 <input
                   type="number"
                   value={openingCash}
-                  onChange={(e) => setOpeningCash(e.target.value)}
-                  disabled={isClosed || Boolean(summary?.openingCashLocked)}
+                  readOnly
+                  disabled
                   className="w-full p-2.5 text-sm font-bold bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none text-slate-900 disabled:bg-slate-100"
                 />
                 <p className="text-[11px] text-slate-500">
-                  {summary?.openingCashLocked
-                    ? `Frozen opening cash for this closed day.`
-                    : summary?.openingCashSource === 'PREV_CLOSED'
-                      ? `Brought forward from previous day's closing cash (${summary?.openingCashFromDate}).`
-                      : summary?.openingCashSource === 'LEDGER'
-                        ? `Auto-filled from Cash Report ledger (Rs. ${formatCurrency(summary?.ledgerOpeningCash)}). Edit only if drawer differs.`
-                        : 'Enter the drawer opening if it differs from the ledger.'}
+                  Same opening as Cash Report (ledger balance before this business day). Physical count goes in closing cash below.
                 </p>
               </div>
 
               {/* Physical Cash Input & Calculator */}
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-700">Actual Physical Closing Cash:</label>
-                  <button
-                    onClick={() => setShowDenominations(true)}
-                    className="text-[11px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                  >
-                    <Calculator className="w-3.5 h-3.5" /> Physical Cash Counter
-                  </button>
-                </div>
+                <label className="text-xs font-bold text-slate-700">Closing Cash (Cash Report ledger)</label>
                 <input
                   type="number"
-                  placeholder="Enter physical cash amount"
                   value={closingCash}
-                  onChange={(e) => setClosingCash(e.target.value)}
-                  disabled={isClosed}
-                  className="w-full p-2.5 text-sm font-bold bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none text-slate-900 disabled:bg-slate-100"
+                  readOnly
+                  disabled
+                  className="w-full p-2.5 text-sm font-bold bg-slate-50 border border-slate-300 rounded-xl text-slate-900 disabled:bg-slate-100"
                 />
+                <p className="text-[11px] text-slate-500">
+                  Saved on close as ledger expected cash — same closing balance as Cash Report for this date. Variance is always zero.
+                </p>
               </div>
 
               {/* Remarks */}

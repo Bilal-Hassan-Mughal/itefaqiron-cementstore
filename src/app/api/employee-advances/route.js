@@ -8,6 +8,7 @@ import {
   ensureEmployeeLedgerSchema,
   recordEmployeeAdvanceDebit,
   recordEmployeeAdvanceReversalCredit,
+  recalculateEmployeeLedger,
 } from '@/lib/employee-ledger';
 
 function advanceLedgerBillNo(advanceId) {
@@ -16,6 +17,77 @@ function advanceLedgerBillNo(advanceId) {
 
 function advanceLedgerReversalBillNo(advanceId) {
   return `ADV-${advanceId}-REV`;
+}
+
+function resolveAdvancePaymentLegs(body, totalAmount) {
+  const amt = parseFloat(totalAmount);
+  const method = String(body.payment_method || body.payment_mode || 'CASH').toUpperCase();
+  const cashAmt = parseFloat(body.cash_amount || 0);
+  const bankAmt = parseFloat(body.bank_amount || 0);
+  const isPartial = method === 'PARTIAL' || method === 'SPLIT' || (cashAmt > 0 && bankAmt > 0);
+
+  if (isPartial) {
+    if (cashAmt <= 0 || bankAmt <= 0) {
+      throw new Error('Split payment requires both cash and bank amounts');
+    }
+    if (Math.abs(cashAmt + bankAmt - amt) > 0.02) {
+      throw new Error('Cash and bank amounts must equal the advance total');
+    }
+    const cashAcc = parseInt(body.cash_account_id || body.paid_from_account_id || body.account_id, 10);
+    const bankAcc = parseInt(body.bank_account_id, 10);
+    if (!cashAcc || !bankAcc) {
+      throw new Error('Select both cash and bank accounts for split payment');
+    }
+    return {
+      storeMode: 'CASH',
+      accountId: cashAcc,
+      paymentSplit: true,
+      legs: [
+        { amount: cashAmt, accountId: cashAcc, paymentMode: 'CASH' },
+        { amount: bankAmt, accountId: bankAcc, paymentMode: 'BANK_TRANSFER' },
+      ],
+    };
+  }
+
+  const payMode = method === 'BANK' || method === 'BANK_TRANSFER' ? 'BANK_TRANSFER' : 'CASH';
+  const accId = parseInt(
+    body.account_id || (payMode === 'BANK_TRANSFER' ? body.bank_account_id : body.paid_from_account_id || body.cash_account_id),
+    10,
+  );
+  if (!accId) throw new Error('Cash or bank account is required');
+
+  return {
+    storeMode: payMode,
+    accountId: accId,
+    paymentSplit: false,
+    legs: [{ amount: amt, accountId: accId, paymentMode: payMode }],
+  };
+}
+
+async function attachPaymentSplitFlags(db, advances) {
+  if (!advances?.length) return advances;
+  const billNos = advances.map((a) => advanceLedgerBillNo(a.advance_id));
+  const entries = await db.ledger.findMany({
+    where: { bill_no: { in: billNos } },
+    select: { bill_no: true, cash_payment: true, bank_payment: true },
+  });
+  const byBill = new Map();
+  for (const e of entries) {
+    const list = byBill.get(e.bill_no) || [];
+    list.push(e);
+    byBill.set(e.bill_no, list);
+  }
+  return advances.map((a) => {
+    const bill = advanceLedgerBillNo(a.advance_id);
+    const legs = byBill.get(bill) || [];
+    let payment_split = legs.length > 1;
+    if (!payment_split && legs.length === 1) {
+      const c = parseFloat(legs[0].cash_payment || 0);
+      const b = parseFloat(legs[0].bank_payment || 0);
+      payment_split = c > 0 && b > 0;
+    }
+    return { ...a, payment_split };
+  });
 }
 
 /** Cash/bank + employee ledger in one tx — default Prisma 5s timeout is too low on slow DB. */
@@ -214,6 +286,7 @@ export async function GET(request) {
       }));
     }
 
+    advances = await attachPaymentSplitFlags(prisma, advances);
     return NextResponse.json(advances);
   } catch (error) {
     console.error('Error fetching employee advances:', error);
@@ -231,11 +304,10 @@ export async function POST(request) {
 
   try {
     const body = await request.json();
-    const { emp_id, amount, advance_date, payment_mode, account_id, reason, payment_reference } = body;
+    const { emp_id, amount, advance_date, reason, payment_reference } = body;
 
     if (!emp_id) return NextResponse.json({ error: 'Employee is required' }, { status: 400 });
     if (!amount || parseFloat(amount) <= 0) return NextResponse.json({ error: 'Valid advance amount is required' }, { status: 400 });
-    if (!account_id) return NextResponse.json({ error: 'Cash or bank account is required' }, { status: 400 });
 
     const empId = parseInt(emp_id, 10);
     const emp = await prisma.employee.findFirst({
@@ -244,8 +316,14 @@ export async function POST(request) {
     if (!emp) return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
 
     const amt = parseFloat(amount);
-    const payMode = payment_mode || 'CASH';
-    const accId = parseInt(account_id, 10);
+    let paymentPlan;
+    try {
+      paymentPlan = resolveAdvancePaymentLegs(body, amt);
+    } catch (planErr) {
+      return NextResponse.json({ error: planErr.message }, { status: 400 });
+    }
+
+    const { storeMode: payMode, accountId: accId, legs, paymentSplit } = paymentPlan;
     const advDate = advance_date ? advance_date : new Date().toISOString().split('T')[0];
     const reasonText = reason ? String(reason).replace(/'/g, "''") : '';
 
@@ -266,15 +344,17 @@ export async function POST(request) {
       const advanceId = rows?.[0]?.advance_id;
       if (!advanceId) throw new Error('Failed to create advance record');
 
-      await recordAdvanceLedgerPayment(tx, {
-        advanceId,
-        empName: emp.emp_name,
-        amount: amt,
-        accountId: accId,
-        paymentMode: payMode,
-        reference: payment_reference || null,
-        reason: reason || null,
-      });
+      for (const leg of legs) {
+        await recordAdvanceLedgerPayment(tx, {
+          advanceId,
+          empName: emp.emp_name,
+          amount: leg.amount,
+          accountId: leg.accountId,
+          paymentMode: leg.paymentMode,
+          reference: payment_reference || null,
+          reason: reason || null,
+        });
+      }
 
       await recordEmployeeAdvanceDebit(tx, {
         branchId,
@@ -296,6 +376,7 @@ export async function POST(request) {
         account_id: accId,
         reason: reason || null,
         status: 'PENDING',
+        payment_split: paymentSplit,
         ledger_bill_no: advanceLedgerBillNo(advanceId),
         employee: {
           emp_id: emp.emp_id,
@@ -304,6 +385,8 @@ export async function POST(request) {
         },
       };
     }, HR_LEDGER_TX_OPTIONS);
+
+    await recalculateEmployeeLedger(prisma, empId);
 
     return NextResponse.json(advance, { status: 201 });
   } catch (error) {
@@ -401,6 +484,8 @@ export async function DELETE(request) {
       });
       await tx.$executeRawUnsafe(`DELETE FROM employee_advances WHERE advance_id = ${id}`);
     }, HR_LEDGER_TX_OPTIONS);
+
+    await recalculateEmployeeLedger(prisma, row.emp_id);
 
     return NextResponse.json({ success: true, ledger_reversal_bill_no: advanceLedgerReversalBillNo(id) });
   } catch (error) {

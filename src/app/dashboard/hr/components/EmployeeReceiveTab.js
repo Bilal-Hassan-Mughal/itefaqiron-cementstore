@@ -11,9 +11,15 @@ import {
 import {
   Search, Payments, Print, PictureAsPdf, Close, AccountBalanceWallet, FilterList,
 } from '@mui/icons-material';
+import { useRouter } from 'next/navigation';
 import { BRAND, COMPANY } from '@/lib/brand-theme';
 import { buildEmployeeReceiptPrintHtml, downloadEmployeeReceiptPdf } from '@/lib/employee-receipt-pdf';
 import { useHrRefresh, useHrRefreshVersion, HR_KEYS } from '../context/HrRefreshContext';
+import { useHrEmployeeOptions } from '../hooks/useHrEmployeeOptions';
+import HrStatCard from './shared/HrStatCard';
+import HrFormSectionCard from './shared/HrFormSectionCard';
+import EmployeeBalanceChip from './shared/EmployeeBalanceChip';
+import { HR_FIELD_SX } from './shared/hrUiShared';
 
 const CARD_SX = {
   borderRadius: '12px',
@@ -37,13 +43,12 @@ const fmtAmt = (v) =>
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
 export default function EmployeeReceiveTab() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const prefillEmpId = searchParams.get('emp_id') || '';
-  const employeesVersion = useHrRefreshVersion(HR_KEYS.employees);
   const receiptsVersion = useHrRefreshVersion(HR_KEYS.receipts);
   const { invalidateMoneyFromEmployee } = useHrRefresh();
-
-  const [employees, setEmployees] = useState([]);
+  const { activeEmployees, loading: employeesLoading } = useHrEmployeeOptions();
   const [accounts, setAccounts] = useState([]);
   const [receipts, setReceipts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -91,8 +96,8 @@ export default function EmployeeReceiveTab() {
   const accountOptions = form.payment_mode === 'BANK_TRANSFER' ? bankAccounts : cashAccounts;
 
   const selectedEmployee = useMemo(
-    () => employees.find((e) => String(e.emp_id) === String(form.emp_id)) || null,
-    [employees, form.emp_id]
+    () => activeEmployees.find((e) => String(e.emp_id) === String(form.emp_id)) || null,
+    [activeEmployees, form.emp_id]
   );
 
   const loadReceipts = useCallback(async () => {
@@ -107,21 +112,17 @@ export default function EmployeeReceiveTab() {
   }, [filters]);
 
   useEffect(() => {
+    if (prefillEmpId) {
+      setForm((f) => ({ ...f, emp_id: String(prefillEmpId) }));
+      setFilters((f) => ({ ...f, emp_id: String(prefillEmpId) }));
+    }
+  }, [prefillEmpId]);
+
+  useEffect(() => {
     (async () => {
       setLoading(true);
       try {
-        const [empRes, accRes] = await Promise.all([
-          fetch('/api/employees'),
-          fetch('/api/customers?dropdown=true'),
-        ]);
-        if (empRes.ok) {
-          const list = await empRes.json();
-          setEmployees(Array.isArray(list) ? list : []);
-          if (prefillEmpId) {
-            setForm((f) => ({ ...f, emp_id: String(prefillEmpId) }));
-            setFilters((f) => ({ ...f, emp_id: String(prefillEmpId) }));
-          }
-        }
+        const accRes = await fetch('/api/customers?dropdown=true');
         if (accRes.ok) {
           const data = await accRes.json();
           setAccounts(Array.isArray(data) ? data : []);
@@ -130,7 +131,7 @@ export default function EmployeeReceiveTab() {
         setLoading(false);
       }
     })();
-  }, [employeesVersion, prefillEmpId]);
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => { loadReceipts(); }, 300);
@@ -201,69 +202,68 @@ export default function EmployeeReceiveTab() {
     }
   }
 
+  const fieldSx = { ...HR_FIELD_SX, width: '100%' };
+
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 1.5 }}>
-        {[
-          { label: 'Receipts (filtered)', value: stats.count, color: '#1A55E3' },
-          { label: 'Total received', value: fmtAmt(stats.total), color: '#0d9488' },
-          { label: 'Today count', value: stats.todayCount, color: '#7c3aed' },
-          { label: 'Today amount', value: fmtAmt(stats.todayTotal), color: '#f59e0b' },
-        ].map((c) => (
-          <Card key={c.label} sx={CARD_SX}>
-            <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-              <Typography sx={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>{c.label}</Typography>
-              <Typography sx={{ fontSize: '1.25rem', fontWeight: 800, color: c.color }}>{c.value}</Typography>
-            </CardContent>
-          </Card>
-        ))}
+        <HrStatCard label="Receipts (filtered)" value={String(stats.count)} color="#1A55E3" loading={loading} icon={Payments} />
+        <HrStatCard label="Total received" value={fmtAmt(stats.total)} color="#0d9488" loading={loading} />
+        <HrStatCard label="Today count" value={String(stats.todayCount)} color="#7c3aed" loading={loading} />
+        <HrStatCard label="Today amount" value={fmtAmt(stats.todayTotal)} color="#f59e0b" loading={loading} />
       </Box>
 
       <Grid container spacing={2}>
-        <Grid item xs={12} md={4}>
-          <Card sx={{ ...CARD_SX, height: '100%' }}>
-            <CardContent sx={{ p: 2 }}>
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
-                <Payments sx={{ color: '#0d9488' }} />
-                <Typography sx={{ fontWeight: 800, fontSize: '1rem' }}>Receive from employee</Typography>
-              </Stack>
+        <Grid item xs={12} lg={5}>
+          <HrFormSectionCard
+            title="Receive from employee"
+            subtitle="Cash/bank in · Credits employee ledger · Printable receipt"
+            accent="#0d9488"
+            maxWidth={9999}
+          >
               <Box component="form" onSubmit={handleSubmit}>
                 <Stack spacing={2}>
                   <Autocomplete
-                    options={employees.filter((e) => e.status === 'ACTIVE')}
+                    options={activeEmployees}
+                    loading={employeesLoading}
                     getOptionLabel={(o) => `${o.emp_name}${o.designation ? ` (${o.designation})` : ''}`}
                     value={selectedEmployee}
                     onChange={(_, v) => setForm((f) => ({ ...f, emp_id: v ? String(v.emp_id) : '' }))}
                     renderInput={(params) => (
-                      <TextField {...params} label="Employee *" size="small" sx={FIELD_SX} />
+                      <TextField {...params} label="Employee *" sx={fieldSx} />
                     )}
                   />
                   {selectedEmployee && (
-                    <Alert severity="info" sx={{ py: 0.5, fontSize: '0.78rem' }}>
-                      Ledger balance: <strong>{fmtAmt(selectedEmployee.ledger_balance ?? 0)}</strong>
-                      {parseFloat(selectedEmployee.ledger_balance || 0) > 0 ? ' (employee owes)' : ''}
-                    </Alert>
+                    <Stack spacing={1}>
+                      <EmployeeBalanceChip balance={selectedEmployee.ledger_balance ?? 0} />
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => router.push(`/dashboard/hr?module=employee-ledger&emp_id=${selectedEmployee.emp_id}`)}
+                        sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '10px', alignSelf: 'flex-start' }}
+                      >
+                        View employee ledger
+                      </Button>
+                    </Stack>
                   )}
                   <TextField
                     required
-                    size="small"
                     label="Amount (Rs) *"
                     type="number"
                     inputProps={{ step: '0.01', min: 0 }}
                     value={form.amount}
                     onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
-                    sx={FIELD_SX}
+                    sx={fieldSx}
                   />
                   <TextField
-                    size="small"
                     label="Date"
                     type="date"
                     value={form.receipt_date}
                     onChange={(e) => setForm((f) => ({ ...f, receipt_date: e.target.value }))}
                     InputLabelProps={{ shrink: true }}
-                    sx={FIELD_SX}
+                    sx={fieldSx}
                   />
-                  <FormControl size="small" sx={FIELD_SX}>
+                  <FormControl sx={fieldSx}>
                     <InputLabel>Payment mode</InputLabel>
                     <Select
                       label="Payment mode"
@@ -274,7 +274,7 @@ export default function EmployeeReceiveTab() {
                       <MenuItem value="BANK_TRANSFER">Bank transfer</MenuItem>
                     </Select>
                   </FormControl>
-                  <FormControl size="small" sx={FIELD_SX} required>
+                  <FormControl sx={fieldSx} required>
                     <InputLabel>Receive into account *</InputLabel>
                     <Select
                       label="Receive into account *"
@@ -289,33 +289,30 @@ export default function EmployeeReceiveTab() {
                     </Select>
                   </FormControl>
                   <TextField
-                    size="small"
                     label="Reference"
                     value={form.reference}
                     onChange={(e) => setForm((f) => ({ ...f, reference: e.target.value }))}
-                    sx={FIELD_SX}
+                    sx={fieldSx}
                   />
                   <TextField
-                    size="small"
                     label="Notes"
                     multiline
                     minRows={2}
                     value={form.notes}
                     onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                    sx={FIELD_SX}
+                    sx={fieldSx}
                   />
                   <Button
                     type="submit"
                     variant="contained"
                     disabled={submitting}
-                    sx={{ bgcolor: '#0d9488', fontWeight: 700, textTransform: 'none', py: 1.2 }}
+                    sx={{ bgcolor: '#0d9488', fontWeight: 700, textTransform: 'none', py: 1.2, borderRadius: '12px' }}
                   >
                     {submitting ? 'Saving…' : 'Save & print receipt'}
                   </Button>
                 </Stack>
               </Box>
-            </CardContent>
-          </Card>
+          </HrFormSectionCard>
         </Grid>
 
         <Grid item xs={12} md={8}>
@@ -348,7 +345,7 @@ export default function EmployeeReceiveTab() {
                     onChange={(e) => setFilters((f) => ({ ...f, emp_id: e.target.value }))}
                   >
                     <MenuItem value="">All</MenuItem>
-                    {employees.map((e) => (
+                    {activeEmployees.map((e) => (
                       <MenuItem key={e.emp_id} value={String(e.emp_id)}>{e.emp_name}</MenuItem>
                     ))}
                   </Select>

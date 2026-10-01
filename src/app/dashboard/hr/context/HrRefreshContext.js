@@ -12,6 +12,8 @@ import {
 export const HR_KEYS = {
   summary: 'summary',
   employees: 'employees',
+  /** Employee dropdowns (advance/receive) — lighter than full register reload */
+  dropdown: 'dropdown',
   payroll: 'payroll',
   advances: 'advances',
   ledger: 'ledger',
@@ -47,9 +49,22 @@ export function HrRefreshProvider({ children }) {
   const invalidateEmployeeData = useCallback(() => {
     invalidate([
       HR_KEYS.employees,
+      HR_KEYS.dropdown,
       HR_KEYS.ledger,
       HR_KEYS.payroll,
       HR_KEYS.summary,
+      HR_KEYS.attendance,
+      HR_KEYS.advances,
+    ]);
+  }, [invalidate]);
+
+  /** After register save/delete — keep list cache, refresh dropdowns + payroll inputs */
+  const invalidateEmployeeRegisterSave = useCallback(() => {
+    invalidate([
+      HR_KEYS.dropdown,
+      HR_KEYS.attendance,
+      HR_KEYS.payroll,
+      HR_KEYS.ledger,
     ]);
   }, [invalidate]);
 
@@ -57,9 +72,9 @@ export function HrRefreshProvider({ children }) {
     invalidate([
       HR_KEYS.payroll,
       HR_KEYS.advances,
-      HR_KEYS.employees,
       HR_KEYS.ledger,
       HR_KEYS.summary,
+      HR_KEYS.dropdown,
     ]);
   }, [invalidate]);
 
@@ -67,8 +82,8 @@ export function HrRefreshProvider({ children }) {
     invalidate([
       HR_KEYS.receipts,
       HR_KEYS.ledger,
-      HR_KEYS.employees,
       HR_KEYS.summary,
+      HR_KEYS.dropdown,
     ]);
   }, [invalidate]);
 
@@ -77,6 +92,7 @@ export function HrRefreshProvider({ children }) {
       versions,
       invalidate,
       invalidateEmployeeData,
+      invalidateEmployeeRegisterSave,
       invalidatePayrollFlow,
       invalidateMoneyFromEmployee,
     }),
@@ -84,6 +100,7 @@ export function HrRefreshProvider({ children }) {
       versions,
       invalidate,
       invalidateEmployeeData,
+      invalidateEmployeeRegisterSave,
       invalidatePayrollFlow,
       invalidateMoneyFromEmployee,
     ]

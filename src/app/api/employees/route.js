@@ -4,11 +4,13 @@ import { initBranchScope } from '@/lib/branch-server';
 import {
   ensureEmployeeLedgerSchema,
   setEmployeeOpeningBalance,
-  recalculateEmployeeLedger,
+  ensureEmployeeStartingBalanceSynced,
   getEmployeeLedgerClosingsMap,
 } from '@/lib/employee-ledger';
 import {
   fetchRegisterEmployeeList,
+  fetchRegisterEmployeeStats,
+  fetchRegisterEmployeeDropdown,
   enrichEmployeeRegisterRow,
 } from './register-helpers';
 
@@ -39,7 +41,21 @@ export async function GET(request) {
     const branchId = __branchScope.branchId ?? 1;
 
     if (register) {
-      const list = await fetchRegisterEmployeeList(prisma, branchId, { status });
+      if (searchParams.get('stats') === 'true') {
+        const stats = await fetchRegisterEmployeeStats(prisma, branchId, { status });
+        return NextResponse.json(stats);
+      }
+      if (searchParams.get('dropdown') === 'true') {
+        const list = await fetchRegisterEmployeeDropdown(prisma, branchId);
+        return NextResponse.json(list);
+      }
+      const limitParam = searchParams.get('limit');
+      const list = await fetchRegisterEmployeeList(prisma, branchId, {
+        status,
+        limit: limitParam ? parseInt(limitParam, 10) : undefined,
+        offset: parseInt(searchParams.get('offset') || '0', 10),
+        search: searchParams.get('q') || undefined,
+      });
       return NextResponse.json(list);
     }
 
@@ -104,6 +120,7 @@ export async function POST(request) {
     await ensureEmployeeLedgerSchema(prisma);
 
     const employee = await prisma.$transaction(async (tx) => {
+      const openingStored = Number.isFinite(openingVal) ? openingVal : 0;
       const created = await tx.employee.create({
         data: {
           branch_id: branchId,
@@ -115,6 +132,7 @@ export async function POST(request) {
           department: department || null,
           join_date: joinDate,
           basic_salary: parseFloat(basic_salary) || 0,
+          opening_balance: openingStored,
           allowed_leaves_per_month: Number.isFinite(parseInt(allowed_leaves_per_month, 10)) ? parseInt(allowed_leaves_per_month, 10) : 2,
           allowed_absents_per_month: Number.isFinite(parseInt(allowed_absents_per_month, 10)) ? parseInt(allowed_absents_per_month, 10) : 0,
         },
@@ -196,7 +214,8 @@ export async function PUT(request) {
           openingBalance: openingVal,
           joinDate: join_date ? new Date(join_date) : updated.join_date,
         });
-        await recalculateEmployeeLedger(tx, updated.emp_id);
+      } else {
+        await ensureEmployeeStartingBalanceSynced(tx, updated.emp_id, branchId, updated.emp_name);
       }
       return updated;
     }, { timeout: 30000 });

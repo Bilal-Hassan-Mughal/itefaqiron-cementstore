@@ -56,8 +56,9 @@ export function getPayrollPeriodEndDay(month, year, asOfDate = new Date()) {
   asOf.setHours(0, 0, 0, 0);
 
   const monthIndex = month - 1;
+  // Month is entirely after "as of" (e.g. paying a future month) — use full calendar month, not zero days.
   if (asOf.getFullYear() < year || (asOf.getFullYear() === year && asOf.getMonth() < monthIndex)) {
-    return 0;
+    return daysInMonth;
   }
   if (asOf.getFullYear() > year || (asOf.getFullYear() === year && asOf.getMonth() > monthIndex)) {
     return daysInMonth;
@@ -115,9 +116,9 @@ export function detectBranchOffDays(employees, attendanceRecords, month, year, a
  * - PRESENT / HOLIDAY (off day) = full paid day, no deduction
  * - LEAVE = leave unit (allowed leaves applied in calcPayroll)
  * - ABSENT = absent unit (allowed absents applied in calcPayroll)
- * - Unmarked (no record) = present — full month pay unless explicitly absent/leave
+ * - Unmarked (no record) = ignored — no pay, no absent, no extra deduction (mark day when ready)
  * - HALF_DAY = 0.5 paid present (shown in Half column; not counted as absent)
- * - offDays: branch off-day headers — unmarked cells treated as HOLIDAY (paid)
+ * - offDays: only used for sheet UI; payroll needs explicit HOLIDAY/PRESENT mark to pay that day
  */
 export function aggregateAttendanceForPayroll({
   month,
@@ -128,11 +129,19 @@ export function aggregateAttendanceForPayroll({
   offDays = [],
 }) {
   const daysInMonth = getDaysInMonth(month, year);
-  const lastDay = getPayrollPeriodEndDay(month, year, asOfDate);
+  let lastDay = getPayrollPeriodEndDay(month, year, asOfDate);
   const byDate = {};
   for (const r of attendanceRecords) {
     const key = toDateKey(r.att_date);
     if (key) byDate[key] = r.status;
+  }
+
+  if (lastDay <= 0) {
+    const hasMarksInMonth = Object.keys(byDate).some((key) => {
+      const parts = parseDateOnly(key);
+      return parts && parts.year === year && parts.month === month;
+    });
+    if (hasMarksInMonth) lastDay = daysInMonth;
   }
 
   let totalDays = 0;
@@ -144,9 +153,9 @@ export function aggregateAttendanceForPayroll({
   let absentDays = 0;
   let halfDays = 0;
   let holidayDays = 0;
+  let unmarkedDays = 0;
 
   const join = parseDateOnly(joinDate);
-  const offDaySet = new Set(offDays);
 
   if (join && (join.year > year || (join.year === year && join.month > month))) {
     return {
@@ -159,6 +168,7 @@ export function aggregateAttendanceForPayroll({
       absent_days: 0,
       half_days: 0,
       holiday_days: 0,
+      unmarked_days: 0,
     };
   }
 
@@ -177,9 +187,11 @@ export function aggregateAttendanceForPayroll({
   for (let day = periodStart; day <= lastDay; day++) {
     totalDays += 1;
     const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    let status = byDate[key];
-    if (!status && offDaySet.has(day)) {
-      status = 'HOLIDAY';
+    const status = byDate[key];
+
+    if (!status) {
+      unmarkedDays += 1;
+      continue;
     }
 
     switch (status) {
@@ -205,8 +217,6 @@ export function aggregateAttendanceForPayroll({
         absentDays += 1;
         break;
       default:
-        presentUnits += 1;
-        presentDays += 1;
         break;
     }
   }
@@ -222,6 +232,7 @@ export function aggregateAttendanceForPayroll({
       absent_days: 0,
       half_days: 0,
       holiday_days: 0,
+      unmarked_days: 0,
     };
   }
 
@@ -235,6 +246,7 @@ export function aggregateAttendanceForPayroll({
     absent_days: absentDays,
     half_days: halfDays,
     holiday_days: holidayDays,
+    unmarked_days: unmarkedDays,
   };
 }
 
@@ -271,11 +283,16 @@ export function splitPendingAdvances(advances = [], month, year) {
   };
 }
 
-/** Prefer ledger closing; if unset/zero, use employees.opening_balance (pre-system). */
+/**
+ * Signed employee balance (+ employee owes, − company owes).
+ * Use employees.opening_balance only when there is no ledger closing value yet (null/undefined).
+ * A ledger closing of 0 is valid — do not fall back to opening (that caused stale opening deductions).
+ */
 export function resolveEmployeeReceivableBalance(ledgerClosing, openingBalance) {
-  const ledger = parseFloat(ledgerClosing ?? 0);
   const opening = parseFloat(openingBalance ?? 0);
-  if (Math.abs(ledger) >= 0.01) return ledger;
+  if (ledgerClosing != null && ledgerClosing !== '' && !Number.isNaN(parseFloat(ledgerClosing))) {
+    return parseFloat(ledgerClosing);
+  }
   return opening;
 }
 
@@ -301,7 +318,9 @@ export function splitEmployeeLedgerForPayroll(signedBalance) {
   };
 }
 
-/** Unpaid absents/leaves vs full monthly basic (shown as absent deduction in clearance). */
+/**
+ * Deduction display for marked excess leave/absent only — unmarked days are not "unpaid" cuts.
+ */
 export function resolveAbsentDeductionFromBasic(row, derived, month, year) {
   const basic = parseFloat(row?.basic_salary ?? 0);
   if (!derived || basic <= 0.009) {
@@ -309,44 +328,35 @@ export function resolveAbsentDeductionFromBasic(row, derived, month, year) {
   }
   const m = parseInt(month, 10);
   const y = parseInt(year, 10);
-  const bonus = parseFloat(derived.bonus ?? 0);
-  const other = parseFloat(derived.other_deduction ?? 0);
-  const gross = parseFloat(derived.gross_earned ?? 0);
-  const fromDays = Math.round((gross - bonus + other) * 100) / 100;
-  const amount = Math.max(0, Math.round((basic - fromDays) * 100) / 100);
-  const perDay = parseFloat(derived.deduction_per_day ?? 0)
-    || basic / Math.max(1, getDaysInMonth(m, y));
-  const unpaidDays = perDay > 0.009 ? Math.round((amount / perDay) * 10) / 10 : 0;
   const excessAbsents = parseFloat(derived.excess_absents ?? 0);
   const excessLeaves = parseFloat(derived.excess_leaves ?? 0);
+  const perDay = parseFloat(derived.deduction_per_day ?? 0)
+    || basic / Math.max(1, getDaysInMonth(m, y));
+  const unpaidDays = Math.round((excessAbsents + excessLeaves) * 10) / 10;
+  const amount = Math.round(unpaidDays * perDay * 100) / 100;
   let detail = '';
   if (amount > 0.009) {
     const parts = [];
-    if (excessAbsents > 0.009) parts.push(`${excessAbsents} absent`);
-    if (excessLeaves > 0.009) parts.push(`${excessLeaves} excess leave`);
-    detail = parts.length
-      ? `${parts.join(', ')} · ${unpaidDays} unpaid day(s) @ ${Math.round(perDay * 100) / 100}/day from basic`
-      : `${unpaidDays} unpaid day(s) vs full month basic (Rs ${Math.round(basic * 100) / 100})`;
+    if (excessAbsents > 0.009) parts.push(`${excessAbsents} absent over limit`);
+    if (excessLeaves > 0.009) parts.push(`${excessLeaves} leave over limit`);
+    detail = `${parts.join(', ')} · ${Math.round(perDay * 100) / 100}/day`;
   }
   return { amount, perDay, unpaidDays, excessAbsents, excessLeaves, detail };
 }
 
-/** Att Ded column: unpaid absents/leaves vs basic (+ legacy total_deduction if any). Display only — net pay already uses reduced earned. */
+/** Att Ded column: only marked excess leave/absent — unmarked days do not show here. */
 export function resolveMonthAttDedDisplay(row = {}, tabMonth, tabYear) {
   const legacy = parseFloat(row.total_deduction ?? 0);
   if (legacy > 0.009) return legacy;
+  const excessAbs = parseFloat(row.excess_absents ?? 0);
+  const excessLeave = parseFloat(row.excess_leaves ?? 0);
+  if (excessAbs <= 0.009 && excessLeave <= 0.009) return 0;
   const m = parseInt(row.month ?? tabMonth, 10);
   const y = parseInt(row.year ?? tabYear, 10);
   if (!m || !y) return 0;
-  const derived = {
-    gross_earned: resolveMonthGrossEarned(row),
-    bonus: row.bonus,
-    other_deduction: row.other_deduction,
-    deduction_per_day: row.deduction_per_day,
-    excess_absents: row.excess_absents,
-    excess_leaves: row.excess_leaves,
-  };
-  return resolveAbsentDeductionFromBasic(row, derived, m, y).amount;
+  const perDay = parseFloat(row.deduction_per_day ?? 0)
+    || parseFloat(row.basic_salary ?? 0) / Math.max(1, getDaysInMonth(m, y));
+  return Math.round((excessAbs + excessLeave) * perDay * 100) / 100;
 }
 
 /** Project employee ledger (+ owes / − company owes) after this clearance. */
@@ -432,6 +442,7 @@ export function previewClearancePayroll(row, form = {}, tabMonth, tabYear) {
     month: m,
     year: y,
     derived: { ...derived, net_salary: monthNet },
+    unmarked_days: parseFloat(row.unmarked_days ?? 0),
     monthNetAttendance,
     accountRecovery: accountRecovery,
     advanceAppliedThisMonth,

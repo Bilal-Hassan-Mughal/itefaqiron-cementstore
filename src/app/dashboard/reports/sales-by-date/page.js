@@ -3,19 +3,24 @@
 import { TailwindDateInput } from '../../components/date-filter-input';
 import { useState, useEffect, useRef } from 'react';
 import { formatDatePK } from '@/lib/date-helper';
+import {
+  saleReportNetTotal,
+  saleReportShippingDisplay,
+  saleReportSubtotal,
+} from '@/lib/sale-report-amounts';
 import { 
   Calendar,
   Download,
   Printer,
   ArrowLeft,
   Search,
-  DollarSign,
   ShoppingCart,
   TrendingDown,
   TrendingUp,
-  Truck
+  Truck,
+  DollarSign,
 } from 'lucide-react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, Table as MuiTable, TableBody as MuiTableBody, TableCell as MuiTableCell, TableContainer as MuiTableContainer, TableHead as MuiTableHead, TableRow as MuiTableRow, Paper } from '@mui/material';
+import { Dialog, DialogContent, DialogActions, Button, Box, Typography, Table as MuiTable, TableBody as MuiTableBody, TableCell as MuiTableCell, TableContainer as MuiTableContainer, TableHead as MuiTableHead, TableRow as MuiTableRow, Paper } from '@mui/material';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '../../components/dashboard-layout';
 
@@ -38,53 +43,18 @@ export default function SalesByDateReport() {
   const [selectedIndex, setSelectedIndex] = useState(null);
   const rowRefs = useRef([]);
   const listContainerRef = useRef(null);
-  const selectedSummaryRef = useRef(null);
-  const pageContainerRef = useRef(null);
-  const salesHeaderRef = useRef(null);
-  const actionsRef = useRef(null);
-  const [summaryFixedStyle, setSummaryFixedStyle] = useState(null);
 
-  const ensureVisibleInContainer = (el, align = 'auto') => {
+  const scrollRowIntoView = (el) => {
     const container = listContainerRef.current;
     if (!container || !el) return;
-    const summaryOffset = (selectedSummaryRef.current && selectedSummaryRef.current.offsetHeight) || (summaryFixedStyle && summaryFixedStyle.estimatedHeight) || 0;
     const elTop = el.offsetTop;
     const elBottom = elTop + el.offsetHeight;
-    const viewTop = container.scrollTop + 0;
+    const viewTop = container.scrollTop;
     const viewBottom = container.scrollTop + container.clientHeight;
-
-    const scrollTo = (top, smooth = false) => {
-      try {
-        if (typeof container.scrollTo === 'function') {
-          container.scrollTo({ top: Math.max(0, Math.min(top, container.scrollHeight - container.clientHeight)), behavior: smooth ? 'smooth' : 'auto' });
-        } else {
-          container.scrollTop = Math.max(0, Math.min(top, container.scrollHeight - container.clientHeight));
-        }
-      } catch (err) {
-        container.scrollTop = Math.max(0, Math.min(top, container.scrollHeight - container.clientHeight));
-      }
-    };
-
-    if (align === 'start') {
-      scrollTo(elTop - summaryOffset - 8);
-    } else if (align === 'end') {
-      scrollTo(elBottom - container.clientHeight + summaryOffset + 8);
-    } else if (align === 'center') {
-      scrollTo(elTop - Math.floor((container.clientHeight - el.offsetHeight) / 2) - summaryOffset, true);
-    } else if (align === 'below') {
-      // place the element just below the sticky summary
-      scrollTo(elTop - summaryOffset - 8, true);
-      // ensure we don't scroll past the bottom
-      if (container.scrollTop + container.clientHeight > container.scrollHeight) {
-        scrollTo(container.scrollHeight - container.clientHeight);
-      }
-    } else {
-      // auto behavior
-      if (elTop < viewTop + summaryOffset) {
-        scrollTo(elTop - summaryOffset - 8, false);
-      } else if (elBottom > viewBottom) {
-        scrollTo(elBottom - container.clientHeight + 8, false);
-      }
+    if (elTop < viewTop + 36) {
+      container.scrollTop = Math.max(0, elTop - 36);
+    } else if (elBottom > viewBottom) {
+      container.scrollTop = elBottom - container.clientHeight + 8;
     }
   };
 
@@ -128,11 +98,11 @@ export default function SalesByDateReport() {
   // Compute readable totals for the selected sale to avoid complex inline JSX expressions
   const getSaleTotals = (sale) => {
     if (!sale) return null;
-    const subtotal = parseFloat(sale.total_amount || 0) || 0;
+    const subtotal = saleReportSubtotal(sale);
     const discount = parseFloat(sale.discount || 0) || 0;
     const labour = parseFloat(sale.labour_charges || 0) || 0;
     const shipping = parseFloat(sale.shipping_amount || 0) || 0;
-    const netTotal = subtotal - discount + labour + shipping;
+    const netTotal = saleReportNetTotal(sale);
     const prevBalance = parseFloat(sale.previous_balance ?? sale.prev_balance ?? sale.previous_customer_balance ?? sale.customer?.cus_balance ?? 0) || 0;
     const cash = parseFloat(sale.cash_payment || 0) || 0;
     const bank = parseFloat(sale.bank_payment || 0) || 0;
@@ -151,138 +121,6 @@ export default function SalesByDateReport() {
     const n = Number(v) || 0;
     return fmtAmt(n);
   };
-  const formatNumber = (v) => {
-    const n = Number(v) || 0;
-    return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-  };
-
-  // Estimate summary height from number of product rows (used as fallback before measured height)
-  const getEstimatedHeight = (sale) => {
-    const rows = (sale?.sale_details || sale?.details || sale?.items || []).length || 0;
-    return Math.min(320, rows * 34 + 84);
-  };
-
-  // Fallback style used while measured summary style isn't available yet
-  const fallbackSummaryStyle = selectedSale ? {
-    top: `96px`,
-    left: `16px`,
-    width: `960px`,
-    height: `${getEstimatedHeight(selectedSale)}px`,
-    estimatedHeight: getEstimatedHeight(selectedSale),
-    placedAbove: false
-  } : null;
-
-  useEffect(() => {
-    const updateFixedStyle = () => {
-      const container = pageContainerRef.current;
-      if (!container) {
-        setSummaryFixedStyle(null);
-        return;
-      }
-      const header = salesHeaderRef.current; // header may be hidden when a sale is selected
-      const headerRect = header ? header.getBoundingClientRect() : container.getBoundingClientRect();
-      const containerRect = container.getBoundingClientRect();
-
-      // Estimate summary height (rows * approx height + header). This avoids measuring a hidden element.
-      const rows = (selectedSale?.sale_details || selectedSale?.details || selectedSale?.items || []).length || 0;
-      const estimatedHeight = Math.min(320, rows * 34 + 84); // clamp to reasonable max
-
-      // Position the fixed summary under the action buttons (Export/Print) but span main content width for readability
-      const actionsEl = actionsRef.current;
-      let top = 8;
-      let left = containerRect.left + 16; // small left gutter inside page container
-      let width = Math.min(containerRect.width - 32, 960); // cap width for readability
-      if (actionsEl) {
-        const aRect = actionsEl.getBoundingClientRect();
-        top = Math.max(8, aRect.bottom + 8);
-        // position the summary under the actions but keep it wide enough for product details
-        left = containerRect.left + 16;
-        width = Math.min(containerRect.width - 32, 960);
-      } else {
-        // fallback: place below header and full content width
-        top = Math.max(8, headerRect.bottom + 8);
-        left = containerRect.left + 16;
-        width = Math.min(containerRect.width - 32, 960);
-      }
-      // ensure list container has padding so the fixed summary doesn't cover the top rows
-      const listCont = listContainerRef.current;
-      if (listCont) listCont.style.paddingTop = `${estimatedHeight + 16}px`;
-      const placedAbove = false;
-      setSummaryFixedStyle({ top: `${top}px`, left: `${left}px`, width: `${width}px`, height: `${estimatedHeight}px`, estimatedHeight, placedAbove });
-    };
-
-    updateFixedStyle();
-    window.addEventListener('resize', updateFixedStyle);
-    window.addEventListener('scroll', updateFixedStyle, true);
-    return () => {
-      window.removeEventListener('resize', updateFixedStyle);
-      window.removeEventListener('scroll', updateFixedStyle, true);
-    };
-  }, [selectedSale]);
-
-  // Measure actual summary height after render and update style so padding follows real content height
-  useEffect(() => {
-    if (!selectedSale) return;
-    const el = selectedSummaryRef.current;
-    if (!el) return;
-
-    // animate the summary content for smooth transitions when user navigates between sales
-    try {
-      el.style.transition = 'opacity 180ms ease, transform 180ms ease, max-height 260ms ease';
-      el.style.opacity = '0';
-      el.style.transform = 'translateY(-6px)';
-      requestAnimationFrame(() => {
-        el.style.opacity = '1';
-        el.style.transform = 'translateY(0)';
-      });
-    } catch (err) {
-      /* ignore DOM styling errors */
-    }
-
-    const setMeasuredHeight = () => {
-      const h = el.offsetHeight;
-      setSummaryFixedStyle((s) => (s ? { ...s, height: `${h}px`, estimatedHeight: h } : s));
-    };
-
-    // reset inner product list scroll to top for a smoother flow
-    const innerScroll = el.querySelector('.overflow-auto');
-    if (innerScroll && typeof innerScroll.scrollTo === 'function') {
-      try { innerScroll.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { innerScroll.scrollTop = 0; }
-    }
-
-    setMeasuredHeight();
-    const ro = new ResizeObserver(setMeasuredHeight);
-    ro.observe(el);
-    return () => {
-      ro.disconnect();
-      try { el.style.transition = ''; el.style.transform = ''; el.style.opacity = ''; } catch (e) {}
-    };
-  }, [selectedSale]);
-
-  // Apply padding to the scrollable list so the fixed summary never covers the header/rows
-  useEffect(() => {
-    const applyPadding = () => {
-      const container = listContainerRef.current;
-      const pageContainer = pageContainerRef.current;
-      if (!container) return;
-      if (selectedSale) {
-        const measured = selectedSummaryRef.current ? selectedSummaryRef.current.offsetHeight : (summaryFixedStyle ? summaryFixedStyle.estimatedHeight : getEstimatedHeight(selectedSale));
-        const pad = (measured || 0) + 16;
-        // animate padding change for a smooth flow
-        container.style.transition = 'padding-top 220ms ease';
-        container.style.paddingTop = `${pad}px`;
-      } else {
-        container.style.transition = 'padding-top 220ms ease';
-        container.style.paddingTop = '';
-        if (pageContainer) pageContainer.style.paddingTop = '';
-      }
-    };
-
-    applyPadding();
-    window.addEventListener('resize', applyPadding);
-    return () => window.removeEventListener('resize', applyPadding);
-  }, [selectedSale, summaryFixedStyle]);
-
   const handleListKeyDown = (e) => {
     if (!salesData || !salesData.sales || salesData.sales.length === 0) return;
     const key = e.key;
@@ -305,18 +143,10 @@ export default function SalesByDateReport() {
     setSelectedIndex(ni);
     setSelectedSale(salesData.sales[ni]);
     const el = rowRefs.current[ni];
-    if (el && el.focus) {
-      // focus without browser auto-scroll, then ensure visibility inside the inner scrollable list
+    if (el?.focus) {
       el.focus({ preventScroll: true });
-      ensureVisibleInContainer(el, 'below');
+      scrollRowIntoView(el);
     }
-  };
-
-  const computeHeaderTop = () => {
-    const measured = selectedSummaryRef.current
-      ? selectedSummaryRef.current.offsetHeight
-      : (summaryFixedStyle ? summaryFixedStyle.estimatedHeight : (selectedSale ? getEstimatedHeight(selectedSale) : 0));
-    return measured ? measured + 16 : 0;
   };
 
   const handlePrint = () => {
@@ -347,8 +177,10 @@ export default function SalesByDateReport() {
     csv += 'Sale ID,Date,Customer,Items,Total Amount,Discount,Shipping,Net Total,Payment,Bill Type\n';
     
     salesData.sales.forEach(sale => {
-      const netTotal = parseFloat(sale.total_amount) - parseFloat(sale.discount) + parseFloat(sale.shipping_amount || 0);
-      csv += `${sale.sale_id},${formatDatePK(sale.created_at)},${sale.customer?.cus_name || 'N/A'},${sale.sale_details?.length || 0},${fmtAmt(sale.total_amount)},${fmtAmt(sale.discount)},${fmtAmt(sale.shipping_amount)},${fmtAmt(netTotal)},${fmtAmt(sale.payment)},${sale.bill_type}\n`;
+      const netTotal = saleReportNetTotal(sale);
+      const subtotal = saleReportSubtotal(sale);
+      const shippingDisplay = saleReportShippingDisplay(sale);
+      csv += `${sale.sale_id},${formatDatePK(sale.created_at)},${sale.customer?.cus_name || 'N/A'},${sale.sale_details?.length || 0},${fmtAmt(subtotal)},${fmtAmt(sale.discount)},${fmtAmt(shippingDisplay)},${fmtAmt(netTotal)},${fmtAmt(sale.payment)},${sale.bill_type}\n`;
     });
 
     // Add totals
@@ -508,48 +340,117 @@ export default function SalesByDateReport() {
     setTimeout(() => { w.print(); }, 300);
   };
 
+  const LEDGER_VISIBLE_ROWS = 10;
+  const LEDGER_ROW_PX = 34;
+  const LEDGER_HEAD_PX = 36;
+  const ledgerScrollHeightPx = LEDGER_HEAD_PX + LEDGER_ROW_PX * LEDGER_VISIBLE_ROWS;
+
+  const gridBorder = 'border border-slate-300';
+  const thBase =
+    `${gridBorder} px-2.5 py-2 text-[10px] font-bold uppercase tracking-wide whitespace-nowrap sticky top-0 z-20`;
+  const thInfo = `${thBase} bg-slate-700 text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]`;
+  const thMoney = `${thBase} text-white`;
+  const thAmount = `${thMoney} bg-indigo-800/95`;
+  const thDiscount = `${thMoney} bg-rose-800/95`;
+  const thShipping = `${thMoney} bg-sky-800/95`;
+  const thNet = `${thMoney} bg-emerald-800/95`;
+  const tdBase = `${gridBorder} px-2.5 text-[12px] align-middle h-[34px] max-h-[34px] py-0 leading-[34px]`;
+  const tdNum = `${tdBase} tabular-nums text-right font-medium`;
+  const tdTextCell = `${tdBase} text-slate-700`;
+  const colAmt = 'bg-indigo-50/80 text-slate-900';
+  const colDisc = 'bg-rose-50/80 text-rose-900';
+  const colShip = 'bg-sky-50/80 text-sky-950';
+  const colNet = 'bg-emerald-50/90 text-emerald-950 font-semibold';
+  const rowEven = 'bg-white';
+  const rowOdd = 'bg-slate-50';
+  const rowSelected = '!bg-blue-100/90';
+  const ledgerTableClass = 'w-full table-fixed border-collapse min-w-[980px] border border-slate-400 print:table';
+
+  const LedgerColgroup = () => (
+    <colgroup>
+      <col className="w-[4%]" />
+      <col className="w-[11%]" />
+      <col className="w-[8%]" />
+      <col className="w-[26%]" />
+      <col className="w-[6%]" />
+      <col className="w-[12%]" />
+      <col className="w-[10%]" />
+      <col className="w-[10%]" />
+      <col className="w-[12%]" />
+      <col className="w-[7%]" />
+    </colgroup>
+  );
+
+  const summaryCard =
+    'rounded-xl border bg-white p-3 shadow-sm min-w-0 flex flex-col justify-center';
+
   return (
     <DashboardLayout>
-      <div id="printable-report" className="h-full flex flex-col overflow-hidden print:overflow-visible">
-        {/* Header - Hide on print */}
-        <div className="flex-shrink-0 mb-6 print:hidden">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
+      <div id="printable-report" className="h-full flex flex-col min-h-0 bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50/40 print:bg-white print:overflow-visible">
+        {/* Toolbar */}
+        <div className="flex-shrink-0 print:hidden px-4 pt-4 pb-2">
+          <div className="rounded-2xl border border-slate-200/90 bg-white/90 backdrop-blur-sm shadow-sm">
+            <div className="px-4 py-3.5 flex flex-wrap items-center gap-3">
               <button
+                type="button"
                 onClick={() => router.push('/dashboard/reports')}
-                className="mr-4 p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+                className="p-2.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors duration-200"
+                title="Back to reports"
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900">Sales Report (By Date)</h2>
-                <p className="text-gray-600 mt-1">View sales transactions within a date range</p>
+              <div className="flex items-center gap-3 min-w-[200px]">
+                <div className="hidden sm:flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-600/25">
+                  <ShoppingCart className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 leading-tight tracking-tight">Sales Report (By Date)</h2>
+                  <p className="text-xs text-slate-500">Posted BILL invoices · ledger view</p>
+                </div>
               </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Filters - Hide on print */}
-        <div className="flex-shrink-0 mb-6 print:hidden">
-          <div className="bg-white rounded-2xl shadow-lg border border-gray-100/50 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Date Range Filter</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
-                <TailwindDateInput value={startDate} onChange={setStartDate} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
-                <TailwindDateInput value={endDate} onChange={setEndDate} />
-              </div>
-              <div className="flex items-end">
+              <div className="flex flex-wrap items-end gap-2.5 ml-auto">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-2.5 py-1.5">
+                  <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-0.5">From</label>
+                  <TailwindDateInput
+                    value={startDate}
+                    onChange={setStartDate}
+                    inputClassName="text-xs py-1 min-w-[128px] bg-transparent border-0 focus:ring-0 px-0"
+                  />
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-2.5 py-1.5">
+                  <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-0.5">To</label>
+                  <TailwindDateInput
+                    value={endDate}
+                    onChange={setEndDate}
+                    inputClassName="text-xs py-1 min-w-[128px] bg-transparent border-0 focus:ring-0 px-0"
+                  />
+                </div>
                 <button
+                  type="button"
                   onClick={fetchReport}
                   disabled={loading}
-                  className="w-full bg-gradient-to-r from-blue-500 to-cyan-500 text-white px-6 py-2 rounded-lg hover:from-blue-600 hover:to-cyan-600 transition-all duration-200 font-medium shadow-md hover:shadow-lg disabled:opacity-50"
+                  className="h-[42px] px-5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm shadow-blue-600/20 disabled:opacity-55 transition-all duration-200 active:scale-[0.98]"
                 >
-                  {loading ? 'Loading...' : 'Generate Report'}
+                  {loading ? 'Loading…' : 'Generate'}
                 </button>
+                {salesData && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleExport}
+                      className="h-[42px] px-4 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl hover:bg-emerald-100/90 flex items-center gap-1.5 transition-colors duration-200"
+                    >
+                      <Download className="w-4 h-4" /> Export
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handlePrint}
+                      className="h-[42px] px-4 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 flex items-center gap-1.5 transition-colors duration-200"
+                    >
+                      <Printer className="w-4 h-4" /> Print
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -576,34 +477,39 @@ export default function SalesByDateReport() {
               </div>
             </div>
 
-            {/* Action Buttons - Hide on print */}
-            <div ref={actionsRef} className="flex-shrink-0 mb-4 print:hidden">
-              <div className="flex items-center justify-end space-x-3">
-                <button
-                  onClick={handleExport}
-                  className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200"
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Export CSV
-                </button>
-                <button
-                  onClick={handlePrint}
-                  className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors duration-200"
-                >
-                  <Printer className="w-4 h-4 mr-2" />
-                  Print
-                </button>
-              </div>
-            </div>
-
-            {/* Selected Sale Summary (products only) - moved into scrollable area to stay fixed */}
-
             {/* Sale details modal (match Sales page invoice format) */}
-            <Dialog open={showDetailsModal} onClose={() => setShowDetailsModal(false)} maxWidth="lg" fullWidth>
-              <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: 'primary.main', color: 'white', py: 2, px: 3 }}>
-                <Typography variant="h6" sx={{ fontWeight: 'bold' }}>Bill Details - #{selectedSale?.sale_id}</Typography>
-                <Button size="small" onClick={() => setShowDetailsModal(false)} sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)' }}>Close</Button>
-              </DialogTitle>
+            <Dialog
+              open={showDetailsModal}
+              onClose={() => setShowDetailsModal(false)}
+              maxWidth="lg"
+              fullWidth
+              aria-labelledby="sales-by-date-bill-dialog-title"
+              PaperProps={{ sx: { borderRadius: 3, overflow: 'hidden' } }}
+            >
+              <Box
+                id="sales-by-date-bill-dialog-title"
+                component="div"
+                sx={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)',
+                  color: 'white',
+                  py: 2,
+                  px: 3,
+                  fontWeight: 700,
+                  fontSize: '1.1rem',
+                }}
+              >
+                <span>Bill Details — #{selectedSale?.sale_id}</span>
+                <Button
+                  size="small"
+                  onClick={() => setShowDetailsModal(false)}
+                  sx={{ color: 'white', border: '1px solid rgba(255,255,255,0.35)', borderRadius: 2, '&:hover': { bgcolor: 'rgba(255,255,255,0.12)' } }}
+                >
+                  Close
+                </Button>
+              </Box>
               <DialogContent dividers>
                 {selectedSale ? (
                   <Box sx={{ width: '100%', bgcolor: 'white' }}>
@@ -823,171 +729,178 @@ export default function SalesByDateReport() {
                 <Button onClick={() => setShowDetailsModal(false)} variant="outlined">Close</Button>
               </DialogActions>
             </Dialog>
-            {/* Sales Table */}
-            <div className="flex-1 min-h-0 print:min-h-0 print:block">
-              <div ref={pageContainerRef} className="bg-white rounded-lg shadow print:shadow-none print:border print:border-gray-300 h-full flex flex-col print:block">
-                {!selectedSale && (
-                  <div ref={salesHeaderRef} className="flex-shrink-0 px-6 py-4 border-b border-gray-200">
-                    <h3 className="text-lg font-semibold text-gray-900">Sales Transactions</h3>
-                  </div>
-                )}
-                
-                <div ref={listContainerRef} tabIndex={0} onKeyDown={handleListKeyDown} className="flex-1 overflow-auto print:overflow-visible print:block">
-                  {/* Selected Sale Summary (fixed under action buttons) */}
-                  {selectedSale && (
+            {/* Summary + grid */}
+            <div className={`flex-1 min-h-0 flex flex-col px-4 pb-4 print:p-0 gap-3 transition-opacity duration-300 ${loading ? 'opacity-60 pointer-events-none' : ''}`}>
+              {selectedSale && (
+                <div className="print:hidden flex flex-wrap items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50/90 border border-blue-200/80 text-xs shadow-sm">
+                  <span className="font-bold text-blue-900">#{selectedSale.sale_id}</span>
+                  <span className="text-slate-600 truncate max-w-[220px]">{selectedSale.customer?.cus_name || '—'}</span>
+                  <span className="tabular-nums font-semibold text-slate-800 ml-auto">
+                    Net {formatCurrency(selectedTotals?.netTotal ?? saleReportNetTotal(selectedSale))}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowDetailsModal(true)}
+                    className="px-3 py-1.5 font-semibold text-blue-800 bg-white border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
+                  >
+                    Open invoice
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedSale(null); setSelectedIndex(null); }}
+                    className="px-2 py-1.5 text-slate-500 hover:text-slate-800 transition-colors"
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+
+              <div className="print:hidden grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+                <div className={`${summaryCard} border-slate-200/90`}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5" /> Period
+                  </p>
+                  <p className="mt-1.5 text-xs sm:text-sm font-bold text-slate-900 leading-snug truncate" title={`${formatDatePK(startDate)} — ${formatDatePK(endDate)}`}>
+                    {formatDatePK(startDate)} — {formatDatePK(endDate)}
+                  </p>
+                </div>
+                <div className={`${summaryCard} border-slate-200/90`}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 flex items-center gap-1">
+                    <ShoppingCart className="w-3.5 h-3.5" /> Invoices
+                  </p>
+                  <p className="mt-1.5 text-xl font-bold text-slate-900 tabular-nums">{salesData.summary.totalSales}</p>
+                </div>
+                <div className={`${summaryCard} border-indigo-200/90 bg-indigo-50/40`}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-indigo-800/90 flex items-center gap-1">
+                    <DollarSign className="w-3.5 h-3.5" /> Amount
+                  </p>
+                  <p className="mt-1.5 text-sm font-bold text-indigo-950 tabular-nums truncate">{formatCurrency(salesData.summary.totalAmount)}</p>
+                </div>
+                <div className={`${summaryCard} border-rose-200/90 bg-rose-50/50`}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-rose-800/90 flex items-center gap-1">
+                    <TrendingDown className="w-3.5 h-3.5" /> Discount
+                  </p>
+                  <p className="mt-1.5 text-sm font-bold text-rose-900 tabular-nums truncate">{formatCurrency(salesData.summary.totalDiscount)}</p>
+                </div>
+                <div className={`${summaryCard} border-sky-200/90 bg-sky-50/50`}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-sky-900/90 flex items-center gap-1">
+                    <Truck className="w-3.5 h-3.5" /> Shipping
+                  </p>
+                  <p className="mt-1.5 text-sm font-bold text-sky-950 tabular-nums truncate">{formatCurrency(salesData.summary.totalShipping)}</p>
+                </div>
+                <div className={`${summaryCard} border-emerald-300/80 bg-emerald-50/60 sm:col-span-3 xl:col-span-1`}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-900/90 flex items-center gap-1">
+                    <TrendingUp className="w-3.5 h-3.5" /> Net sales
+                  </p>
+                  <p className="mt-1.5 text-sm font-bold text-emerald-950 tabular-nums truncate">{formatCurrency(salesData.summary.netTotal)}</p>
+                </div>
+              </div>
+
+              <div className="flex-shrink-0 flex flex-col rounded-2xl border border-slate-200/90 bg-white shadow-lg shadow-slate-200/40 overflow-hidden print:border print:shadow-none mt-1">
+                <div className="overflow-x-auto px-2 py-2 print:px-0 print:py-0">
+                  <div className="min-w-[980px]">
                     <div
-                      ref={selectedSummaryRef}
-                      role="region"
-                      aria-labelledby={`sale-summary-${selectedSale.sale_id}`}
-                      style={{ position: 'fixed', zIndex: 90, boxSizing: 'border-box', paddingRight: 96, boxShadow: '0 10px 30px rgba(220,38,38,0.12)', ...(summaryFixedStyle || fallbackSummaryStyle), height: 'auto', maxHeight: '60vh' }}
-                      className="mb-4 bg-white rounded-2xl border-4 border-red-700 p-5 print:hidden overflow-visible">
-                      <div aria-hidden="true" className="absolute left-0 top-0 h-full w-1 bg-red-700 rounded-l-2xl" />
-
-                      <button
-                        onClick={() => { setSelectedSale(null); setSelectedIndex(null); }}
-                        aria-label="Close sale summary"
-                        className="absolute right-4 top-4 bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-300"
-                      >
-                        ✕
-                      </button>
-
-                      <div className="pl-4">
-                        <div className="flex items-start justify-between mb-3">
-                          <div>
-                            <div id={`sale-summary-${selectedSale.sale_id}`} className="text-2xl md:text-3xl font-extrabold text-gray-900">Bill: #{selectedSale.sale_id}</div>
-                            <div className="text-sm text-gray-500 mt-1">{selectedSale.customer?.cus_name || '-'}</div>
-                          </div>
-
-                          <div className="text-right flex flex-col items-end gap-2">
-                            <div className="flex items-center gap-3">
-                              <div className="bg-red-50 border border-red-100 text-red-800 px-3 py-2 rounded-lg shadow-sm text-center min-w-[76px]">
-                                <div className="text-xs text-gray-500">Total Qty</div>
-                                <div className="text-base md:text-lg font-extrabold">{fmtAmt(selectedTotals?.totalQty || 0)}</div>
-                              </div>
-                              <div className="bg-red-100 border border-red-200 text-red-900 px-3 py-2 rounded-lg shadow-sm text-center min-w-[120px]">
-                                <div className="text-xs text-gray-500">Total Amount</div>
-                                <div className="text-lg md:text-2xl font-extrabold">Rs. {((selectedTotals && selectedTotals.netTotal) || parseFloat(selectedSale.total_amount || 0)).toFixed(2)}</div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="overflow-auto rounded-md border border-gray-100" style={{ maxHeight: '60vh' }}>
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="bg-gray-50">
-                                <th className="px-3 py-2 text-left text-sm font-semibold">S#</th>
-                                <th className="px-3 py-2 text-left text-sm font-semibold">Product</th>
-                                <th className="px-3 py-2 text-right text-sm font-semibold">Qty</th>
-                                <th className="px-3 py-2 text-right text-sm font-semibold">Amount</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                              {(selectedSale.sale_details || selectedSale.details || selectedSale.items || []).map((d, i) => (
-                                <tr key={i} className={`${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
-                                  <td className="px-3 py-2 text-sm text-gray-700">{i + 1}</td>
-                                  <td className="px-3 py-2 text-sm text-gray-800" style={{maxWidth:360, whiteSpace:'normal', wordBreak:'break-word', overflowWrap: 'anywhere'}}>{d.product?.pro_title || d.product_name || '-'}</td>
-                                  <td className="px-3 py-2 text-sm text-right font-semibold">{fmtAmt(parseFloat(d.qnty || 0) || 0)}</td>
-                                  <td className="px-3 py-2 text-sm text-right">{fmtAmt(parseFloat(d.total_amount || d.amount || 0) || 0)}</td>
-                                </tr>
-                              ))}
-
-                              {/* Totals row aligned under Qty and Amount columns */}
-                              {((selectedSale.sale_details || selectedSale.details || selectedSale.items || []).length > 0) && (
-                                <tr className="bg-red-50 border-t border-red-100">
-                                  <td colSpan={2} className="px-3 py-3 text-sm font-semibold text-red-800">TOTAL</td>
-                                  <td className="px-3 py-3 text-sm text-right font-extrabold text-red-800 text-lg">{fmtAmt(selectedTotals?.totalQty || 0)}</td>
-                                  <td className="px-3 py-3 text-sm text-right font-extrabold text-red-800 text-lg">Rs. {fmtAmt(selectedTotals?.lineItemsTotal || 0)}</td>
-                                </tr>
-                              )}
-
-                              {((selectedSale.sale_details || selectedSale.details || selectedSale.items || []).length === 0) && (
-                                <tr><td colSpan="4" className="px-3 py-6 text-center text-gray-500">No items for this sale</td></tr>
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  <table aria-label="Sales by date report" className="min-w-full divide-y divide-gray-200 print:block print:table">
-                    {!selectedSale && (
-                      <thead className="bg-white sticky print:relative shadow-sm" style={{ top: `${computeHeaderTop()}px`, zIndex: 40 }}>
-                      <tr>
-                        <th scope="col" className="px-6 py-4 w-36 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Date</th>
-                        <th scope="col" className="px-6 py-4 w-28 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Sale ID</th>
-                        <th scope="col" className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Customer</th>
-                        <th scope="col" className="px-6 py-4 w-20 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Items</th>
-                        <th scope="col" className="px-6 py-4 w-32 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Amount</th>
-                        <th scope="col" className="px-6 py-4 w-28 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider hidden sm:table-cell">Discount</th>
-                        <th scope="col" className="px-6 py-4 w-28 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider hidden sm:table-cell">Shipping</th>
-                        <th scope="col" className="px-6 py-4 w-32 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Net Total</th>
-                        <th scope="col" className="px-6 py-4 w-24 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Type</th>
+                      ref={listContainerRef}
+                      tabIndex={0}
+                      onKeyDown={handleListKeyDown}
+                      style={{ height: ledgerScrollHeightPx }}
+                      className="sales-report-scroll overflow-y-auto overflow-x-hidden scroll-smooth print:h-auto print:max-h-none print:overflow-visible"
+                    >
+                      <table aria-label="Sales by date report" className={ledgerTableClass}>
+                        <LedgerColgroup />
+                        <thead>
+                      <tr className="h-[36px]">
+                        <th scope="col" className={`${thInfo} text-center`}>#</th>
+                        <th scope="col" className={`${thInfo} text-left`}>Date</th>
+                        <th scope="col" className={`${thInfo} text-left`}>Sale ID</th>
+                        <th scope="col" className={`${thInfo} text-left`}>Customer</th>
+                        <th scope="col" className={`${thInfo} text-center`}>Items</th>
+                        <th scope="col" className={`${thAmount} text-right`}>Amount</th>
+                        <th scope="col" className={`${thDiscount} text-right hidden sm:table-cell`}>Discount</th>
+                        <th scope="col" className={`${thShipping} text-right hidden sm:table-cell`}>Shipping</th>
+                        <th scope="col" className={`${thNet} text-right`}>Net Total</th>
+                        <th scope="col" className={`${thInfo} text-center`}>Type</th>
                       </tr>
                     </thead>
-                    )}
-                    <tbody className="bg-white divide-y divide-gray-200">
-                          {salesData.sales.map((sale, i) => {
-                        const netTotal = (parseFloat(sale.total_amount) || 0) - (parseFloat(sale.discount) || 0) + (parseFloat(sale.shipping_amount || 0) || 0);
+                    <tbody className="sales-report-tbody print:table-row-group">
+                      {salesData.sales.map((sale, i) => {
+                        const netTotal = saleReportNetTotal(sale);
+                        const rowSubtotal = saleReportSubtotal(sale);
+                        const rowShipping = saleReportShippingDisplay(sale);
+                        const isSelected = selectedIndex === i || (selectedSale && selectedSale.sale_id === sale.sale_id);
+                        const rowDelay = Math.min(i, 20) * 18;
                         return (
                           <tr
                             key={sale.sale_id}
-                            ref={(el) => (rowRefs.current[i] = el)}
+                            ref={(el) => { rowRefs.current[i] = el; }}
                             tabIndex={0}
-                            onClick={() => { setSelectedSale(sale); setSelectedIndex(i); const el = rowRefs.current[i]; if (el && el.focus) { el.focus({ preventScroll: true }); ensureVisibleInContainer(rowRefs.current[i], 'below'); } }}
-                            className={`hover:bg-gray-50 print:hover:bg-white cursor-pointer transition-colors duration-150 ${selectedIndex === i || (selectedSale && selectedSale.sale_id === sale.sale_id) ? 'ring-2 ring-blue-300 bg-blue-50' : ''}`}
+                            style={{ animationDelay: `${rowDelay}ms` }}
+                            onClick={() => {
+                              setSelectedSale(sale);
+                              setSelectedIndex(i);
+                              const el = rowRefs.current[i];
+                              if (el?.focus) el.focus({ preventScroll: true });
+                            }}
+                            onDoubleClick={() => { setSelectedSale(sale); setShowDetailsModal(true); }}
+                            className={`sales-report-row group cursor-pointer outline-none transition-colors duration-150 ${
+                              isSelected ? 'ring-2 ring-inset ring-blue-500/70' : ''
+                            }`}
                           >
-                            <td className="px-6 py-5 align-middle text-sm text-gray-900">
-                              {formatDatePK(sale.created_at)}
+                            <td className={`${tdTextCell} text-center text-[11px] font-semibold text-slate-500 ${isSelected ? rowSelected : i % 2 === 0 ? rowEven : rowOdd}`}>{i + 1}</td>
+                            <td className={`${tdTextCell} ${isSelected ? rowSelected : i % 2 === 0 ? rowEven : rowOdd}`}>{formatDatePK(sale.created_at)}</td>
+                            <td className={`${tdNum} text-left font-bold text-slate-900 ${isSelected ? rowSelected : i % 2 === 0 ? rowEven : rowOdd}`}>{sale.sale_id}</td>
+                            <td className={`${tdTextCell} !leading-snug ${isSelected ? rowSelected : i % 2 === 0 ? rowEven : rowOdd}`}>
+                              <span className="block truncate font-medium text-slate-800 leading-tight py-1" title={sale.customer?.cus_name || ''}>
+                                {sale.customer?.cus_name || 'N/A'}
+                              </span>
                             </td>
-                            <td className="px-6 py-5 align-middle text-sm text-gray-900">
-                              {sale.sale_id.toString().slice(-8)}
-                            </td>
-                            <td className="px-6 py-5 align-middle text-sm text-gray-900">
-                              {sale.customer?.cus_name || 'N/A'}
-                            </td>
-                            <td className="px-6 py-5 align-middle text-sm text-center text-gray-900">
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800">
+                            <td className={`${tdNum} text-center ${isSelected ? rowSelected : i % 2 === 0 ? rowEven : rowOdd}`}>
+                              <span className="inline-flex min-w-[1.5rem] justify-center rounded-sm border border-slate-300 bg-white px-1 text-[11px] font-bold text-slate-700 leading-none py-0.5">
                                 {sale.sale_details?.length || 0}
                               </span>
                             </td>
-                            <td className="px-6 py-5 align-middle text-sm text-right text-gray-900 font-medium">
-                              {formatCurrency(sale.total_amount)}
-                            </td>
-                            <td className="px-6 py-5 align-middle text-sm text-right text-red-600 hidden sm:table-cell">
-                              {formatCurrency(sale.discount)}
-                            </td>
-                            <td className="px-6 py-5 align-middle text-sm text-right text-blue-600 hidden sm:table-cell">
-                              {formatCurrency(sale.shipping_amount || 0)}
-                            </td>
-                            <td className="px-6 py-5 align-middle text-sm text-right font-semibold text-green-600">
-                              {formatCurrency(netTotal)}
-                            </td>
-                            <td className="px-6 py-5 align-middle text-sm text-center text-gray-900">
+                            <td className={`${tdNum} ${colAmt} ${isSelected ? rowSelected : ''}`}>{formatCurrency(rowSubtotal)}</td>
+                            <td className={`${tdNum} ${colDisc} hidden sm:table-cell ${isSelected ? rowSelected : ''}`}>{formatCurrency(sale.discount)}</td>
+                            <td className={`${tdNum} ${colShip} hidden sm:table-cell ${isSelected ? rowSelected : ''}`}>{formatCurrency(rowShipping)}</td>
+                            <td className={`${tdNum} ${colNet} ${isSelected ? rowSelected : ''}`}>{formatCurrency(netTotal)}</td>
+                            <td className={`${tdTextCell} text-center ${isSelected ? rowSelected : i % 2 === 0 ? rowEven : rowOdd}`}>
                               <button
+                                type="button"
                                 onClick={(e) => { e.stopPropagation(); setSelectedSale(sale); setShowDetailsModal(true); }}
-                                className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800 hover:opacity-90"
-                                title={`View bill ${sale.sale_id}`}>
+                                className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-indigo-800 bg-white border border-indigo-300 rounded hover:bg-indigo-700 hover:text-white transition-colors"
+                              >
                                 {sale.bill_type}
                               </button>
                             </td>
                           </tr>
                         );
                       })}
-                    </tbody>
-                    <tfoot className="bg-gray-50 font-semibold">
-                      <tr>
-                        <td colSpan="4" className="px-6 py-4 text-right text-sm text-gray-700">TOTAL:</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">{formatCurrency(salesData.summary.totalAmount)}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-red-600 hidden sm:table-cell">{formatCurrency(salesData.summary.totalDiscount)}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-blue-600 hidden sm:table-cell">{formatCurrency(salesData.summary.totalShipping)}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-green-600">{formatCurrency(salesData.summary.netTotal)}</td>
-                        <td></td>
-                      </tr>
-                    </tfoot>
-                  </table>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <table aria-label="Sales by date totals" className={`${ledgerTableClass} border-t-2 border-slate-500 mt-2`}>
+                      <LedgerColgroup />
+                      <tfoot>
+                        <tr className="font-bold h-[38px]">
+                          <td colSpan={5} className={`${tdTextCell} !h-[38px] !leading-[38px] text-right uppercase text-[11px] tracking-wider bg-slate-300/90 text-slate-900`}>
+                            Total
+                          </td>
+                          <td className={`${tdNum} !h-[38px] !leading-[38px] bg-indigo-100 text-indigo-950`}>{formatCurrency(salesData.summary.totalAmount)}</td>
+                          <td className={`${tdNum} !h-[38px] !leading-[38px] bg-rose-100 text-rose-900 hidden sm:table-cell`}>{formatCurrency(salesData.summary.totalDiscount)}</td>
+                          <td className={`${tdNum} !h-[38px] !leading-[38px] bg-sky-100 text-sky-950 hidden sm:table-cell`}>{formatCurrency(salesData.summary.totalShipping)}</td>
+                          <td className={`${tdNum} !h-[38px] !leading-[38px] bg-emerald-200/90 text-emerald-950`}>{formatCurrency(salesData.summary.netTotal)}</td>
+                          <td className={`${tdTextCell} !h-[38px] bg-slate-300/90`} />
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
                 </div>
               </div>
+              <p className="print:hidden text-[11px] text-slate-500 px-1 flex items-center gap-1.5">
+                <Search className="w-3.5 h-3.5 opacity-60" />
+                {LEDGER_VISIBLE_ROWS} rows visible · scroll for more · Click row · Double-click or Enter for invoice · ↑↓ to navigate
+              </p>
             </div>
 
             {/* Print Footer - Only show on print */}
@@ -1003,13 +916,21 @@ export default function SalesByDateReport() {
           </>
         )}
 
-        {!salesData && !loading && (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <Calendar className="mx-auto h-12 w-12 text-gray-400" />
-              <h3 className="mt-2 text-sm font-medium text-gray-900">No Report Generated</h3>
-              <p className="mt-1 text-sm text-gray-500">
-                Select a date range and click &quot;Generate Report&quot; to view data
+        {!salesData && (
+          <div className="flex-1 flex items-center justify-center p-8">
+            <div className="text-center max-w-sm rounded-2xl border border-slate-200/90 bg-white/90 px-8 py-10 shadow-sm">
+              {loading ? (
+                <div className="mx-auto h-10 w-10 rounded-full border-2 border-blue-200 border-t-blue-600 animate-spin" />
+              ) : (
+                <Calendar className="mx-auto h-12 w-12 text-blue-400/80" />
+              )}
+              <h3 className="mt-4 text-base font-semibold text-slate-900">
+                {loading ? 'Generating report…' : 'No report yet'}
+              </h3>
+              <p className="mt-2 text-sm text-slate-500 leading-relaxed">
+                {loading
+                  ? 'Fetching sales for your date range.'
+                  : 'Choose dates above and click Generate to load the ledger.'}
               </p>
             </div>
           </div>
@@ -1017,14 +938,58 @@ export default function SalesByDateReport() {
       </div>
 
       <style jsx global>{`
+        .sales-report-scroll {
+          scroll-behavior: smooth;
+          scrollbar-width: thin;
+          scrollbar-color: #94a3b8 transparent;
+        }
+        .sales-report-scroll::-webkit-scrollbar {
+          width: 10px;
+          height: 10px;
+        }
+        .sales-report-scroll::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .sales-report-scroll::-webkit-scrollbar-thumb {
+          background: linear-gradient(180deg, #cbd5e1, #94a3b8);
+          border-radius: 999px;
+          border: 2px solid transparent;
+          background-clip: padding-box;
+        }
+        .sales-report-scroll::-webkit-scrollbar-thumb:hover {
+          background: linear-gradient(180deg, #94a3b8, #64748b);
+          background-clip: padding-box;
+        }
+        @keyframes salesReportRowIn {
+          from {
+            opacity: 0;
+            transform: translateY(6px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        .sales-report-row {
+          animation: salesReportRowIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .sales-report-row {
+            animation: none;
+          }
+          .sales-report-scroll {
+            scroll-behavior: auto;
+          }
+        }
         @media print {
           @page { size: A4 landscape; margin: 8mm; }
-          .no-print { display: none !important; }
-          body { font-size: 10px !important; background: white !important; margin: 0 !important; padding: 0 !important; }
+          body { font-size: 9px !important; background: white !important; }
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-          table { width: 100% !important; table-layout: fixed !important; border-collapse: collapse !important; font-size: 9px !important; }
-          th, td { padding: 4px 6px !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; }
-          th { position: static !important; }
+          .sales-report-row { animation: none !important; }
+          table { width: 100% !important; border-collapse: collapse !important; }
+          th, td { border: 1px solid #64748b !important; padding: 3px 5px !important; }
+          thead th { background: #e2e8f0 !important; position: static !important; }
+          tfoot td { background: #cbd5e1 !important; font-weight: bold !important; }
           tr { page-break-inside: avoid !important; }
           thead { display: table-header-group !important; }
           tfoot { display: table-footer-group !important; }

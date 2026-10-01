@@ -8,7 +8,23 @@ const fmt = (v) =>
 function fmtDate(d) {
   if (!d) return '—';
   const dt = new Date(d);
-  return Number.isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-GB');
+  if (Number.isNaN(dt.getTime())) return '—';
+  return dt.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function sortEntriesChronological(entries = []) {
+  return [...entries].sort((a, b) => {
+    const ta = new Date(a.created_at).getTime();
+    const tb = new Date(b.created_at).getTime();
+    if (ta !== tb) return ta - tb;
+    return (parseInt(a.el_id, 10) || 0) - (parseInt(b.el_id, 10) || 0);
+  });
 }
 
 function balanceLabel(closing) {
@@ -83,10 +99,10 @@ export async function downloadEmployeeLedgerPdf({
       y
     );
     y += 5;
-    doc.text(`Opening (pre-system): Rs ${fmt(employee.opening_balance)}`, 14, y);
+    doc.text(`Starting balance: Rs ${fmt(employee.opening_balance)}`, 14, y);
     y += 5;
     const close = closingBalance ?? employee.closing_balance;
-    doc.text(`Closing: ${balanceLabel(close)}`, 14, y);
+    doc.text(`Account balance: ${balanceLabel(close)}`, 14, y);
     y += 5;
   } else {
     doc.text('All employees — combined transactions (as shown on screen)', 14, y);
@@ -101,20 +117,24 @@ export async function downloadEmployeeLedgerPdf({
   }
 
   const head = showEmployeeColumn
-    ? ['Date', 'Employee', 'Type', 'Cash/Bank', 'Bill #', 'Particulars', 'Debit', 'Credit', 'Balance']
-    : ['Date', 'Type', 'Cash/Bank', 'Bill #', 'Particulars', 'Debit', 'Credit', 'Balance'];
+    ? ['Date & time', 'Employee', 'Cash/Bank', 'Bill #', 'Particulars', 'Debit', 'Credit', 'Balance', 'Type']
+    : ['Date & time', 'Cash/Bank', 'Bill #', 'Particulars', 'Debit', 'Credit', 'Balance', 'Type'];
 
-  const body = entries.map((row) => {
+  const rowsForPdf = sortEntriesChronological(entries);
+
+  const body = rowsForPdf.map((row) => {
     const channel = row.payment_channel || (row.trnx_type === 'SALARY_PAYMENT' ? 'Salary' : '—');
+    const balN = parseFloat(row.closing_balance || 0);
+    const balCell = Math.abs(balN) < 0.009 ? '0' : (balN < 0 ? `-${fmt(Math.abs(balN))}` : fmt(balN));
     const base = [
       fmtDate(row.created_at),
-      typeLabel(row.trnx_type, entryTypes),
       channel,
       row.bill_no || '—',
       String(row.details || '—').slice(0, 120),
       row.debit_amount > 0 ? fmt(row.debit_amount) : '—',
       row.credit_amount > 0 ? fmt(row.credit_amount) : '—',
-      fmt(row.closing_balance),
+      balCell,
+      typeLabel(row.trnx_type, entryTypes),
     ];
     if (showEmployeeColumn) {
       return [base[0], row.emp_name || '—', ...base.slice(1)];
@@ -122,7 +142,7 @@ export async function downloadEmployeeLedgerPdf({
     return base;
   });
 
-  const totals = entries.reduce(
+  const totals = rowsForPdf.reduce(
     (acc, r) => ({
       debit: acc.debit + parseFloat(r.debit_amount || 0),
       credit: acc.credit + parseFloat(r.credit_amount || 0),
@@ -157,17 +177,19 @@ export async function downloadEmployeeLedgerPdf({
       ? {
         0: { cellWidth: 22 },
         1: { cellWidth: 26 },
-        5: { cellWidth: 48 },
+        4: { cellWidth: 48 },
+        5: { halign: 'right', cellWidth: 20 },
         6: { halign: 'right', cellWidth: 20 },
-        7: { halign: 'right', cellWidth: 20 },
-        8: { halign: 'right', cellWidth: 22 },
+        7: { halign: 'right', cellWidth: 28 },
+        8: { cellWidth: 24 },
       }
       : {
         0: { cellWidth: 22 },
-        4: { cellWidth: 58 },
+        3: { cellWidth: 58 },
+        4: { halign: 'right', cellWidth: 22 },
         5: { halign: 'right', cellWidth: 22 },
-        6: { halign: 'right', cellWidth: 22 },
-        7: { halign: 'right', cellWidth: 24 },
+        6: { halign: 'right', cellWidth: 28 },
+        7: { cellWidth: 24 },
       },
     margin: { left: 14, right: 14 },
   });

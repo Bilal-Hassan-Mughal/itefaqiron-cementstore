@@ -72,7 +72,12 @@ export async function GET(request) {
     const sheet = searchParams.get('sheet') === 'true';
 
     if (sheet && month && year) {
-      const payload = await buildAttendanceSheetPayload(prisma, branchId, month, year);
+      const limit = searchParams.get('limit');
+      const offset = searchParams.get('offset');
+      const payload = await buildAttendanceSheetPayload(prisma, branchId, month, year, {
+        limit: limit ? parseInt(limit, 10) : undefined,
+        offset: offset ? parseInt(offset, 10) : undefined,
+      });
       return NextResponse.json(payload);
     }
 
@@ -146,7 +151,7 @@ export async function POST(request) {
     if (Array.isArray(body)) {
       const result = await prisma.$transaction(
         (tx) => batchSaveAttendanceSheet(tx, branchId, body),
-        { timeout: 60000 },
+        { timeout: 120000, maxWait: 10000 },
       );
       return NextResponse.json({ ok: true, ...result });
     }

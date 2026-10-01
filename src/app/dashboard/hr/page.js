@@ -40,7 +40,7 @@ const HR_MODULES = [
   {
     id: 'employees',
     title: 'Employee Register',
-    description: 'Add and manage employee profiles, contact details, and contract salary.',
+    description: 'Register staff, set starting account balance, salary, and leave limits — syncs to Employee Account Ledger.',
     icon: BadgeIcon,
     accent: '#1A55E3',
     accentDark: '#1347c4',
@@ -66,8 +66,8 @@ const HR_MODULES = [
   },
   {
     id: 'salary-clearance',
-    title: 'Salary Clearance',
-    description: 'Process final payments and recover outstanding advances.',
+    title: 'Pay Salary',
+    description: 'Pay staff for the month from cash or bank. See a simple total, then print the salary receipt.',
     icon: PaymentsIcon,
     accent: '#7c3aed',
     accentDark: '#6d28d9',
@@ -85,7 +85,7 @@ const HR_MODULES = [
   {
     id: 'employee-ledger',
     title: 'Employee Account Ledger',
-    description: 'View each employee’s running balance — opening, advances, receipts, and salary recovery.',
+    description: 'View each employee’s account balance — starting amount, advances, receipts, and salary recovery.',
     icon: AccountBalanceWallet,
     accent: '#0d9488',
     accentDark: '#0f766e',
@@ -103,7 +103,7 @@ const HR_MODULES = [
   {
     id: 'salary-receipt',
     title: 'Salary Receipt',
-    description: 'Print official monthly salary invoice for any employee.',
+    description: 'Re-print paid salaries — bilingual A5 invoice (Urdu/English) with attendance grid.',
     icon: ReceiptIcon,
     accent: '#4f46e5',
     accentDark: '#4338ca',
@@ -315,7 +315,7 @@ function HrPageContent() {
   );
 
   const isFlatModule = ['attendance', 'salary-sheet', 'salary-clearance', 'salary-advance', 'employee-ledger', 'employee-receive', 'salary-receipt'].includes(activeModule);
-  const hideHrHubHeader = activeModule === 'employee-ledger';
+  const hideHrHubHeader = false;
   const { invalidate } = useHrRefresh();
 
   const openModule = (moduleId) => {

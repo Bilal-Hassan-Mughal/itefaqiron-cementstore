@@ -17,12 +17,11 @@ function money(val) {
 
 function freezeClosedSummary(summary, dayEnd) {
   if (!dayEnd || dayEnd.status !== 'CLOSED') return summary;
-  const expected = money(dayEnd.cash_in_hand);
+  const expected = money(summary.expectedCashInHand);
   const actual = dayEnd.closing_cash != null ? money(dayEnd.closing_cash) : null;
-  const bank = dayEnd.bank_balance != null ? money(dayEnd.bank_balance) : money(summary.expectedClosingBank);
+  const bank = money(summary.expectedClosingBank);
   return {
     ...summary,
-    openingCash: money(dayEnd.opening_cash),
     totalSales: money(dayEnd.total_sales),
     totalPurchases: money(dayEnd.total_purchases),
     totalExpenses: money(dayEnd.total_expenses),
@@ -30,9 +29,9 @@ function freezeClosedSummary(summary, dayEnd) {
     totalPayments: money(dayEnd.total_payments),
     expectedCashInHand: expected,
     actualClosingCash: actual,
-    variance: actual != null ? money(actual - expected) : 0,
-    savedClosingBank: dayEnd.bank_balance != null ? bank : summary.savedClosingBank,
-    expectedClosingBank: dayEnd.bank_balance != null ? bank : summary.expectedClosingBank,
+    variance: actual != null ? money(actual - expected) : summary.variance,
+    savedClosingBank: dayEnd.bank_balance != null ? money(dayEnd.bank_balance) : summary.savedClosingBank,
+    expectedClosingBank: bank,
     closingBalance: expected,
     closingCashBalance: expected,
     closingCombinedBalance: money(expected + bank),
@@ -108,6 +107,7 @@ export async function GET(request) {
       dayEnd: dayEnd
         ? {
             ...dayEnd,
+            opening_cash: summary.openingCash,
             total_sales: summary.totalSales,
             total_purchases: summary.totalPurchases,
             total_expenses: summary.totalExpenses,
@@ -184,8 +184,6 @@ export async function POST(request) {
     const body = await request.json();
     const {
       business_date,
-      opening_cash,
-      closing_cash,
       notes,
       closed_by,
       action,
@@ -250,16 +248,8 @@ export async function POST(request) {
       const closeBlocked = await assertCanCloseBusinessDay(dateStr);
       if (closeBlocked) return closeBlocked;
     }
-    if (isClosing && (closing_cash === undefined || closing_cash === null || closing_cash === '')) {
-      return NextResponse.json(
-        { error: 'Enter physical closing cash before closing the day.' },
-        { status: 400 }
-      );
-    }
-
     const snapshot = await loadDayEndSnapshot(prisma, {
       dateStr,
-      openingCashOverride: opening_cash,
       dayEndRecord: existingDayEnd,
       branchId,
     });
@@ -276,8 +266,9 @@ export async function POST(request) {
       }
     }
 
+    // Closing cash = Cash Report ledger expected (variance always zero).
     const finalClosingCash = isClosing
-      ? parseFloat(closing_cash)
+      ? summary.expectedCashInHand
       : (existingDayEnd?.closing_cash != null ? parseFloat(existingDayEnd.closing_cash) : null);
 
     const result = await prisma.$transaction(async (tx) => {
@@ -321,25 +312,14 @@ export async function POST(request) {
       return { dayEnd, detailsCount: details.length };
     });
 
-    let warning = null;
-    if (isClosing && finalClosingCash != null) {
-      const discrepancy = finalClosingCash - summary.expectedCashInHand;
-      if (Math.abs(discrepancy) > 0.01) {
-        warning = discrepancy < 0
-          ? `Cash shortage: physical cash is ${Math.abs(discrepancy).toFixed(2)} PKR less than expected (${summary.expectedCashInHand.toFixed(2)}).`
-          : `Cash excess: physical cash is ${discrepancy.toFixed(2)} PKR more than expected (${summary.expectedCashInHand.toFixed(2)}).`;
-      }
-    }
-
     const nextRequiredDate = isClosing ? await findNextCloseableDate(dateStr) : null;
 
     return NextResponse.json({
       ...result.dayEnd,
-      warning,
       details_count: result.detailsCount,
       expected_cash_in_hand: summary.expectedCashInHand,
       expected_closing_bank: summary.expectedClosingBank,
-      variance: isClosing ? (finalClosingCash - summary.expectedCashInHand) : summary.variance,
+      variance: isClosing ? 0 : summary.variance,
       nextRequiredDate,
     });
   } catch (error) {

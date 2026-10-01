@@ -1,42 +1,76 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState, useEffect } from 'react';
 import {
   Box, Typography, Button, TextField, Card, CardContent,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Paper, IconButton, Chip, InputAdornment, MenuItem,
-  FormControl, InputLabel, Select, LinearProgress, Skeleton,
+  FormControl, InputLabel, Select, LinearProgress, Skeleton, Tooltip, Stack,
 } from '@mui/material';
-import { Add, Edit, Delete, Search } from '@mui/icons-material';
+import { Add, Edit, Delete, Search, AccountBalanceWallet, MenuBook } from '@mui/icons-material';
 import { BRAND } from '@/lib/brand-theme';
-import { CARD_SX, FILTER_SX, fmtAmt, filterEmployees } from './employeeRegisterShared';
+import { CARD_SX, FILTER_SX, fmtAmt } from './employeeRegisterShared';
+import HrStatCard from '../shared/HrStatCard';
+import EmployeeBalanceChip from '../shared/EmployeeBalanceChip';
+import { HR_TABLE_HEAD_SX } from '../shared/hrUiShared';
+import HrLoadMoreTrigger from '../shared/HrLoadMoreTrigger';
 
 export default function EmployeeRegisterList({
   employees,
+  stats,
+  total,
   loading,
+  loadingMore,
   refreshing,
+  hasMore,
+  onLoadMore,
+  search,
+  onSearchChange,
+  statusFilter,
+  onStatusFilterChange,
   onAdd,
   onEdit,
   onDelete,
+  onViewLedger,
 }) {
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ALL');
+  const scrollRef = useRef(null);
+  const [localSearch, setLocalSearch] = useState(search ?? '');
 
-  const filtered = useMemo(
-    () => filterEmployees(employees, { search, statusFilter }),
-    [employees, search, statusFilter]
-  );
+  useEffect(() => {
+    setLocalSearch(search ?? '');
+  }, [search]);
 
-  const stats = useMemo(() => {
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (localSearch !== (search ?? '')) onSearchChange?.(localSearch);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [localSearch, search, onSearchChange]);
+
+  const headerStats = useMemo(() => {
+    if (stats) {
+      return {
+        total: stats.total ?? total ?? 0,
+        active: stats.active ?? 0,
+        inactive: stats.inactive ?? 0,
+        totalSalary: stats.totalSalary ?? 0,
+        receivable: stats.receivable ?? 0,
+      };
+    }
     const list = employees || [];
     const active = list.filter((e) => e.status === 'ACTIVE');
+    const receivable = list.reduce((s, e) => {
+      const b = parseFloat(e.ledger_balance ?? e.opening_balance ?? 0);
+      return b > 0 ? s + b : s;
+    }, 0);
     return {
-      total: list.length,
+      total: total ?? list.length,
       active: active.length,
       inactive: list.length - active.length,
-      totalSalary: active.reduce((s, e) => s + parseFloat(e.basic_salary || 0), 0),
+      totalSalary: active.reduce((sum, e) => sum + parseFloat(e.basic_salary || 0), 0),
+      receivable,
     };
-  }, [employees]);
+  }, [stats, employees, total]);
 
   const showSkeleton = loading && employees.length === 0;
 
@@ -56,24 +90,18 @@ export default function EmployeeRegisterList({
         />
       )}
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 1.5 }}>
-        {[
-          { label: 'Total', value: stats.total, color: '#1A55E3' },
-          { label: 'Active', value: stats.active, color: '#00a868' },
-          { label: 'Inactive', value: stats.inactive, color: '#64748b' },
-          { label: 'Total Basic Salary', value: fmtAmt(stats.totalSalary), color: '#5E6EED' },
-        ].map((c) => (
-          <Card key={c.label} sx={CARD_SX}>
-            <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-              <Typography sx={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>{c.label}</Typography>
-              {showSkeleton ? (
-                <Skeleton width={64} height={32} />
-              ) : (
-                <Typography sx={{ fontSize: '1.35rem', fontWeight: 800, color: c.color }}>{c.value}</Typography>
-              )}
-            </CardContent>
-          </Card>
-        ))}
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', lg: 'repeat(5, 1fr)' }, gap: 1.5 }}>
+        <HrStatCard label="Employees" value={headerStats.total} color="#1A55E3" loading={showSkeleton} icon={AccountBalanceWallet} />
+        <HrStatCard label="Active" value={headerStats.active} color="#059669" loading={showSkeleton} />
+        <HrStatCard label="Inactive" value={headerStats.inactive} color="#64748b" loading={showSkeleton} />
+        <HrStatCard label="Monthly basic (active)" value={fmtAmt(headerStats.totalSalary)} color="#6366f1" loading={showSkeleton} />
+        <HrStatCard
+          label="Ledger receivable"
+          value={fmtAmt(headerStats.receivable)}
+          color="#b91c1c"
+          loading={showSkeleton}
+          icon={MenuBook}
+        />
       </Box>
 
       <Card sx={CARD_SX}>
@@ -81,10 +109,10 @@ export default function EmployeeRegisterList({
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center', mb: 2 }}>
             <TextField
               size="small"
-              placeholder="Search employees..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              sx={{ ...FILTER_SX, minWidth: 220 }}
+              placeholder="Search name, CNIC, designation…"
+              value={localSearch}
+              onChange={(e) => setLocalSearch(e.target.value)}
+              sx={{ ...FILTER_SX, minWidth: 240, flex: { xs: '1 1 100%', sm: '1 1 280px' } }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
@@ -95,7 +123,11 @@ export default function EmployeeRegisterList({
             />
             <FormControl size="small" sx={{ minWidth: 140, ...FILTER_SX }}>
               <InputLabel>Status</InputLabel>
-              <Select label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <Select
+                label="Status"
+                value={statusFilter}
+                onChange={(e) => onStatusFilterChange?.(e.target.value)}
+              >
                 <MenuItem value="ALL">All</MenuItem>
                 <MenuItem value="ACTIVE">Active</MenuItem>
                 <MenuItem value="INACTIVE">Inactive</MenuItem>
@@ -106,18 +138,27 @@ export default function EmployeeRegisterList({
               variant="contained"
               startIcon={<Add />}
               onClick={onAdd}
-              sx={{ bgcolor: BRAND.primary.blue, textTransform: 'none', fontWeight: 700 }}
+              sx={{ bgcolor: BRAND.primary.blue, textTransform: 'none', fontWeight: 700, borderRadius: '10px', px: 2.5 }}
             >
-              Add Employee
+              Register employee
             </Button>
           </Box>
 
-          <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #cbd5e1', maxHeight: 480 }}>
+          <TableContainer
+            ref={scrollRef}
+            component={Paper}
+            elevation={0}
+            sx={{ border: '1px solid #cbd5e1', borderRadius: '12px', maxHeight: 520, overflow: 'auto' }}
+          >
             <Table stickyHeader size="small">
               <TableHead>
-                <TableRow sx={{ bgcolor: '#e8effd' }}>
-                  {['#', 'Employee', 'Designation', 'Join Date', 'Basic Salary', 'Ledger Bal.', 'Leave / Absent', 'Status', 'Actions'].map((h) => (
-                    <TableCell key={h} sx={{ fontWeight: 700, color: '#1347c4', fontSize: '0.72rem', borderColor: '#cbd5e1' }}>
+                <TableRow>
+                  {['#', 'Employee', 'Job', 'Join', 'Salary', 'Starting balance', 'Account balance', 'Leave', 'Status', 'Actions'].map((h, idx) => (
+                    <TableCell
+                      key={h}
+                      align={['Salary', 'Starting balance', 'Account balance'].includes(h) ? 'right' : idx === 0 ? 'center' : 'left'}
+                      sx={HR_TABLE_HEAD_SX}
+                    >
                       {h}
                     </TableCell>
                   ))}
@@ -127,52 +168,63 @@ export default function EmployeeRegisterList({
                 {showSkeleton
                   ? Array.from({ length: 6 }).map((_, i) => (
                     <TableRow key={i}>
-                      {Array.from({ length: 9 }).map((__, j) => (
-                        <TableCell key={j} sx={{ borderColor: '#cbd5e1' }}>
+                      {Array.from({ length: 10 }).map((__, j) => (
+                        <TableCell key={j} sx={{ borderColor: '#e2e8f0' }}>
                           <Skeleton variant="text" />
                         </TableCell>
                       ))}
                     </TableRow>
                   ))
-                  : filtered.length === 0 ? (
+                  : employees.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} align="center" sx={{ py: 4, color: '#94a3b8' }}>
-                        No employees found
+                      <TableCell colSpan={10} align="center" sx={{ py: 5, color: '#94a3b8', borderColor: '#e2e8f0' }}>
+                        No employees match your filters
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filtered.map((emp, i) => {
-                      const bal = parseFloat(emp.ledger_balance ?? emp.opening_balance ?? 0);
+                    employees.map((emp, i) => {
+                      const starting = parseFloat(emp.opening_balance ?? 0);
+                      const ledger = parseFloat(emp.ledger_balance ?? emp.account_balance ?? starting);
+                      const isTemp = String(emp.emp_id).startsWith('temp-');
                       return (
-                        <TableRow key={emp.emp_id} hover sx={{ opacity: String(emp.emp_id).startsWith('temp-') ? 0.85 : 1 }}>
-                          <TableCell sx={{ borderColor: '#cbd5e1' }}>{i + 1}</TableCell>
-                          <TableCell sx={{ borderColor: '#cbd5e1' }}>
-                            <Typography sx={{ fontWeight: 700, fontSize: '0.8125rem' }}>{emp.emp_name}</Typography>
+                        <TableRow
+                          key={emp.emp_id}
+                          hover
+                          sx={{
+                            opacity: isTemp ? 0.88 : 1,
+                            '& td': { borderColor: '#e2e8f0', fontSize: '0.8125rem' },
+                          }}
+                        >
+                          <TableCell align="center">{i + 1}</TableCell>
+                          <TableCell>
+                            <Typography sx={{ fontWeight: 700 }}>{emp.emp_name}</Typography>
+                            {emp.emp_phone && (
+                              <Typography sx={{ fontSize: '0.72rem', color: '#64748b' }}>{emp.emp_phone}</Typography>
+                            )}
                             {emp.emp_cnic && (
-                              <Typography sx={{ fontSize: '0.7rem', color: '#64748b' }}>{emp.emp_cnic}</Typography>
+                              <Typography sx={{ fontSize: '0.68rem', color: '#94a3b8' }}>{emp.emp_cnic}</Typography>
                             )}
                           </TableCell>
-                          <TableCell sx={{ borderColor: '#cbd5e1' }}>{emp.designation || '—'}</TableCell>
-                          <TableCell sx={{ borderColor: '#cbd5e1' }}>
+                          <TableCell>
+                            <Typography sx={{ fontWeight: 600 }}>{emp.designation || '—'}</Typography>
+                            <Typography sx={{ fontSize: '0.72rem', color: '#64748b' }}>{emp.department || ''}</Typography>
+                          </TableCell>
+                          <TableCell>
                             {emp.join_date ? new Date(emp.join_date).toLocaleDateString('en-GB') : '—'}
                           </TableCell>
-                          <TableCell sx={{ borderColor: '#cbd5e1', fontWeight: 700, fontFamily: 'monospace' }}>
+                          <TableCell align="right" sx={{ fontWeight: 700, fontFamily: 'ui-monospace, monospace' }}>
                             {fmtAmt(emp.basic_salary)}
                           </TableCell>
-                          <TableCell
-                            sx={{
-                              borderColor: '#cbd5e1',
-                              fontWeight: 700,
-                              fontFamily: 'monospace',
-                              color: bal > 0 ? '#b91c1c' : bal < 0 ? '#15803d' : '#64748b',
-                            }}
-                          >
-                            {fmtAmt(bal)}
+                          <TableCell align="right" sx={{ fontFamily: 'ui-monospace, monospace', color: '#475569' }}>
+                            {fmtAmt(starting)}
                           </TableCell>
-                          <TableCell sx={{ borderColor: '#cbd5e1', fontSize: '0.78rem', fontWeight: 700, color: '#475569' }}>
+                          <TableCell align="right">
+                            <EmployeeBalanceChip balance={ledger} />
+                          </TableCell>
+                          <TableCell sx={{ fontSize: '0.78rem', fontWeight: 700, color: '#475569' }}>
                             {emp.allowed_leaves_per_month ?? 2}L · {emp.allowed_absents_per_month ?? 0}A
                           </TableCell>
-                          <TableCell sx={{ borderColor: '#cbd5e1' }}>
+                          <TableCell>
                             <Chip
                               size="small"
                               label={emp.status}
@@ -180,17 +232,30 @@ export default function EmployeeRegisterList({
                               sx={{ fontWeight: 700, height: 22 }}
                             />
                           </TableCell>
-                          <TableCell sx={{ borderColor: '#cbd5e1' }}>
-                            <IconButton size="small" onClick={() => onEdit(emp)} disabled={String(emp.emp_id).startsWith('temp-')}>
-                              <Edit sx={{ fontSize: 18, color: BRAND.primary.blue }} />
-                            </IconButton>
-                            <IconButton
-                              size="small"
-                              onClick={() => onDelete(emp)}
-                              disabled={String(emp.emp_id).startsWith('temp-')}
-                            >
-                              <Delete sx={{ fontSize: 18, color: '#dc2626' }} />
-                            </IconButton>
+                          <TableCell>
+                            <Stack direction="row" spacing={0.25}>
+                              <Tooltip title="Employee ledger">
+                                <span>
+                                  <IconButton size="small" onClick={() => onViewLedger?.(emp)} disabled={isTemp}>
+                                    <MenuBook sx={{ fontSize: 18, color: '#0d9488' }} />
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                              <Tooltip title="Edit">
+                                <span>
+                                  <IconButton size="small" onClick={() => onEdit(emp)} disabled={isTemp}>
+                                    <Edit sx={{ fontSize: 18, color: BRAND.primary.blue }} />
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                              <Tooltip title="Delete">
+                                <span>
+                                  <IconButton size="small" onClick={() => onDelete(emp)} disabled={isTemp}>
+                                    <Delete sx={{ fontSize: 18, color: '#dc2626' }} />
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            </Stack>
                           </TableCell>
                         </TableRow>
                       );
@@ -198,7 +263,18 @@ export default function EmployeeRegisterList({
                   )}
               </TableBody>
             </Table>
+            <HrLoadMoreTrigger
+              rootRef={scrollRef}
+              hasMore={hasMore}
+              loading={loadingMore}
+              onLoadMore={onLoadMore}
+            />
           </TableContainer>
+          {total > employees.length && (
+            <Typography sx={{ fontSize: '0.75rem', color: '#94a3b8', mt: 1 }}>
+              Showing {employees.length} of {total} — scroll for more
+            </Typography>
+          )}
         </CardContent>
       </Card>
     </Box>

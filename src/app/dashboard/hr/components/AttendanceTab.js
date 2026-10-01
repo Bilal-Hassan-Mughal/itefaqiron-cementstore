@@ -10,6 +10,7 @@ import { saveHrAttendanceBatch } from '../lib/hr-fetch';
 import AttendanceSheetToolbar from './attendance/AttendanceSheetToolbar';
 import AttendanceSheetGrid from './attendance/AttendanceSheetGrid';
 import AttendanceStatusPicker from './attendance/AttendanceStatusPicker';
+import HrLoadMoreTrigger from './shared/HrLoadMoreTrigger';
 import {
   PRIMARY,
   CLEAR_SENTINEL,
@@ -45,7 +46,15 @@ export default function AttendanceTab() {
 
   const showSnack = (msg, severity = 'success') => setSnack({ open: true, msg, severity });
   const { invalidate } = useHrRefresh();
-  const { sheetData, loading, refreshing, error, replaceLocalSheet } = useHrAttendanceSheet(monthYear);
+  const {
+    sheetData,
+    loading,
+    loadingMore,
+    refreshing,
+    error,
+    replaceLocalSheet,
+    loadMoreEmployees,
+  } = useHrAttendanceSheet(monthYear);
 
   const { month, year } = monthYear;
 
@@ -331,19 +340,33 @@ export default function AttendanceTab() {
               No active employees found. Add staff in Employee Register first.
             </Alert>
           ) : showGrid ? (
-            <AttendanceSheetGrid
-              ref={scrollContainerRef}
-              month={month}
-              year={year}
-              dayMeta={dayMeta}
-              filteredEmployees={filteredEmployees}
-              sheetEdits={sheetEdits}
-              getEffectiveStatus={getEffectiveStatus}
-              isOffDay={isOffDay}
-              onToggleOffDay={toggleOffDay}
-              onCellClick={handleCellClick}
-              fadeIn={fadeIn}
-            />
+            <>
+              <AttendanceSheetGrid
+                ref={scrollContainerRef}
+                month={month}
+                year={year}
+                dayMeta={dayMeta}
+                filteredEmployees={filteredEmployees}
+                sheetEdits={sheetEdits}
+                getEffectiveStatus={getEffectiveStatus}
+                isOffDay={isOffDay}
+                onToggleOffDay={toggleOffDay}
+                onCellClick={handleCellClick}
+                fadeIn={fadeIn}
+              />
+              <HrLoadMoreTrigger
+                rootRef={scrollContainerRef}
+                hasMore={!!sheetData?.hasMoreEmployees}
+                loading={loadingMore}
+                onLoadMore={loadMoreEmployees}
+                label="Load more employees"
+              />
+              {sheetData?.totalEmployees > allEmployees.length && (
+                <Box sx={{ px: 2, pb: 1.5, fontSize: '0.75rem', color: '#94a3b8' }}>
+                  Showing {allEmployees.length} of {sheetData.totalEmployees} staff
+                </Box>
+              )}
+            </>
           ) : null}
         </CardContent>
       </Card>

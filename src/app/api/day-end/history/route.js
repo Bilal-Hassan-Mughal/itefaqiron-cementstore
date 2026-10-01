@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { initBranchScope } from '@/lib/branch-server';
 import { pkBusinessDate } from '@/lib/date-helper';
+import { loadCashBankDayTotals } from '@/lib/cash-bank-report-helper';
 
 
 // GET - Fetch day end history with pagination and filtering
@@ -97,8 +98,40 @@ export async function GET(request) {
       }
     });
 
+    const dayEndsEnriched = await Promise.all(
+      dayEnds.map(async (row) => {
+        const biz = row.business_date;
+        const dateStr =
+          biz instanceof Date
+            ? `${biz.getUTCFullYear()}-${String(biz.getUTCMonth() + 1).padStart(2, '0')}-${String(biz.getUTCDate()).padStart(2, '0')}`
+            : String(biz).slice(0, 10);
+        let ledgerCash = null;
+        try {
+          ledgerCash = await loadCashBankDayTotals(prisma, dateStr);
+        } catch {
+          ledgerCash = null;
+        }
+        const expected =
+          ledgerCash?.expectedCashInHand != null ? Number(ledgerCash.expectedCashInHand) : null;
+        const openingLedger =
+          ledgerCash?.openingCash != null ? Number(ledgerCash.openingCash) : null;
+        const physical =
+          row.closing_cash != null ? Number(row.closing_cash) : null;
+        const variance =
+          expected != null && physical != null
+            ? Math.round((physical - expected) * 100) / 100
+            : null;
+        return {
+          ...row,
+          ledger_opening_cash: openingLedger,
+          expected_cash_in_hand: expected,
+          variance,
+        };
+      })
+    );
+
     return NextResponse.json({
-      dayEnds,
+      dayEnds: dayEndsEnriched,
       pagination: {
         page,
         limit,

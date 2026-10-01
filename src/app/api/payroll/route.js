@@ -37,6 +37,8 @@ import {
   recordEmployeePayrollBalanceRecovery,
   recordEmployeePayrollPayableSettlement,
   recordEmployeePayrollSalaryPayment,
+  recordEmployeePayrollUnderpaidCarry,
+  recalculateEmployeeLedger,
   reverseEmployeePayrollLedgerCredits,
 } from '@/lib/employee-ledger';
 
@@ -346,32 +348,18 @@ async function reversePayrollLedger(payrollId, snapshot = null, { empName = '', 
   return reverseBillNo;
 }
 
-async function computeEmployeeMonthPayroll(emp, month, year, {
+/** In-memory payroll calc (no DB) — used for batch Pay Salary / sheet loads. */
+function computeEmployeeMonthPayrollCore(emp, month, year, {
   advanceDeduction = null,
   existing = null,
   offDays = [],
-  attendanceRecords = null,
-  pendingAdvances: pendingAdvancesIn = null,
-  ledgerReceivable: ledgerReceivableIn = null,
+  attendanceRecords = [],
+  pendingAdvances = [],
+  ledgerClosingRaw = 0,
 } = {}) {
-  const monthStart = new Date(year, month - 1, 1);
-  const monthEnd = new Date(year, month, 1);
-
-  const att = attendanceRecords ?? await prisma.attendance.findMany({
-    where: { emp_id: emp.emp_id, att_date: { gte: monthStart, lt: monthEnd } },
-  });
-
-  const pendingAdvances = pendingAdvancesIn ?? await loadPendingAdvances(emp.emp_id);
   const pendingAdvanceSum = pendingAdvances.reduce((sum, a) => sum + parseFloat(a.amount || 0), 0);
   const openingBal = parseFloat(emp.opening_balance ?? 0);
-  let ledgerClosing = ledgerReceivableIn;
-  if (ledgerClosing == null) {
-    await ensureEmployeeLedgerSchema(prisma);
-    ledgerClosing = await getEmployeeLedgerClosing(prisma, emp.emp_id);
-  } else {
-    const parsed = parseFloat(ledgerClosing);
-    ledgerClosing = Number.isFinite(parsed) ? parsed : 0;
-  }
+  const ledgerClosing = Number.isFinite(parseFloat(ledgerClosingRaw)) ? parseFloat(ledgerClosingRaw) : 0;
   const signedClosing = resolveEmployeeReceivableBalance(ledgerClosing, openingBal);
   const { recoverFromSalary, addToPayable } = splitEmployeeLedgerForPayroll(signedClosing);
   const ledgerReceivable = recoverFromSalary;
@@ -382,7 +370,7 @@ async function computeEmployeeMonthPayroll(emp, month, year, {
   const agg = aggregateAttendanceForPayroll({
     month,
     year,
-    attendanceRecords: att,
+    attendanceRecords,
     joinDate: emp.join_date,
     asOfDate: payrollAsOfDate(month, year),
     offDays,
@@ -418,6 +406,100 @@ async function computeEmployeeMonthPayroll(emp, month, year, {
     ledger_receivable: ledgerReceivable,
     ledger_closing_signed: signedClosing,
     ledger_payable_credit: addToPayable,
+  };
+}
+
+async function computeEmployeeMonthPayroll(emp, month, year, {
+  advanceDeduction = null,
+  existing = null,
+  offDays = [],
+  attendanceRecords = null,
+  pendingAdvances: pendingAdvancesIn = null,
+  ledgerReceivable: ledgerReceivableIn = null,
+} = {}) {
+  const monthStart = new Date(year, month - 1, 1);
+  const monthEnd = new Date(year, month, 1);
+
+  const att = attendanceRecords ?? await prisma.attendance.findMany({
+    where: { emp_id: emp.emp_id, att_date: { gte: monthStart, lt: monthEnd } },
+  });
+
+  const pendingAdvances = pendingAdvancesIn ?? await loadPendingAdvances(emp.emp_id);
+  let ledgerClosing = ledgerReceivableIn;
+  if (ledgerClosing == null) {
+    await ensureEmployeeLedgerSchema(prisma);
+    ledgerClosing = await getEmployeeLedgerClosing(prisma, emp.emp_id);
+  }
+
+  return computeEmployeeMonthPayrollCore(emp, month, year, {
+    advanceDeduction,
+    existing,
+    offDays,
+    attendanceRecords: att,
+    pendingAdvances,
+    ledgerClosingRaw: ledgerClosing,
+  });
+}
+
+function resolvePreviousBalanceBatch(emp, month, year, prevByEmp, {
+  pendingByEmp,
+  prevAttByEmp,
+  prevOffDays,
+  ledgerMap,
+}) {
+  const prev = getPrevMonth(month, year);
+
+  if (employeeJoinedAfterMonth(emp.join_date, prev.month, prev.year)) {
+    return {
+      previous_balance: 0,
+      prev_payroll_id: null,
+      prev_month: prev.month,
+      prev_year: prev.year,
+    };
+  }
+
+  const prevRow = prevByEmp[emp.emp_id];
+
+  if (prevRow?.status === 'PAID') {
+    return {
+      previous_balance: 0,
+      prev_payroll_id: null,
+      prev_month: prev.month,
+      prev_year: prev.year,
+    };
+  }
+
+  const pendingAdvances = pendingByEmp[emp.emp_id] || pendingByEmp[Number(emp.emp_id)] || [];
+  const prevCoreInput = {
+    existing: prevRow?.status === 'PENDING' ? prevRow : null,
+    // Use live ledger + pending advances — do not pin advance_previous (under-recovers opening/other ledger).
+    advanceDeduction: null,
+    offDays: prevOffDays,
+    attendanceRecords: prevAttByEmp[emp.emp_id] || prevAttByEmp[Number(emp.emp_id)] || [],
+    pendingAdvances,
+    ledgerClosingRaw: ledgerMap.get(Number(emp.emp_id)) ?? 0,
+  };
+
+  if (prevRow?.status === 'PENDING') {
+    const { derived: livePrev } = computeEmployeeMonthPayrollCore(emp, prev.month, prev.year, prevCoreInput);
+    return {
+      previous_balance: Math.max(0, parseFloat(livePrev.net_salary || 0)),
+      prev_payroll_id: prevRow.payroll_id,
+      prev_month: prev.month,
+      prev_year: prev.year,
+    };
+  }
+
+  const { derived } = computeEmployeeMonthPayrollCore(emp, prev.month, prev.year, {
+    ...prevCoreInput,
+  });
+
+  return {
+    previous_balance: Math.max(0, parseFloat(derived.net_salary || 0)),
+    prev_payroll_id: null,
+    prev_month: prev.month,
+    prev_year: prev.year,
+    prev_derived: derived,
   };
 }
 
@@ -480,51 +562,14 @@ async function rebuildPayrollAfterUndo({ emp, row, branchId }) {
   return { agg, derived };
 }
 
+/** @deprecated Prefer resolvePreviousBalanceBatch inside calculate=true (no per-employee DB). */
 async function resolvePreviousBalance(emp, month, year, prevByEmp) {
-  const prev = getPrevMonth(month, year);
-
-  if (employeeJoinedAfterMonth(emp.join_date, prev.month, prev.year)) {
-    return {
-      previous_balance: 0,
-      prev_payroll_id: null,
-      prev_month: prev.month,
-      prev_year: prev.year,
-    };
-  }
-
-  const prevRow = prevByEmp[emp.emp_id];
-
-  if (prevRow?.status === 'PAID') {
-    return {
-      previous_balance: 0,
-      prev_payroll_id: null,
-      prev_month: prev.month,
-      prev_year: prev.year,
-    };
-  }
-
-  if (prevRow?.status === 'PENDING') {
-    return {
-      previous_balance: Math.max(0, parseFloat(prevRow.net_salary || 0)),
-      prev_payroll_id: prevRow.payroll_id,
-      prev_month: prev.month,
-      prev_year: prev.year,
-    };
-  }
-
-  const pendingAdvances = await loadPendingAdvances(emp.emp_id);
-  const { advance_previous: advanceBeforeThisMonth } = splitPendingAdvances(pendingAdvances, month, year);
-  const { derived } = await computeEmployeeMonthPayroll(emp, prev.month, prev.year, {
-    advanceDeduction: advanceBeforeThisMonth,
+  return resolvePreviousBalanceBatch(emp, month, year, prevByEmp, {
+    pendingByEmp: { [emp.emp_id]: await loadPendingAdvances(emp.emp_id) },
+    prevAttByEmp: {},
+    prevOffDays: [],
+    ledgerMap: new Map([[Number(emp.emp_id), await getEmployeeLedgerClosing(prisma, emp.emp_id)]]),
   });
-
-  return {
-    previous_balance: Math.max(0, parseFloat(derived.net_salary || 0)),
-    prev_payroll_id: null,
-    prev_month: prev.month,
-    prev_year: prev.year,
-    prev_derived: derived,
-  };
 }
 
 function attachBalanceFields(row, { previous_balance, prev_payroll_id, prev_month, prev_year, advanceSplit, monthNet, totalPayableOverride = null, snapshot = null }) {
@@ -685,8 +730,6 @@ export async function GET(request) {
         orderBy: { emp_name: 'asc' },
       });
 
-      await cleanupOrphanClearanceAdvances(branchId, month, year);
-
       const existingRows = await prisma.$queryRawUnsafe(`
         SELECT p.* FROM payrolls p
         INNER JOIN employees e ON p.emp_id = e.emp_id
@@ -726,15 +769,40 @@ export async function GET(request) {
       const pendingByEmp = await loadPendingAdvancesByEmpIds(empIds);
       const attByEmp = groupAttendanceByEmp(allMonthAtt);
 
+      const prevMonthStart = new Date(prev.year, prev.month - 1, 1);
+      const prevMonthEnd = new Date(prev.year, prev.month, 1);
+      const allPrevMonthAtt = await prisma.attendance.findMany({
+        where: {
+          emp_id: { in: empIds },
+          att_date: { gte: prevMonthStart, lt: prevMonthEnd },
+        },
+      });
+      const prevAttByEmp = groupAttendanceByEmp(allPrevMonthAtt);
+      const prevOffDays = detectBranchOffDays(
+        employees,
+        allPrevMonthAtt,
+        prev.month,
+        prev.year,
+        payrollAsOfDate(prev.month, prev.year)
+      );
+
+      const prevBalanceCtx = {
+        pendingByEmp,
+        prevAttByEmp,
+        prevOffDays,
+        ledgerMap,
+      };
+
       let result = [];
       for (const emp of employees) {
         const existing = existingByEmp[emp.emp_id];
-        const prevInfo = await resolvePreviousBalance(emp, month, year, prevByEmp);
+        const prevInfo = resolvePreviousBalanceBatch(emp, month, year, prevByEmp, prevBalanceCtx);
+        const empIdNum = Number(emp.emp_id);
         const batchCtx = {
           offDays: branchOffDays,
-          attendanceRecords: attByEmp[emp.emp_id] || [],
-          pendingAdvances: pendingByEmp[emp.emp_id] || [],
-          ledgerReceivable: ledgerMap.get(emp.emp_id) ?? 0,
+          attendanceRecords: attByEmp[empIdNum] || attByEmp[emp.emp_id] || [],
+          pendingAdvances: pendingByEmp[empIdNum] || pendingByEmp[emp.emp_id] || [],
+          ledgerClosingRaw: ledgerMap.get(empIdNum) ?? 0,
         };
 
         if (existing?.status === 'PAID') {
@@ -742,9 +810,19 @@ export async function GET(request) {
           const pendingAdvances = batchCtx.pendingAdvances;
           const advanceSplit = splitPendingAdvances(pendingAdvances, month, year);
           const monthNet = parseFloat(existing.net_salary || 0);
-          const { agg } = await computeEmployeeMonthPayroll(emp, month, year, { existing, ...batchCtx });
-
           const useSnapshotAtt = snapshot?.days_present != null;
+          const agg = useSnapshotAtt
+            ? {
+              days_present: parseFloat(snapshot.days_present),
+              leaves_taken: parseFloat(snapshot.leaves_taken ?? 0),
+              absents_taken: parseFloat(snapshot.absent_days ?? snapshot.absents_taken ?? 0),
+              present_days: snapshot.present_days,
+              leave_days: snapshot.leave_days,
+              absent_days: snapshot.absent_days,
+              half_days: snapshot.half_days ?? 0,
+            }
+            : computeEmployeeMonthPayrollCore(emp, month, year, { existing, ...batchCtx }).agg;
+
           const attDaysPresent = useSnapshotAtt ? parseFloat(snapshot.days_present) : agg.days_present;
           const attLeaves = useSnapshotAtt ? parseFloat(snapshot.leaves_taken ?? agg.leaves_taken) : agg.leaves_taken;
           const attAbsents = useSnapshotAtt
@@ -803,7 +881,7 @@ export async function GET(request) {
         const {
           agg, derived, pendingAdvances, allowedLeaves, allowedAbsents,
           ledger_receivable, ledger_closing_signed, ledger_payable_credit,
-        } = await computeEmployeeMonthPayroll(emp, month, year, { existing, ...batchCtx });
+        } = computeEmployeeMonthPayrollCore(emp, month, year, { existing, ...batchCtx });
         const advanceSplit = splitPendingAdvances(pendingAdvances, month, year);
         const monthNet = parseFloat(derived.net_salary || 0);
 
@@ -822,6 +900,7 @@ export async function GET(request) {
           absent_days: agg.absent_days,
           half_days: agg.half_days,
           holiday_days: agg.holiday_days,
+          unmarked_days: agg.unmarked_days ?? 0,
           allowed_leaves: allowedLeaves,
           allowed_absents: allowedAbsents,
           excess_leaves: derived.excess_leaves,
@@ -842,7 +921,9 @@ export async function GET(request) {
             department: emp.department,
             emp_phone: emp.emp_phone || null,
             basic_salary: parseFloat(emp.basic_salary || 0),
+            join_date: emp.join_date,
           },
+          join_date: emp.join_date,
           employee_ledger_closing: ledger_closing_signed,
           ledger_payable_credit: ledger_payable_credit,
           employee_ledger_balance: ledger_receivable ?? Math.max(0, derived.advance_deduction || 0),
@@ -1338,15 +1419,36 @@ export async function POST(request) {
         }
       }
 
+      const paidTotalClearance = payment.paidTotal ?? (payment.cashAmt + payment.bankAmt);
+      const salaryUnderpaid = Math.max(
+        0,
+        Math.round((totalPayable - paidTotalClearance) * 100) / 100
+      );
+      if (currentPayrollId && salaryUnderpaid > 0.009) {
+        try {
+          await ensureEmployeeLedgerSchema(prisma);
+          await recordEmployeePayrollUnderpaidCarry(prisma, {
+            branchId,
+            empId,
+            empName: emp.emp_name,
+            payrollId: currentPayrollId,
+            amount: salaryUnderpaid,
+            month: m,
+            year: y,
+          });
+          clearanceSnapshot.salary_underpaid_carry = salaryUnderpaid;
+        } catch (e) {
+          console.error('Employee ledger underpaid carry:', e);
+        }
+      }
+
       if (currentPayrollId) {
         try {
           await ensureEmployeeLedgerSchema(prisma);
+          await recalculateEmployeeLedger(prisma, empId);
           const closingRaw = await getEmployeeLedgerClosing(prisma, empId);
           clearanceSnapshot.employee_ledger_closing_before = signedClosing;
-          clearanceSnapshot.employee_ledger_closing_after = resolveEmployeeReceivableBalance(
-            closingRaw,
-            openingBal
-          );
+          clearanceSnapshot.employee_ledger_closing_after = closingRaw;
         } catch (e) {
           console.error('Employee ledger closing after clearance:', e);
         }
@@ -1358,6 +1460,8 @@ export async function POST(request) {
       }
 
       const totalPayableResponse = totalPayable;
+
+      await cleanupOrphanClearanceAdvances(branchId, m, y);
 
       return NextResponse.json({
         success: true,

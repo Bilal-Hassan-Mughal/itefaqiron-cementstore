@@ -1,4 +1,4 @@
-import { getPkDateString, pkBusinessDate, pkDayRange, shiftPkDate } from '@/lib/date-helper';
+import { getPkDateString, pkDayRange, shiftPkDate } from '@/lib/date-helper';
 import {
   getCashCategoryIds,
   getBankCategoryIds,
@@ -118,7 +118,7 @@ function classifyLedgerEntry(entry) {
   return { isBank, entryAmt, isReceipt, isPayment, debit: d, credit: c };
 }
 
-export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride, dayEndRecord, branchId }) {
+export async function loadDayEndSnapshot(prisma, { dateStr, dayEndRecord, branchId }) {
   const range = pkDayRange(dateStr);
   const customerInclude = {
     customer_type: { select: { cus_type_title: true } },
@@ -326,45 +326,14 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
   bankReceipts = totalBankInflow;
   bankPayments = totalBankOutflow;
 
-  const effectiveBranchId = branchId !== undefined ? branchId : dayEndRecord?.branch_id;
-  const prevClosedWhere = {
-    business_date: { lt: pkBusinessDate(dateStr) },
-    status: 'CLOSED',
-  };
-  if (effectiveBranchId !== undefined && effectiveBranchId !== null) {
-    prevClosedWhere.branch_id = effectiveBranchId;
-  }
-  const prevClosed = await prisma.dayEnd.findFirst({
-    where: prevClosedWhere,
-    orderBy: { business_date: 'desc' },
-  });
-  const prevClosedDate = prevClosed?.business_date ? getPkDateString(prevClosed.business_date) : null;
-  const prevClosedClosingCash = prevClosed
-    ? (prevClosed.closing_cash != null
-        ? n(prevClosed.closing_cash)
-        : (prevClosed.cash_in_hand != null ? n(prevClosed.cash_in_hand) : null))
-    : null;
-
   const [ledgerOpeningCash, ledgerOpeningBank] = await Promise.all([
     getLedgerOpeningBefore(prisma, cashCategoryIds, range.gte),
     getLedgerOpeningBefore(prisma, bankCategoryIds, range.gte),
   ]);
 
-  let openingCash;
-  let openingCashSource = 'LEDGER';
-  if (dayEndRecord?.status === 'CLOSED' && dayEndRecord?.opening_cash != null) {
-    openingCash = n(dayEndRecord.opening_cash);
-    openingCashSource = 'FROZEN';
-  } else if (openingCashOverride !== undefined && openingCashOverride !== null && openingCashOverride !== '') {
-    openingCash = n(openingCashOverride);
-    openingCashSource = 'ENTERED';
-  } else if (prevClosed && prevClosedClosingCash !== null) {
-    openingCash = prevClosedClosingCash;
-    openingCashSource = 'PREV_CLOSED';
-  } else {
-    openingCash = ledgerOpeningCash;
-    openingCashSource = 'LEDGER';
-  }
+  // Always match Cash Report: opening = ledger balance before this PK business day.
+  const openingCash = ledgerOpeningCash;
+  const openingCashSource = 'LEDGER';
 
   const expectedCashInHand = money(openingCash + totalCashInflow - totalCashOutflow);
   const actualClosingCash = dayEndRecord?.closing_cash != null ? money(dayEndRecord.closing_cash) : null;
@@ -457,14 +426,14 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     trend.push({ date: dStr, label, sales: daySales, purchases: dayPurchases });
   }
 
-  const openingCashLocked = openingCashSource === 'FROZEN';
+  const openingCashLocked = true;
 
   const summary = {
     openingCash: money(openingCash),
     ledgerOpeningCash: money(ledgerOpeningCash),
     openingCashLocked,
     openingCashSource,
-    openingCashFromDate: openingCashSource === 'LEDGER' ? dateStr : prevClosedDate,
+    openingCashFromDate: dateStr,
     totalSales: money(totalSales),
     cashSales: money(cashSales),
     bankSales: money(bankSales),
@@ -513,11 +482,9 @@ export async function loadDayEndSnapshot(prisma, { dateStr, openingCashOverride,
     closingCombinedBalance: money(expectedCashInHand + (savedClosingBank ?? expectedClosingBank)),
     cashMovementSource: 'LEDGER_CASH_BANK',
     invoicesCount: sales.length,
-    receiptsCount: cashLedgerEntries.filter((e) => n(e.debit_amount) > 0).length
-      + bankLedgerEntries.filter((e) => n(e.debit_amount) > 0).length,
+    receiptsCount: cashLedgerEntries.filter((e) => n(e.debit_amount) > 0).length,
     billsCount: purchases.length,
-    paymentsCount: cashLedgerEntries.filter((e) => n(e.credit_amount) > 0).length
-      + bankLedgerEntries.filter((e) => n(e.credit_amount) > 0).length,
+    paymentsCount: cashLedgerEntries.filter((e) => n(e.credit_amount) > 0).length,
     returnsCount: saleReturns.length,
     openOrdersCount,
     holdBillsCount,

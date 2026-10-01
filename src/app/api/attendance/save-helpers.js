@@ -1,15 +1,4 @@
-import { attendanceDayBounds } from '@/lib/hr-payroll';
-
-async function findAttendanceOnDay(tx, empId, att_date) {
-  const bounds = attendanceDayBounds(att_date);
-  if (!bounds) return null;
-  return tx.attendance.findFirst({
-    where: {
-      emp_id: empId,
-      att_date: { gte: bounds.start, lt: bounds.end },
-    },
-  });
-}
+import { attendanceDayBounds, toDateKey } from '@/lib/hr-payroll';
 
 /** Last edit wins when the same employee/day appears more than once in a batch. */
 function dedupeSheetRows(rows) {
@@ -24,42 +13,12 @@ function dedupeSheetRows(rows) {
   return [...map.values()];
 }
 
-async function saveOneRow(tx, empId, row) {
-  const bounds = attendanceDayBounds(row.att_date);
-  if (!bounds) throw new Error(`Invalid att_date: ${row.att_date}`);
-
-  const existing = await findAttendanceOnDay(tx, empId, row.att_date);
-
-  if (row.clear) {
-    if (existing) {
-      await tx.attendance.delete({ where: { att_id: existing.att_id } });
-    }
-    return;
-  }
-
-  const data = {
-    in_time: row.in_time || null,
-    out_time: row.out_time || null,
-    status: row.status || 'PRESENT',
-    notes: row.notes || null,
-    att_date: existing?.att_date ?? bounds.storageDate,
-  };
-
-  if (existing) {
-    await tx.attendance.update({
-      where: { att_id: existing.att_id },
-      data,
-    });
-    return;
-  }
-
-  await tx.attendance.create({
-    data: { emp_id: empId, ...data },
-  });
+function rowLookupKey(empId, attDateStr) {
+  return `${empId}|${attDateStr}`;
 }
 
 /**
- * Batch save sheet edits — branch validation once, day-range match (avoids date/upsert races).
+ * Batch save sheet edits — one branch check, one prefetch, bulk delete/create, batched updates.
  */
 export async function batchSaveAttendanceSheet(tx, branchId, rows) {
   const deduped = dedupeSheetRows(rows);
@@ -72,12 +31,87 @@ export async function batchSaveAttendanceSheet(tx, branchId, rows) {
   });
   const allowed = new Set(allowedRows.map((e) => e.emp_id));
 
+  let minStart = null;
+  let maxEnd = null;
+  for (const row of deduped) {
+    const bounds = attendanceDayBounds(row.att_date);
+    if (!bounds) continue;
+    if (!minStart || bounds.start < minStart) minStart = bounds.start;
+    if (!maxEnd || bounds.end > maxEnd) maxEnd = bounds.end;
+  }
+
+  const existingMap = new Map();
+  if (minStart && maxEnd && allowed.size > 0) {
+    const existing = await tx.attendance.findMany({
+      where: {
+        emp_id: { in: [...allowed] },
+        att_date: { gte: minStart, lt: maxEnd },
+      },
+      select: { att_id: true, emp_id: true, att_date: true },
+    });
+    for (const ex of existing) {
+      const dateKey = toDateKey(ex.att_date);
+      if (!dateKey) continue;
+      existingMap.set(rowLookupKey(ex.emp_id, dateKey), ex);
+    }
+  }
+
+  const deleteIds = [];
+  const creates = [];
+  const updates = [];
+
   for (const row of deduped) {
     const empId = parseInt(row.emp_id, 10);
     if (!allowed.has(empId)) {
       throw new Error(`Employee ${empId} is not in this branch`);
     }
-    await saveOneRow(tx, empId, row);
+    const bounds = attendanceDayBounds(row.att_date);
+    if (!bounds) throw new Error(`Invalid att_date: ${row.att_date}`);
+
+    const lookupKey = rowLookupKey(empId, row.att_date);
+    const existing = existingMap.get(lookupKey);
+
+    if (row.clear) {
+      if (existing) deleteIds.push(existing.att_id);
+      continue;
+    }
+
+    const data = {
+      in_time: row.in_time || null,
+      out_time: row.out_time || null,
+      status: row.status || 'PRESENT',
+      notes: row.notes || null,
+      att_date: existing?.att_date ?? bounds.storageDate,
+    };
+
+    if (existing) {
+      updates.push({ att_id: existing.att_id, data });
+    } else {
+      creates.push({
+        emp_id: empId,
+        in_time: data.in_time,
+        out_time: data.out_time,
+        status: data.status,
+        notes: data.notes,
+        att_date: bounds.storageDate,
+      });
+    }
+  }
+
+  if (deleteIds.length > 0) {
+    await tx.attendance.deleteMany({ where: { att_id: { in: deleteIds } } });
+  }
+
+  const UPDATE_CHUNK = 25;
+  for (let i = 0; i < updates.length; i += UPDATE_CHUNK) {
+    const chunk = updates.slice(i, i + UPDATE_CHUNK);
+    await Promise.all(
+      chunk.map(({ att_id, data }) => tx.attendance.update({ where: { att_id }, data }))
+    );
+  }
+
+  if (creates.length > 0) {
+    await tx.attendance.createMany({ data: creates });
   }
 
   return { saved: deduped.length };

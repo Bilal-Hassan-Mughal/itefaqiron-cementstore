@@ -67,8 +67,6 @@ async function main() {
     user,
     body: JSON.stringify({
       business_date: TEST_DATE,
-      opening_cash: get1.json?.summary?.openingCash ?? 0,
-      closing_cash: 1234.5,
       notes: 'Automated close test',
       closed_by: user.user_id,
       action: 'CLOSE_DAY',
@@ -86,7 +84,12 @@ async function main() {
   log(saved?.closed_at != null, 'closed_at is stored');
   log(saved?.cash_in_hand != null, 'cash_in_hand is stored', String(saved?.cash_in_hand));
   log(saved?.bank_balance != null, 'bank_balance is stored', String(saved?.bank_balance));
-  log(Number(saved?.closing_cash) === 1234.5, 'closing_cash saved as 1234.50', String(saved?.closing_cash));
+  const expectedClose = Number(get1.json?.summary?.expectedCashInHand ?? saved?.cash_in_hand);
+  log(
+    Math.abs(Number(saved?.closing_cash) - expectedClose) < 0.02,
+    'closing_cash matches ledger expected',
+    String(saved?.closing_cash)
+  );
   log(saved?.notes === 'Automated close test', 'notes saved');
   log(Array.isArray(saved?.day_end_details), 'day_end_details persisted', `${saved?.day_end_details?.length || 0} rows`);
 

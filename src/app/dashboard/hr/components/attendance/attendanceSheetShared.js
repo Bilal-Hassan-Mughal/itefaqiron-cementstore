@@ -94,7 +94,7 @@ export function statusMeta(val, isFuture, isBeforeJoinDay, isPast) {
   if (!val) {
     if (isFuture) return { label: '-', full: 'Future date', color: '#cbd5e1', bg: '#f1f5f9', muted: true, locked: true };
     if (isPast) return { label: '-', full: 'Tap to mark attendance', color: '#64748b', bg: '#fff', muted: false };
-    return { label: '-', full: 'Unmarked (Absent in payroll)', color: '#64748b', bg: '#fff', muted: false };
+    return { label: '-', full: 'Not marked — no pay & no absent cut until you mark', color: '#64748b', bg: '#fff', muted: false };
   }
   return STATUS_OPTIONS.find((s) => s.value === val) || { label: '-', full: 'Unknown', color: '#94a3b8', bg: '#f8fafc', muted: true };
 }

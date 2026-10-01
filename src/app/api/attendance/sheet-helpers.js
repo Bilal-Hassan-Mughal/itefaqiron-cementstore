@@ -32,26 +32,38 @@ function leanCell(record) {
   };
 }
 
-/** Fast monthly sheet payload for HR Attendance tab. */
-export async function buildAttendanceSheetPayload(db, branchId, month, year) {
+const SHEET_EMP_PAGE = 50;
+
+/** Fast monthly sheet payload for HR Attendance tab (optional employee paging). */
+export async function buildAttendanceSheetPayload(db, branchId, month, year, options = {}) {
   const monthStart = new Date(year, month - 1, 1);
   const monthEnd = new Date(year, month, 1);
+  const empWhere = { branch_id: branchId, status: 'ACTIVE' };
+  const limitParam = options.limit != null ? parseInt(options.limit, 10) : null;
+  const offset = Math.max(parseInt(options.offset || 0, 10) || 0, 0);
+  const take = limitParam != null ? Math.min(Math.max(limitParam, 1), 100) : undefined;
 
-  const [employees, attendance] = await Promise.all([
+  const [totalEmployees, employees] = await Promise.all([
+    take != null ? db.employee.count({ where: empWhere }) : Promise.resolve(null),
     db.employee.findMany({
-      where: { branch_id: branchId, status: 'ACTIVE' },
+      where: empWhere,
       orderBy: { emp_name: 'asc' },
       select: SHEET_EMPLOYEE_SELECT,
+      ...(take != null ? { take, skip: offset } : {}),
     }),
-    db.attendance.findMany({
+  ]);
+
+  const empIds = employees.map((e) => e.emp_id);
+  const attendance = empIds.length === 0
+    ? []
+    : await db.attendance.findMany({
       where: {
         att_date: { gte: monthStart, lt: monthEnd },
-        employee: { branch_id: branchId, status: 'ACTIVE' },
+        emp_id: { in: empIds },
       },
       select: SHEET_ATTENDANCE_SELECT,
       orderBy: [{ att_date: 'asc' }, { emp_id: 'asc' }],
-    }),
-  ]);
+    });
 
   const { daysInMonth, days: dayMeta } = getMonthDayMeta(month, year);
   const grid = {};
@@ -69,7 +81,7 @@ export async function buildAttendanceSheetPayload(db, branchId, month, year) {
 
   const offDays = detectBranchOffDays(employees, attendance, month, year);
 
-  return {
+  const payload = {
     month,
     year,
     daysInMonth,
@@ -78,4 +90,15 @@ export async function buildAttendanceSheetPayload(db, branchId, month, year) {
     grid,
     offDays,
   };
+
+  if (take != null) {
+    payload.totalEmployees = totalEmployees ?? employees.length;
+    payload.employeeLimit = take;
+    payload.employeeOffset = offset;
+    payload.hasMoreEmployees = offset + employees.length < (totalEmployees ?? 0);
+  }
+
+  return payload;
 }
+
+export { SHEET_EMP_PAGE };

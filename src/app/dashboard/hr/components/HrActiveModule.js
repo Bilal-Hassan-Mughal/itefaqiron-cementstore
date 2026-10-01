@@ -3,6 +3,7 @@
 import dynamic from 'next/dynamic';
 import { Box, CircularProgress } from '@mui/material';
 import { BRAND } from '@/lib/brand-theme';
+import HrModuleLayout from './layout/HrModuleLayout';
 
 const tabLoader = () => (
   <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
@@ -22,24 +23,28 @@ const EmployeeReceiveTab = lazy(() => import('./EmployeeReceiveTab'));
 /**
  * Loads only the active HR module chunk (code-split per tab).
  */
+function wrap(module) {
+  return <HrModuleLayout>{module}</HrModuleLayout>;
+}
+
 export default function HrActiveModule({ moduleId, backToHub }) {
   switch (moduleId) {
     case 'employees':
-      return <EmployeesTab />;
+      return wrap(<EmployeesTab />);
     case 'attendance':
-      return <AttendanceTab />;
+      return wrap(<AttendanceTab />);
     case 'salary-sheet':
-      return <SalaryTab view="sheet" />;
+      return wrap(<SalaryTab view="sheet" />);
     case 'salary-clearance':
-      return <SalaryTab view="clearance" />;
+      return wrap(<SalaryTab view="clearance" />);
     case 'salary-advance':
-      return <SalaryAdvanceTab />;
+      return wrap(<SalaryAdvanceTab />);
     case 'employee-ledger':
-      return <EmployeeLedgerTab onBackToHub={backToHub} />;
+      return wrap(<EmployeeLedgerTab onBackToHub={backToHub} />);
     case 'employee-receive':
-      return <EmployeeReceiveTab />;
+      return wrap(<EmployeeReceiveTab />);
     case 'salary-receipt':
-      return <SalaryTab view="receipt" />;
+      return wrap(<SalaryTab view="receipt" />);
     default:
       return null;
   }

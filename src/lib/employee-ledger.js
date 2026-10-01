@@ -153,11 +153,11 @@ export async function getEmployeeLedgerClosing(db, empId) {
   const rows = await db.$queryRawUnsafe(`
     SELECT closing_balance FROM employee_ledger
     WHERE emp_id = ${id}
-    ORDER BY el_id DESC
+    ORDER BY created_at DESC, el_id DESC
     LIMIT 1
   `);
   if (rows?.[0]) {
-    return resolveEmployeeReceivableBalance(rows[0].closing_balance, opening);
+    return parseFloat(rows[0].closing_balance ?? 0);
   }
   return opening;
 }
@@ -173,11 +173,17 @@ export async function getEmployeeLedgerClosingsMap(db, empIds) {
     SELECT el.emp_id, el.closing_balance
     FROM employee_ledger el
     INNER JOIN (
-      SELECT emp_id, MAX(el_id) AS max_el_id
-      FROM employee_ledger
-      WHERE emp_id IN (${idList})
-      GROUP BY emp_id
-    ) latest ON latest.max_el_id = el.el_id
+      SELECT el2.emp_id AS emp_id, MAX(el2.el_id) AS max_el_id
+      FROM employee_ledger el2
+      INNER JOIN (
+        SELECT emp_id, MAX(created_at) AS max_created
+        FROM employee_ledger
+        WHERE emp_id IN (${idList})
+        GROUP BY emp_id
+      ) mc ON mc.emp_id = el2.emp_id AND el2.created_at = mc.max_created
+      WHERE el2.emp_id IN (${idList})
+      GROUP BY el2.emp_id
+    ) latest ON latest.max_el_id = el.el_id AND latest.emp_id = el.emp_id
   `);
   const openRows = await db.$queryRawUnsafe(`
     SELECT emp_id, opening_balance FROM employees WHERE emp_id IN (${idList})
@@ -190,8 +196,11 @@ export async function getEmployeeLedgerClosingsMap(db, empIds) {
   for (const id of ids) {
     const opening = openingByEmp.get(id) ?? 0;
     const ledgerRow = (rows || []).find((r) => Number(r.emp_id) === id);
-    const ledgerClosing = ledgerRow ? parseFloat(ledgerRow.closing_balance || 0) : 0;
-    map.set(id, resolveEmployeeReceivableBalance(ledgerClosing, opening));
+    if (ledgerRow) {
+      map.set(id, parseFloat(ledgerRow.closing_balance ?? 0));
+    } else {
+      map.set(id, opening);
+    }
   }
   return map;
 }
@@ -200,7 +209,7 @@ export function employeeAdvanceSettledBillNo(advanceId) {
   return `${employeeAdvanceBillNo(advanceId)}-SETTLED`;
 }
 
-/** Align employee_ledger with employees.opening_balance + all advance rows (fixes legacy data). */
+/** Align starting balance, advances, payroll, receipts; recalc account balance (fixes legacy data). */
 export async function reconcileEmployeeLedgerForEmployee(db, empId, branchId) {
   // Call ensureEmployeeLedgerSchema(prisma) on the root client before $transaction — DDL inside tx breaks MySQL.
   const emp_id = parseInt(empId, 10);
@@ -219,7 +228,7 @@ export async function reconcileEmployeeLedgerForEmployee(db, empId, branchId) {
   });
 
   const advances = await db.$queryRawUnsafe(`
-    SELECT advance_id, amount, status, advance_date, reason
+    SELECT advance_id, amount, status, advance_date, reason, payroll_id
     FROM employee_advances WHERE emp_id = ${emp_id}
   `);
 
@@ -246,7 +255,7 @@ export async function reconcileEmployeeLedgerForEmployee(db, empId, branchId) {
       });
     }
 
-    if (a.status === 'DEDUCTED') {
+    if (a.status === 'DEDUCTED' && !parseInt(a.payroll_id, 10)) {
       const debitNow = await db.$queryRawUnsafe(`
         SELECT 1 AS ok FROM employee_ledger WHERE emp_id = ${emp_id} AND bill_no = '${advBill}' LIMIT 1
       `);
@@ -256,14 +265,23 @@ export async function reconcileEmployeeLedgerForEmployee(db, empId, branchId) {
         LIMIT 1
       `);
       if (debitNow?.[0] && !creditRows?.[0]) {
-        await appendEmployeeLedgerEntry(db, {
+        let month = 0;
+        let year = 0;
+        if (a.advance_date) {
+          const d = new Date(a.advance_date);
+          if (!Number.isNaN(d.getTime())) {
+            month = d.getMonth() + 1;
+            year = d.getFullYear();
+          }
+        }
+        await recordEmployeeAdvanceSettledFromPayroll(db, {
           branchId,
           empId: emp_id,
-          trnx_type: 'ADVANCE_SETTLED',
-          bill_no: settledBill,
-          details: `Advance recovered — ${emp.emp_name}`,
-          credit_amount: amt,
-          created_at: a.advance_date || new Date(),
+          empName: emp.emp_name,
+          advanceId: a.advance_id,
+          amount: amt,
+          month,
+          year,
         });
       }
     }
@@ -289,9 +307,37 @@ export async function reconcileEmployeeLedgerForEmployee(db, empId, branchId) {
     WHERE emp_id = ${emp_id} AND trnx_type = 'SALARY_DED' AND bill_no LIKE 'EMP-PAYROLL-%'
   `);
 
+  await syncEmployeeReceipts(db, emp_id, branchId, emp.emp_name);
   await syncEmployeePayrollLedgerMemos(db, emp_id, branchId, emp.emp_name);
   const closing = await recalculateEmployeeLedger(db, emp_id);
   return closing;
+}
+
+async function syncEmployeeReceipts(db, empId, branchId, empName) {
+  const emp_id = parseInt(empId, 10);
+  const rows = await db.$queryRawUnsafe(`
+    SELECT receipt_id, amount, notes, receipt_date, payment_mode, reference
+    FROM employee_receipts WHERE emp_id = ${emp_id}
+    ORDER BY receipt_id ASC
+  `);
+  for (const r of rows || []) {
+    const bill = employeeReceiptBillNo(r.receipt_id);
+    const exists = await db.$queryRawUnsafe(`
+      SELECT 1 AS ok FROM employee_ledger WHERE emp_id = ${emp_id} AND bill_no = '${bill}' LIMIT 1
+    `);
+    if (exists?.[0]) continue;
+    await recordEmployeeReceiptCredit(db, {
+      branchId,
+      empId: emp_id,
+      empName,
+      receiptId: r.receipt_id,
+      amount: r.amount,
+      notes: r.notes,
+      receiptDate: r.receipt_date,
+      paymentMode: r.payment_mode,
+      reference: r.reference,
+    });
+  }
 }
 
 /** Informational row (0 debit / 0 credit) — salary paid at clearance; does not change running balance. */
@@ -357,6 +403,8 @@ async function syncEmployeePayrollLedgerMemos(db, empId, branchId, empName) {
   `);
   for (const row of rows || []) {
     const snap = parseClearanceSnapshot(row.notes);
+    await syncEmployeePayrollClearanceEntries(db, emp_id, branchId, empName, row, snap);
+
     const advanceRecovered = parseFloat(
       snap?.advance_settled_on_ledger ?? 0
     ) + parseFloat(snap?.opening_balance_recovered ?? 0);
@@ -376,6 +424,94 @@ async function syncEmployeePayrollLedgerMemos(db, empId, branchId, empName) {
       advanceWithSalary: snap?.advance_with_salary ?? 0,
       paymentReference: snap?.payment_reference ?? null,
       paymentDate: row.payment_date || snap?.cleared_at || null,
+    });
+  }
+}
+
+async function syncEmployeePayrollClearanceEntries(db, empId, branchId, empName, row, snap) {
+  const emp_id = parseInt(empId, 10);
+  const pid = parseInt(row.payroll_id, 10);
+  const month = row.month;
+  const year = row.year;
+  if (!pid) return;
+
+  const openingRec = parseFloat(snap?.opening_balance_recovered ?? 0);
+  if (openingRec > 0.009) {
+    await recordEmployeePayrollBalanceRecovery(db, {
+      branchId,
+      empId: emp_id,
+      empName,
+      payrollId: pid,
+      amount: openingRec,
+      month,
+      year,
+    });
+  }
+
+  const payableSettled = parseFloat(snap?.ledger_payable_settled ?? 0);
+  if (payableSettled > 0.009) {
+    await recordEmployeePayrollPayableSettlement(db, {
+      branchId,
+      empId: emp_id,
+      empName,
+      payrollId: pid,
+      amount: payableSettled,
+      month,
+      year,
+    });
+  }
+
+  const snapDeducted = Array.isArray(snap?.deducted_advances) ? snap.deducted_advances : [];
+  if (snapDeducted.length > 0) {
+    for (const d of snapDeducted) {
+      const aid = parseInt(d.advance_id ?? d.advanceId, 10);
+      const damt = parseFloat(d.amount ?? 0);
+      if (!aid || damt <= 0) continue;
+      await recordEmployeeAdvanceSettledFromPayroll(db, {
+        branchId,
+        empId: emp_id,
+        empName,
+        advanceId: aid,
+        amount: damt,
+        month,
+        year,
+      });
+    }
+  } else {
+    const advRows = await db.$queryRawUnsafe(`
+      SELECT advance_id, amount FROM employee_advances
+      WHERE emp_id = ${emp_id} AND payroll_id = ${pid} AND status = 'DEDUCTED'
+    `);
+    for (const a of advRows || []) {
+      await recordEmployeeAdvanceSettledFromPayroll(db, {
+        branchId,
+        empId: emp_id,
+        empName,
+        advanceId: a.advance_id,
+        amount: a.amount,
+        month,
+        year,
+      });
+    }
+  }
+
+  let underpaid = parseFloat(snap?.salary_underpaid_carry ?? 0);
+  if (underpaid <= 0.009 && snap) {
+    const totalPayable = parseFloat(snap.total_payable ?? 0);
+    const amountPaid = parseFloat(snap.amount_paid ?? 0);
+    if (totalPayable > amountPaid + 0.009) {
+      underpaid = Math.round((totalPayable - amountPaid) * 100) / 100;
+    }
+  }
+  if (underpaid > 0.009) {
+    await recordEmployeePayrollUnderpaidCarry(db, {
+      branchId,
+      empId: emp_id,
+      empName,
+      payrollId: pid,
+      amount: underpaid,
+      month,
+      year,
     });
   }
 }
@@ -420,11 +556,19 @@ async function appendEmployeeLedgerEntry(db, {
 }
 
 export async function recalculateEmployeeLedger(db, empId) {
-  const entries = await fetchEmployeeLedgerEntries(db, empId);
+  const id = parseInt(empId, 10);
+  const entries = await db.$queryRawUnsafe(`
+    SELECT el_id, debit_amount, credit_amount
+    FROM employee_ledger
+    WHERE emp_id = ${id}
+    ORDER BY created_at ASC, el_id ASC
+  `);
   let running = 0;
-  for (const e of entries) {
+  for (const e of entries || []) {
     const opening = running;
-    const closing = calcClosing(opening, e.debit_amount, e.credit_amount);
+    const debit = parseFloat(e.debit_amount || 0);
+    const credit = parseFloat(e.credit_amount || 0);
+    const closing = calcClosing(opening, debit, credit);
     await db.$executeRawUnsafe(`
       UPDATE employee_ledger
       SET opening_balance = ${opening}, closing_balance = ${closing}
@@ -435,6 +579,32 @@ export async function recalculateEmployeeLedger(db, empId) {
   return running;
 }
 
+function employeeOpeningDetailsLabel(opening, empName) {
+  const name = empName || 'Employee';
+  if (opening > 0) {
+    return `Starting account balance — ${name} owes company`;
+  }
+  if (opening < 0) {
+    return `Starting account balance — company owes ${name}`;
+  }
+  return `Starting account balance — ${name}`;
+}
+
+/** Signed amount stored on the OPENING ledger row (+ employee owes, − company owes). */
+export async function readEmployeeStartingBalanceFromLedger(db, empId) {
+  const emp_id = parseInt(empId, 10);
+  if (!emp_id) return null;
+  const bill = employeeOpeningBillNo(emp_id);
+  const rows = await db.$queryRawUnsafe(`
+    SELECT debit_amount, credit_amount FROM employee_ledger
+    WHERE emp_id = ${emp_id} AND bill_no = '${bill}' LIMIT 1
+  `);
+  const row = rows?.[0];
+  if (!row) return null;
+  return parseFloat(row.debit_amount || 0) - parseFloat(row.credit_amount || 0);
+}
+
+/** Keep employees.opening_balance and the OPENING ledger row aligned; recalc running balances. */
 export async function setEmployeeOpeningBalance(db, {
   branchId,
   empId,
@@ -442,25 +612,43 @@ export async function setEmployeeOpeningBalance(db, {
   openingBalance,
   joinDate = null,
 }) {
-  const opening = parseFloat(openingBalance || 0);
+  const opening = Math.round(parseFloat(openingBalance || 0) * 100) / 100;
   const billNo = employeeOpeningBillNo(empId);
   const emp_id = parseInt(empId, 10);
-  await db.$executeRawUnsafe(`
-    DELETE FROM employee_ledger
-    WHERE emp_id = ${emp_id} AND bill_no = '${billNo}'
-  `);
+  const bid = parseInt(branchId, 10);
+
   await db.$executeRawUnsafe(`
     UPDATE employees SET opening_balance = ${opening} WHERE emp_id = ${emp_id}
   `);
 
-  if (opening !== 0) {
-    const debit = opening > 0 ? opening : 0;
-    const credit = opening < 0 ? Math.abs(opening) : 0;
-    const label =
-      opening > 0
-        ? `Opening balance — ${empName || 'Employee'} owes company (pre-system)`
-        : `Opening balance — company owes ${empName || 'employee'} (pre-system)`;
-    const detSql = `'${label.replace(/'/g, "''")}'`;
+  const existing = await db.$queryRawUnsafe(`
+    SELECT el_id, created_at FROM employee_ledger
+    WHERE emp_id = ${emp_id} AND bill_no = '${billNo}' LIMIT 1
+  `);
+
+  if (Math.abs(opening) < 0.009) {
+    if (existing?.[0]) {
+      await db.$executeRawUnsafe(`
+        DELETE FROM employee_ledger WHERE emp_id = ${emp_id} AND bill_no = '${billNo}'
+      `);
+    }
+    return recalculateEmployeeLedger(db, emp_id);
+  }
+
+  const debit = opening > 0 ? opening : 0;
+  const credit = opening < 0 ? Math.abs(opening) : 0;
+  const detSql = `'${employeeOpeningDetailsLabel(opening, empName).replace(/'/g, "''")}'`;
+
+  if (existing?.[0]) {
+    await db.$executeRawUnsafe(`
+      UPDATE employee_ledger
+      SET trnx_type = 'OPENING',
+        details = ${detSql},
+        debit_amount = ${debit},
+        credit_amount = ${credit}
+      WHERE el_id = ${parseInt(existing[0].el_id, 10)}
+    `);
+  } else {
     const ts = joinDate
       ? `'${joinDate instanceof Date ? joinDate.toISOString().slice(0, 19).replace('T', ' ') : String(joinDate).slice(0, 19)}'`
       : 'NOW()';
@@ -469,13 +657,34 @@ export async function setEmployeeOpeningBalance(db, {
         branch_id, emp_id, created_at, trnx_type, bill_no, details,
         debit_amount, credit_amount, opening_balance, closing_balance
       ) VALUES (
-        ${parseInt(branchId, 10)}, ${emp_id}, ${ts}, 'OPENING', '${billNo}', ${detSql},
+        ${bid}, ${emp_id}, ${ts}, 'OPENING', '${billNo}', ${detSql},
         ${debit}, ${credit}, 0, 0
       )
     `);
   }
 
   return recalculateEmployeeLedger(db, emp_id);
+}
+
+/** If master opening_balance and OPENING row drifted, master wins and ledger is corrected. */
+export async function ensureEmployeeStartingBalanceSynced(db, empId, branchId, empName) {
+  const emp_id = parseInt(empId, 10);
+  const empRows = await db.$queryRawUnsafe(`
+    SELECT opening_balance, join_date FROM employees WHERE emp_id = ${emp_id} LIMIT 1
+  `);
+  const master = parseFloat(empRows?.[0]?.opening_balance ?? 0);
+  const fromLedger = await readEmployeeStartingBalanceFromLedger(db, emp_id);
+  const ledgerVal = fromLedger == null ? 0 : fromLedger;
+  if (Math.abs(master - ledgerVal) > 0.02) {
+    return setEmployeeOpeningBalance(db, {
+      branchId,
+      empId: emp_id,
+      empName,
+      openingBalance: master,
+      joinDate: empRows?.[0]?.join_date,
+    });
+  }
+  return getEmployeeLedgerClosing(db, emp_id);
 }
 
 export async function recordEmployeeAdvanceDebit(db, {
@@ -558,6 +767,34 @@ export async function recordEmployeePayrollPayableSettlement(db, {
   });
 }
 
+/** Salary clearance paid less than total due — company still owes (ledger credit). */
+export async function recordEmployeePayrollUnderpaidCarry(db, {
+  branchId,
+  empId,
+  empName,
+  payrollId,
+  amount,
+  month,
+  year,
+}) {
+  const amt = parseFloat(amount || 0);
+  if (amt <= 0) return;
+  const bill = `${employeePayrollSalaryBillNo(payrollId)}-UNDERPAID`;
+  const exists = await db.$queryRawUnsafe(`
+    SELECT 1 AS ok FROM employee_ledger WHERE emp_id = ${parseInt(empId, 10)} AND bill_no = '${bill}' LIMIT 1
+  `);
+  if (exists?.[0]) return;
+  await appendEmployeeLedgerEntry(db, {
+    branchId,
+    empId,
+    trnx_type: 'SALARY_UNDERPAID',
+    bill_no: bill,
+    details: `Salary underpaid (carried) ${month}/${year} — ${empName || 'Employee'} · Rs ${amt.toFixed(2)}`,
+    debit_amount: 0,
+    credit_amount: amt,
+  });
+}
+
 export async function recordEmployeePayrollBalanceRecovery(db, {
   branchId,
   empId,
@@ -592,8 +829,9 @@ export async function reverseEmployeePayrollLedgerCredits(db, empId, { payrollId
     const recoveryBill = employeePayrollRecoveryBillNo(pid);
     const payableBill = employeePayrollPayableBillNo(pid);
     const salaryBill = employeePayrollSalaryBillNo(pid);
+    const underpaidBill = `${salaryBill}-UNDERPAID`;
     await db.$executeRawUnsafe(`
-      DELETE FROM employee_ledger WHERE emp_id = ${id} AND bill_no IN ('${recoveryBill}', '${payableBill}', '${salaryBill}')
+      DELETE FROM employee_ledger WHERE emp_id = ${id} AND bill_no IN ('${recoveryBill}', '${payableBill}', '${salaryBill}', '${underpaidBill}')
     `);
   }
   for (const advId of advanceIds) {
@@ -641,6 +879,7 @@ export async function fetchBranchEmployeeLedgerEntries(db, branchId, {
   type = null,
   q = null,
   limit = 2500,
+  offset = 0,
 } = {}) {
   const bid = parseInt(branchId, 10);
   let sql = `
@@ -663,7 +902,9 @@ export async function fetchBranchEmployeeLedgerEntries(db, branchId, {
     const safe = String(q).replace(/'/g, "''");
     sql += ` AND (e.emp_name LIKE '%${safe}%' OR el.bill_no LIKE '%${safe}%' OR el.details LIKE '%${safe}%')`;
   }
-  sql += ` ORDER BY el.created_at ASC, el.el_id ASC LIMIT ${parseInt(limit, 10)}`;
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 2500);
+  const off = Math.max(parseInt(offset, 10) || 0, 0);
+  sql += ` ORDER BY el.created_at DESC, el.el_id DESC LIMIT ${off}, ${lim}`;
 
   const rows = await db.$queryRawUnsafe(sql);
   return (rows || []).map((r) => {
@@ -704,7 +945,7 @@ export async function fetchEmployeeLedgerEntries(db, empId, { branchId } = {}) {
     WHERE el.emp_id = ${id}
   `;
   if (branchId != null) q += ` AND e.branch_id = ${parseInt(branchId, 10)}`;
-  q += ' ORDER BY el.created_at ASC, el.el_id ASC';
+  q += ' ORDER BY el.created_at DESC, el.el_id DESC';
   const rows = await db.$queryRawUnsafe(q);
   return (rows || []).map((r) => ({
     el_id: r.el_id,

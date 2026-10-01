@@ -28,13 +28,122 @@ export async function GET(request) {
     const q = searchParams.get('q');
 
     if (summary) {
-      const employees = await prisma.$queryRawUnsafe(`
-        SELECT emp_id, emp_name, designation, department, status, opening_balance
-        FROM employees
-        WHERE branch_id = ${branchId}
-        ORDER BY emp_name ASC
-      `);
-      const empList = employees || [];
+      const limitParam = searchParams.get('limit');
+      const summaryQ = searchParams.get('q');
+
+      const buildSummaryWhere = () => {
+        const where = { branch_id: branchId };
+        if (summaryQ && String(summaryQ).trim()) {
+          const term = String(summaryQ).trim();
+          where.OR = [
+            { emp_name: { contains: term } },
+            { designation: { contains: term } },
+            { department: { contains: term } },
+          ];
+        }
+        return where;
+      };
+
+      const mapSummaryRow = (emp, closingMap) => {
+        const closing = closingMap.get(Number(emp.emp_id))
+          ?? parseFloat(emp.opening_balance || 0);
+        return {
+          emp_id: emp.emp_id,
+          emp_name: emp.emp_name,
+          designation: emp.designation,
+          department: emp.department || '',
+          status: emp.status || 'ACTIVE',
+          opening_balance: parseFloat(emp.opening_balance || 0),
+          starting_balance: parseFloat(emp.opening_balance || 0),
+          closing_balance: closing,
+          ledger_balance: closing,
+          account_balance: closing,
+        };
+      };
+
+      if (searchParams.get('stats') === 'true') {
+        const empList = await prisma.employee.findMany({
+          where: { branch_id: branchId },
+          select: { emp_id: true, opening_balance: true },
+        });
+        let closingMap = await getEmployeeLedgerClosingsMap(prisma, empList.map((e) => e.emp_id));
+        if (reconcile) {
+          closingMap = new Map();
+          for (const emp of empList) {
+            const closing = await reconcileEmployeeLedgerForEmployee(prisma, emp.emp_id, branchId);
+            closingMap.set(Number(emp.emp_id), closing);
+          }
+        }
+        let receivable = 0;
+        let payable = 0;
+        let owesCount = 0;
+        let settledCount = 0;
+        for (const emp of empList) {
+          const b = closingMap.get(Number(emp.emp_id)) ?? parseFloat(emp.opening_balance || 0);
+          if (b > 0.009) {
+            receivable += b;
+            owesCount += 1;
+          } else if (b < -0.009) {
+            payable += Math.abs(b);
+          } else {
+            settledCount += 1;
+          }
+        }
+        return NextResponse.json({
+          total: empList.length,
+          receivable: Math.round(receivable * 100) / 100,
+          payable: Math.round(payable * 100) / 100,
+          owesCount,
+          settledCount,
+        });
+      }
+
+      const where = buildSummaryWhere();
+      const select = {
+        emp_id: true,
+        emp_name: true,
+        designation: true,
+        department: true,
+        status: true,
+        opening_balance: true,
+      };
+
+      if (limitParam) {
+        const take = Math.min(Math.max(parseInt(limitParam, 10) || 40, 1), 100);
+        const skip = Math.max(parseInt(searchParams.get('offset') || '0', 10), 0);
+        const [total, empList] = await Promise.all([
+          prisma.employee.count({ where }),
+          prisma.employee.findMany({
+            where,
+            orderBy: { emp_name: 'asc' },
+            skip,
+            take,
+            select,
+          }),
+        ]);
+        let closingMap = await getEmployeeLedgerClosingsMap(prisma, empList.map((e) => e.emp_id));
+        if (reconcile) {
+          closingMap = new Map();
+          for (const emp of empList) {
+            const closing = await reconcileEmployeeLedgerForEmployee(prisma, emp.emp_id, branchId);
+            closingMap.set(Number(emp.emp_id), closing);
+          }
+        }
+        const items = empList.map((emp) => mapSummaryRow(emp, closingMap));
+        return NextResponse.json({
+          items,
+          total,
+          limit: take,
+          offset: skip,
+          hasMore: skip + items.length < total,
+        });
+      }
+
+      const empList = await prisma.employee.findMany({
+        where,
+        orderBy: { emp_name: 'asc' },
+        select,
+      });
       let closingMap = await getEmployeeLedgerClosingsMap(prisma, empList.map((e) => e.emp_id));
 
       if (reconcile) {
@@ -45,20 +154,7 @@ export async function GET(request) {
         }
       }
 
-      const result = empList.map((emp) => {
-        const closing = closingMap.get(Number(emp.emp_id))
-          ?? parseFloat(emp.opening_balance || 0);
-        return {
-          emp_id: emp.emp_id,
-          emp_name: emp.emp_name,
-          designation: emp.designation,
-          department: emp.department || '',
-          status: emp.status || 'ACTIVE',
-          opening_balance: parseFloat(emp.opening_balance || 0),
-          closing_balance: closing,
-          ledger_balance: closing,
-        };
-      });
+      const result = empList.map((emp) => mapSummaryRow(emp, closingMap));
       return NextResponse.json(result);
     }
 
@@ -72,24 +168,29 @@ export async function GET(request) {
           await reconcileEmployeeLedgerForEmployee(prisma, row.emp_id, branchId);
         }
       }
+      const txLimit = Math.min(Math.max(parseInt(searchParams.get('limit') || '200', 10) || 200, 1), 500);
+      const txOffset = Math.max(parseInt(searchParams.get('offset') || '0', 10) || 0, 0);
       const entries = await fetchBranchEmployeeLedgerEntries(prisma, branchId, {
         empId,
         from,
         to,
         type: type && type !== 'ALL' ? type : null,
         q,
+        limit: txLimit,
+        offset: txOffset,
       });
       let closing = null;
       if (empId) {
-        closing = reconcile
-          ? await reconcileEmployeeLedgerForEmployee(prisma, empId, branchId)
-          : await getEmployeeLedgerClosing(prisma, empId);
+        closing = await getEmployeeLedgerClosing(prisma, empId);
       }
       return NextResponse.json({
         entries,
         emp_id: empId,
         closing_balance: closing,
         count: entries.length,
+        limit: txLimit,
+        offset: txOffset,
+        hasMore: entries.length >= txLimit,
       });
     }
 
@@ -115,9 +216,11 @@ export async function GET(request) {
         designation: emp.designation,
         department: emp.department || '',
         opening_balance: parseFloat(emp.opening_balance || 0),
+        starting_balance: parseFloat(emp.opening_balance || 0),
       },
       closing_balance: closing,
       ledger_balance: closing,
+      account_balance: closing,
       entries,
     });
   } catch (error) {

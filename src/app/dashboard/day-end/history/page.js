@@ -86,17 +86,17 @@ export default function DayEndHistoryPage() {
   });
 
   const handleExportCSV = () => {
-    const headers = ['Business Date', 'Status', 'Opening Cash', 'Total Sales', 'Total Purchases', 'Total Expenses', 'Expected Cash', 'Closing Cash', 'Variance', 'Closed By', 'Notes'];
+    const headers = ['Business Date', 'Status', 'Opening (Ledger)', 'Total Sales', 'Total Purchases', 'Total Expenses', 'Expected Cash', 'Physical Close', 'Variance', 'Closed By', 'Notes'];
     const rows = filteredDayEnds.map(d => [
       formatDate(d.business_date),
       d.status,
-      d.opening_cash || 0,
+      d.ledger_opening_cash ?? d.opening_cash ?? 0,
       d.total_sales || 0,
       d.total_purchases || 0,
       d.total_expenses || 0,
-      d.cash_in_hand || 0,
+      d.expected_cash_in_hand ?? d.cash_in_hand ?? 0,
       d.closing_cash !== null ? d.closing_cash : '-',
-      d.variance || 0,
+      d.variance ?? 0,
       d.closed_by_user?.full_name || 'System',
       `"${(d.notes || '').replace(/"/g, '""')}"`
     ]);
@@ -259,11 +259,12 @@ export default function DayEndHistoryPage() {
                   <th className="py-3.5 px-4 text-center">#</th>
                   <th className="py-3.5 px-4">Business Date</th>
                   <th className="py-3.5 px-4 text-center">Status</th>
-                  <th className="py-3.5 px-4 text-right">Opening Cash</th>
+                  <th className="py-3.5 px-4 text-right">Opening (Ledger)</th>
                   <th className="py-3.5 px-4 text-right">Total Sales</th>
                   <th className="py-3.5 px-4 text-right">Total Purchases</th>
                   <th className="py-3.5 px-4 text-right">Total Expenses</th>
-                  <th className="py-3.5 px-4 text-right">Closing Cash</th>
+                  <th className="py-3.5 px-4 text-right">Expected (Ledger)</th>
+                  <th className="py-3.5 px-4 text-right">Closing (Ledger)</th>
                   <th className="py-3.5 px-4 text-right">Variance</th>
                   <th className="py-3.5 px-4">Closed By</th>
                   <th className="py-3.5 px-4 text-center print:hidden">Action</th>
@@ -272,14 +273,14 @@ export default function DayEndHistoryPage() {
               <tbody className="divide-y divide-slate-100 font-medium">
                 {loading ? (
                   <tr>
-                    <td colSpan="11" className="py-12 text-center text-slate-400">
+                    <td colSpan="12" className="py-12 text-center text-slate-400">
                       <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-600" />
                       <p className="font-semibold text-xs text-slate-600">Loading closing history...</p>
                     </td>
                   </tr>
                 ) : filteredDayEnds.length === 0 ? (
                   <tr>
-                    <td colSpan="11" className="py-12 text-center text-slate-400">
+                    <td colSpan="12" className="py-12 text-center text-slate-400">
                       <Calendar className="w-8 h-8 mx-auto mb-2 opacity-30" />
                       <p className="font-bold text-slate-700">No day end closing records found</p>
                       <p className="text-xs text-slate-400 mt-1">Try adjusting your date range or filters</p>
@@ -309,7 +310,7 @@ export default function DayEndHistoryPage() {
                           </span>
                         </td>
                         <td className="py-3 px-4 text-right font-semibold text-slate-700">
-                          Rs. {formatCurrency(d.opening_cash)}
+                          Rs. {formatCurrency(d.ledger_opening_cash ?? d.opening_cash)}
                         </td>
                         <td className="py-3 px-4 text-right font-bold text-blue-700">
                           Rs. {formatCurrency(d.total_sales)}
@@ -320,11 +321,14 @@ export default function DayEndHistoryPage() {
                         <td className="py-3 px-4 text-right font-semibold text-rose-700">
                           Rs. {formatCurrency(d.total_expenses)}
                         </td>
+                        <td className="py-3 px-4 text-right font-bold text-blue-800">
+                          {d.expected_cash_in_hand != null ? `Rs. ${formatCurrency(d.expected_cash_in_hand)}` : '-'}
+                        </td>
                         <td className="py-3 px-4 text-right font-extrabold text-slate-900">
                           {d.closing_cash !== null && d.closing_cash !== undefined ? `Rs. ${formatCurrency(d.closing_cash)}` : '-'}
                         </td>
                         <td className="py-3 px-4 text-right font-bold">
-                          {d.variance ? (
+                          {d.variance != null && Math.abs(Number(d.variance)) > 0.009 ? (
                             <span className={d.variance < 0 ? 'text-rose-600' : 'text-emerald-600'}>
                               Rs. {formatCurrency(d.variance)}
                             </span>

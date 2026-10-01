@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchHrAttendanceSheet } from '../lib/hr-fetch';
+import { fetchHrAttendanceSheet, HR_SHEET_EMP_PAGE } from '../lib/hr-fetch';
 import { useHrRefreshVersion, HR_KEYS } from '../context/HrRefreshContext';
 
 const cacheByKey = new Map();
@@ -15,6 +15,20 @@ function cacheEntry(key) {
 
 function sheetCacheKey(month, year) {
   return `${year}-${month}`;
+}
+
+function mergeSheetPages(prev, next) {
+  if (!prev) return next;
+  const offDays = [...new Set([...(prev.offDays || []), ...(next.offDays || [])])].sort((a, b) => a - b);
+  return {
+    ...next,
+    employees: [...(prev.employees || []), ...(next.employees || [])],
+    grid: { ...(prev.grid || {}), ...(next.grid || {}) },
+    offDays,
+    totalEmployees: next.totalEmployees ?? prev.totalEmployees,
+    hasMoreEmployees: next.hasMoreEmployees,
+    employeeOffset: (next.employees || []).length + (prev.employees || []).length,
+  };
 }
 
 function shiftMonthYear(month, year, delta) {
@@ -33,24 +47,28 @@ function shiftMonthYear(month, year, delta) {
 function prefetchAdjacentSheets(month, year) {
   const prev = shiftMonthYear(month, year, -1);
   const next = shiftMonthYear(month, year, 1);
-  loadSheet(prev.month, prev.year).catch(() => {});
-  loadSheet(next.month, next.year).catch(() => {});
+  loadSheetPage(prev.month, prev.year, 0).catch(() => {});
+  loadSheetPage(next.month, next.year, 0).catch(() => {});
 }
 
-async function loadSheet(month, year) {
+async function loadSheetPage(month, year, offset = 0) {
   const key = sheetCacheKey(month, year);
   const entry = cacheEntry(key);
-  if (!entry.inflight) {
-    entry.inflight = fetchHrAttendanceSheet(month, year)
-      .finally(() => {
-        entry.inflight = null;
-      });
+  const inflightKey = `${key}@${offset}`;
+  if (!entry.inflightMap) entry.inflightMap = new Map();
+  if (!entry.inflightMap.has(inflightKey)) {
+    entry.inflightMap.set(
+      inflightKey,
+      fetchHrAttendanceSheet(month, year, { offset, limit: HR_SHEET_EMP_PAGE }).finally(() => {
+        entry.inflightMap.delete(inflightKey);
+      })
+    );
   }
-  return entry.inflight;
+  return entry.inflightMap.get(inflightKey);
 }
 
 /**
- * Monthly attendance sheet — per-month cache, background refresh on HR signal.
+ * Monthly attendance sheet — first page fast, load more employees, per-month cache.
  */
 export function useHrAttendanceSheet(monthYear) {
   const { month, year } = monthYear;
@@ -60,6 +78,7 @@ export function useHrAttendanceSheet(monthYear) {
 
   const [sheetData, setSheetData] = useState(() => entry.data);
   const [loading, setLoading] = useState(() => entry.data == null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const mounted = useRef(true);
@@ -101,7 +120,7 @@ export function useHrAttendanceSheet(monthYear) {
 
     let cancelled = false;
 
-    loadSheet(month, year)
+    loadSheetPage(month, year, 0)
       .then((data) => {
         if (cancelled || !mounted.current) return;
         applySheet(data, signalVersion);
@@ -124,6 +143,23 @@ export function useHrAttendanceSheet(monthYear) {
     };
   }, [month, year, key, signalVersion, applySheet]);
 
+  const loadMoreEmployees = useCallback(async () => {
+    const current = cacheEntry(key).data;
+    if (!current?.hasMoreEmployees || loadingMore || loading) return;
+    setLoadingMore(true);
+    try {
+      const offset = (current.employees || []).length;
+      const page = await loadSheetPage(month, year, offset);
+      if (!mounted.current) return;
+      const merged = mergeSheetPages(current, page);
+      applySheet(merged, signalVersion);
+    } catch (err) {
+      if (mounted.current) setError(err.message || 'Failed to load more');
+    } finally {
+      if (mounted.current) setLoadingMore(false);
+    }
+  }, [key, month, year, loadingMore, loading, applySheet, signalVersion]);
+
   const replaceLocalSheet = useCallback((next, options = {}) => {
     const { markSynced = false } = options;
     const e = cacheEntry(key);
@@ -136,7 +172,7 @@ export function useHrAttendanceSheet(monthYear) {
   const softSync = useCallback(async () => {
     setRefreshing(true);
     try {
-      const data = await loadSheet(month, year);
+      const data = await loadSheetPage(month, year, 0);
       if (mounted.current) {
         applySheet(data, signalVersion);
         setError(null);
@@ -151,8 +187,10 @@ export function useHrAttendanceSheet(monthYear) {
   return {
     sheetData,
     loading,
+    loadingMore,
     refreshing,
     error,
+    loadMoreEmployees,
     replaceLocalSheet,
     softSync,
   };

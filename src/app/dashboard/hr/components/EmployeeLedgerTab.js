@@ -6,7 +6,7 @@ import {
   Box, Typography, Card, CardContent, TextField, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Paper, MenuItem, FormControl, InputLabel,
   Select, Chip, CircularProgress, InputAdornment, Button, Stack, ToggleButton,
-  ToggleButtonGroup, IconButton, Tooltip, Grid,
+  ToggleButtonGroup, IconButton, Tooltip,
 } from '@mui/material';
 import {
   Search, AccountBalance, Refresh, FilterList, ClearAll, PictureAsPdf, PersonSearch, ArrowBack,
@@ -14,6 +14,8 @@ import {
 import { BRAND } from '@/lib/brand-theme';
 import { downloadEmployeeLedgerPdf } from '@/lib/employee-ledger-pdf';
 import { useHrRefreshVersion, HR_KEYS } from '../context/HrRefreshContext';
+import { fetchHrLedgerSummaryPage, fetchHrLedgerSummaryStats } from '../lib/hr-fetch';
+import HrLoadMoreTrigger from './shared/HrLoadMoreTrigger';
 
 const CARD_SX = {
   borderRadius: '12px',
@@ -61,7 +63,7 @@ const TABLE_HEAD_CELL_SX = {
 
 const ENTRY_TYPES = [
   { value: 'ALL', label: 'All types' },
-  { value: 'OPENING', label: 'Opening' },
+  { value: 'OPENING', label: 'Starting balance' },
   { value: 'ADVANCE', label: 'Advance' },
   { value: 'ADVANCE_REV', label: 'Advance cancel' },
   { value: 'ADVANCE_SETTLED', label: 'Payroll recovery' },
@@ -70,6 +72,7 @@ const ENTRY_TYPES = [
   { value: 'PAYROLL_RECOVERY', label: 'Salary recovery' },
   { value: 'PAYROLL_PAYABLE', label: 'Company balance paid' },
   { value: 'SALARY_PAYMENT', label: 'Salary paid (info)' },
+  { value: 'SALARY_UNDERPAID', label: 'Salary underpaid (carry)' },
 ];
 
 const fmtAmt = (v) => {
@@ -77,15 +80,84 @@ const fmtAmt = (v) => {
   return n.toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 };
 
-function balanceMeta(closing) {
+function fmtDateTime(value) {
+  if (!value) return '—';
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return '—';
+  return dt.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function balanceTone(closing) {
   const n = parseFloat(closing || 0);
-  if (n > 0.009) {
-    return { label: 'Employee owes', color: '#b91c1c', bg: '#fef2f2' };
+  if (n > 0.009) return '#0f172a';
+  if (n < -0.009) return '#0f172a';
+  return '#64748b';
+}
+
+/** Running balance — number only (no “owes you” labels). */
+function fmtSignedBalance(closing) {
+  const n = parseFloat(closing || 0);
+  if (Math.abs(n) < 0.009) return '0';
+  const body = fmtAmt(Math.abs(n));
+  return n < 0 ? `-${body}` : body;
+}
+
+const LEDGER_TABLE_SX = {
+  tableLayout: 'fixed',
+  width: '100%',
+  borderCollapse: 'separate',
+  borderSpacing: 0,
+  '& .MuiTableCell-root': {
+    borderRight: '1px solid #e2e8f0',
+    borderBottom: '1px solid #e2e8f0',
+    px: 1.25,
+    py: 0.85,
+    verticalAlign: 'middle',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  '& .MuiTableRow-root .MuiTableCell-root:first-of-type': {
+    borderLeft: '1px solid #e2e8f0',
+  },
+  '& .MuiTableHead-root .MuiTableCell-root': {
+    borderTop: '1px solid #115e59',
+  },
+};
+
+function ledgerColGroup(showEmployeeColumn) {
+  if (showEmployeeColumn) {
+    return (
+      <colgroup>
+        <col style={{ width: '11%' }} />
+        <col style={{ width: '11%' }} />
+        <col style={{ width: '8%' }} />
+        <col style={{ width: '9%' }} />
+        <col style={{ width: '23%' }} />
+        <col style={{ width: '9%' }} />
+        <col style={{ width: '9%' }} />
+        <col style={{ width: '10%' }} />
+        <col style={{ width: '9%' }} />
+      </colgroup>
+    );
   }
-  if (n < -0.009) {
-    return { label: 'Company owes', color: '#15803d', bg: '#f0fdf4' };
-  }
-  return { label: 'Settled', color: '#64748b', bg: '#f1f5f9' };
+  return (
+    <colgroup>
+      <col style={{ width: '11%' }} />
+      <col style={{ width: '9%' }} />
+      <col style={{ width: '10%' }} />
+      <col style={{ width: '30%' }} />
+      <col style={{ width: '10%' }} />
+      <col style={{ width: '10%' }} />
+      <col style={{ width: '11%' }} />
+      <col style={{ width: '9%' }} />
+    </colgroup>
+  );
 }
 
 function typeChipStyle(type) {
@@ -120,8 +192,14 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
   const scrollRef = useRef(null);
 
   const [summary, setSummary] = useState([]);
+  const [summaryTotal, setSummaryTotal] = useState(0);
+  const [summaryHasMore, setSummaryHasMore] = useState(false);
+  const [summaryLoadingMore, setSummaryLoadingMore] = useState(false);
+  const [portfolioStats, setPortfolioStats] = useState(null);
   const [selectedEmpId, setSelectedEmpId] = useState(() => searchParams.get('emp_id') || '');
   const [entries, setEntries] = useState([]);
+  const [entriesHasMore, setEntriesHasMore] = useState(false);
+  const [entriesLoadingMore, setEntriesLoadingMore] = useState(false);
   const [closingBalance, setClosingBalance] = useState(null);
   const [loadingSummary, setLoadingSummary] = useState(true);
   const [loadingEntries, setLoadingEntries] = useState(true);
@@ -129,6 +207,7 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
 
   const [balanceFilter, setBalanceFilter] = useState('ALL');
   const [empPickerSearch, setEmpPickerSearch] = useState('');
+  const [empPickerSearchDebounced, setEmpPickerSearchDebounced] = useState('');
 
   const [entryFrom, setEntryFrom] = useState('');
   const [entryTo, setEntryTo] = useState('');
@@ -143,6 +222,11 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
     return () => clearTimeout(t);
   }, [entrySearch]);
 
+  useEffect(() => {
+    const t = setTimeout(() => setEmpPickerSearchDebounced(empPickerSearch.trim()), 350);
+    return () => clearTimeout(t);
+  }, [empPickerSearch]);
+
   const summaryByEmpId = useMemo(() => {
     const map = new Map();
     summary.forEach((e) => map.set(String(e.emp_id), e));
@@ -152,15 +236,34 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
   const loadSummary = useCallback(async (withReconcile = false) => {
     setLoadingSummary(true);
     try {
-      const url = withReconcile
-        ? '/api/employee-ledger?summary=true&reconcile=true'
-        : '/api/employee-ledger?summary=true';
-      const res = await fetch(url);
-      if (res.ok) setSummary(await res.json());
+      const [page, stats] = await Promise.all([
+        fetchHrLedgerSummaryPage({ offset: 0, search: empPickerSearchDebounced }),
+        fetchHrLedgerSummaryStats({ reconcile: withReconcile }),
+      ]);
+      setSummary(page.items);
+      setSummaryTotal(page.total);
+      setSummaryHasMore(page.hasMore);
+      setPortfolioStats(stats);
     } finally {
       setLoadingSummary(false);
     }
-  }, []);
+  }, [empPickerSearchDebounced]);
+
+  const loadMoreSummary = useCallback(async () => {
+    if (!summaryHasMore || summaryLoadingMore || loadingSummary) return;
+    setSummaryLoadingMore(true);
+    try {
+      const page = await fetchHrLedgerSummaryPage({
+        offset: summary.length,
+        search: empPickerSearchDebounced,
+      });
+      setSummary((prev) => [...prev, ...page.items]);
+      setSummaryTotal(page.total);
+      setSummaryHasMore(page.hasMore);
+    } finally {
+      setSummaryLoadingMore(false);
+    }
+  }, [summaryHasMore, summaryLoadingMore, loadingSummary, summary.length, empPickerSearchDebounced]);
 
   const loadTransactions = useCallback(async (withReconcile = false) => {
     setLoadingEntries(true);
@@ -173,30 +276,70 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
         q: entrySearchDebounced || undefined,
         reconcile: withReconcile,
       });
-      const res = await fetch(`/api/employee-ledger?${qs}`);
+      const res = await fetch(`/api/employee-ledger?${qs}&limit=200&offset=0`);
       if (res.ok) {
         const data = await res.json();
         setEntries(Array.isArray(data.entries) ? data.entries : []);
+        setEntriesHasMore(!!data.hasMore);
         setClosingBalance(data.closing_balance ?? null);
       }
     } finally {
       setLoadingEntries(false);
+      requestAnimationFrame(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = 0;
+      });
     }
   }, [selectedEmpId, entryFrom, entryTo, entryType, entrySearchDebounced]);
 
   useEffect(() => { loadSummary(); }, [loadSummary, ledgerVersion]);
 
   useEffect(() => {
-    loadTransactions();
-  }, [loadTransactions, ledgerVersion]);
+    loadTransactions(!!selectedEmpId);
+  }, [loadTransactions, ledgerVersion, selectedEmpId]);
 
-  useEffect(() => {
-    if (!loadingEntries && entries.length > 0 && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  const loadMoreEntries = useCallback(async () => {
+    if (!entriesHasMore || entriesLoadingMore || loadingEntries) return;
+    setEntriesLoadingMore(true);
+    try {
+      const qs = buildTransactionsQuery({
+        empId: selectedEmpId || undefined,
+        from: entryFrom || undefined,
+        to: entryTo || undefined,
+        type: entryType,
+        q: entrySearchDebounced || undefined,
+      });
+      const res = await fetch(`/api/employee-ledger?${qs}&limit=200&offset=${entries.length}`);
+      if (res.ok) {
+        const data = await res.json();
+        const batch = Array.isArray(data.entries) ? data.entries : [];
+        setEntries((prev) => [...prev, ...batch]);
+        setEntriesHasMore(!!data.hasMore);
+      }
+    } finally {
+      setEntriesLoadingMore(false);
     }
-  }, [loadingEntries, entries.length, selectedEmpId]);
+  }, [
+    entriesHasMore,
+    entriesLoadingMore,
+    loadingEntries,
+    entries.length,
+    selectedEmpId,
+    entryFrom,
+    entryTo,
+    entryType,
+    entrySearchDebounced,
+  ]);
 
-  const portfolioStats = useMemo(() => {
+  const portfolioDisplay = useMemo(() => {
+    if (portfolioStats) {
+      return {
+        receivable: portfolioStats.receivable ?? 0,
+        payable: portfolioStats.payable ?? 0,
+        owesCount: portfolioStats.owesCount ?? 0,
+        settledCount: portfolioStats.settledCount ?? 0,
+        total: portfolioStats.total ?? summaryTotal,
+      };
+    }
     let receivable = 0;
     let payable = 0;
     let owesCount = 0;
@@ -212,25 +355,16 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
         settledCount += 1;
       }
     });
-    return { receivable, payable, owesCount, settledCount, total: summary.length };
-  }, [summary]);
+    return { receivable, payable, owesCount, settledCount, total: summaryTotal || summary.length };
+  }, [portfolioStats, summary, summaryTotal]);
 
   const filteredSummary = useMemo(() => {
     let list = summary;
-    if (empPickerSearch.trim()) {
-      const q = empPickerSearch.toLowerCase();
-      list = list.filter(
-        (e) =>
-          e.emp_name.toLowerCase().includes(q) ||
-          (e.designation || '').toLowerCase().includes(q) ||
-          (e.department || '').toLowerCase().includes(q)
-      );
-    }
     if (balanceFilter === 'OWES') list = list.filter((e) => parseFloat(e.closing_balance || 0) > 0.009);
     if (balanceFilter === 'WE_OWE') list = list.filter((e) => parseFloat(e.closing_balance || 0) < -0.009);
     if (balanceFilter === 'ZERO') list = list.filter((e) => Math.abs(parseFloat(e.closing_balance || 0)) < 0.01);
     return list;
-  }, [summary, balanceFilter, empPickerSearch]);
+  }, [summary, balanceFilter]);
 
   const employeesForSelect = useMemo(() => {
     if (!selectedEmpId) return filteredSummary;
@@ -253,8 +387,8 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
   }, [entries, allowedEmpIds]);
 
   const selectedEmployee = selectedEmpId ? summaryByEmpId.get(String(selectedEmpId)) : null;
-  const closingMeta = selectedEmployee
-    ? balanceMeta(closingBalance ?? selectedEmployee.closing_balance)
+  const closingDisplay = selectedEmployee
+    ? fmtSignedBalance(closingBalance ?? selectedEmployee.closing_balance)
     : null;
 
   const entryTotals = useMemo(() => (
@@ -367,12 +501,10 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
                   <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>
                     {ledgerViewTitle}
                   </Typography>
-                  {selectedEmployee && closingMeta && (
-                    <Chip
-                      size="small"
-                      label={`${closingMeta.label}: ${fmtAmt(closingBalance ?? selectedEmployee.closing_balance)}`}
-                      sx={{ height: 22, bgcolor: closingMeta.bg, color: closingMeta.color, fontWeight: 800, fontSize: '0.68rem' }}
-                    />
+                  {selectedEmployee && closingDisplay != null && (
+                    <Typography sx={{ fontSize: '0.75rem', fontWeight: 800, color: '#0f172a', fontFamily: 'ui-monospace, monospace' }}>
+                      Balance: {closingDisplay}
+                    </Typography>
                   )}
                 </Stack>
               </Box>
@@ -412,10 +544,10 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
           }}
         >
           {[
-            { label: 'On ledger', value: portfolioStats.total, accent: '#1A55E3' },
-            { label: 'Employee owes', value: fmtAmt(portfolioStats.receivable), accent: '#b91c1c' },
-            { label: 'Company owes', value: fmtAmt(portfolioStats.payable), accent: '#15803d' },
-            { label: 'Settled', value: portfolioStats.settledCount, accent: '#64748b' },
+            { label: 'On ledger', value: portfolioDisplay.total, accent: '#1A55E3' },
+            { label: 'Employee owes', value: fmtAmt(portfolioDisplay.receivable), accent: '#b91c1c' },
+            { label: 'Company owes', value: fmtAmt(portfolioDisplay.payable), accent: '#15803d' },
+            { label: 'Settled', value: portfolioDisplay.settledCount, accent: '#64748b' },
           ].map((s, i) => (
             <Box
               key={s.label}
@@ -460,8 +592,15 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
               </Button>
             </Stack>
 
-            <Grid container spacing={2}>
-              <Grid item xs={12} lg={5}>
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', md: '1.4fr 1fr', lg: '2fr 1.2fr 1fr' },
+                gap: 2,
+                alignItems: 'start',
+              }}
+            >
+              <Box>
                 <FormControl fullWidth size="small" sx={{ ...FIELD_SX, minWidth: 200 }}>
                   <InputLabel id="ledger-emp-label" shrink>Employee account</InputLabel>
                   <Select
@@ -481,27 +620,24 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
                     <MenuItem value="">
                       <Typography sx={{ fontWeight: 700, fontSize: '0.8125rem' }}>All employees</Typography>
                     </MenuItem>
-                    {employeesForSelect.map((e) => {
-                      const meta = balanceMeta(e.closing_balance);
-                      return (
+                    {employeesForSelect.map((e) => (
                         <MenuItem key={e.emp_id} value={String(e.emp_id)}>
                           <Stack direction="row" justifyContent="space-between" width="100%" spacing={1}>
                             <Typography sx={{ fontSize: '0.8125rem', fontWeight: 600 }}>
                               {e.emp_name}
                               {e.designation ? ` · ${e.designation}` : ''}
                             </Typography>
-                            <Typography sx={{ fontSize: '0.75rem', color: meta.color, fontWeight: 700, fontFamily: 'monospace' }}>
-                              {fmtAmt(e.closing_balance)}
+                            <Typography sx={{ fontSize: '0.75rem', color: '#475569', fontWeight: 700, fontFamily: 'ui-monospace, monospace', flexShrink: 0 }}>
+                              {fmtSignedBalance(e.closing_balance)}
                             </Typography>
                           </Stack>
                         </MenuItem>
-                      );
-                    })}
+                    ))}
                   </Select>
                 </FormControl>
-              </Grid>
+              </Box>
 
-              <Grid item xs={12} lg={4}>
+              <Box>
                 <TextField
                   fullWidth
                   size="small"
@@ -519,8 +655,18 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
                     ),
                   }}
                 />
-              </Grid>
-              <Grid item xs={12} lg={3}>
+                {summaryHasMore && (
+                  <Button
+                    size="small"
+                    onClick={loadMoreSummary}
+                    disabled={summaryLoadingMore}
+                    sx={{ mt: 1, textTransform: 'none', fontWeight: 700 }}
+                  >
+                    {summaryLoadingMore ? 'Loading…' : `Load more accounts (${summary.length}/${summaryTotal})`}
+                  </Button>
+                )}
+              </Box>
+              <Box>
                 <FormControl fullWidth size="small" sx={{ ...FIELD_SX, minWidth: 160 }}>
                   <InputLabel id="ledger-type-label" shrink>Transaction type</InputLabel>
                   <Select
@@ -535,54 +681,59 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
                     ))}
                   </Select>
                 </FormControl>
-              </Grid>
+              </Box>
+            </Box>
 
-              <Grid item xs={12} sm={6} md={4}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  type="date"
-                  label="From date"
-                  InputLabelProps={{ shrink: true }}
-                  value={entryFrom}
-                  onChange={(e) => setEntryFrom(e.target.value)}
-                  sx={FIELD_SX}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6} md={4}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  type="date"
-                  label="To date"
-                  InputLabelProps={{ shrink: true }}
-                  value={entryTo}
-                  onChange={(e) => setEntryTo(e.target.value)}
-                  sx={FIELD_SX}
-                />
-              </Grid>
-              <Grid item xs={12} md={4}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Search in ledger"
-                  placeholder="Bill number or particulars"
-                  value={entrySearch}
-                  onChange={(e) => setEntrySearch(e.target.value)}
-                  sx={FIELD_SX}
-                  InputLabelProps={{ shrink: true }}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <Search sx={{ fontSize: 18, color: '#94a3b8' }} />
-                      </InputAdornment>
-                    ),
-                  }}
-                />
-              </Grid>
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: '1fr 1fr 1.2fr' },
+                gap: 2,
+                mt: 2,
+                alignItems: 'start',
+              }}
+            >
+              <TextField
+                fullWidth
+                size="small"
+                type="date"
+                label="From date"
+                InputLabelProps={{ shrink: true }}
+                value={entryFrom}
+                onChange={(e) => setEntryFrom(e.target.value)}
+                sx={FIELD_SX}
+              />
+              <TextField
+                fullWidth
+                size="small"
+                type="date"
+                label="To date"
+                InputLabelProps={{ shrink: true }}
+                value={entryTo}
+                onChange={(e) => setEntryTo(e.target.value)}
+                sx={FIELD_SX}
+              />
+              <TextField
+                fullWidth
+                size="small"
+                label="Search in ledger"
+                placeholder="Bill number or particulars"
+                value={entrySearch}
+                onChange={(e) => setEntrySearch(e.target.value)}
+                sx={FIELD_SX}
+                InputLabelProps={{ shrink: true }}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Search sx={{ fontSize: 18, color: '#94a3b8' }} />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Box>
 
-              {!selectedEmpId && (
-                <Grid item xs={12}>
+            {!selectedEmpId && (
+              <Box sx={{ mt: 2 }}>
                   <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', mb: 0.75, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                     Account balance (all-employees view)
                   </Typography>
@@ -610,9 +761,8 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
                     <ToggleButton value="WE_OWE" sx={{ '&.Mui-selected': { bgcolor: '#f0fdf4', color: '#15803d' } }}>Company owes</ToggleButton>
                     <ToggleButton value="ZERO">Settled</ToggleButton>
                   </ToggleButtonGroup>
-                </Grid>
-              )}
-            </Grid>
+              </Box>
+            )}
 
             {activeFilterChips.length > 0 && (
               <Stack direction="row" flexWrap="wrap" gap={0.75} sx={{ mt: 2, pt: 1.5, borderTop: '1px dashed #cbd5e1' }}>
@@ -635,14 +785,20 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
           {selectedEmployee && (
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 1, mt: 2 }}>
               {[
-                { label: 'Opening (pre-system)', value: fmtAmt(selectedEmployee.opening_balance) },
+                { label: 'Starting balance', value: fmtAmt(selectedEmployee.opening_balance) },
                 { label: 'Total debit (filtered)', value: fmtAmt(entryTotals.debit), color: '#b91c1c' },
                 { label: 'Total credit (filtered)', value: fmtAmt(entryTotals.credit), color: '#15803d' },
-                { label: 'Closing balance', value: fmtAmt(closingBalance ?? selectedEmployee.closing_balance), color: closingMeta?.color },
+                {
+                  label: 'Account balance',
+                  value: fmtSignedBalance(closingBalance ?? selectedEmployee.closing_balance),
+                  color: '#0f172a',
+                },
               ].map((s) => (
                 <Box key={s.label} sx={{ p: 1.25, borderRadius: '10px', bgcolor: '#fff', border: '1px solid #e2e8f0' }}>
                   <Typography sx={{ fontSize: '0.65rem', color: '#64748b', fontWeight: 600 }}>{s.label}</Typography>
-                  <Typography sx={{ fontSize: '0.95rem', fontWeight: 800, fontFamily: 'monospace', color: s.color || '#0f172a' }}>{s.value}</Typography>
+                  <Typography sx={{ fontSize: '0.95rem', fontWeight: 800, fontFamily: 'ui-monospace, monospace', color: s.color || '#0f172a', mt: 0.25 }}>
+                    {s.value}
+                  </Typography>
                 </Box>
               ))}
             </Box>
@@ -654,7 +810,7 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
               <Chip size="small" label={`${visibleEntries.length} rows`} sx={{ fontWeight: 800, bgcolor: LEDGER_TINT, color: '#0f766e' }} />
               {(loadingSummary || loadingEntries) && <CircularProgress size={18} sx={{ color: LEDGER_ACCENT }} />}
               <Typography sx={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-                Cash/bank receipts, advances, payroll recovery & salary paid · Refresh syncs missing rows
+                Newest first · scroll down for older · date & time order
               </Typography>
             </Stack>
           </Box>
@@ -671,12 +827,13 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
               overflow: 'auto',
             }}
           >
-            <Table size="small" stickyHeader sx={{ minWidth: showEmployeeColumn ? 1000 : 860 }}>
+            <Table size="small" stickyHeader sx={{ ...LEDGER_TABLE_SX, minWidth: showEmployeeColumn ? 960 : 820 }}>
+              {ledgerColGroup(showEmployeeColumn)}
               <TableHead>
                 <TableRow>
                   {(showEmployeeColumn
-                    ? ['Date', 'Employee', 'Type', 'Cash/Bank', 'Bill #', 'Particulars', 'Debit (Rs)', 'Credit (Rs)', 'Balance (Rs)']
-                    : ['Date', 'Type', 'Cash/Bank', 'Bill #', 'Particulars', 'Debit (Rs)', 'Credit (Rs)', 'Balance (Rs)']
+                    ? ['Date & time', 'Employee', 'Cash/Bank', 'Bill #', 'Particulars', 'Debit (Rs)', 'Credit (Rs)', 'Balance (Rs)', 'Type']
+                    : ['Date & time', 'Cash/Bank', 'Bill #', 'Particulars', 'Debit (Rs)', 'Credit (Rs)', 'Balance (Rs)', 'Type']
                   ).map((h) => (
                     <TableCell
                       key={h}
@@ -710,8 +867,8 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
                         hover
                         sx={{ bgcolor: idx % 2 === 0 ? '#fff' : '#f8fafc', '&:last-child td': { borderBottom: 'none' } }}
                       >
-                        <TableCell sx={{ fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
-                          {row.created_at ? new Date(row.created_at).toLocaleDateString('en-GB') : '—'}
+                        <TableCell sx={{ fontSize: '0.72rem', whiteSpace: 'nowrap', lineHeight: 1.35 }}>
+                          {fmtDateTime(row.created_at)}
                         </TableCell>
                         {showEmployeeColumn && (
                           <TableCell sx={{ fontSize: '0.8125rem', fontWeight: 600, maxWidth: 140 }}>
@@ -724,13 +881,6 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
                             </Button>
                           </TableCell>
                         )}
-                        <TableCell>
-                          <Chip
-                            size="small"
-                            label={typeLabel(row.trnx_type)}
-                            sx={{ height: 20, fontSize: '0.62rem', fontWeight: 700, bgcolor: chip.bgcolor, color: chip.color }}
-                          />
-                        </TableCell>
                         <TableCell sx={{ fontSize: '0.72rem', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap' }}>
                           {row.payment_channel || (row.trnx_type === 'SALARY_PAYMENT' ? 'Salary' : '—')}
                         </TableCell>
@@ -742,8 +892,11 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
                         <TableCell align="right" sx={{ color: row.credit_amount > 0 ? '#15803d' : '#cbd5e1', fontFamily: 'monospace', fontSize: '0.75rem' }}>
                           {row.credit_amount > 0 ? fmtAmt(row.credit_amount) : '—'}
                         </TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 800, fontFamily: 'monospace', fontSize: '0.75rem' }}>
-                          {fmtAmt(row.closing_balance)}
+                        <TableCell align="right" sx={{ fontWeight: 800, fontFamily: 'ui-monospace, monospace', fontSize: '0.75rem', color: balanceTone(row.closing_balance) }}>
+                          {fmtSignedBalance(row.closing_balance)}
+                        </TableCell>
+                        <TableCell sx={{ fontSize: '0.72rem', fontWeight: 700, color: chip.color }}>
+                          {typeLabel(row.trnx_type)}
                         </TableCell>
                       </TableRow>
                     );
@@ -751,6 +904,13 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
                 )}
               </TableBody>
             </Table>
+            <HrLoadMoreTrigger
+              rootRef={scrollRef}
+              hasMore={entriesHasMore}
+              loading={entriesLoadingMore}
+              onLoadMore={loadMoreEntries}
+              label="Load older transactions"
+            />
           </TableContainer>
         </CardContent>
       </Card>

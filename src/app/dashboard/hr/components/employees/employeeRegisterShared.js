@@ -8,19 +8,22 @@ export const CARD_SX = {
 };
 
 export const FIELD_SX = {
+  width: '100%',
   '& .MuiOutlinedInput-root': {
-    borderRadius: '10px',
+    borderRadius: '12px',
     bgcolor: '#fff',
     fontSize: '0.875rem',
+    minHeight: 48,
+    width: '100%',
     '& fieldset': { borderColor: '#cbd5e1' },
     '&:hover fieldset': { borderColor: '#94a3b8' },
     '&.Mui-focused fieldset': {
       borderColor: BRAND.supporting.periwinkle,
-      borderWidth: '1.5px',
+      borderWidth: '2px',
     },
   },
-  '& .MuiInputLabel-root': { fontSize: '0.8125rem', fontWeight: 500 },
-  '& .MuiFormHelperText-root': { fontSize: '0.72rem', mt: 0.5 },
+  '& .MuiInputLabel-root': { fontSize: '0.8125rem', fontWeight: 600 },
+  '& .MuiFormHelperText-root': { fontSize: '0.72rem', mt: 0.75, mx: 0 },
 };
 
 export const FILTER_SX = {
@@ -64,6 +67,24 @@ export const EMPTY_FORM = {
 
 export const fmtAmt = (v) => parseFloat(v || 0).toLocaleString('en-PK');
 
+/** Two equal-width fields per row from `sm` up; one column on phones. */
+export const FORM_FIELDS_ROW_SX = {
+  display: 'grid',
+  gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' },
+  columnGap: 2,
+  rowGap: 2.5,
+  width: '100%',
+  alignItems: 'start',
+  '& > *': {
+    minWidth: 0,
+    width: '100%',
+    maxWidth: '100%',
+  },
+  '& .MuiFormControl-root': {
+    width: '100%',
+  },
+};
+
 export function defaultJoinDate() {
   const n = new Date();
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-01`;
@@ -73,24 +94,27 @@ export function normalizeEmployeeRow(emp) {
   if (!emp) return emp;
   const opening = parseFloat(emp.opening_balance ?? 0);
   const ledger = emp.ledger_balance != null ? parseFloat(emp.ledger_balance) : opening;
-  return { ...emp, opening_balance: opening, ledger_balance: ledger };
+  return { ...emp, opening_balance: opening, ledger_balance: ledger, account_balance: ledger };
 }
 
 export function employeeToFormData(emp) {
+  const normalized = normalizeEmployeeRow(emp);
   return {
-    emp_id: emp.emp_id,
-    emp_name: emp.emp_name,
-    emp_phone: emp.emp_phone || '',
-    emp_cnic: emp.emp_cnic || '',
-    emp_address: emp.emp_address || '',
-    designation: emp.designation || '',
-    department: emp.department || '',
-    join_date: emp.join_date ? String(emp.join_date).split('T')[0] : '',
-    basic_salary: String(emp.basic_salary ?? ''),
-    opening_balance: emp.opening_balance != null ? String(emp.opening_balance) : '',
-    status: emp.status || 'ACTIVE',
-    allowed_leaves_per_month: String(emp.allowed_leaves_per_month ?? 2),
-    allowed_absents_per_month: String(emp.allowed_absents_per_month ?? 0),
+    emp_id: normalized.emp_id,
+    emp_name: normalized.emp_name,
+    emp_phone: normalized.emp_phone || '',
+    emp_cnic: normalized.emp_cnic || '',
+    emp_address: normalized.emp_address || '',
+    designation: normalized.designation || '',
+    department: normalized.department || '',
+    join_date: normalized.join_date ? String(normalized.join_date).split('T')[0] : '',
+    basic_salary: String(normalized.basic_salary ?? ''),
+    opening_balance: normalized.opening_balance != null ? String(normalized.opening_balance) : '',
+    ledger_balance: normalized.ledger_balance,
+    account_balance: normalized.account_balance,
+    status: normalized.status || 'ACTIVE',
+    allowed_leaves_per_month: String(normalized.allowed_leaves_per_month ?? 2),
+    allowed_absents_per_month: String(normalized.allowed_absents_per_month ?? 0),
   };
 }
 

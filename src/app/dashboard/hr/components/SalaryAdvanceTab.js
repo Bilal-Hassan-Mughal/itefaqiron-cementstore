@@ -5,14 +5,20 @@ import {
   Box, Typography, Button, TextField, Card, CardContent,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Chip, Snackbar, Alert, IconButton, Tooltip, CircularProgress, Stack,
-  Autocomplete, ToggleButton, ToggleButtonGroup, Divider, InputAdornment,
+  Autocomplete, ToggleButton, ToggleButtonGroup, Divider, InputAdornment, Grid,
 } from '@mui/material';
 import {
   AccountBalanceWallet, Payments, Person, DeleteOutline, Refresh,
   TrendingUp, FilterList, Search,
 } from '@mui/icons-material';
+import { useRouter } from 'next/navigation';
 import { BRAND } from '@/lib/brand-theme';
 import { useHrRefresh, useHrRefreshVersion, HR_KEYS } from '../context/HrRefreshContext';
+import { useHrEmployeeOptions } from '../hooks/useHrEmployeeOptions';
+import HrStatCard from './shared/HrStatCard';
+import HrFormSectionCard from './shared/HrFormSectionCard';
+import EmployeeBalanceChip from './shared/EmployeeBalanceChip';
+import { HR_FIELD_SX } from './shared/hrUiShared';
 
 const NAVY = '#0f172a';
 const PRIMARY = BRAND.primary.blue;
@@ -30,48 +36,6 @@ const STATUS_META = {
   CANCELLED: { label: 'Cancelled', bg: '#f1f5f9', color: '#64748b' },
 };
 
-function StatCard({ label, value, sub, accent, tint, icon: Icon }) {
-  return (
-    <Box
-      sx={{
-        flex: 1,
-        minWidth: 150,
-        p: 2,
-        borderRadius: '14px',
-        border: '1px solid #e8edf4',
-        bgcolor: '#fff',
-        position: 'relative',
-        overflow: 'hidden',
-      }}
-    >
-      <Box
-        sx={{
-          position: 'absolute',
-          top: 12,
-          right: 12,
-          width: 38,
-          height: 38,
-          borderRadius: '10px',
-          bgcolor: tint,
-          color: accent,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Icon sx={{ fontSize: 20 }} />
-      </Box>
-      <Typography sx={{ fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.06em', color: '#94a3b8', textTransform: 'uppercase' }}>
-        {label}
-      </Typography>
-      <Typography sx={{ fontSize: '1.25rem', fontWeight: 900, color: NAVY, mt: 0.5, lineHeight: 1.2 }}>{value}</Typography>
-      {sub && (
-        <Typography sx={{ fontSize: '0.72rem', color: '#64748b', mt: 0.35 }}>{sub}</Typography>
-      )}
-    </Box>
-  );
-}
-
 const emptyForm = () => ({
   emp_id: '',
   amount: '',
@@ -79,12 +43,37 @@ const emptyForm = () => ({
   paymentMethod: 'CASH',
   paid_from_account_id: '',
   bank_account_id: '',
+  cash_amount: '',
+  bank_amount: '',
   reason: '',
   payment_reference: '',
 });
 
+const togglePaySx = {
+  '& .MuiToggleButton-root': {
+    textTransform: 'none',
+    fontWeight: 700,
+    py: 1.1,
+    borderRadius: '12px !important',
+    border: '1px solid #e2e8f0 !important',
+    mx: 0.25,
+    flex: 1,
+  },
+};
+
+function advancePaymentLabel(a) {
+  if (a.payment_split) return 'Split';
+  return a.payment_mode === 'BANK_TRANSFER' ? 'Bank' : 'Cash';
+}
+
 export default function SalaryAdvanceTab() {
-  const [employees, setEmployees] = useState([]);
+  const router = useRouter();
+  const {
+    employees,
+    activeEmployees,
+    loading: employeesLoading,
+    refresh: refreshEmployees,
+  } = useHrEmployeeOptions();
   const [advances, setAdvances] = useState([]);
   const [paymentAccounts, setPaymentAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -97,13 +86,7 @@ export default function SalaryAdvanceTab() {
 
   const showSnack = (msg, severity = 'success') => setSnack({ open: true, msg, severity });
   const advancesVersion = useHrRefreshVersion(HR_KEYS.advances);
-  const employeesVersion = useHrRefreshVersion(HR_KEYS.employees);
   const { invalidatePayrollFlow } = useHrRefresh();
-
-  const activeEmployees = useMemo(
-    () => employees.filter((e) => e.status === 'ACTIVE'),
-    [employees]
-  );
 
   const cashAccountsList = useMemo(() => paymentAccounts.filter((account) => {
     const typeTitle = account.customer_type?.cus_type_title?.toLowerCase() || '';
@@ -172,9 +155,14 @@ export default function SalaryAdvanceTab() {
     return list;
   }, [advances, statusFilter, search]);
 
+  const employeeOptions = useMemo(() => {
+    if (activeEmployees.length > 0) return activeEmployees;
+    return employees;
+  }, [activeEmployees, employees]);
+
   const selectedEmployee = useMemo(
-    () => activeEmployees.find((e) => String(e.emp_id) === String(form.emp_id)) || null,
-    [activeEmployees, form.emp_id]
+    () => employeeOptions.find((e) => String(e.emp_id) === String(form.emp_id)) || null,
+    [employeeOptions, form.emp_id]
   );
 
   const selectedEmpLedgerBal = selectedEmployee
@@ -185,15 +173,10 @@ export default function SalaryAdvanceTab() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [empRes, advRes, accRes] = await Promise.all([
-        fetch('/api/employees'),
+      const [advRes, accRes] = await Promise.all([
         fetch('/api/employee-advances'),
         fetch('/api/customers?dropdown=true'),
       ]);
-      if (empRes.ok) {
-        const data = await empRes.json();
-        setEmployees(Array.isArray(data) ? data : []);
-      }
       if (advRes.ok) setAdvances(await advRes.json());
       if (accRes.ok) {
         const data = await accRes.json();
@@ -208,7 +191,12 @@ export default function SalaryAdvanceTab() {
 
   useEffect(() => {
     fetchData();
-  }, [fetchData, advancesVersion, employeesVersion]);
+  }, [fetchData, advancesVersion]);
+
+  useEffect(() => {
+    if (employeesLoading || employeeOptions.length > 0) return;
+    refreshEmployees().catch(() => {});
+  }, [employeesLoading, employeeOptions.length, refreshEmployees]);
 
   useEffect(() => {
     if (form.paymentMethod !== 'CASH' || form.paid_from_account_id || cashAccountsList.length === 0) return;
@@ -219,43 +207,81 @@ export default function SalaryAdvanceTab() {
   }, [cashAccountsList, form.paymentMethod, form.paid_from_account_id]);
 
   async function handleSubmit(e) {
-    e.preventDefault();
+    e?.preventDefault?.();
+
     if (!form.emp_id) {
       showSnack('Select an employee', 'error');
       return;
     }
-    const amount = parseFloat(form.amount);
+
+    const cashPart = parseFloat(form.cash_amount) || 0;
+    const bankPart = parseFloat(form.bank_amount) || 0;
+    let amount = parseFloat(form.amount) || 0;
+    if (form.paymentMethod === 'PARTIAL' && cashPart + bankPart > 0) {
+      amount = cashPart + bankPart;
+    }
     if (!amount || amount <= 0) {
       showSnack('Enter a valid advance amount', 'error');
       return;
     }
-    if (form.paymentMethod === 'CASH' && !form.paid_from_account_id) {
-      showSnack('Select a cash account', 'error');
+    if (!form.advance_date) {
+      showSnack('Select advance date', 'error');
       return;
     }
-    if (form.paymentMethod === 'BANK' && !form.bank_account_id) {
-      showSnack('Select a bank account', 'error');
-      return;
+
+    const payload = {
+      emp_id: parseInt(form.emp_id, 10),
+      amount,
+      advance_date: form.advance_date,
+      reason: form.reason.trim() || null,
+      payment_reference: form.payment_reference.trim() || null,
+    };
+
+    if (form.paymentMethod === 'PARTIAL') {
+      const cash = cashPart;
+      const bank = bankPart;
+      if (!form.paid_from_account_id || !form.bank_account_id) {
+        showSnack('Select cash and bank accounts', 'error');
+        return;
+      }
+      if (cash <= 0 || bank <= 0) {
+        showSnack('Enter cash and bank amounts for split payment', 'error');
+        return;
+      }
+      Object.assign(payload, {
+        payment_method: 'PARTIAL',
+        amount,
+        cash_amount: cash,
+        bank_amount: bank,
+        paid_from_account_id: form.paid_from_account_id,
+        bank_account_id: form.bank_account_id,
+      });
+    } else if (form.paymentMethod === 'BANK') {
+      if (!form.bank_account_id) {
+        showSnack('Select a bank account', 'error');
+        return;
+      }
+      Object.assign(payload, {
+        payment_mode: 'BANK_TRANSFER',
+        account_id: parseInt(form.bank_account_id, 10),
+      });
+    } else {
+      if (!form.paid_from_account_id) {
+        showSnack('Select a cash account', 'error');
+        return;
+      }
+      Object.assign(payload, {
+        payment_mode: 'CASH',
+        account_id: parseInt(form.paid_from_account_id, 10),
+      });
     }
 
     setSubmitting(true);
     try {
-      const accountId = form.paymentMethod === 'BANK'
-        ? parseInt(form.bank_account_id, 10)
-        : parseInt(form.paid_from_account_id, 10);
-
       const res = await fetch('/api/employee-advances', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          emp_id: parseInt(form.emp_id, 10),
-          amount,
-          advance_date: form.advance_date,
-          payment_mode: form.paymentMethod === 'BANK' ? 'BANK_TRANSFER' : 'CASH',
-          account_id: accountId,
-          reason: form.reason.trim() || null,
-          payment_reference: form.payment_reference.trim() || null,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -308,59 +334,43 @@ export default function SalaryAdvanceTab() {
     borderBottom: 'none',
   };
 
-  return (
-    <Box sx={{ pb: 3 }}>
-      {/* Stats */}
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ px: { xs: 2, md: 2.5 }, pt: 2, pb: 1 }}>
-        <StatCard label="Pending Balance" value={fmtAmt(stats.pendingTotal)} sub={`${stats.employeesOwing} employee(s) owing`} accent={ADVANCE} tint={ADVANCE_TINT} icon={AccountBalanceWallet} />
-        <StatCard label="Given This Month" value={fmtAmt(stats.thisMonth)} sub="All advance issues" accent={PRIMARY} tint="#e8effd" icon={TrendingUp} />
-        <StatCard label="Deducted (Settled)" value={fmtAmt(stats.deductedTotal)} sub="Recovered via salary" accent="#15803d" tint="#dcfce7" icon={Payments} />
-        <StatCard label="Total Records" value={String(stats.recordCount)} sub="Advance history" accent="#7c3aed" tint="#ede9fe" icon={FilterList} />
-      </Stack>
+  const fieldSx = { ...HR_FIELD_SX, width: '100%' };
+  const splitCash = parseFloat(form.cash_amount) || 0;
+  const splitBank = parseFloat(form.bank_amount) || 0;
+  const splitTotal = splitCash + splitBank;
 
-      <Stack
-        direction={{ xs: 'column', lg: 'row' }}
-        spacing={2}
-        sx={{ px: { xs: 2, md: 2.5 }, pt: 1, alignItems: 'flex-start' }}
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', lg: 'repeat(4, 1fr)' }, gap: 1.5 }}>
+        <HrStatCard label="Pending balance" value={fmtAmt(stats.pendingTotal)} color={ADVANCE} loading={loading} icon={AccountBalanceWallet} />
+        <HrStatCard label="Given this month" value={fmtAmt(stats.thisMonth)} color={PRIMARY} loading={loading} icon={TrendingUp} />
+        <HrStatCard label="Deducted (settled)" value={fmtAmt(stats.deductedTotal)} color="#15803d" loading={loading} icon={Payments} />
+        <HrStatCard label="Total records" value={String(stats.recordCount)} color="#7c3aed" loading={loading} icon={FilterList} />
+      </Box>
+
+      <HrFormSectionCard
+        title="Give salary advance"
+        subtitle="Paid from cash/bank · Posts to employee ledger · Recovered on salary clearance"
+        accent={ADVANCE}
+        maxWidth={960}
       >
-        {/* Issue form */}
-        <Card
-          sx={{
-            width: { xs: '100%', lg: 380 },
-            flexShrink: 0,
-            borderRadius: '16px',
-            border: '1px solid #e8edf4',
-            boxShadow: '0 4px 24px rgba(15,23,42,0.06)',
-            position: { lg: 'sticky' },
-            top: 16,
-          }}
-        >
-          <Box
-            sx={{
-              px: 2.5,
-              py: 2,
-              background: `linear-gradient(135deg, ${ADVANCE} 0%, #ea580c 100%)`,
-              borderRadius: '16px 16px 0 0',
-            }}
-          >
-            <Typography sx={{ fontWeight: 900, color: '#fff', fontSize: '1.05rem' }}>Give Salary Advance</Typography>
-            <Typography sx={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.85)', mt: 0.35 }}>
-              Paid from cash/bank · Deducted on next salary clearance
-            </Typography>
-          </Box>
-          <CardContent sx={{ p: 2.5, '&:last-child': { pb: 2.5 } }}>
-            <Box component="form" onSubmit={handleSubmit}>
+        <Box component="form" noValidate onSubmit={handleSubmit}>
+          <Grid container spacing={2.5}>
+            <Grid size={{ xs: 12, md: 7 }}>
               <Stack spacing={2}>
                 <Autocomplete
-                  size="small"
-                  options={activeEmployees}
-                  getOptionLabel={(o) => o.emp_name || ''}
+                  options={employeeOptions}
+                  loading={employeesLoading}
+                  isOptionEqualToValue={(a, b) => a?.emp_id === b?.emp_id}
+                  getOptionLabel={(o) => `${o.emp_name || ''}${o.designation ? ` · ${o.designation}` : ''}`}
+                  noOptionsText={employeesLoading ? 'Loading…' : 'No active employees'}
                   value={selectedEmployee}
                   onChange={(_, val) => setForm((f) => ({ ...f, emp_id: val ? String(val.emp_id) : '' }))}
                   renderInput={(params) => (
                     <TextField
                       {...params}
-                      label="Employee *"
+                      label="Employee"
+                      sx={fieldSx}
                       InputProps={{
                         ...params.InputProps,
                         startAdornment: (
@@ -375,145 +385,207 @@ export default function SalaryAdvanceTab() {
                   renderOption={(props, option) => {
                     const { key, ...optionProps } = props;
                     return (
-                    <Box component="li" key={key} {...optionProps}>
-                      <Box>
-                        <Typography sx={{ fontWeight: 700, fontSize: '0.875rem' }}>{option.emp_name}</Typography>
-                        <Typography sx={{ fontSize: '0.72rem', color: '#64748b' }}>
-                          {option.designation || '—'} · Basic {fmtAmt(option.basic_salary)}
-                          {parseFloat(option.ledger_balance ?? 0) !== 0 && (
-                            <Box component="span" sx={{ color: ADVANCE, fontWeight: 700 }}>
-                              {' '}· Bal {fmtAmt(option.ledger_balance)}
-                            </Box>
-                          )}
-                        </Typography>
+                      <Box component="li" key={key} {...optionProps}>
+                        <Box>
+                          <Typography sx={{ fontWeight: 700, fontSize: '0.875rem' }}>{option.emp_name}</Typography>
+                          <Typography sx={{ fontSize: '0.72rem', color: '#64748b' }}>
+                            {option.designation || '—'} · Basic {fmtAmt(option.basic_salary)}
+                            {parseFloat(option.ledger_balance ?? 0) !== 0 && (
+                              <Box component="span" sx={{ color: ADVANCE, fontWeight: 700 }}>
+                                {' '}· Bal {fmtAmt(option.ledger_balance)}
+                              </Box>
+                            )}
+                          </Typography>
+                        </Box>
                       </Box>
-                    </Box>
                     );
                   }}
                 />
 
-                {selectedEmployee && (
-                  <Box sx={{ bgcolor: '#f8fafc', borderRadius: '12px', p: 1.5, border: '1px solid #e8edf4' }}>
-                    <Stack spacing={0.5}>
-                      <Stack direction="row" justifyContent="space-between">
-                        <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>Basic salary</Typography>
-                        <Typography sx={{ fontSize: '0.8125rem', fontWeight: 700 }}>{fmtAmt(selectedEmployee.basic_salary)}</Typography>
-                      </Stack>
-                      <Stack direction="row" justifyContent="space-between">
-                        <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>Employee ledger balance</Typography>
-                        <Typography sx={{ fontSize: '0.8125rem', fontWeight: 800, color: selectedEmpLedgerBal > 0 ? ADVANCE : selectedEmpLedgerBal < 0 ? '#15803d' : '#64748b' }}>
-                          {fmtAmt(selectedEmpLedgerBal)}
-                          {selectedEmpLedgerBal > 0 ? ' (owes)' : selectedEmpLedgerBal < 0 ? ' (we owe)' : ''}
-                        </Typography>
-                      </Stack>
-                      <Stack direction="row" justifyContent="space-between">
-                        <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>Pending advances only</Typography>
-                        <Typography sx={{ fontSize: '0.8125rem', fontWeight: 700, color: selectedEmpPending > 0 ? ADVANCE : '#64748b' }}>
-                          {selectedEmpPending > 0 ? fmtAmt(selectedEmpPending) : 'None'}
-                        </Typography>
-                      </Stack>
-                    </Stack>
-                  </Box>
-                )}
+                <Grid container spacing={1.5}>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <TextField
+                      fullWidth
+                      label={form.paymentMethod === 'PARTIAL' ? 'Advance total (auto from split)' : 'Advance amount'}
+                      type="number"
+                      value={
+                        form.paymentMethod === 'PARTIAL' && splitTotal > 0
+                          ? String(splitTotal)
+                          : form.amount
+                      }
+                      onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
+                      InputProps={{ readOnly: form.paymentMethod === 'PARTIAL', startAdornment: <InputAdornment position="start">Rs</InputAdornment> }}
+                      helperText={form.paymentMethod === 'PARTIAL' ? 'Total is cash + bank below' : undefined}
+                      sx={fieldSx}
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <TextField
+                      fullWidth
+                      label="Advance date"
+                      type="date"
+                      value={form.advance_date}
+                      onChange={(e) => setForm((f) => ({ ...f, advance_date: e.target.value }))}
+                      InputLabelProps={{ shrink: true }}
+                      inputProps={{ lang: 'en-GB' }}
+                      sx={fieldSx}
+                    />
+                  </Grid>
+                </Grid>
 
                 <TextField
                   fullWidth
-                  required
-                  size="small"
-                  label="Advance Amount (Rs) *"
-                  type="number"
-                  value={form.amount}
-                  onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
-                  InputProps={{
-                    startAdornment: <InputAdornment position="start">Rs</InputAdornment>,
-                  }}
-                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: '10px' } }}
-                />
-
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Advance Date *"
-                  type="date"
-                  value={form.advance_date}
-                  onChange={(e) => setForm((f) => ({ ...f, advance_date: e.target.value }))}
-                  InputLabelProps={{ shrink: true }} inputProps={{ lang: 'en-GB' }}
-                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: '10px' } }}
-                />
-
-                <TextField
-                  fullWidth
-                  size="small"
                   label="Reason"
                   placeholder="e.g. Emergency, medical, festival…"
                   value={form.reason}
                   onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
                   multiline
                   minRows={2}
-                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: '10px' } }}
+                  sx={fieldSx}
                 />
+              </Stack>
+            </Grid>
 
-                <Divider>
-                  <Typography sx={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: 800, letterSpacing: '0.08em' }}>
-                    PAYMENT FROM
+            <Grid size={{ xs: 12, md: 5 }}>
+              <Stack
+                spacing={2}
+                sx={{
+                  p: 2,
+                  height: '100%',
+                  borderRadius: '14px',
+                  bgcolor: ADVANCE_TINT,
+                  border: '1px solid #fed7aa',
+                }}
+              >
+                {selectedEmployee ? (
+                  <Stack spacing={1.25}>
+                    <Typography sx={{ fontSize: '0.7rem', fontWeight: 800, color: ADVANCE, letterSpacing: '0.06em' }}>
+                      EMPLOYEE SNAPSHOT
+                    </Typography>
+                    <Stack direction="row" justifyContent="space-between">
+                      <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>Basic salary</Typography>
+                      <Typography sx={{ fontSize: '0.8125rem', fontWeight: 700 }}>{fmtAmt(selectedEmployee.basic_salary)}</Typography>
+                    </Stack>
+                    <EmployeeBalanceChip balance={selectedEmpLedgerBal} />
+                    <Stack direction="row" justifyContent="space-between">
+                      <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>Pending advances</Typography>
+                      <Typography sx={{ fontSize: '0.8125rem', fontWeight: 700, color: selectedEmpPending > 0 ? ADVANCE : '#64748b' }}>
+                        {selectedEmpPending > 0 ? fmtAmt(selectedEmpPending) : 'None'}
+                      </Typography>
+                    </Stack>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => router.push(`/dashboard/hr?module=employee-ledger&emp_id=${selectedEmployee.emp_id}`)}
+                      sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '10px', alignSelf: 'flex-start', borderColor: '#fdba74', color: ADVANCE }}
+                    >
+                      View ledger
+                    </Button>
+                  </Stack>
+                ) : (
+                  <Typography sx={{ fontSize: '0.8125rem', color: '#92400e', py: 2 }}>
+                    Select an employee to see salary balance and pending advances.
                   </Typography>
-                </Divider>
+                )}
+
+                <Divider sx={{ borderColor: '#fed7aa' }} />
+
+                <Typography sx={{ fontSize: '0.7rem', fontWeight: 800, color: '#64748b', letterSpacing: '0.06em' }}>
+                  PAYMENT FROM
+                </Typography>
 
                 <ToggleButtonGroup
                   exclusive
-                  size="small"
                   fullWidth
+                  size="small"
                   value={form.paymentMethod}
-                  onChange={(_, val) => val && setForm((f) => ({
-                    ...f,
-                    paymentMethod: val,
-                    paid_from_account_id: val === 'BANK' ? '' : f.paid_from_account_id,
-                    bank_account_id: val === 'CASH' ? '' : f.bank_account_id,
-                  }))}
+                  onChange={(_, val) => {
+                    if (!val) return;
+                    setForm((f) => ({
+                      ...f,
+                      paymentMethod: val,
+                      paid_from_account_id: val === 'BANK' ? '' : f.paid_from_account_id,
+                      bank_account_id: val === 'CASH' ? '' : f.bank_account_id,
+                      cash_amount: val === 'PARTIAL' ? f.cash_amount : '',
+                      bank_amount: val === 'PARTIAL' ? f.bank_amount : '',
+                    }));
+                  }}
+                  sx={togglePaySx}
                 >
-                  <ToggleButton value="CASH" sx={{ textTransform: 'none', fontWeight: 700, flex: 1 }}>Cash</ToggleButton>
-                  <ToggleButton value="BANK" sx={{ textTransform: 'none', fontWeight: 700, flex: 1 }}>Bank</ToggleButton>
+                  <ToggleButton value="CASH">Cash</ToggleButton>
+                  <ToggleButton value="BANK">Bank</ToggleButton>
+                  <ToggleButton value="PARTIAL">Split</ToggleButton>
                 </ToggleButtonGroup>
 
-                {form.paymentMethod === 'CASH' && (
+                {(form.paymentMethod === 'CASH' || form.paymentMethod === 'PARTIAL') && (
                   <Autocomplete
-                    size="small"
                     options={cashAccountsList}
                     getOptionLabel={(o) => `${o.cus_name} (${fmtAmt(o.cus_balance)})`}
+                    isOptionEqualToValue={(a, b) => a?.cus_id === b?.cus_id}
                     value={cashAccountsList.find((a) => String(a.cus_id) === form.paid_from_account_id) || null}
                     onChange={(_, val) => setForm((f) => ({ ...f, paid_from_account_id: val ? String(val.cus_id) : '' }))}
-                    renderInput={(params) => <TextField {...params} label="Cash Account *" required />}
+                    renderInput={(params) => (
+                      <TextField {...params} label="Cash account" sx={fieldSx} />
+                    )}
                   />
                 )}
 
-                {form.paymentMethod === 'BANK' && (
+                {(form.paymentMethod === 'BANK' || form.paymentMethod === 'PARTIAL') && (
                   <Autocomplete
-                    size="small"
                     options={bankAccountsList}
                     getOptionLabel={(o) => `${o.cus_name} (${fmtAmt(o.cus_balance)})`}
+                    isOptionEqualToValue={(a, b) => a?.cus_id === b?.cus_id}
                     value={bankAccountsList.find((a) => String(a.cus_id) === form.bank_account_id) || null}
                     onChange={(_, val) => setForm((f) => ({ ...f, bank_account_id: val ? String(val.cus_id) : '' }))}
-                    renderInput={(params) => <TextField {...params} label="Bank Account *" required />}
+                    renderInput={(params) => (
+                      <TextField {...params} label="Bank account" sx={fieldSx} />
+                    )}
                   />
+                )}
+
+                {form.paymentMethod === 'PARTIAL' && (
+                  <Grid container spacing={1.5}>
+                    <Grid size={6}>
+                      <TextField
+                        fullWidth
+                        label="Cash amount"
+                        type="number"
+                        value={form.cash_amount}
+                        onChange={(e) => setForm((f) => ({ ...f, cash_amount: e.target.value }))}
+                        sx={fieldSx}
+                      />
+                    </Grid>
+                    <Grid size={6}>
+                      <TextField
+                        fullWidth
+                        label="Bank amount"
+                        type="number"
+                        value={form.bank_amount}
+                        onChange={(e) => setForm((f) => ({ ...f, bank_amount: e.target.value }))}
+                        sx={fieldSx}
+                      />
+                    </Grid>
+                  </Grid>
                 )}
 
                 <TextField
                   fullWidth
-                  size="small"
-                  label="Payment Reference (optional)"
+                  label="Payment reference (optional)"
                   value={form.payment_reference}
                   onChange={(e) => setForm((f) => ({ ...f, payment_reference: e.target.value }))}
-                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: '10px' } }}
+                  sx={fieldSx}
                 />
 
                 <Button
-                  type="submit"
+                  type="button"
                   variant="contained"
                   fullWidth
                   disabled={submitting}
+                  onClick={handleSubmit}
                   startIcon={submitting ? <CircularProgress size={18} color="inherit" /> : <Payments />}
                   sx={{
-                    py: 1.25,
+                    py: 1.35,
+                    mt: 'auto',
                     bgcolor: ADVANCE,
                     fontWeight: 800,
                     textTransform: 'none',
@@ -523,15 +595,15 @@ export default function SalaryAdvanceTab() {
                     '&:hover': { bgcolor: '#92400e' },
                   }}
                 >
-                  {submitting ? 'Processing…' : 'Issue Advance & Post Ledger'}
+                  {submitting ? 'Processing…' : 'Issue advance & post ledger'}
                 </Button>
               </Stack>
-            </Box>
-          </CardContent>
-        </Card>
+            </Grid>
+          </Grid>
+        </Box>
+      </HrFormSectionCard>
 
-        {/* Records */}
-        <Card sx={{ flex: 1, minWidth: 0, borderRadius: '16px', border: '1px solid #e8edf4', boxShadow: '0 2px 12px rgba(15,23,42,0.04)' }}>
+        <Card sx={{ width: '100%', borderRadius: '16px', border: '1px solid #e8edf4', boxShadow: '0 2px 12px rgba(15,23,42,0.04)' }}>
           <Box sx={{ px: 2.5, py: 2, borderBottom: '1px solid #eef2f6', display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'center', justifyContent: 'space-between' }}>
             <Box>
               <Typography sx={{ fontWeight: 900, color: NAVY, fontSize: '1rem' }}>Advance Records</Typography>
@@ -589,7 +661,7 @@ export default function SalaryAdvanceTab() {
                 <AccountBalanceWallet sx={{ fontSize: 48, color: '#cbd5e1', mb: 1 }} />
                 <Typography sx={{ fontWeight: 700, color: '#64748b' }}>No advance records</Typography>
                 <Typography sx={{ fontSize: '0.8125rem', color: '#94a3b8', mt: 0.5 }}>
-                  Issue an advance using the form on the left
+                  Issue an advance using the form above
                 </Typography>
               </Box>
             ) : (
@@ -627,7 +699,7 @@ export default function SalaryAdvanceTab() {
                           <TableCell>
                             <Chip
                               size="small"
-                              label={a.payment_mode === 'BANK_TRANSFER' ? 'Bank' : 'Cash'}
+                              label={advancePaymentLabel(a)}
                               sx={{ height: 22, fontWeight: 700, fontSize: '0.65rem', bgcolor: '#f1f5f9', color: '#475569' }}
                             />
                           </TableCell>
@@ -672,7 +744,6 @@ export default function SalaryAdvanceTab() {
             )}
           </CardContent>
         </Card>
-      </Stack>
 
       <Snackbar open={snack.open} autoHideDuration={3500} onClose={() => setSnack((s) => ({ ...s, open: false }))} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}>
         <Alert severity={snack.severity} sx={{ borderRadius: '12px' }}>{snack.msg}</Alert>

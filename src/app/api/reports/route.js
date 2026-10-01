@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { initBranchScope } from '@/lib/branch-server';
+import { sumSaleReportSummary } from '@/lib/sale-report-amounts';
 
 
 // Helper to parse dates in Pakistan Standard Time (UTC+5)
@@ -139,7 +140,7 @@ async function getDetailedCustomerBalanceReport() {
 
 // Sales Report by Date Range
 async function getSalesByDateReport(startDate, endDate) {
-  const whereClause = {};
+  const whereClause = { bill_type: 'BILL' };
 
   if (startDate && endDate) {
     whereClause.created_at = parseLocalDateRange(startDate, endDate);
@@ -176,17 +177,7 @@ async function getSalesByDateReport(startDate, endDate) {
     }
   });
 
-  // Calculate summary
-  const summary = {
-    totalSales: sales.length,
-    totalAmount: sales.reduce((sum, s) => sum + parseFloat(s.total_amount), 0),
-    totalDiscount: sales.reduce((sum, s) => sum + parseFloat(s.discount), 0),
-    totalShipping: sales.reduce((sum, s) => sum + parseFloat(s.shipping_amount || 0), 0),
-    totalPayment: sales.reduce((sum, s) => sum + parseFloat(s.payment), 0),
-    netTotal: sales.reduce((sum, s) =>
-      sum + parseFloat(s.total_amount) - parseFloat(s.discount) + parseFloat(s.shipping_amount || 0), 0
-    )
-  };
+  const summary = sumSaleReportSummary(sales);
 
   return NextResponse.json({ sales, summary });
 }

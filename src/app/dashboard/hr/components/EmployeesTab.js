@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import {
   Box, Typography, Button, Dialog, DialogActions, Alert, Snackbar, CircularProgress,
 } from '@mui/material';
-import { useHrRefresh, HR_KEYS } from '../context/HrRefreshContext';
+import { useHrRefresh } from '../context/HrRefreshContext';
 import { useHrEmployees } from '../hooks/useHrEmployees';
 import EmployeeRegisterList from './employees/EmployeeRegisterList';
 import {
@@ -21,17 +22,26 @@ const EmployeeRegisterFormDialog = dynamic(
 );
 
 export default function EmployeesTab() {
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [search, setSearch] = useState('');
+
   const {
     employees,
+    stats,
+    total,
+    hasMore,
     loading,
+    loadingMore,
     refreshing,
     error,
+    loadMore,
     replaceLocal,
     mergeServerRow,
     removeLocal,
     softSync,
-  } = useHrEmployees();
-  const { invalidate } = useHrRefresh();
+  } = useHrEmployees({ status: statusFilter, search });
+  const { invalidateEmployeeRegisterSave } = useHrRefresh();
+  const router = useRouter();
 
   const [formState, setFormState] = useState({ open: false, mode: 'add', data: EMPTY_FORM });
   const [deleteDialog, setDeleteDialog] = useState({ open: false, id: null, name: '' });
@@ -40,14 +50,13 @@ export default function EmployeesTab() {
   const [snack, setSnack] = useState({ open: false, msg: '', severity: 'success' });
 
   const syncOtherHrTabs = useCallback(() => {
-    invalidate([
-      HR_KEYS.employees,
-      HR_KEYS.ledger,
-      HR_KEYS.payroll,
-      HR_KEYS.summary,
-      HR_KEYS.attendance,
-    ]);
-  }, [invalidate]);
+    invalidateEmployeeRegisterSave();
+  }, [invalidateEmployeeRegisterSave]);
+
+  const viewEmployeeLedger = useCallback((emp) => {
+    if (!emp?.emp_id || String(emp.emp_id).startsWith('temp-')) return;
+    router.push(`/dashboard/hr?module=employee-ledger&emp_id=${emp.emp_id}`, { scroll: false });
+  }, [router]);
 
   const openAdd = () => {
     setFormState({
@@ -98,7 +107,6 @@ export default function EmployeesTab() {
       );
     }
 
-    setFormState((s) => ({ ...s, open: false }));
     setSaving(true);
 
     try {
@@ -110,10 +118,12 @@ export default function EmployeesTab() {
       const json = await res.json();
       if (!res.ok) {
         replaceLocal(snapshot);
+        setFormState((s) => ({ ...s, open: true, data: formData }));
         setSnack({ open: true, msg: json.error || 'Save failed', severity: 'error' });
         return;
       }
       mergeServerRow(json, tempId || formData.emp_id);
+      setFormState((s) => ({ ...s, open: false }));
       setSnack({
         open: true,
         msg: mode === 'add' ? 'Employee added' : 'Employee updated',
@@ -163,11 +173,21 @@ export default function EmployeesTab() {
 
       <EmployeeRegisterList
         employees={employees}
+        stats={stats}
+        total={total}
         loading={loading}
+        loadingMore={loadingMore}
         refreshing={refreshing}
+        hasMore={hasMore}
+        onLoadMore={loadMore}
+        search={search}
+        onSearchChange={setSearch}
+        statusFilter={statusFilter}
+        onStatusFilterChange={setStatusFilter}
         onAdd={openAdd}
         onEdit={openEdit}
         onDelete={(emp) => setDeleteDialog({ open: true, id: emp.emp_id, name: emp.emp_name })}
+        onViewLedger={viewEmployeeLedger}
       />
 
       {formState.open && (
