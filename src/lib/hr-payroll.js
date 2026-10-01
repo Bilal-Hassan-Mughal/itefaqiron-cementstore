@@ -301,6 +301,70 @@ export function splitEmployeeLedgerForPayroll(signedBalance) {
   };
 }
 
+/** Unpaid absents/leaves vs full monthly basic (shown as absent deduction in clearance). */
+export function resolveAbsentDeductionFromBasic(row, derived, month, year) {
+  const basic = parseFloat(row?.basic_salary ?? 0);
+  if (!derived || basic <= 0.009) {
+    return { amount: 0, perDay: 0, unpaidDays: 0, excessAbsents: 0, excessLeaves: 0, detail: '' };
+  }
+  const m = parseInt(month, 10);
+  const y = parseInt(year, 10);
+  const bonus = parseFloat(derived.bonus ?? 0);
+  const other = parseFloat(derived.other_deduction ?? 0);
+  const gross = parseFloat(derived.gross_earned ?? 0);
+  const fromDays = Math.round((gross - bonus + other) * 100) / 100;
+  const amount = Math.max(0, Math.round((basic - fromDays) * 100) / 100);
+  const perDay = parseFloat(derived.deduction_per_day ?? 0)
+    || basic / Math.max(1, getDaysInMonth(m, y));
+  const unpaidDays = perDay > 0.009 ? Math.round((amount / perDay) * 10) / 10 : 0;
+  const excessAbsents = parseFloat(derived.excess_absents ?? 0);
+  const excessLeaves = parseFloat(derived.excess_leaves ?? 0);
+  let detail = '';
+  if (amount > 0.009) {
+    const parts = [];
+    if (excessAbsents > 0.009) parts.push(`${excessAbsents} absent`);
+    if (excessLeaves > 0.009) parts.push(`${excessLeaves} excess leave`);
+    detail = parts.length
+      ? `${parts.join(', ')} · ${unpaidDays} unpaid day(s) @ ${Math.round(perDay * 100) / 100}/day from basic`
+      : `${unpaidDays} unpaid day(s) vs full month basic (Rs ${Math.round(basic * 100) / 100})`;
+  }
+  return { amount, perDay, unpaidDays, excessAbsents, excessLeaves, detail };
+}
+
+/** Att Ded column: unpaid absents/leaves vs basic (+ legacy total_deduction if any). Display only — net pay already uses reduced earned. */
+export function resolveMonthAttDedDisplay(row = {}, tabMonth, tabYear) {
+  const legacy = parseFloat(row.total_deduction ?? 0);
+  if (legacy > 0.009) return legacy;
+  const m = parseInt(row.month ?? tabMonth, 10);
+  const y = parseInt(row.year ?? tabYear, 10);
+  if (!m || !y) return 0;
+  const derived = {
+    gross_earned: resolveMonthGrossEarned(row),
+    bonus: row.bonus,
+    other_deduction: row.other_deduction,
+    deduction_per_day: row.deduction_per_day,
+    excess_absents: row.excess_absents,
+    excess_leaves: row.excess_leaves,
+  };
+  return resolveAbsentDeductionFromBasic(row, derived, m, y).amount;
+}
+
+/** Project employee ledger (+ owes / − company owes) after this clearance. */
+export function previewEmployeeLedgerAfterClearance({
+  signedClosing = 0,
+  advanceAppliedThisMonth = 0,
+  advanceWithSalary = 0,
+  ledgerPayableCredit = 0,
+} = {}) {
+  let after = parseFloat(signedClosing || 0);
+  after -= parseFloat(advanceAppliedThisMonth || 0);
+  if (parseFloat(ledgerPayableCredit || 0) > 0.009) {
+    after += parseFloat(ledgerPayableCredit);
+  }
+  after += parseFloat(advanceWithSalary || 0);
+  return Math.round(after * 100) / 100;
+}
+
 /**
  * Salary clearance preview — same month attendance + account balance rules as POST /api/payroll clearance.
  */
@@ -356,6 +420,13 @@ export function previewClearancePayroll(row, form = {}, tabMonth, tabYear) {
     ledgerPayableCredit,
   });
   const advanceAppliedThisMonth = derived.advance_deduction;
+  const absentDeduction = resolveAbsentDeductionFromBasic(row, derived, m, y);
+  const ledgerAfterClearance = previewEmployeeLedgerAfterClearance({
+    signedClosing,
+    advanceAppliedThisMonth,
+    advanceWithSalary,
+    ledgerPayableCredit,
+  });
 
   return {
     month: m,
@@ -364,6 +435,8 @@ export function previewClearancePayroll(row, form = {}, tabMonth, tabYear) {
     monthNetAttendance,
     accountRecovery: accountRecovery,
     advanceAppliedThisMonth,
+    absentDeduction,
+    ledgerAfterClearance,
     ledgerPayableCredit,
     signedClosing,
     openingBal,
@@ -498,6 +571,24 @@ export function resolveSalaryAdvanceApplied(row = {}) {
     row.advance_deduction ?? row.employee_ledger_balance ?? row.ledger_receivable ?? 0
   );
   return Math.min(Math.max(0, ledgerRecovery), earnAfterAtt);
+}
+
+/** Employee account balance after this clearance (+ owes / − company owes). */
+export function resolveLedgerBalanceAfterClearance(row = {}) {
+  const snap = row.clearance_snapshot;
+  if (row.status === 'PAID') {
+    const afterRaw = row.employee_ledger_closing_after ?? snap?.employee_ledger_closing_after;
+    if (afterRaw != null && afterRaw !== '' && !Number.isNaN(parseFloat(afterRaw))) {
+      const opening = parseFloat(row.employee_opening_balance ?? row.employee?.opening_balance ?? 0);
+      return resolveEmployeeReceivableBalance(afterRaw, opening);
+    }
+  }
+  return previewEmployeeLedgerAfterClearance({
+    signedClosing: resolveSignedLedgerBalance(row),
+    advanceAppliedThisMonth: resolveSalaryAdvanceApplied(row),
+    advanceWithSalary: parseFloat(row.advance_with_salary ?? snap?.advance_with_salary ?? 0),
+    ledgerPayableCredit: parseFloat(row.ledger_payable_credit ?? snap?.ledger_payable_credit ?? 0),
+  });
 }
 
 export function parseClearancePayment(body = {}, totalDue = 0) {
