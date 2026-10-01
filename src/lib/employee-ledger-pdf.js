@@ -71,7 +71,7 @@ export async function downloadEmployeeLedgerPdf({
 
   doc.setFontSize(12);
   doc.setTextColor(13, 71, 196);
-  doc.text('Employee account ledger', 14, y);
+  doc.text('Employee Account Ledger', 14, y);
   y += 6;
 
   doc.setFontSize(10);
@@ -101,13 +101,15 @@ export async function downloadEmployeeLedgerPdf({
   }
 
   const head = showEmployeeColumn
-    ? ['Date', 'Employee', 'Type', 'Bill #', 'Particulars', 'Debit', 'Credit', 'Balance']
-    : ['Date', 'Type', 'Bill #', 'Particulars', 'Debit', 'Credit', 'Balance'];
+    ? ['Date', 'Employee', 'Type', 'Cash/Bank', 'Bill #', 'Particulars', 'Debit', 'Credit', 'Balance']
+    : ['Date', 'Type', 'Cash/Bank', 'Bill #', 'Particulars', 'Debit', 'Credit', 'Balance'];
 
   const body = entries.map((row) => {
+    const channel = row.payment_channel || (row.trnx_type === 'SALARY_PAYMENT' ? 'Salary' : '—');
     const base = [
       fmtDate(row.created_at),
       typeLabel(row.trnx_type, entryTypes),
+      channel,
       row.bill_no || '—',
       String(row.details || '—').slice(0, 120),
       row.debit_amount > 0 ? fmt(row.debit_amount) : '—',
@@ -154,18 +156,18 @@ export async function downloadEmployeeLedgerPdf({
     columnStyles: showEmployeeColumn
       ? {
         0: { cellWidth: 22 },
-        1: { cellWidth: 28 },
-        4: { cellWidth: 52 },
+        1: { cellWidth: 26 },
+        5: { cellWidth: 48 },
+        6: { halign: 'right', cellWidth: 20 },
+        7: { halign: 'right', cellWidth: 20 },
+        8: { halign: 'right', cellWidth: 22 },
+      }
+      : {
+        0: { cellWidth: 22 },
+        4: { cellWidth: 58 },
         5: { halign: 'right', cellWidth: 22 },
         6: { halign: 'right', cellWidth: 22 },
         7: { halign: 'right', cellWidth: 24 },
-      }
-      : {
-        0: { cellWidth: 24 },
-        3: { cellWidth: 62 },
-        4: { halign: 'right', cellWidth: 24 },
-        5: { halign: 'right', cellWidth: 24 },
-        6: { halign: 'right', cellWidth: 26 },
       },
     margin: { left: 14, right: 14 },
   });

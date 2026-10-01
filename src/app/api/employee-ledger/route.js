@@ -63,6 +63,15 @@ export async function GET(request) {
     }
 
     if (transactions) {
+      if (reconcile) {
+        const empRows = await prisma.$queryRawUnsafe(`
+          SELECT emp_id FROM employees WHERE branch_id = ${branchId}
+          ${empId ? `AND emp_id = ${empId}` : ''}
+        `);
+        for (const row of empRows || []) {
+          await reconcileEmployeeLedgerForEmployee(prisma, row.emp_id, branchId);
+        }
+      }
       const entries = await fetchBranchEmployeeLedgerEntries(prisma, branchId, {
         empId,
         from,

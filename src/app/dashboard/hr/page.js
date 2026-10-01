@@ -1,7 +1,6 @@
 'use client';
 
-import dynamic from 'next/dynamic';
-import { Suspense, useEffect, useState, useMemo, useRef } from 'react';
+import { Suspense, useState, useMemo, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Box,
@@ -23,25 +22,11 @@ import {
   ArrowForward,
   ChevronRight,
   ArrowBack,
-  Groups,
-  Schedule,
 } from '@mui/icons-material';
 import DashboardLayout from '../components/dashboard-layout';
 import { BRAND, COMPANY } from '@/lib/brand-theme';
-import { HrRefreshProvider, useHrRefresh, useHrRefreshVersion, HR_KEYS } from './context/HrRefreshContext';
-
-const hrTabLoader = () => (
-  <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-    <CircularProgress size={32} sx={{ color: BRAND.primary.blue }} />
-  </Box>
-);
-
-const EmployeesTab = dynamic(() => import('./components/EmployeesTab'), { loading: hrTabLoader });
-const AttendanceTab = dynamic(() => import('./components/AttendanceTab'), { loading: hrTabLoader });
-const SalaryTab = dynamic(() => import('./components/SalaryTab'), { loading: hrTabLoader });
-const SalaryAdvanceTab = dynamic(() => import('./components/SalaryAdvanceTab'), { loading: hrTabLoader });
-const EmployeeLedgerTab = dynamic(() => import('./components/EmployeeLedgerTab'), { loading: hrTabLoader });
-const EmployeeReceiveTab = dynamic(() => import('./components/EmployeeReceiveTab'), { loading: hrTabLoader });
+import { HrRefreshProvider, useHrRefresh, HR_KEYS } from './context/HrRefreshContext';
+import HrActiveModule from './components/HrActiveModule';
 
 const LEGACY_TAB_MAP = {
   employees: 'employees',
@@ -58,22 +43,25 @@ const HR_MODULES = [
     description: 'Add and manage employee profiles, contact details, and contract salary.',
     icon: BadgeIcon,
     accent: '#1A55E3',
-    tint: '#e8effd',
+    accentDark: '#1347c4',
+    tint: '#dbeafe',
   },
   {
     id: 'attendance',
     title: 'Attendance Sheet',
     description: 'Mark daily present, leave, absent, and half-day attendance.',
     icon: EventNoteIcon,
-    accent: '#00a868',
-    tint: '#dcfce7',
+    accent: '#059669',
+    accentDark: '#047857',
+    tint: '#d1fae5',
   },
   {
     id: 'salary-sheet',
     title: 'Salary Sheet',
     description: 'Review monthly salary breakdown for all employees.',
     icon: TableChartIcon,
-    accent: '#f59e0b',
+    accent: '#d97706',
+    accentDark: '#b45309',
     tint: '#fef3c7',
   },
   {
@@ -82,6 +70,7 @@ const HR_MODULES = [
     description: 'Process final payments and recover outstanding advances.',
     icon: PaymentsIcon,
     accent: '#7c3aed',
+    accentDark: '#6d28d9',
     tint: '#ede9fe',
   },
   {
@@ -89,15 +78,17 @@ const HR_MODULES = [
     title: 'Salary Advance',
     description: 'Record mid-month advances and track employee balances.',
     icon: AccountBalanceWallet,
-    accent: '#FF0854',
-    tint: '#ffe8f0',
+    accent: '#e11d48',
+    accentDark: '#be123c',
+    tint: '#ffe4e6',
   },
   {
     id: 'employee-ledger',
-    title: 'Employee Ledger',
-    description: 'Opening balances, advances, receipts, and salary deductions.',
+    title: 'Employee Account Ledger',
+    description: 'View each employee’s running balance — opening, advances, receipts, and salary recovery.',
     icon: AccountBalanceWallet,
     accent: '#0d9488',
+    accentDark: '#0f766e',
     tint: '#ccfbf1',
   },
   {
@@ -105,96 +96,93 @@ const HR_MODULES = [
     title: 'Receive Payment',
     description: 'Record cash/bank received from employees with printable PDF receipts.',
     icon: PaymentsIcon,
-    accent: '#059669',
-    tint: '#d1fae5',
+    accent: '#0284c7',
+    accentDark: '#0369a1',
+    tint: '#e0f2fe',
   },
   {
     id: 'salary-receipt',
     title: 'Salary Receipt',
     description: 'Print official monthly salary invoice for any employee.',
     icon: ReceiptIcon,
-    accent: '#334155',
-    tint: '#f1f5f9',
+    accent: '#4f46e5',
+    accentDark: '#4338ca',
+    tint: '#e0e7ff',
   },
 ];
 
-const fmtAmt = (v) => {
-  const n = parseFloat(v || 0);
-  return `Rs ${n.toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-};
+const HR_MODULE_COUNT = HR_MODULES.length;
 
-function StatCard({ label, sublabel, value, icon: Icon, accent, tint }) {
-  return (
-    <Card
-      elevation={0}
-      sx={{
-        borderRadius: '16px',
-        border: '1px solid #e8edf4',
-        bgcolor: '#ffffff',
-        boxShadow: '0 4px 20px rgba(15, 23, 42, 0.05)',
-        height: '100%',
-      }}
-    >
-      <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2.25 }, position: 'relative' }}>
-        <Box
-          sx={{
-            position: 'absolute',
-            top: 16,
-            right: 16,
-            width: 44,
-            height: 44,
-            borderRadius: '12px',
-            bgcolor: tint,
-            color: accent,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Icon sx={{ fontSize: 24 }} />
-        </Box>
-        <Typography
-          sx={{
-            fontSize: '0.65rem',
-            fontWeight: 800,
-            letterSpacing: '0.06em',
-            color: '#94a3b8',
-            textTransform: 'uppercase',
-            pr: 6,
-          }}
-        >
-          {label}
-        </Typography>
-        <Typography sx={{ fontSize: '0.72rem', color: '#64748b', mt: 0.35 }}>{sublabel}</Typography>
-        <Typography sx={{ fontSize: '1.65rem', fontWeight: 900, color: '#0f172a', mt: 1, lineHeight: 1.1 }}>
-          {value}
-        </Typography>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ModuleNavCard({ module, badge, onClick }) {
+function ModuleNavCard({ module, badge, onClick, index = 0 }) {
   const Icon = module.icon;
+  const accentDeep = module.accentDark || module.accent;
 
   return (
     <Card
       onClick={onClick}
       elevation={0}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       sx={{
-        borderRadius: '20px',
-        border: '1px solid #e8edf4',
-        bgcolor: '#ffffff',
-        boxShadow: '0 4px 20px rgba(15, 23, 42, 0.05)',
+        '@keyframes hrModuleIn': {
+          from: { opacity: 0, transform: 'translateY(14px)' },
+          to: { opacity: 1, transform: 'translateY(0)' },
+        },
+        animation: `hrModuleIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) ${index * 0.045}s both`,
+        borderRadius: '18px',
+        border: `1px solid ${module.accent}30`,
+        background: `linear-gradient(165deg, #ffffff 0%, ${module.tint} 100%)`,
+        boxShadow: `0 2px 8px ${module.accent}12, 0 1px 2px rgba(15, 23, 42, 0.04)`,
         cursor: 'pointer',
         height: '100%',
         position: 'relative',
-        transition: 'all 0.28s cubic-bezier(0.4, 0, 0.2, 1)',
-        '&:hover': {
+        overflow: 'hidden',
+        transition: 'border-color 0.32s ease, box-shadow 0.32s ease, transform 0.32s cubic-bezier(0.22, 1, 0.36, 1)',
+        '&::after': {
+          content: '""',
+          position: 'absolute',
+          top: -40,
+          right: -40,
+          width: 120,
+          height: 120,
+          borderRadius: '50%',
+          background: `radial-gradient(circle, ${module.accent}28 0%, transparent 68%)`,
+          pointerEvents: 'none',
+          transition: 'transform 0.35s ease, opacity 0.35s ease',
+          opacity: 0.85,
+        },
+        '&:hover, &:focus-visible': {
+          outline: 'none',
           transform: 'translateY(-4px)',
-          boxShadow: '0 12px 32px rgba(15, 23, 42, 0.1)',
-          borderColor: `${module.accent}55`,
-          '& .open-link': { gap: 1, color: module.accent },
+          boxShadow: `0 16px 40px ${module.accent}28, 0 4px 12px rgba(15, 23, 42, 0.06)`,
+          borderColor: `${module.accent}70`,
+          '&::after': {
+            transform: 'scale(1.15)',
+            opacity: 1,
+          },
+          '& .module-icon-wrap': {
+            transform: 'translateY(-1px) scale(1.05)',
+            boxShadow: `0 8px 20px ${module.accent}35`,
+          },
+          '& .module-open-pill': {
+            bgcolor: module.accent,
+            color: '#fff',
+            borderColor: module.accent,
+            boxShadow: `0 4px 12px ${module.accent}40`,
+          },
+          '& .module-open-chevron': {
+            transform: 'translateX(3px)',
+          },
+        },
+        '&:active': {
+          transform: 'translateY(-1px)',
+          transitionDuration: '0.12s',
         },
       }}
     >
@@ -202,8 +190,8 @@ function ModuleNavCard({ module, badge, onClick }) {
         <Box
           sx={{
             position: 'absolute',
-            top: 14,
-            right: 14,
+            top: 12,
+            right: 12,
             minWidth: 22,
             height: 22,
             px: 0.75,
@@ -215,42 +203,94 @@ function ModuleNavCard({ module, badge, onClick }) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            zIndex: 1,
           }}
         >
           {badge}
         </Box>
       )}
-      <CardContent sx={{ p: 2.5, '&:last-child': { pb: 2.5 }, display: 'flex', flexDirection: 'column', minHeight: 190 }}>
+      <CardContent
+        sx={{
+          p: 2.5,
+          '&:last-child': { pb: 2.5 },
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: { xs: 172, md: 182 },
+          position: 'relative',
+          zIndex: 1,
+        }}
+      >
         <Box
+          className="module-icon-wrap"
           sx={{
-            width: 46,
-            height: 46,
+            width: 48,
+            height: 48,
             borderRadius: '14px',
-            bgcolor: module.tint,
-            color: module.accent,
+            background: `linear-gradient(145deg, ${module.accent} 0%, ${accentDeep} 100%)`,
+            color: '#ffffff',
+            boxShadow: `0 6px 16px ${module.accent}45`,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             mb: 1.75,
+            transition: 'transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.32s ease',
+            flexShrink: 0,
           }}
         >
           <Icon sx={{ fontSize: 24 }} />
         </Box>
-        <Typography sx={{ fontWeight: 800, fontSize: '1.05rem', color: '#0f172a', mb: 0.75 }}>
+        <Typography
+          sx={{
+            fontWeight: 800,
+            fontSize: '1rem',
+            color: '#0f172a',
+            letterSpacing: '-0.02em',
+            mb: 0.65,
+            lineHeight: 1.25,
+          }}
+        >
           {module.title}
         </Typography>
-        <Typography sx={{ fontSize: '0.8125rem', color: '#64748b', lineHeight: 1.55, flex: 1 }}>
+        <Typography
+          sx={{
+            fontSize: '0.8125rem',
+            color: '#64748b',
+            lineHeight: 1.6,
+            flex: 1,
+            display: '-webkit-box',
+            WebkitLineClamp: 3,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+        >
           {module.description}
         </Typography>
         <Stack
           direction="row"
           alignItems="center"
-          spacing={0.5}
-          className="open-link"
-          sx={{ mt: 2, color: module.accent, fontWeight: 700, fontSize: '0.875rem', transition: 'all 0.2s ease' }}
+          justifyContent="flex-end"
+          className="module-open-pill"
+          sx={{
+            mt: 2,
+            alignSelf: 'flex-start',
+            gap: 0.35,
+            px: 1.35,
+            py: 0.55,
+            borderRadius: '999px',
+            border: `1px solid ${module.accent}40`,
+            bgcolor: 'rgba(255,255,255,0.92)',
+            color: module.accent,
+            fontWeight: 700,
+            fontSize: '0.72rem',
+            letterSpacing: '0.03em',
+            transition: 'all 0.28s cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
         >
           <span>Open</span>
-          <ChevronRight sx={{ fontSize: 20 }} />
+          <ChevronRight
+            className="module-open-chevron"
+            sx={{ fontSize: 17, transition: 'transform 0.28s ease' }}
+          />
         </Stack>
       </CardContent>
     </Card>
@@ -267,14 +307,7 @@ function HrPageContent() {
   const rawModule = moduleParam || (tabParam ? LEGACY_TAB_MAP[tabParam] : null);
   const activeModule = HR_MODULES.some((m) => m.id === rawModule) ? rawModule : null;
 
-  const [stats, setStats] = useState({
-    activeEmployees: 0,
-    monthlyPayroll: 0,
-    pendingClearance: 0,
-    advanceBalance: 0,
-  });
   const [contentVisible, setContentVisible] = useState(true);
-  const [loadingStats, setLoadingStats] = useState(true);
 
   const activeModuleMeta = useMemo(
     () => HR_MODULES.find((m) => m.id === activeModule),
@@ -282,33 +315,8 @@ function HrPageContent() {
   );
 
   const isFlatModule = ['attendance', 'salary-sheet', 'salary-clearance', 'salary-advance', 'employee-ledger', 'employee-receive', 'salary-receipt'].includes(activeModule);
-  const summaryVersion = useHrRefreshVersion(HR_KEYS.summary);
+  const hideHrHubHeader = activeModule === 'employee-ledger';
   const { invalidate } = useHrRefresh();
-
-  useEffect(() => {
-    if (activeModule) return;
-
-    async function loadStats() {
-      setLoadingStats(true);
-      try {
-        const res = await fetch('/api/hr/summary');
-        if (res.ok) {
-          const data = await res.json();
-          setStats({
-            activeEmployees: data.activeEmployees ?? 0,
-            monthlyPayroll: data.monthlyPayroll ?? 0,
-            pendingClearance: data.pendingClearance ?? 0,
-            advanceBalance: data.advanceBalance ?? 0,
-          });
-        }
-      } catch {
-        /* optional */
-      } finally {
-        setLoadingStats(false);
-      }
-    }
-    loadStats();
-  }, [activeModule, summaryVersion]);
 
   const openModule = (moduleId) => {
     if (moduleId === activeModule) return;
@@ -326,108 +334,9 @@ function HrPageContent() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const renderModuleContent = () => {
-    switch (activeModule) {
-      case 'employees':
-        return <EmployeesTab />;
-      case 'attendance':
-        return <AttendanceTab />;
-      case 'salary-sheet':
-        return <SalaryTab view="sheet" />;
-      case 'salary-clearance':
-        return <SalaryTab view="clearance" />;
-      case 'salary-advance':
-        return <SalaryAdvanceTab />;
-      case 'employee-ledger':
-        return <EmployeeLedgerTab />;
-      case 'employee-receive':
-        return <EmployeeReceiveTab />;
-      case 'salary-receipt':
-        return <SalaryTab view="receipt" />;
-      default:
-        return null;
-    }
-  };
-
-  const statCards = [
-    {
-      label: 'Active Employees',
-      sublabel: 'On payroll',
-      value: stats.activeEmployees,
-      icon: Groups,
-      accent: '#1A55E3',
-      tint: '#e8effd',
-    },
-    {
-      label: 'Monthly Payroll',
-      sublabel: 'Contract total',
-      value: fmtAmt(stats.monthlyPayroll),
-      icon: AccountBalanceWallet,
-      accent: '#f59e0b',
-      tint: '#fef3c7',
-    },
-    {
-      label: 'Pending Clearance',
-      sublabel: 'Awaiting payment',
-      value: stats.pendingClearance,
-      icon: Schedule,
-      accent: '#7c3aed',
-      tint: '#ede9fe',
-    },
-    {
-      label: 'Advance Balance',
-      sublabel: 'Outstanding',
-      value: fmtAmt(stats.advanceBalance),
-      icon: PaymentsIcon,
-      accent: '#FF0854',
-      tint: '#ffe8f0',
-    },
-  ];
-
   return (
     <DashboardLayout>
       <Box sx={{ maxWidth: 1440, mx: 'auto', pb: 4 }}>
-        {/* Hero header */}
-        <Box
-          sx={{
-            mb: 3,
-            p: { xs: 2.5, md: 3 },
-            borderRadius: '20px',
-            background: 'linear-gradient(135deg, #1A55E3 0%, #1347c4 45%, #5E6EED 100%)',
-            color: '#fff',
-            boxShadow: '0 8px 32px rgba(26, 85, 227, 0.25)',
-          }}
-        >
-          <Typography sx={{ fontSize: { xs: '1.5rem', md: '1.85rem' }, fontWeight: 900, letterSpacing: '-0.02em' }}>
-            HR Management
-          </Typography>
-          <Typography sx={{ fontSize: '0.875rem', opacity: 0.88, mt: 0.5, maxWidth: 560 }}>
-            {COMPANY.nameShort} — employees, attendance, payroll and salary clearance in one dashboard.
-          </Typography>
-        </Box>
-
-        {/* Stats row */}
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: {
-              xs: '1fr 1fr',
-              md: 'repeat(2, 1fr)',
-              lg: 'repeat(4, 1fr)',
-            },
-            gap: 2,
-            mb: 3,
-          }}
-        >
-          {loadingStats
-            ? Array.from({ length: 4 }).map((_, i) => (
-                <Card key={i} sx={{ borderRadius: '16px', minHeight: 110, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <CircularProgress size={24} sx={{ color: BRAND.primary.blue }} />
-                </Card>
-              ))
-            : statCards.map((s) => <StatCard key={s.label} {...s} />)}
-        </Box>
-
         {/* Hub: module grid */}
         {!activeModule && (
           <Box
@@ -437,21 +346,94 @@ function HrPageContent() {
               transition: 'opacity 0.28s ease, transform 0.28s ease',
             }}
           >
-            <Typography sx={{ fontWeight: 800, fontSize: '1.1rem', color: '#0f172a', mb: 2 }}>
-              HR Modules
-            </Typography>
+            <Box
+              sx={{
+                mb: 3,
+                px: { xs: 2, md: 3 },
+                py: { xs: 2.25, md: 2.5 },
+                borderRadius: '20px',
+                border: '1px solid #e8edf4',
+                background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 55%, #f1f5f9 100%)',
+                boxShadow: '0 4px 24px rgba(15, 23, 42, 0.05)',
+                display: 'flex',
+                flexDirection: { xs: 'column', sm: 'row' },
+                alignItems: { sm: 'center' },
+                justifyContent: 'space-between',
+                gap: 2,
+              }}
+            >
+              <Stack direction="row" spacing={1.75} alignItems="center">
+                <Box
+                  sx={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: '14px',
+                    background: `linear-gradient(135deg, ${BRAND.primary.blue} 0%, ${BRAND.supporting.periwinkle} 100%)`,
+                    color: '#fff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 4px 14px rgba(26, 85, 227, 0.28)',
+                    flexShrink: 0,
+                  }}
+                >
+                  <BadgeIcon sx={{ fontSize: 26 }} />
+                </Box>
+                <Box>
+                  <Typography sx={{ fontWeight: 900, fontSize: { xs: '1.2rem', md: '1.35rem' }, color: '#0f172a', letterSpacing: '-0.02em' }}>
+                    HR Management
+                  </Typography>
+                  <Typography sx={{ fontSize: '0.8125rem', color: '#64748b', mt: 0.35, maxWidth: 520 }}>
+                    {COMPANY.nameShort} — choose a module for employees, payroll, and staff accounts.
+                  </Typography>
+                </Box>
+              </Stack>
+              <Box
+                sx={{
+                  px: 2,
+                  py: 1.15,
+                  borderRadius: '14px',
+                  background: `linear-gradient(135deg, ${BRAND.tint.blue} 0%, #ffffff 100%)`,
+                  border: `1px solid ${BRAND.primary.blue}22`,
+                  textAlign: { xs: 'left', sm: 'center' },
+                  minWidth: { sm: 108 },
+                  boxShadow: '0 2px 8px rgba(26, 85, 227, 0.08)',
+                }}
+              >
+                <Typography sx={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  Modules
+                </Typography>
+                <Typography
+                  sx={{
+                    fontSize: '1.5rem',
+                    fontWeight: 900,
+                    lineHeight: 1.1,
+                    fontFamily: 'monospace',
+                    background: `linear-gradient(135deg, ${BRAND.primary.blue}, ${BRAND.supporting.periwinkle})`,
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    backgroundClip: 'text',
+                  }}
+                >
+                  {HR_MODULE_COUNT}
+                </Typography>
+              </Box>
+            </Box>
+
             <Box
               sx={{
                 display: 'grid',
                 gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' },
-                gap: 2,
+                gap: { xs: 1.75, md: 2.25 },
+                alignItems: 'stretch',
               }}
             >
-              {HR_MODULES.map((module) => (
+              {HR_MODULES.map((module, index) => (
                 <ModuleNavCard
                   key={module.id}
                   module={module}
-                  badge={module.badgeKey ? stats[module.badgeKey] : 0}
+                  badge={0}
+                  index={index}
                   onClick={() => openModule(module.id)}
                 />
               ))}
@@ -462,81 +444,85 @@ function HrPageContent() {
         {/* Module view */}
         {activeModule && activeModuleMeta && (
           <Box ref={contentRef}>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-              <Button
-                startIcon={<ArrowBack />}
-                onClick={backToHub}
-                sx={{
-                  textTransform: 'none',
-                  fontWeight: 700,
-                  color: '#64748b',
-                  '&:hover': { bgcolor: '#f1f5f9', color: '#0f172a' },
-                }}
-              >
-                HR Dashboard
-              </Button>
-              <ChevronRight sx={{ color: '#cbd5e1', fontSize: 20 }} />
-              <Typography sx={{ fontWeight: 800, color: '#0f172a' }}>{activeModuleMeta.title}</Typography>
-            </Stack>
+            {!hideHrHubHeader && (
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+                <Button
+                  startIcon={<ArrowBack />}
+                  onClick={backToHub}
+                  sx={{
+                    textTransform: 'none',
+                    fontWeight: 700,
+                    color: '#64748b',
+                    '&:hover': { bgcolor: '#f1f5f9', color: '#0f172a' },
+                  }}
+                >
+                  HR Dashboard
+                </Button>
+                <ChevronRight sx={{ color: '#cbd5e1', fontSize: 20 }} />
+                <Typography sx={{ fontWeight: 800, color: '#0f172a' }}>{activeModuleMeta.title}</Typography>
+              </Stack>
+            )}
 
             <Box
               sx={{
-                borderRadius: isFlatModule ? 0 : '20px',
-                border: isFlatModule ? 'none' : '1px solid #e8edf4',
-                bgcolor: '#ffffff',
-                boxShadow: isFlatModule ? 'none' : '0 4px 24px rgba(15, 23, 42, 0.06)',
+                borderRadius: hideHrHubHeader || isFlatModule ? 0 : '20px',
+                border: hideHrHubHeader || isFlatModule ? 'none' : '1px solid #e8edf4',
+                bgcolor: hideHrHubHeader ? 'transparent' : '#ffffff',
+                boxShadow: hideHrHubHeader || isFlatModule ? 'none' : '0 4px 24px rgba(15, 23, 42, 0.06)',
                 overflow: 'hidden',
               }}
             >
-              <Box
-                sx={{
-                  px: { xs: 2, md: 2.5 },
-                  py: 2,
-                  borderBottom: '1px solid #e8edf4',
-                  background: `linear-gradient(90deg, ${activeModuleMeta.tint} 0%, #ffffff 100%)`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  flexWrap: 'wrap',
-                  gap: 1.5,
-                }}
-              >
-                <Stack direction="row" spacing={1.5} alignItems="center">
-                  <Box
-                    sx={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: '12px',
-                      bgcolor: '#fff',
-                      color: activeModuleMeta.accent,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      boxShadow: '0 2px 8px rgba(15,23,42,0.06)',
-                    }}
-                  >
-                    <activeModuleMeta.icon sx={{ fontSize: 24 }} />
-                  </Box>
-                  <Box>
-                    <Typography sx={{ fontWeight: 800, fontSize: '1.1rem', color: '#0f172a' }}>
-                      {activeModuleMeta.title}
-                    </Typography>
-                    <Typography sx={{ fontSize: '0.8125rem', color: '#64748b', maxWidth: 480 }}>
-                      {activeModuleMeta.description}
-                    </Typography>
-                  </Box>
-                </Stack>
-                <IconButton
-                  onClick={backToHub}
+              {!hideHrHubHeader && (
+                <Box
                   sx={{
-                    bgcolor: '#fff',
-                    border: '1px solid #e2e8f0',
-                    '&:hover': { bgcolor: '#f8fafc' },
+                    px: { xs: 2, md: 2.5 },
+                    py: 2,
+                    borderBottom: '1px solid #e8edf4',
+                    background: `linear-gradient(90deg, ${activeModuleMeta.tint} 0%, #ffffff 100%)`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: 1.5,
                   }}
                 >
-                  <ArrowForward sx={{ transform: 'rotate(180deg)', fontSize: 20 }} />
-                </IconButton>
-              </Box>
+                  <Stack direction="row" spacing={1.5} alignItems="center">
+                    <Box
+                      sx={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: '12px',
+                        bgcolor: '#fff',
+                        color: activeModuleMeta.accent,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: '0 2px 8px rgba(15,23,42,0.06)',
+                      }}
+                    >
+                      <activeModuleMeta.icon sx={{ fontSize: 24 }} />
+                    </Box>
+                    <Box>
+                      <Typography sx={{ fontWeight: 800, fontSize: '1.1rem', color: '#0f172a' }}>
+                        {activeModuleMeta.title}
+                      </Typography>
+                      <Typography sx={{ fontSize: '0.8125rem', color: '#64748b', maxWidth: 480 }}>
+                        {activeModuleMeta.description}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                  <IconButton
+                    onClick={backToHub}
+                    sx={{
+                      bgcolor: '#fff',
+                      border: '1px solid #e2e8f0',
+                      '&:hover': { bgcolor: '#f8fafc' },
+                    }}
+                  >
+                    <ArrowForward sx={{ transform: 'rotate(180deg)', fontSize: 20 }} />
+                  </IconButton>
+                </Box>
+              )}
 
               <Box
                 key={activeModule}
@@ -547,7 +533,7 @@ function HrPageContent() {
                   transition: 'opacity 0.3s ease, transform 0.3s ease',
                 }}
               >
-                {renderModuleContent()}
+                <HrActiveModule moduleId={activeModule} backToHub={backToHub} />
               </Box>
             </Box>
           </Box>

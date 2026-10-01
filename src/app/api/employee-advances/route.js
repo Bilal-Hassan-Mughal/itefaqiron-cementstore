@@ -284,6 +284,7 @@ export async function POST(request) {
         amount: amt,
         reason: reason || null,
         advanceDate: advDate,
+        paymentMode: payMode,
       });
 
       return {

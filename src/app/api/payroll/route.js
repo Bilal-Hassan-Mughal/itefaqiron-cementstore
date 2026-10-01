@@ -36,6 +36,7 @@ import {
   recordEmployeeAdvanceSettledFromPayroll,
   recordEmployeePayrollBalanceRecovery,
   recordEmployeePayrollPayableSettlement,
+  recordEmployeePayrollSalaryPayment,
   reverseEmployeePayrollLedgerCredits,
 } from '@/lib/employee-ledger';
 
@@ -1307,6 +1308,33 @@ export async function POST(request) {
         } catch (e) {
           console.error('Failed to record salary ledger payment:', e);
           return NextResponse.json({ error: `Clearance saved but ledger failed: ${e.message}` }, { status: 500 });
+        }
+      }
+
+      if (currentPayrollId) {
+        try {
+          await ensureEmployeeLedgerSchema(prisma);
+          const advanceRecoveredOnLedger =
+            (clearanceSnapshot.advance_settled_on_ledger || 0)
+            + (clearanceSnapshot.opening_balance_recovered || 0);
+          await recordEmployeePayrollSalaryPayment(prisma, {
+            branchId,
+            empId,
+            empName: emp.emp_name,
+            payrollId: currentPayrollId,
+            month: m,
+            year: y,
+            netSalary: derived.net_salary,
+            totalPayable,
+            cashAmount: payment.cashAmt,
+            bankAmount: payment.bankAmt,
+            advanceRecovered: advanceRecoveredOnLedger,
+            advanceWithSalary,
+            paymentReference: payment.payment_reference,
+            paymentDate: payDate,
+          });
+        } catch (e) {
+          console.error('Employee ledger salary memo:', e);
         }
       }
 

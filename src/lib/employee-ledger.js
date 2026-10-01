@@ -10,6 +10,8 @@ import {
   resolveEmployeeReceivableBalance,
   resolvePayrollAdvanceDeduction,
   splitEmployeeLedgerForPayroll,
+  parseClearanceSnapshot,
+  payrollLedgerBillNo,
 } from '@/lib/hr-payroll';
 
 export {
@@ -46,6 +48,10 @@ export function employeePayrollPayableBillNo(payrollId) {
 
 export function employeeReceiptBillNo(receiptId) {
   return `EMP-RCV-${receiptId}`;
+}
+
+export function employeePayrollSalaryBillNo(payrollId) {
+  return `EMP-PAYROLL-${payrollId}-SALARY`;
 }
 
 function calcClosing(opening, debit, credit) {
@@ -115,15 +121,22 @@ export async function recordEmployeeReceiptCredit(db, {
   amount,
   notes,
   receiptDate,
+  paymentMode = 'CASH',
+  reference = null,
 }) {
   const amt = parseFloat(amount || 0);
   if (amt <= 0) return;
+  const modeLabel = String(paymentMode || 'CASH').toUpperCase() === 'BANK' ? 'Bank' : 'Cash';
   await appendEmployeeLedgerEntry(db, {
     branchId,
     empId,
     trnx_type: 'RECEIPT',
     bill_no: employeeReceiptBillNo(receiptId),
-    details: [`Payment received from ${empName || 'Employee'}`, notes].filter(Boolean).join(' · '),
+    details: [
+      `${modeLabel} received from ${empName || 'Employee'}`,
+      reference ? `Ref: ${reference}` : null,
+      notes,
+    ].filter(Boolean).join(' · '),
     debit_amount: 0,
     credit_amount: amt,
     created_at: receiptDate || new Date(),
@@ -276,8 +289,95 @@ export async function reconcileEmployeeLedgerForEmployee(db, empId, branchId) {
     WHERE emp_id = ${emp_id} AND trnx_type = 'SALARY_DED' AND bill_no LIKE 'EMP-PAYROLL-%'
   `);
 
+  await syncEmployeePayrollLedgerMemos(db, emp_id, branchId, emp.emp_name);
   const closing = await recalculateEmployeeLedger(db, emp_id);
   return closing;
+}
+
+/** Informational row (0 debit / 0 credit) — salary paid at clearance; does not change running balance. */
+export async function recordEmployeePayrollSalaryPayment(db, {
+  branchId,
+  empId,
+  empName,
+  payrollId,
+  month,
+  year,
+  netSalary = 0,
+  totalPayable = 0,
+  cashAmount = 0,
+  bankAmount = 0,
+  advanceRecovered = 0,
+  advanceWithSalary = 0,
+  paymentReference = null,
+  paymentDate = null,
+}) {
+  const pid = parseInt(payrollId, 10);
+  if (!pid) return;
+  const bill = employeePayrollSalaryBillNo(pid);
+  const exists = await db.$queryRawUnsafe(`
+    SELECT 1 AS ok FROM employee_ledger WHERE emp_id = ${parseInt(empId, 10)} AND bill_no = '${bill}' LIMIT 1
+  `);
+  if (exists?.[0]) return;
+
+  const parts = [`Salary clearance ${month}/${year} — ${empName || 'Employee'}`];
+  const net = parseFloat(netSalary || 0);
+  const paid = parseFloat(totalPayable || 0);
+  const cash = parseFloat(cashAmount || 0);
+  const bank = parseFloat(bankAmount || 0);
+  const recovered = parseFloat(advanceRecovered || 0);
+  const advWith = parseFloat(advanceWithSalary || 0);
+  if (net > 0) parts.push(`Month net Rs ${net.toFixed(2)}`);
+  if (recovered > 0) parts.push(`Advance recovered Rs ${recovered.toFixed(2)}`);
+  if (advWith > 0) parts.push(`Advance with salary Rs ${advWith.toFixed(2)}`);
+  if (paid > 0) parts.push(`Total paid Rs ${paid.toFixed(2)}`);
+  if (cash > 0 && bank > 0) parts.push(`Cash Rs ${cash.toFixed(2)} · Bank Rs ${bank.toFixed(2)}`);
+  else if (cash > 0) parts.push(`Paid cash Rs ${cash.toFixed(2)}`);
+  else if (bank > 0) parts.push(`Paid bank Rs ${bank.toFixed(2)}`);
+  if (paymentReference) parts.push(`Ref: ${paymentReference}`);
+  parts.push(`Finance bill ${payrollLedgerBillNo(pid)}`);
+
+  await appendEmployeeLedgerEntry(db, {
+    branchId,
+    empId,
+    trnx_type: 'SALARY_PAYMENT',
+    bill_no: bill,
+    details: parts.join(' · '),
+    debit_amount: 0,
+    credit_amount: 0,
+    created_at: paymentDate || new Date(),
+  });
+}
+
+async function syncEmployeePayrollLedgerMemos(db, empId, branchId, empName) {
+  const emp_id = parseInt(empId, 10);
+  const rows = await db.$queryRawUnsafe(`
+    SELECT payroll_id, month, year, net_salary, payment_date, notes, advance_deduction
+    FROM payrolls WHERE emp_id = ${emp_id} AND status = 'PAID'
+    ORDER BY year ASC, month ASC, payroll_id ASC
+  `);
+  for (const row of rows || []) {
+    const snap = parseClearanceSnapshot(row.notes);
+    const advanceRecovered = parseFloat(
+      snap?.advance_settled_on_ledger ?? 0
+    ) + parseFloat(snap?.opening_balance_recovered ?? 0);
+    const recoveredFallback = parseFloat(row.advance_deduction || 0);
+    await recordEmployeePayrollSalaryPayment(db, {
+      branchId,
+      empId: emp_id,
+      empName,
+      payrollId: row.payroll_id,
+      month: row.month,
+      year: row.year,
+      netSalary: snap?.month_net ?? row.net_salary,
+      totalPayable: snap?.total_payable ?? snap?.amount_paid ?? row.net_salary,
+      cashAmount: snap?.cash_amount ?? 0,
+      bankAmount: snap?.bank_amount ?? 0,
+      advanceRecovered: advanceRecovered > 0 ? advanceRecovered : recoveredFallback,
+      advanceWithSalary: snap?.advance_with_salary ?? 0,
+      paymentReference: snap?.payment_reference ?? null,
+      paymentDate: row.payment_date || snap?.cleared_at || null,
+    });
+  }
 }
 
 export async function syncEmployeeLedgerBalanceColumn(db, empId) {
@@ -386,15 +486,22 @@ export async function recordEmployeeAdvanceDebit(db, {
   amount,
   reason,
   advanceDate,
+  paymentMode = null,
 }) {
   const amt = parseFloat(amount || 0);
   if (amt <= 0) return;
+  const modeLabel = paymentMode
+    ? (String(paymentMode).toUpperCase() === 'BANK' ? 'Bank' : 'Cash')
+    : null;
   await appendEmployeeLedgerEntry(db, {
     branchId,
     empId,
     trnx_type: 'ADVANCE',
     bill_no: employeeAdvanceBillNo(advanceId),
-    details: [`Salary advance — ${empName || 'Employee'}`, reason].filter(Boolean).join(' · '),
+    details: [
+      modeLabel ? `${modeLabel} advance to ${empName || 'Employee'}` : `Salary advance — ${empName || 'Employee'}`,
+      reason,
+    ].filter(Boolean).join(' · '),
     debit_amount: amt,
     credit_amount: 0,
     created_at: advanceDate || new Date(),
@@ -484,8 +591,9 @@ export async function reverseEmployeePayrollLedgerCredits(db, empId, { payrollId
   if (pid) {
     const recoveryBill = employeePayrollRecoveryBillNo(pid);
     const payableBill = employeePayrollPayableBillNo(pid);
+    const salaryBill = employeePayrollSalaryBillNo(pid);
     await db.$executeRawUnsafe(`
-      DELETE FROM employee_ledger WHERE emp_id = ${id} AND bill_no IN ('${recoveryBill}', '${payableBill}')
+      DELETE FROM employee_ledger WHERE emp_id = ${id} AND bill_no IN ('${recoveryBill}', '${payableBill}', '${salaryBill}')
     `);
   }
   for (const advId of advanceIds) {
@@ -536,9 +644,15 @@ export async function fetchBranchEmployeeLedgerEntries(db, branchId, {
 } = {}) {
   const bid = parseInt(branchId, 10);
   let sql = `
-    SELECT el.*, e.emp_name, e.designation, e.department
+    SELECT el.*, e.emp_name, e.designation, e.department,
+      er.payment_mode AS receipt_payment_mode, er.reference AS receipt_reference,
+      ea.payment_mode AS advance_payment_mode
     FROM employee_ledger el
     INNER JOIN employees e ON e.emp_id = el.emp_id
+    LEFT JOIN employee_receipts er ON el.trnx_type = 'RECEIPT'
+      AND er.receipt_id = CAST(REPLACE(el.bill_no, 'EMP-RCV-', '') AS UNSIGNED)
+    LEFT JOIN employee_advances ea ON el.trnx_type = 'ADVANCE'
+      AND ea.advance_id = CAST(REPLACE(el.bill_no, 'EMP-ADV-', '') AS UNSIGNED)
     WHERE e.branch_id = ${bid}
   `;
   if (empId) sql += ` AND el.emp_id = ${parseInt(empId, 10)}`;
@@ -552,21 +666,34 @@ export async function fetchBranchEmployeeLedgerEntries(db, branchId, {
   sql += ` ORDER BY el.created_at ASC, el.el_id ASC LIMIT ${parseInt(limit, 10)}`;
 
   const rows = await db.$queryRawUnsafe(sql);
-  return (rows || []).map((r) => ({
-    el_id: r.el_id,
-    emp_id: r.emp_id,
-    emp_name: r.emp_name,
-    designation: r.designation,
-    department: r.department,
-    created_at: r.created_at,
-    trnx_type: r.trnx_type,
-    bill_no: r.bill_no,
-    details: r.details,
-    debit_amount: parseFloat(r.debit_amount || 0),
-    credit_amount: parseFloat(r.credit_amount || 0),
-    opening_balance: parseFloat(r.opening_balance || 0),
-    closing_balance: parseFloat(r.closing_balance || 0),
-  }));
+  return (rows || []).map((r) => {
+    let payment_channel = null;
+    if (r.trnx_type === 'RECEIPT' && r.receipt_payment_mode) {
+      payment_channel = String(r.receipt_payment_mode).toUpperCase() === 'BANK' ? 'Bank' : 'Cash';
+    } else if (r.trnx_type === 'ADVANCE' && r.advance_payment_mode) {
+      payment_channel = String(r.advance_payment_mode).toUpperCase() === 'BANK' ? 'Bank' : 'Cash';
+    } else if (r.trnx_type === 'SALARY_PAYMENT' && r.details) {
+      if (/Paid cash/i.test(r.details)) payment_channel = 'Cash';
+      else if (/Paid bank/i.test(r.details)) payment_channel = 'Bank';
+      else if (/Cash Rs/i.test(r.details) && /Bank Rs/i.test(r.details)) payment_channel = 'Cash + Bank';
+    }
+    return {
+      el_id: r.el_id,
+      emp_id: r.emp_id,
+      emp_name: r.emp_name,
+      designation: r.designation,
+      department: r.department,
+      created_at: r.created_at,
+      trnx_type: r.trnx_type,
+      bill_no: r.bill_no,
+      details: r.details,
+      payment_channel,
+      debit_amount: parseFloat(r.debit_amount || 0),
+      credit_amount: parseFloat(r.credit_amount || 0),
+      opening_balance: parseFloat(r.opening_balance || 0),
+      closing_balance: parseFloat(r.closing_balance || 0),
+    };
+  });
 }
 
 export async function fetchEmployeeLedgerEntries(db, empId, { branchId } = {}) {

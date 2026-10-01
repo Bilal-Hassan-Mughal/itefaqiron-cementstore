@@ -207,6 +207,8 @@ export async function POST(request) {
         amount: amt,
         notes,
         receiptDate: dateStr,
+        paymentMode: payMode,
+        reference,
       });
 
       const balanceAfter = await getEmployeeLedgerClosing(tx, empId);

@@ -41,7 +41,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import DashboardLayout from '../components/dashboard-layout';
-import DateFilterInput from '../components/date-filter-input';
+import DateFilterInput, { formatToDDMMYYYY } from '../components/date-filter-input';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
 import { BRAND, COMPANY } from '@/lib/brand-theme';
@@ -862,6 +862,37 @@ const getMonthStartKarachiDateKey = () => {
   return `${todayKey.slice(0, 7)}-01`;
 };
 
+/** Last calendar day for a YYYY-MM-DD key's month (Karachi calendar). */
+const getMonthEndKarachiDateKey = (anchorDateKey = getTodayKarachiDateKey()) => {
+  const [y, m] = anchorDateKey.split('-').map(Number);
+  const lastDay = new Date(y, m, 0).getDate();
+  return `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+};
+
+/** Rolling 30 days including today (e.g. 1 Oct → 2 Sep – 1 Oct). */
+const getKarachiRolling30DayRange = () => ({
+  start: getKarachiDateKeyDaysAgo(29),
+  end: getTodayKarachiDateKey(),
+});
+
+const getKarachiLastMonthRange = () => {
+  const todayKey = getTodayKarachiDateKey();
+  const [y, m] = todayKey.split('-').map(Number);
+  const prevM = m === 1 ? 12 : m - 1;
+  const prevY = m === 1 ? y - 1 : y;
+  const start = `${prevY}-${String(prevM).padStart(2, '0')}-01`;
+  const end = getMonthEndKarachiDateKey(start);
+  return { start, end };
+};
+
+const ledgerEntryInKarachiRange = (entry, fromStr, toStr) => {
+  const key = getKarachiDateKey(entry?.created_at);
+  if (!key) return false;
+  if (fromStr && key < fromStr) return false;
+  if (toStr && key > toStr) return false;
+  return true;
+};
+
 const LEDGER_DATE_PRESETS = [
   {
     id: 'today',
@@ -895,10 +926,7 @@ const LEDGER_DATE_PRESETS = [
   {
     id: 'month',
     label: 'Month',
-    getRange: () => ({
-      start: getMonthStartKarachiDateKey(),
-      end: getTodayKarachiDateKey(),
-    }),
+    getRange: () => getKarachiRolling30DayRange(),
   },
 ];
 
@@ -1492,7 +1520,7 @@ export default function FinancePage() {
       if (startDate) params.append('startDate', startDate);
       if (endDate) params.append('endDate', endDate);
       if (searchTerm) params.append('search', searchTerm);
-      if (ledgerDatePreset === 'all' || (!startDate && !endDate)) {
+      if (!startDate && !endDate) {
         params.append('all', 'true');
       }
 
@@ -1514,7 +1542,7 @@ export default function FinancePage() {
       }
       if (!silent) setLoading(false);
     }
-  }, [selectedCustomer, selectedCategory, selectedSubCategory, startDate, endDate, searchTerm, ledgerDatePreset]);
+  }, [selectedCustomer, selectedCategory, selectedSubCategory, startDate, endDate, searchTerm]);
 
   const refreshLedgerView = useCallback(async (silent = true) => {
     await fetchLedgerData(silent);
@@ -1608,7 +1636,7 @@ export default function FinancePage() {
       }, 300); // 300ms debounce
       return () => clearTimeout(timer);
     }
-  }, [selectedCustomer, selectedCategory, selectedSubCategory, startDate, endDate, searchTerm, ledgerDatePreset, staticDataLoaded, fetchLedgerData]);
+  }, [selectedCustomer, selectedCategory, selectedSubCategory, startDate, endDate, searchTerm, staticDataLoaded, fetchLedgerData]);
 
   // Auto-refresh when ledger changes elsewhere (sales, payments, other tabs)
   useEffect(() => {
@@ -3393,7 +3421,6 @@ export default function FinancePage() {
     const id = Number(cusId);
     if (!id) return;
     const name = cusName || customers.find((c) => Number(c.cus_id) === id)?.cus_name || `Account #${id}`;
-    resetLedgerDatesToToday();
     setActiveLedgerId(id);
     setSelectedCustomer(String(id));
     setAccountSearchTerm(name);
@@ -3406,7 +3433,6 @@ export default function FinancePage() {
     const id = Number(cusId);
     if (!id) return;
     const name = cusName || customers.find((c) => Number(c.cus_id) === id)?.cus_name || `Account #${id}`;
-    resetLedgerDatesToToday();
     setOpenLedgers((prev) => {
       const exists = prev.find((l) => l.id === id);
       if (exists) {
@@ -3539,16 +3565,10 @@ export default function FinancePage() {
       return;
     }
 
-    const from = new Date(fromStr);
-    from.setHours(0, 0, 0, 0);
-    const to = new Date(toStr);
-    to.setHours(23, 59, 59, 999);
-
-    // Filter entries by date range (from the currently visible/filtered entries)
-    const dateFilteredEntries = finalLedgerEntries.filter(entry => {
-      const entryDate = new Date(entry.created_at);
-      return entryDate >= from && entryDate <= to;
-    });
+    // Filter entries by date range (Karachi calendar — matches on-screen ledger filters)
+    const dateFilteredEntries = finalLedgerEntries.filter((entry) =>
+      ledgerEntryInKarachiRange(entry, fromStr, toStr)
+    );
 
     if (dateFilteredEntries.length === 0) {
       alert('No ledger entries found in the selected date range.');
@@ -4154,7 +4174,7 @@ export default function FinancePage() {
               <>Showing <strong>last 15 days</strong> ({startDate} – {endDate}). Click <strong>15 Days</strong> to unselect.</>
             )}
             {ledgerDatePreset === 'month' && (
-              <>Showing <strong>this month</strong> ({startDate} – {endDate}). Click <strong>Month</strong> to unselect.</>
+              <>Showing <strong>last 30 days</strong> ({startDate} – {endDate}). Click <strong>Month</strong> to unselect.</>
             )}
             {ledgerDatePreset === 'custom' && (
               <>Showing <strong>custom period</strong> ({startDate || '…'} – {endDate || '…'}).</>
@@ -6809,12 +6829,12 @@ export default function FinancePage() {
             <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
               <Typography variant="caption" sx={{ width: '100%', color: '#94a3b8', fontWeight: 600, mb: 0.5 }}>Quick Select:</Typography>
               {[
-                { label: 'Today', fn: () => { const t = new Date().toISOString().split('T')[0]; setPrintFromDate(t); setPrintToDate(t); } },
-                { label: 'Last 7 Days', fn: () => { const t = new Date(); const f = new Date(t); f.setDate(f.getDate() - 7); setPrintFromDate(f.toISOString().split('T')[0]); setPrintToDate(t.toISOString().split('T')[0]); } },
-                { label: 'Last 30 Days', fn: () => { const t = new Date(); const f = new Date(t); f.setDate(f.getDate() - 30); setPrintFromDate(f.toISOString().split('T')[0]); setPrintToDate(t.toISOString().split('T')[0]); } },
-                { label: 'This Month', fn: () => { const t = new Date(); const f = new Date(t.getFullYear(), t.getMonth(), 1); setPrintFromDate(f.toISOString().split('T')[0]); setPrintToDate(t.toISOString().split('T')[0]); } },
-                { label: 'Last Month', fn: () => { const t = new Date(); const f = new Date(t.getFullYear(), t.getMonth() - 1, 1); const to = new Date(t.getFullYear(), t.getMonth(), 0); setPrintFromDate(f.toISOString().split('T')[0]); setPrintToDate(to.toISOString().split('T')[0]); } },
-                { label: 'This Year', fn: () => { const t = new Date(); const f = new Date(t.getFullYear(), 0, 1); setPrintFromDate(f.toISOString().split('T')[0]); setPrintToDate(t.toISOString().split('T')[0]); } },
+                { label: 'Today', fn: () => { const t = getTodayKarachiDateKey(); setPrintFromDate(t); setPrintToDate(t); } },
+                { label: 'Last 7 Days', fn: () => { setPrintFromDate(getKarachiDateKeyDaysAgo(6)); setPrintToDate(getTodayKarachiDateKey()); } },
+                { label: 'Last 30 Days', fn: () => { setPrintFromDate(getKarachiDateKeyDaysAgo(29)); setPrintToDate(getTodayKarachiDateKey()); } },
+                { label: 'This Month', fn: () => { const r = getKarachiRolling30DayRange(); setPrintFromDate(r.start); setPrintToDate(r.end); } },
+                { label: 'Last Month', fn: () => { const r = getKarachiLastMonthRange(); setPrintFromDate(r.start); setPrintToDate(r.end); } },
+                { label: 'This Year', fn: () => { const t = getTodayKarachiDateKey(); const y = t.slice(0, 4); setPrintFromDate(`${y}-01-01`); setPrintToDate(t); } },
               ].map((btn) => (
                 <Chip
                   key={btn.label}
@@ -6843,10 +6863,12 @@ export default function FinancePage() {
               <Box sx={{ mt: 2, p: 2, bgcolor: '#f0fdf4', borderRadius: 2, border: '1px solid #bbf7d0' }}>
                 <Typography variant="body2" sx={{ color: '#15803d', fontWeight: 600 }}>
                   {(() => {
-                    const from = new Date(printFromDate); from.setHours(0, 0, 0, 0);
-                    const to = new Date(printToDate); to.setHours(23, 59, 59, 999);
-                    const count = finalLedgerEntries.filter(e => { const d = new Date(e.created_at); return d >= from && d <= to; }).length;
-                    return `${count} entries found between ${new Date(printFromDate).toLocaleDateString('en-GB')} and ${new Date(printToDate).toLocaleDateString('en-GB')}`;
+                    const count = finalLedgerEntries.filter((e) =>
+                      ledgerEntryInKarachiRange(e, printFromDate, printToDate)
+                    ).length;
+                    const fromLabel = formatToDDMMYYYY(printFromDate);
+                    const toLabel = formatToDDMMYYYY(printToDate);
+                    return `${count} entries found between ${fromLabel} and ${toLabel}`;
                   })()}
                 </Typography>
               </Box>

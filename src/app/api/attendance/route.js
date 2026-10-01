@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { initBranchScope } from '@/lib/branch-server';
-import { buildEmployeeAttendanceMap, summarizeAttendanceMonth, getMonthDayMeta, detectBranchOffDays, attendanceDayBounds } from '@/lib/hr-payroll';
+import { attendanceDayBounds } from '@/lib/hr-payroll';
+import { buildAttendanceSheetPayload } from './sheet-helpers';
+import { batchSaveAttendanceSheet } from './save-helpers';
 
-async function findAttendanceOnDay(empId, att_date) {
+async function findAttendanceOnDay(db, empId, att_date) {
   const bounds = attendanceDayBounds(att_date);
   if (!bounds) return null;
-  return prisma.attendance.findFirst({
+  return db.attendance.findFirst({
     where: {
       emp_id: empId,
       att_date: { gte: bounds.start, lt: bounds.end },
@@ -14,15 +16,15 @@ async function findAttendanceOnDay(empId, att_date) {
   });
 }
 
-async function saveAttendanceRecord(empId, { att_date, in_time, out_time, status, notes, clear }) {
+async function saveAttendanceRecord(db, empId, { att_date, in_time, out_time, status, notes, clear }) {
   const bounds = attendanceDayBounds(att_date);
   if (!bounds) throw new Error(`Invalid att_date: ${att_date}`);
 
-  const existing = await findAttendanceOnDay(empId, att_date);
+  const existing = await findAttendanceOnDay(db, empId, att_date);
 
   if (clear) {
     if (existing) {
-      await prisma.attendance.delete({ where: { att_id: existing.att_id } });
+      await db.attendance.delete({ where: { att_id: existing.att_id } });
       return { emp_id: empId, att_date, cleared: true };
     }
     return { emp_id: empId, att_date, cleared: false };
@@ -37,13 +39,13 @@ async function saveAttendanceRecord(empId, { att_date, in_time, out_time, status
   };
 
   if (existing) {
-    return prisma.attendance.update({
+    return db.attendance.update({
       where: { att_id: existing.att_id },
       data,
     });
   }
 
-  return prisma.attendance.create({
+  return db.attendance.create({
     data: { emp_id: empId, ...data },
   });
 }
@@ -69,11 +71,14 @@ export async function GET(request) {
     const year = searchParams.get('year') ? parseInt(searchParams.get('year'), 10) : null;
     const sheet = searchParams.get('sheet') === 'true';
 
+    if (sheet && month && year) {
+      const payload = await buildAttendanceSheetPayload(prisma, branchId, month, year);
+      return NextResponse.json(payload);
+    }
+
     const branchEmpIds = await getBranchEmployeeIds(branchId);
     if (branchEmpIds.length === 0) {
-      return sheet
-        ? NextResponse.json({ employees: [], month, year, daysInMonth: 0, grid: {} })
-        : NextResponse.json([]);
+      return NextResponse.json([]);
     }
 
     const where = { emp_id: { in: branchEmpIds } };
@@ -115,57 +120,6 @@ export async function GET(request) {
       orderBy: [{ att_date: 'asc' }, { emp_id: 'asc' }],
     });
 
-    if (sheet && month && year) {
-      const { daysInMonth, days: dayMeta } = getMonthDayMeta(month, year);
-      const employees = await prisma.employee.findMany({
-        where: { branch_id: branchId, status: 'ACTIVE' },
-        orderBy: { emp_name: 'asc' },
-        select: {
-          emp_id: true,
-          emp_name: true,
-          designation: true,
-          department: true,
-          join_date: true,
-        },
-      });
-
-      const attMap = buildEmployeeAttendanceMap(attendance);
-
-      const grid = {};
-      for (const emp of employees) {
-        grid[emp.emp_id] = {};
-        for (let day = 1; day <= daysInMonth; day++) {
-          const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-          grid[emp.emp_id][day] = attMap[emp.emp_id]?.[key] || null;
-        }
-      }
-
-      const summaries = employees.map((emp) => {
-        const empRecords = attendance.filter((a) => a.emp_id === emp.emp_id);
-        return {
-          emp_id: emp.emp_id,
-          emp_name: emp.emp_name,
-          designation: emp.designation,
-          join_date: emp.join_date,
-          ...summarizeAttendanceMonth(empRecords, daysInMonth, month, year, emp.join_date),
-        };
-      });
-
-      const offDays = detectBranchOffDays(employees, attendance, month, year);
-
-      return NextResponse.json({
-        month,
-        year,
-        daysInMonth,
-        dayMeta,
-        employees,
-        grid,
-        summaries,
-        offDays,
-        records: attendance,
-      });
-    }
-
     return NextResponse.json(attendance);
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -190,12 +144,11 @@ export async function POST(request) {
     };
 
     if (Array.isArray(body)) {
-      const results = [];
-      for (const row of body) {
-        const empId = validateEmp(row.emp_id);
-        results.push(await saveAttendanceRecord(empId, row));
-      }
-      return NextResponse.json(results);
+      const result = await prisma.$transaction(
+        (tx) => batchSaveAttendanceSheet(tx, branchId, body),
+        { timeout: 60000 },
+      );
+      return NextResponse.json({ ok: true, ...result });
     }
 
     const { emp_id, att_date, in_time, out_time, status, notes } = body;
@@ -204,7 +157,7 @@ export async function POST(request) {
     }
 
     const empId = validateEmp(emp_id);
-    const attendance = await saveAttendanceRecord(empId, {
+    const attendance = await saveAttendanceRecord(prisma, empId, {
       att_date, in_time, out_time, status, notes,
     });
     return NextResponse.json(attendance);

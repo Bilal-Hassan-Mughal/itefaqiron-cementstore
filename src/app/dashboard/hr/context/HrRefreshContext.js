@@ -4,7 +4,6 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useState,
 } from 'react';
@@ -71,14 +70,6 @@ export function HrRefreshProvider({ children }) {
       HR_KEYS.employees,
       HR_KEYS.summary,
     ]);
-  }, [invalidate]);
-
-  useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') invalidate(ALL_KEYS);
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
   }, [invalidate]);
 
   const value = useMemo(

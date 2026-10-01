@@ -7,6 +7,10 @@ import {
   recalculateEmployeeLedger,
   getEmployeeLedgerClosingsMap,
 } from '@/lib/employee-ledger';
+import {
+  fetchRegisterEmployeeList,
+  enrichEmployeeRegisterRow,
+} from './register-helpers';
 
 
 export async function GET(request) {
@@ -18,6 +22,7 @@ export async function GET(request) {
     const id = searchParams.get('id') ? parseInt(searchParams.get('id')) : null;
     const status = searchParams.get('status');
     const lite = searchParams.get('lite') === 'true' || searchParams.get('lite') === '1';
+    const register = searchParams.get('register') === 'true' || searchParams.get('register') === '1';
 
     if (id) {
       const employee = await prisma.employee.findUnique({
@@ -32,6 +37,12 @@ export async function GET(request) {
     }
 
     const branchId = __branchScope.branchId ?? 1;
+
+    if (register) {
+      const list = await fetchRegisterEmployeeList(prisma, branchId, { status });
+      return NextResponse.json(list);
+    }
+
     const employees = await prisma.employee.findMany({
       where: {
         branch_id: branchId,
@@ -95,6 +106,7 @@ export async function POST(request) {
     const employee = await prisma.$transaction(async (tx) => {
       const created = await tx.employee.create({
         data: {
+          branch_id: branchId,
           emp_name,
           emp_phone: emp_phone || null,
           emp_cnic: emp_cnic || null,
@@ -117,7 +129,8 @@ export async function POST(request) {
       return created;
     }, { timeout: 15000 });
 
-    return NextResponse.json(employee, { status: 201 });
+    const payload = await enrichEmployeeRegisterRow(prisma, employee);
+    return NextResponse.json(payload, { status: 201 });
   } catch (error) {
     if (error.code === 'P2002') return NextResponse.json({ error: 'CNIC already registered' }, { status: 400 });
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -148,13 +161,19 @@ export async function PUT(request) {
     if (!emp_id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
 
     const branchId = __branchScope.branchId ?? 1;
+    const empIdInt = parseInt(emp_id, 10);
     const openingVal = opening_balance != null && opening_balance !== '' ? parseFloat(opening_balance) : undefined;
+
+    const scoped = await prisma.employee.findFirst({
+      where: { emp_id: empIdInt, branch_id: branchId },
+    });
+    if (!scoped) return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
 
     await ensureEmployeeLedgerSchema(prisma);
 
     const employee = await prisma.$transaction(async (tx) => {
       const updated = await tx.employee.update({
-        where: { emp_id: parseInt(emp_id) },
+        where: { emp_id: empIdInt },
         data: {
           emp_name,
           emp_phone: emp_phone || null,
@@ -181,7 +200,8 @@ export async function PUT(request) {
       }
       return updated;
     }, { timeout: 30000 });
-    return NextResponse.json(employee);
+    const payload = await enrichEmployeeRegisterRow(prisma, employee);
+    return NextResponse.json(payload);
   } catch (error) {
     if (error.code === 'P2002') return NextResponse.json({ error: 'CNIC already registered' }, { status: 400 });
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -194,8 +214,13 @@ export async function DELETE(request) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const id = parseInt(searchParams.get('id'));
+    const id = parseInt(searchParams.get('id'), 10);
+    const branchId = __branchScope.branchId ?? 1;
     if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
+    const scoped = await prisma.employee.findFirst({
+      where: { emp_id: id, branch_id: branchId },
+    });
+    if (!scoped) return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
     await prisma.employee.delete({ where: { emp_id: id } });
     return NextResponse.json({ success: true });
   } catch (error) {
