@@ -334,10 +334,13 @@ export function previewClearancePayroll(row, form = {}, tabMonth, tabYear) {
     other_deduction: parseFloat(form.extra_deduction || 0),
   };
 
-  const derived = calcPayroll(buildPayrollCalcInput({
-    ...attendanceInput,
-    advance_deduction: accountRecovery,
-  }, m, y));
+  const derived = calcPayrollWithCappedAdvance(
+    buildPayrollCalcInput({
+      ...attendanceInput,
+      advance_deduction: accountRecovery,
+    }, m, y),
+    accountRecovery
+  );
   const monthNetAttendance = Math.max(
     0,
     Math.round((derived.gross_earned - derived.total_deduction) * 100) / 100
@@ -345,19 +348,22 @@ export function previewClearancePayroll(row, form = {}, tabMonth, tabYear) {
 
   const prevBal = parseFloat(row.previous_balance || 0);
   const advanceWithSalary = parseFloat(form.advance_with_salary || 0);
+  const monthNet = derived.net_salary;
   const grandTotal = calcTotalPayable({
-    monthNet: derived.net_salary,
+    monthNet,
     previousBalance: prevBal,
     advanceWithSalary,
     ledgerPayableCredit,
   });
+  const advanceAppliedThisMonth = derived.advance_deduction;
 
   return {
     month: m,
     year: y,
-    derived,
+    derived: { ...derived, net_salary: monthNet },
     monthNetAttendance,
-    accountRecovery: derived.advance_deduction,
+    accountRecovery: accountRecovery,
+    advanceAppliedThisMonth,
     ledgerPayableCredit,
     signedClosing,
     openingBal,
@@ -405,24 +411,93 @@ export function resolveMonthAttendanceNet(row = {}) {
   return Math.max(0, Math.round((gross - attDed) * 100) / 100);
 }
 
+/** Net attendance pay before ledger/advance recovery (same as calcPayroll before advance). */
+export function resolveMonthEarnAfterAttendance(row = {}) {
+  return resolveMonthAttendanceNet(row);
+}
+
+/** Signed employee ledger (+ employee owes, − company owes), including opening when ledger is zero. */
+export function resolveSignedLedgerBalance(row = {}) {
+  const closing = row.employee_ledger_closing;
+  const opening = parseFloat(row.employee_opening_balance ?? row.employee?.opening_balance ?? 0);
+  if (closing != null && closing !== '' && !Number.isNaN(parseFloat(closing))) {
+    return resolveEmployeeReceivableBalance(closing, opening);
+  }
+  return opening;
+}
+
+/** Ledger recovery cannot exceed this month's net attendance pay (paid days from basic, not full basic). */
+export function capLedgerRecoveryToEarned(derived, ledgerRecovery) {
+  const earnAfterAtt = Math.max(
+    0,
+    parseFloat(derived?.gross_earned ?? 0) - parseFloat(derived?.total_deduction ?? 0)
+  );
+  const recovery = Math.max(0, parseFloat(ledgerRecovery ?? 0));
+  return Math.min(recovery, Math.round(earnAfterAtt * 100) / 100);
+}
+
+/** Run calcPayroll with advance/ledger recovery capped to this month's earned amount. */
+export function calcPayrollWithCappedAdvance(calcInput, ledgerRecovery) {
+  const recovery = Math.max(0, parseFloat(ledgerRecovery ?? 0));
+  let derived = calcPayroll({ ...calcInput, advance_deduction: recovery });
+  const capped = capLedgerRecoveryToEarned(derived, recovery);
+  if (Math.abs(capped - recovery) > 0.009) {
+    derived = calcPayroll({ ...calcInput, advance_deduction: capped });
+  }
+  return { ...derived, advance_deduction: capped };
+}
+
+/** Net pay for this month after attendance and capped ledger/advance recovery. */
+export function computeMonthNetFromParts(row = {}) {
+  const earnAfterAtt = resolveMonthEarnAfterAttendance(row);
+  const ledgerRecovery = parseFloat(
+    row.advance_deduction ?? row.employee_ledger_balance ?? row.ledger_receivable ?? 0
+  );
+  const advanceApplied = Math.min(Math.max(0, ledgerRecovery), earnAfterAtt);
+  return Math.max(0, Math.round((earnAfterAtt - advanceApplied) * 100) / 100);
+}
+
 /** Net pay for this month after attendance, advance/ledger recovery, bonus, and other deductions. */
 export function resolveMonthNetPay(row = {}) {
   const snap = row.clearance_snapshot;
-  if (snap?.month_net != null && !Number.isNaN(parseFloat(snap.month_net))) {
-    return parseFloat(snap.month_net);
+  if (row.status === 'PAID') {
+    if (snap?.month_net != null && !Number.isNaN(parseFloat(snap.month_net))) {
+      return parseFloat(snap.month_net);
+    }
+    if (row.month_net != null && !Number.isNaN(parseFloat(row.month_net))) {
+      return parseFloat(row.month_net);
+    }
+    if (row.net_salary != null && !Number.isNaN(parseFloat(row.net_salary))) {
+      return parseFloat(row.net_salary);
+    }
   }
-  if (row.month_net != null && !Number.isNaN(parseFloat(row.month_net))) {
-    return parseFloat(row.month_net);
+  return computeMonthNetFromParts(row);
+}
+
+/** Cash due for clearance: month net + previous salary + company owes + advance paid with salary. */
+export function resolveTotalPayable(row = {}) {
+  const snap = row.clearance_snapshot;
+  if (row.status === 'PAID' && snap?.total_payable != null && !Number.isNaN(parseFloat(snap.total_payable))) {
+    return parseFloat(snap.total_payable);
   }
-  if (row.net_salary != null && !Number.isNaN(parseFloat(row.net_salary))) {
-    return parseFloat(row.net_salary);
+  if (row.status === 'PAID' && row.total_payable != null && !Number.isNaN(parseFloat(row.total_payable))) {
+    return parseFloat(row.total_payable);
   }
-  const gross = resolveMonthGrossEarned(row);
-  const attDed = parseFloat(row.total_deduction ?? 0);
-  const advance = parseFloat(row.advance_deduction ?? row.advance_this_month ?? snap?.advance_this_month ?? 0);
-  const bonus = parseFloat(row.bonus ?? 0);
-  const other = parseFloat(row.other_deduction ?? 0);
-  return Math.max(0, Math.round((gross - attDed - advance + bonus - other) * 100) / 100);
+  return calcTotalPayable({
+    monthNet: resolveMonthNetPay(row),
+    previousBalance: parseFloat(row.previous_balance ?? snap?.previous_balance ?? 0),
+    advanceWithSalary: parseFloat(row.advance_with_salary ?? snap?.advance_with_salary ?? 0),
+    ledgerPayableCredit: parseFloat(row.ledger_payable_credit ?? snap?.ledger_payable_credit ?? 0),
+  });
+}
+
+/** Ledger/advance actually recovered from this month's salary (capped by earned net). */
+export function resolveSalaryAdvanceApplied(row = {}) {
+  const earnAfterAtt = resolveMonthEarnAfterAttendance(row);
+  const ledgerRecovery = parseFloat(
+    row.advance_deduction ?? row.employee_ledger_balance ?? row.ledger_receivable ?? 0
+  );
+  return Math.min(Math.max(0, ledgerRecovery), earnAfterAtt);
 }
 
 export function parseClearancePayment(body = {}, totalDue = 0) {
@@ -733,7 +808,8 @@ export function summarizeGridMonth({ daysInMonth, month, year, joinDate, getStat
  * Day-based salary calculation.
  * Daily rate = basic_salary / days in calendar month.
  * Paid days = present (incl. 0.5 per half-day) + allowed leaves + allowed full absents.
- * Net = (paid days × daily rate) − excess attendance deduction − advances + bonus − other deductions.
+ * Excess leave/absent days are not paid (omitted from paid days) — not deducted again as Att Ded.
+ * Net = (paid days × daily rate) + bonus − other deductions − advances/ledger recovery.
  */
 export function calcPayroll({
   basic_salary,
@@ -805,7 +881,8 @@ export function calcPayroll({
 
   const perDay = salary / divisor;
   const earned = paidDays * perDay;
-  const totalDeduction = (excessLeaves + excessAbsents) * perDay;
+  // Unpaid excess leave/absent days are already reflected in paidDays (lower than full month).
+  const totalDeduction = 0;
   const grossEarned = Math.round((earned + bonusAmt - othDeduction) * 100) / 100;
   const net = Math.max(0, Math.round((grossEarned - totalDeduction - advDeduction) * 100) / 100);
 

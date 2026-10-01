@@ -23,6 +23,7 @@ import {
   payrollLedgerBillNo,
   payrollLedgerReversalBillNo,
   resolveMonthGrossEarned,
+  calcPayrollWithCappedAdvance,
 } from '@/lib/hr-payroll';
 import {
   ensureEmployeeLedgerSchema,
@@ -391,7 +392,7 @@ async function computeEmployeeMonthPayroll(emp, month, year, {
 
   const calendarDays = getDaysInMonth(month, year);
 
-  const derived = calcPayroll({
+  const derived = calcPayrollWithCappedAdvance({
     basic_salary: emp.basic_salary,
     total_days: agg.total_days,
     salary_divisor_days: calendarDays,
@@ -401,10 +402,9 @@ async function computeEmployeeMonthPayroll(emp, month, year, {
     absent_days: agg.absent_days,
     allowed_leaves: allowedLeaves,
     allowed_absents: allowedAbsents,
-    advance_deduction: totalPendingAdvance,
     bonus: preserveBonus,
     other_deduction: preserveOther,
-  });
+  }, totalPendingAdvance);
 
   return {
     agg,
@@ -843,6 +843,7 @@ export async function GET(request) {
           employee_ledger_closing: ledger_closing_signed,
           ledger_payable_credit: ledger_payable_credit,
           employee_ledger_balance: ledger_receivable ?? Math.max(0, derived.advance_deduction || 0),
+          employee_opening_balance: parseFloat(emp.opening_balance ?? 0),
         }, {
           ...prevInfo,
           advanceSplit,

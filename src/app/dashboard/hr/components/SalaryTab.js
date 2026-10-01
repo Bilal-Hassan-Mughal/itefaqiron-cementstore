@@ -15,8 +15,9 @@ import {
 } from '@mui/icons-material';
 import { BRAND, COMPANY } from '@/lib/brand-theme';
 import {
-  calcTotalPayable, getDaysInMonth, getMonthDayMeta, previewClearancePayroll, resolveMonthAttendanceNet,
-  resolveMonthGrossEarned, resolveMonthNetPay, toDateKey,
+  calcTotalPayable, getDaysInMonth, getMonthDayMeta, previewClearancePayroll,
+  resolveMonthGrossEarned, resolveMonthNetPay, resolveSalaryAdvanceApplied, resolveSignedLedgerBalance,
+  resolveTotalPayable, toDateKey,
 } from '@/lib/hr-payroll';
 import { useHrRefresh, useHrRefreshVersion, HR_KEYS } from '../context/HrRefreshContext';
 
@@ -130,6 +131,25 @@ function resolveReceiptAdvanceDeduction(payroll, monthlySalaryAmount, monthNet, 
   );
   if (implied > 0.009 && (stored <= 0.009 || Math.abs(stored - implied) > 0.02)) return implied;
   return stored;
+}
+
+function fmtHrLedgerBalanceCell(row) {
+  const signed = resolveSignedLedgerBalance(row);
+  if (Math.abs(signed) < 0.009) {
+    return { text: '—', color: '#94a3b8', title: 'No opening or ledger balance' };
+  }
+  if (signed > 0) {
+    return {
+      text: `− ${fmtAmt(signed)}`,
+      color: '#b45309',
+      title: 'Employee owes (opening/advances) — recovered from salary up to earned amount',
+    };
+  }
+  return {
+    text: `+ ${fmtAmt(Math.abs(signed))}`,
+    color: '#15803d',
+    title: 'Company owes employee — added to Total Pay',
+  };
 }
 
 function payslipPaymentMethodUr(method) {
@@ -677,10 +697,7 @@ function buildPayslipBody(payroll) {
   );
   const cashPaid = parseFloat(payroll.cash_amount || 0);
   const bankPaid = parseFloat(payroll.bank_amount || 0);
-  const totalDue = parseFloat(
-    payroll.total_payable
-    ?? monthNet + prevBal + advanceWithSalary + ledgerPayableCredit
-  );
+  const totalDue = resolveTotalPayable(payroll);
   const amountPaidActual = parseFloat(
     payroll.amount_paid
     ?? payroll.clearance_snapshot?.amount_paid
@@ -1705,18 +1722,18 @@ export default function SalaryTab({ view = 'sheet' }) {
 
   const sheetTotals = useMemo(() => ({
     grossEarned: pendingPayrolls.reduce((s, p) => s + resolveMonthGrossEarned(p), 0),
-    net: pendingPayrolls.reduce((s, p) => s + resolveMonthAttendanceNet(p), 0),
+    net: pendingPayrolls.reduce((s, p) => s + resolveMonthNetPay(p), 0),
     basic: pendingPayrolls.reduce((s, p) => s + parseFloat(p.basic_salary || 0), 0),
-    pending: pendingPayrolls.filter((p) => p.status === 'PENDING').reduce((s, p) => s + parseFloat(p.total_payable ?? p.net_salary ?? 0), 0),
-    paid: displayPayrolls.filter((p) => p.status === 'PAID').reduce((s, p) => s + parseFloat(p.total_payable ?? p.net_salary ?? 0), 0),
+    pending: pendingPayrolls.filter((p) => p.status === 'PENDING').reduce((s, p) => s + resolveTotalPayable(p), 0),
+    paid: displayPayrolls.filter((p) => p.status === 'PAID').reduce((s, p) => s + resolveTotalPayable(p), 0),
     prevBalance: pendingPayrolls.reduce((s, p) => s + parseFloat(p.previous_balance || 0), 0),
-    advanceDeducted: pendingPayrolls.reduce((s, p) => s + parseFloat(p.advance_this_month || p.advance_deduction || 0), 0),
+    advanceDeducted: pendingPayrolls.reduce((s, p) => s + resolveSalaryAdvanceApplied(p), 0),
     advanceWithSalary: displayPayrolls.reduce((s, p) => s + parseFloat(p.advance_with_salary || 0), 0),
     advanceThisMonth: pendingPayrolls.reduce((s, p) => s + parseFloat(p.advance_this_month || p.advance_deduction || 0), 0),
     bonusTotal: displayPayrolls.reduce((s, p) => s + parseFloat(p.bonus || 0), 0),
     extraDedTotal: displayPayrolls.reduce((s, p) => s + parseFloat(p.other_deduction || 0), 0),
     attDedTotal: displayPayrolls.reduce((s, p) => s + parseFloat(p.total_deduction || 0), 0),
-    totalPayable: pendingPayrolls.reduce((s, p) => s + parseFloat(p.total_payable ?? p.net_salary ?? 0), 0),
+    totalPayable: pendingPayrolls.reduce((s, p) => s + resolveTotalPayable(p), 0),
   }), [displayPayrolls, pendingPayrolls]);
 
   const pendingAdvancesTotal = useMemo(
@@ -1838,7 +1855,7 @@ export default function SalaryTab({ view = 'sheet' }) {
             {!isReceiptView && (
               <Typography sx={{ fontSize: '0.78rem', color: '#64748b', mt: 1.75, pt: 1.5, borderTop: '1px dashed #e8edf4' }}>
                 {isClearanceView
-                  ? 'Earned = attendance pay · Bonus / extra deduction set at Clear · Net Pay = earned + bonus − deductions − adv deducted · Total Pay = net + prev balance + adv with salary.'
+                  ? 'Basic = monthly rate · Earned = paid days × (Basic ÷ days in month), not full Basic if absent · Att Ded = legacy/extra only (absents already reduce Earned) · Adv recovered from Earned (capped), not from full Basic · Acct − = employee owes · Net Pay = Earned − adv recovered · Total Pay = net + prev + company owes + adv with salary.'
                   : 'Daily rate = basic / month days. Present + off days + allowed leave/absent are paid. Half day = half pay.'}
               </Typography>
             )}
@@ -1899,8 +1916,13 @@ export default function SalaryTab({ view = 'sheet' }) {
                         <TableCell align="right" sx={{ ...thSx, bgcolor: '#be123c' }} title="Extra deduction at salary clearance">
                           Extra Ded
                         </TableCell>
-                        <TableCell align="right" sx={{ ...thSx, bgcolor: '#7c3aed' }}>Prev Bal</TableCell>
-                        <TableCell align="right" sx={{ ...thSx, bgcolor: '#b45309' }} title="Advance deducted from salary (taken earlier)">
+                        <TableCell align="right" sx={{ ...thSx, bgcolor: '#7c3aed' }} title="Unpaid salary from previous month">
+                          Prev Bal
+                        </TableCell>
+                        <TableCell align="right" sx={{ ...thSx, bgcolor: '#92400e' }} title="Opening + ledger (+ employee owes, − company owes)">
+                          Acct Bal
+                        </TableCell>
+                        <TableCell align="right" sx={{ ...thSx, bgcolor: '#b45309' }} title="Recovered from salary this month (capped at earned)">
                           Adv Deducted
                         </TableCell>
                         {(isClearanceView || isReceiptView) && (
@@ -1908,10 +1930,12 @@ export default function SalaryTab({ view = 'sheet' }) {
                             Adv w/ Salary
                           </TableCell>
                         )}
-                        <TableCell align="right" sx={{ ...thSx, bgcolor: '#1e3a8a' }} title="This month salary (attendance), before employee account recovery">
+                        <TableCell align="right" sx={{ ...thSx, bgcolor: '#1e3a8a' }} title="This month after attendance and capped ledger recovery">
                           Net Pay
                         </TableCell>
-                        <TableCell align="right" sx={{ ...thSx, bgcolor: '#0d9488' }}>Total Pay</TableCell>
+                        <TableCell align="right" sx={{ ...thSx, bgcolor: '#0d9488' }} title="Net + prev month + company owes + adv with salary">
+                          Total Pay
+                        </TableCell>
                         <TableCell align="center" sx={thSx}>Status</TableCell>
                         {isClearanceView && (
                           <TableCell align="center" sx={{ ...thSx, minWidth: 248 }}>Action</TableCell>
@@ -1961,7 +1985,17 @@ export default function SalaryTab({ view = 'sheet' }) {
                             <TableCell align="center" sx={{ borderBottom: '1px solid #eef2f6', color: '#ca8a04', fontWeight: 700 }}>
                               {p.half_days ?? 0}
                             </TableCell>
-                            <TableCell align="right" sx={{ borderBottom: '1px solid #eef2f6', fontWeight: 800, color: '#059669', fontSize: '0.875rem', bgcolor: 'rgba(5,150,105,0.05)' }}>
+                            <TableCell
+                              align="right"
+                              title={(() => {
+                                const basic = parseFloat(p.basic_salary || 0);
+                                const pd = parseFloat(p.paid_days ?? p.days_present ?? 0);
+                                const td = Math.max(1, parseInt(p.total_days || 30, 10));
+                                const rate = parseFloat(p.deduction_per_day || 0) || basic / td;
+                                return `Earned from Basic: ${pd} paid days × ${fmtAmt(rate)}/day (not full ${fmtAmt(basic)} unless full month paid)`;
+                              })()}
+                              sx={{ borderBottom: '1px solid #eef2f6', fontWeight: 800, color: '#059669', fontSize: '0.875rem', bgcolor: 'rgba(5,150,105,0.05)' }}
+                            >
                               {fmtAmt(resolveMonthGrossEarned(p))}
                             </TableCell>
                             <TableCell align="right" sx={{ borderBottom: '1px solid #eef2f6', color: '#dc2626', fontWeight: 600, fontSize: '0.8125rem' }}>
@@ -1974,11 +2008,29 @@ export default function SalaryTab({ view = 'sheet' }) {
                               {parseFloat(p.other_deduction || 0) > 0 ? fmtAmt(p.other_deduction) : '—'}
                             </TableCell>
                             <TableCell align="right" sx={{ borderBottom: '1px solid #eef2f6', color: '#7c3aed', fontWeight: 700, fontSize: '0.8125rem' }}>
-                              {parseFloat(p.previous_balance) > 0 ? fmtAmt(p.previous_balance) : '—'}
+                              {parseFloat(p.previous_balance) > 0.009 ? fmtAmt(p.previous_balance) : '—'}
                             </TableCell>
+                            {(() => {
+                              const lb = fmtHrLedgerBalanceCell(p);
+                              return (
+                                <TableCell
+                                  align="right"
+                                  title={lb.title}
+                                  sx={{
+                                    borderBottom: '1px solid #eef2f6',
+                                    color: lb.color,
+                                    fontWeight: 800,
+                                    fontSize: '0.8125rem',
+                                    fontFamily: 'monospace',
+                                  }}
+                                >
+                                  {lb.text}
+                                </TableCell>
+                              );
+                            })()}
                             <TableCell align="right" sx={{ borderBottom: '1px solid #eef2f6', color: '#b45309', fontWeight: 600, fontSize: '0.8125rem' }}>
-                              {parseFloat(p.advance_deduction ?? p.employee_ledger_balance ?? p.advance_this_month ?? 0) > 0
-                                ? fmtAmt(p.advance_deduction ?? p.employee_ledger_balance ?? p.advance_this_month)
+                              {resolveSalaryAdvanceApplied(p) > 0.009
+                                ? fmtAmt(resolveSalaryAdvanceApplied(p))
                                 : '—'}
                             </TableCell>
                             {(isClearanceView || isReceiptView) && (
@@ -1987,10 +2039,15 @@ export default function SalaryTab({ view = 'sheet' }) {
                               </TableCell>
                             )}
                             <TableCell align="right" sx={{ borderBottom: '1px solid #eef2f6', fontWeight: 900, color: PRIMARY, fontSize: '0.875rem', bgcolor: 'rgba(26,85,227,0.06)' }}>
-                              {fmtAmt(resolveMonthAttendanceNet(p))}
+                              {fmtAmt(resolveMonthNetPay(p))}
                             </TableCell>
                             <TableCell align="right" sx={{ borderBottom: '1px solid #eef2f6', fontWeight: 900, color: '#0d9488', fontSize: '0.875rem', bgcolor: 'rgba(13,148,136,0.06)' }}>
-                              {fmtAmt(p.total_payable ?? p.net_salary)}
+                              {fmtAmt(resolveTotalPayable(p))}
+                              {parseFloat(p.ledger_payable_credit ?? 0) > 0.009 && (
+                                <Typography component="span" sx={{ display: 'block', fontSize: '0.62rem', color: '#15803d', fontWeight: 700 }}>
+                                  incl. co. {fmtAmt(p.ledger_payable_credit)}
+                                </Typography>
+                              )}
                             </TableCell>
                             <TableCell align="center" sx={{ borderBottom: '1px solid #eef2f6' }}>
                               <StatusChip status={p.status} />
@@ -2245,7 +2302,9 @@ export default function SalaryTab({ view = 'sheet' }) {
                 const openingDiffers =
                   Math.abs(clearancePreview.openingBal) >= 0.01
                   && Math.abs(clearancePreview.openingBal - clearancePreview.signedClosing) >= 0.01;
-                const recoveryAmt = clearancePreview.recoveryDeduction ?? clearancePreview.ledgerOwed;
+                const recoveryAmt = clearancePreview.advanceAppliedThisMonth
+                  ?? clearancePreview.recoveryDeduction
+                  ?? clearancePreview.ledgerOwed;
                 return (
                   <Stack spacing={2}>
                     <Box
