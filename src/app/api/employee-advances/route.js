@@ -18,6 +18,9 @@ function advanceLedgerReversalBillNo(advanceId) {
   return `ADV-${advanceId}-REV`;
 }
 
+/** Cash/bank + employee ledger in one tx — default Prisma 5s timeout is too low on slow DB. */
+const HR_LEDGER_TX_OPTIONS = { timeout: 30000, maxWait: 15000 };
+
 async function recordAdvanceLedgerPayment(tx, {
   advanceId,
   empName,
@@ -299,7 +302,7 @@ export async function POST(request) {
           designation: emp.designation,
         },
       };
-    });
+    }, HR_LEDGER_TX_OPTIONS);
 
     return NextResponse.json(advance, { status: 201 });
   } catch (error) {
@@ -396,7 +399,7 @@ export async function DELETE(request) {
         amount: parseFloat(row.amount || 0),
       });
       await tx.$executeRawUnsafe(`DELETE FROM employee_advances WHERE advance_id = ${id}`);
-    });
+    }, HR_LEDGER_TX_OPTIONS);
 
     return NextResponse.json({ success: true, ledger_reversal_bill_no: advanceLedgerReversalBillNo(id) });
   } catch (error) {

@@ -173,6 +173,8 @@ async function recordPayrollLedgerPayment({
     return parts.join(' · ');
   };
 
+  const payrollLedgerTxOptions = { timeout: 30000, maxWait: 15000 };
+
   await prisma.$transaction(async (tx) => {
     if (payment.cashAmt > 0 && payment.paid_from_account_id) {
       const cashAccount = await tx.customer.findUnique({ where: { cus_id: payment.paid_from_account_id } });
@@ -231,7 +233,7 @@ async function recordPayrollLedgerPayment({
         data: { cus_balance: ledgerEntryData.closing_balance },
       });
     }
-  });
+  }, payrollLedgerTxOptions);
 
   return billNo;
 }
@@ -296,8 +298,8 @@ async function reversePayrollLedger(payrollId, snapshot = null, { empName = '', 
   const toReverse = entries.filter((entry) => !isEntryAlreadyReversed(entry));
   if (toReverse.length === 0) return reverseBillNo;
 
-  for (const entry of toReverse) {
-    await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx) => {
+    for (const entry of toReverse) {
       const acc = await tx.customer.findUnique({ where: { cus_id: entry.cus_id } });
       if (!acc) throw new Error(`Cash/bank account not found for ledger reversal (cus_id ${entry.cus_id})`);
 
@@ -337,8 +339,8 @@ async function reversePayrollLedger(payrollId, snapshot = null, { empName = '', 
         where: { cus_id: entry.cus_id },
         data: { cus_balance: ledgerEntryData.closing_balance },
       });
-    });
-  }
+    }
+  }, { timeout: 30000, maxWait: 15000 });
 
   return reverseBillNo;
 }
