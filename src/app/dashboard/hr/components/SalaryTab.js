@@ -16,13 +16,15 @@ import {
 import { BRAND, COMPANY } from '@/lib/brand-theme';
 import {
   calcTotalPayable, getDaysInMonth, getMonthDayMeta, previewClearancePayroll,
-  resolveLedgerBalanceAfterClearance, resolveMonthAttDedDisplay, resolveMonthGrossEarned,
-  resolveMonthNetPay, resolveSalaryAdvanceApplied, resolveSignedLedgerBalance, resolveTotalPayable, toDateKey,
+  resolveLedgerBalanceAfterClearance, resolveLedgerBalanceBeforeClearance, resolveMonthAttDedDisplay,
+  resolveMonthGrossEarned, resolveMonthNetPay, resolveSalaryAdvanceApplied, resolveSignedLedgerBalance,
+  resolveTotalPayable, toDateKey,
 } from '@/lib/hr-payroll';
 import { useHrRefresh, useHrRefreshVersion, HR_KEYS } from '../context/HrRefreshContext';
 import { getSalaryReceiptA5Stylesheet, SALARY_RECEIPT_PAGE } from '../lib/salary-receipt-a5-styles';
 import SalaryClearanceDialog from './salary/SalaryClearanceDialog';
 import SalaryClearancePanel from './salary/SalaryClearancePanel';
+import SalaryReceiptPageList from './salary/SalaryReceiptPageList';
 
 const NAVY = '#0f172a';
 const PRIMARY = BRAND.primary.blue;
@@ -151,45 +153,49 @@ function resolvePayslipPrevPeriod(payroll) {
 /** A5 portrait — see `hr/lib/salary-receipt-a5-spec.js` */
 const PAYSLIP_PAGE = SALARY_RECEIPT_PAGE;
 
-/** Salary receipt labels (English) */
+/** Salary receipt — plain English (matches salary sheet columns). */
 const PAYSLIP_I18N = {
-  docTitleEn: 'Salary Payment Receipt',
-  docSubEn: 'Official employee salary payment record',
-  receiptNo: 'Receipt No',
-  paymentDate: 'Payment Date',
-  salaryPeriod: 'Salary Month',
+  docTitleEn: 'Salary Receipt',
+  docSubEn: 'Payment record for this month',
+  paymentDate: 'Paid on',
+  salaryPeriod: 'Month',
   status: 'Status',
   paid: 'PAID',
   employee: 'Employee',
-  basic: 'Basic Salary',
-  salaryCalculation: 'Salary Calculation',
-  paymentDetails: 'Payment',
-  balancesSection: 'Balances & Account',
-  description: 'Description',
+  attendance: 'Days this month',
+  present: 'Present',
+  leave: 'Leave',
+  absent: 'Absent',
+  half: 'Half day',
+  paidDays: 'Paid days',
+  salaryDetails: 'Salary (same as salary sheet)',
+  item: 'Item',
   amount: 'Amount (Rs)',
-  cashPaid: 'Cash Paid',
-  bankPaid: 'Bank Paid',
-  paymentMethod: 'Payment Method',
+  paymentTitle: 'How payment was made',
+  cashPaid: 'Cash paid',
+  bankPaid: 'Bank paid',
+  paymentMethod: 'Method',
   reference: 'Reference',
-  amountPaid: 'Total Paid',
-  empSign: 'Employee Signature',
-  authSign: 'Authorized Signature',
+  amountPaid: 'Total paid',
+  empSign: 'Employee sign',
+  authSign: 'Manager sign',
 };
 
 const PAYSLIP_ROW = {
-  attendanceSalary: 'Earned salary (attendance)',
+  basic: 'Monthly basic salary',
+  earned: 'Salary earned (days worked)',
+  attDed: 'Cut for absent / unpaid days',
   bonus: 'Bonus',
-  attDed: 'Attendance deduction',
-  extraDed: 'Extra deduction',
-  advanceDed: 'Advance recovered',
-  netMonth: 'Net salary (this month)',
-  companyBal: 'Company balance payable',
-  prevBalUnpaid: 'Previous month unpaid',
-  empAcctBefore: 'Employee account (before payment)',
-  empAcctAfter: 'Employee account (after payment)',
-  totalPaymentDue: 'Total payable',
-  advWithSal: 'Advance with salary',
-  amountPaid: 'Amount paid (cash/bank)',
+  extraDed: 'Other deduction',
+  prevBal: 'Unpaid salary from last month',
+  accountBal: 'Old balance (before this pay)',
+  advDeducted: 'Old advance / balance recovered',
+  advWithSal: 'New advance paid with salary',
+  netPay: 'Net pay this month',
+  totalPay: 'Total to pay (cash + bank)',
+  accountAfter: 'Balance after this pay',
+  salaryShortPaid: 'Still owed this month (carried)',
+  amountPaid: 'Paid now (cash + bank)',
 };
 
 /** WhatsApp / PDF capture — full receipt, scaled to A5 in PDF step */
@@ -197,6 +203,12 @@ const PAYSLIP_WA_CAPTURE_STYLES = `
   .salary-payslip-sheet.salary-wa-capture {
     overflow: visible !important;
     box-shadow: none !important;
+    min-height: 0 !important;
+  }
+  .salary-payslip-sheet.salary-wa-capture .salary-payslip-root {
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
 `;
 
@@ -329,191 +341,162 @@ function buildMonthAttendanceGridHtml(month, year, attendanceByDay = {}, joinDat
   </div>`;
 }
 
+function payslipDashMoney(amount) {
+  const n = parseFloat(amount);
+  if (Number.isNaN(n) || Math.abs(n) < 0.009) return { text: '—', cls: 'muted' };
+  return { text: fmtAmt(n), cls: '' };
+}
+
+function payslipDashDed(amount) {
+  const n = parseFloat(amount);
+  if (Number.isNaN(n) || Math.abs(n) < 0.009) return { text: '—', cls: 'muted' };
+  return { text: fmtDed(n), cls: 'ded-amt' };
+}
+
+function payslipSheetBalance(signed) {
+  const n = parseFloat(signed);
+  if (Number.isNaN(n) || Math.abs(n) < 0.009) return { text: '—', cls: 'muted' };
+  const cell = fmtHrLedgerBalanceCell({}, n);
+  return { text: cell.text, cls: n > 0 ? 'ded-amt' : 'earn-amt' };
+}
+
 function buildPayslipBody(payroll) {
   const emp = payroll.employee || {};
   const monthLabel = MONTHS[(payroll.month || 1) - 1] || '-';
   const period = `${monthLabel} ${payroll.year || ''}`.trim();
-  const totalDaysInMonth = getDaysInMonth(payroll.month, payroll.year);
   const printed = new Date().toLocaleString('en-GB');
+  const snap = payroll.clearance_snapshot || {};
   const monthNet = resolveMonthNetPay(payroll);
-  const prevBal = parseFloat(payroll.previous_balance ?? payroll.previous_balance_paid ?? 0);
-  const advanceWithSalary = parseFloat(payroll.advance_with_salary || 0);
-  const ledgerPayableCredit = parseFloat(
-    payroll.ledger_payable_credit
-    ?? payroll.clearance_snapshot?.ledger_payable_credit
-    ?? 0
-  );
-  const cashPaid = parseFloat(payroll.cash_amount || 0);
-  const bankPaid = parseFloat(payroll.bank_amount || 0);
+  const earned = resolveMonthGrossEarned(payroll);
+  const attDed = resolveMonthAttDedDisplay(payroll, payroll.month, payroll.year);
+  const bonus = parseFloat(payroll.bonus || 0);
+  const otherDed = parseFloat(payroll.other_deduction || 0);
+  const prevBal = parseFloat(payroll.previous_balance ?? snap.previous_balance ?? 0);
+  const advDeducted = resolveSalaryAdvanceApplied(payroll);
+  const advanceWithSalary = parseFloat(payroll.advance_with_salary ?? snap.advance_with_salary ?? 0);
+  const ledgerPayableCredit = parseFloat(payroll.ledger_payable_credit ?? snap.ledger_payable_credit ?? 0);
   const totalDue = resolveTotalPayable(payroll);
+  const cashPaid = parseFloat(payroll.cash_amount ?? snap.cash_amount ?? 0);
+  const bankPaid = parseFloat(payroll.bank_amount ?? snap.bank_amount ?? 0);
   const amountPaidActual = parseFloat(
-    payroll.amount_paid
-    ?? payroll.clearance_snapshot?.amount_paid
-    ?? (cashPaid + bankPaid)
+    payroll.amount_paid ?? snap.amount_paid ?? (cashPaid + bankPaid)
   );
   const totalPaid = amountPaidActual > 0.009 ? amountPaidActual : totalDue;
-  const payDate = payroll.payment_date || payroll.cleared_at;
-  const receiptNo = payroll.payroll_id ? `SR-${String(payroll.payroll_id).padStart(5, '0')}` : '-';
-  const paidDays = parseFloat(payroll.paid_days ?? payroll.days_present ?? 0);
-  const legacyAttDed = parseFloat(payroll.total_deduction || 0);
-  const attDedDisplay = resolveMonthAttDedDisplay(payroll, payroll.month, payroll.year);
-  const otherDed = parseFloat(payroll.other_deduction || 0);
-  const bonus = parseFloat(payroll.bonus || 0);
-  const paymentMethod = payroll.payment_method || (cashPaid > 0 && bankPaid > 0 ? 'PARTIAL' : bankPaid > 0 ? 'BANK' : 'CASH');
-  const phones = (COMPANY.phones || []).join(', ');
-  const monthlySalaryAmount = resolveMonthGrossEarned(payroll);
+  const salaryShortPaid = Math.max(0, Math.round((totalDue - amountPaidActual) * 100) / 100);
+  const payDate = payroll.payment_date || payroll.cleared_at || snap.cleared_at;
+  const paymentMethod = payroll.payment_method || snap.payment_method
+    || (cashPaid > 0 && bankPaid > 0 ? 'PARTIAL' : bankPaid > 0 ? 'BANK' : 'CASH');
 
-  const deductedAdvances = Array.isArray(payroll.deducted_advances) ? payroll.deducted_advances : [];
-  const advanceDedTotal = resolveReceiptAdvanceDeduction(
-    payroll,
-    monthlySalaryAmount,
-    monthNet,
-    legacyAttDed,
-    otherDed,
-    bonus,
-    deductedAdvances
-  );
+  const acctBefore = payroll.status === 'PAID'
+    ? resolveLedgerBalanceBeforeClearance(payroll)
+    : resolveSignedLedgerBalance(payroll);
+  const acctAfter = payroll.status === 'PAID'
+    ? resolveLedgerBalanceAfterClearance(payroll)
+    : null;
 
-  const snap = payroll.clearance_snapshot || {};
-  const prevPeriod = resolvePayslipPrevPeriod(payroll);
-  const ledgerBeforeRaw = payroll.employee_ledger_closing_before
-    ?? snap.employee_ledger_closing_before
-    ?? snap.employee_ledger_closing
-    ?? payroll.employee_ledger_closing;
-  const ledgerAfterRaw = payroll.employee_ledger_closing_after ?? snap.employee_ledger_closing_after;
-  const ledgerBefore = ledgerBeforeRaw != null && ledgerBeforeRaw !== '' ? parseFloat(ledgerBeforeRaw) : NaN;
-  const ledgerAfter = ledgerAfterRaw != null && ledgerAfterRaw !== '' ? parseFloat(ledgerAfterRaw) : NaN;
+  const br = (label, cell, rowCls = '') =>
+    `<tr class="data-row ${rowCls}"><td class="desc">${payslipLbl(label)}</td><td class="amt ${cell.cls}">${cell.text}</td></tr>`;
+  const brIf = (label, cell, rowCls = '') => {
+    if (cell.text === '—') return '';
+    return br(label, cell, rowCls);
+  };
 
-  const fv = (labelHtml, valueHtml, rowCls = '') =>
-    `<tr class="data-row ${rowCls}"><td class="desc">${labelHtml}</td><td class="val">${valueHtml}</td></tr>`;
-  const br = (labelHtml, amount, cls = '', rowCls = '') =>
-    `<tr class="data-row ${rowCls}"><td class="desc">${labelHtml}</td><td class="amt ${cls}">${amount}</td></tr>`;
-
-  const presentDays = fmtNum(payroll.days_present ?? payroll.present_days);
-  const leaveDays = fmtNum(payroll.leaves_taken ?? payroll.leave_days);
-  const absentDays = fmtNum(payroll.absent_days ?? payroll.absents_taken);
-  const halfDays = parseFloat(payroll.half_days ?? 0);
-  const attSummary = halfDays > 0
-    ? `${presentDays} / ${leaveDays} / ${absentDays} / ${fmtNum(halfDays)} / ${fmtNum(paidDays)}`
-    : `${presentDays} / ${leaveDays} / ${absentDays} / ${fmtNum(paidDays)}`;
-  const attSummaryLbl = halfDays > 0
-    ? 'Present / Leave / Absent / Half / Paid days'
-    : 'Present / Leave / Absent / Paid days';
+  const present = fmtNum(payroll.days_present ?? payroll.present_days);
+  const leave = fmtNum(payroll.leaves_taken ?? payroll.leave_days);
+  const absent = fmtNum(payroll.absent_days ?? payroll.absents_taken ?? 0);
+  const half = fmtNum(payroll.half_days ?? 0);
+  const paidDays = fmtNum(payroll.paid_days ?? payroll.days_present);
 
   let rows = '';
-  rows += `<tr class="sep"><td colspan="2">${payslipLbl(PAYSLIP_I18N.salaryCalculation)}</td></tr>`;
-  rows += br(payslipLbl(PAYSLIP_I18N.basic), fmtAmt(payroll.basic_salary));
-  rows += fv(payslipLbl(attSummaryLbl), escapeHtml(attSummary));
-  rows += br(payslipLbl(PAYSLIP_ROW.attendanceSalary), fmtAmt(monthlySalaryAmount), 'earn-amt');
-  if (bonus > 0.009) rows += br(payslipLbl(PAYSLIP_ROW.bonus), fmtAdd(bonus), 'earn-amt');
-  if (attDedDisplay > 0.009) rows += br(payslipLbl(PAYSLIP_ROW.attDed), fmtDed(attDedDisplay), 'ded-amt');
-  if (otherDed > 0.009) {
-    rows += br(payslipLbl(PAYSLIP_ROW.extraDed), fmtDed(otherDed), 'ded-amt');
-  }
-  if (advanceDedTotal > 0.009) {
-    rows += br(payslipLbl(PAYSLIP_ROW.advanceDed), fmtDed(advanceDedTotal), 'ded-amt');
-  }
-  rows += br(payslipLbl(PAYSLIP_ROW.netMonth), fmtAmt(monthNet), '', 'net-row');
-
-  const balanceLines = [];
-  if (prevBal > 0.009) {
-    const prevBalLbl = prevPeriod
-      ? `${PAYSLIP_ROW.prevBalUnpaid} (${prevPeriod})`
-      : PAYSLIP_ROW.prevBalUnpaid;
-    balanceLines.push(br(payslipLbl(prevBalLbl), fmtAmt(prevBal), 'earn-amt'));
-  }
-  if (!payslipAccountIsEmpty(ledgerBefore)) {
-    const acctBefore = payslipEmployeeAccountDisplay(ledgerBefore);
-    balanceLines.push(br(payslipLbl(PAYSLIP_ROW.empAcctBefore), acctBefore.html, acctBefore.cls));
+  rows += br(PAYSLIP_ROW.basic, payslipDashMoney(payroll.basic_salary));
+  rows += br(PAYSLIP_ROW.earned, { text: fmtAmt(earned), cls: 'earn-amt' });
+  rows += brIf(PAYSLIP_ROW.attDed, payslipDashDed(attDed));
+  rows += brIf(PAYSLIP_ROW.bonus, bonus > 0.009 ? { text: fmtAdd(bonus), cls: 'earn-amt' } : payslipDashMoney(0));
+  rows += brIf(PAYSLIP_ROW.extraDed, payslipDashDed(otherDed));
+  rows += brIf(PAYSLIP_ROW.prevBal, payslipDashMoney(prevBal));
+  rows += brIf(PAYSLIP_ROW.accountBal, payslipSheetBalance(acctBefore));
+  rows += brIf(PAYSLIP_ROW.advDeducted, payslipDashDed(advDeducted));
+  if (advanceWithSalary > 0.009) {
+    rows += br(PAYSLIP_ROW.advWithSal, { text: fmtAmt(advanceWithSalary), cls: 'earn-amt' });
   }
   if (ledgerPayableCredit > 0.009) {
-    balanceLines.push(br(payslipLbl(PAYSLIP_ROW.companyBal), fmtAdd(ledgerPayableCredit), 'earn-amt'));
+    rows += br('Extra from company (old balance)', { text: fmtAdd(ledgerPayableCredit), cls: 'earn-amt' });
   }
-  if (advanceWithSalary > 0.009) {
-    balanceLines.push(br(payslipLbl(PAYSLIP_ROW.advWithSal), fmtAmt(advanceWithSalary), 'earn-amt'));
+  rows += br(PAYSLIP_ROW.netPay, { text: fmtAmt(monthNet), cls: 'net-amt' }, 'net-row');
+  rows += br(PAYSLIP_ROW.totalPay, { text: fmtAmt(totalDue), cls: 'net-amt' }, 'net-row');
+  if (acctAfter != null) {
+    rows += brIf(PAYSLIP_ROW.accountAfter, payslipSheetBalance(acctAfter));
   }
-  if (balanceLines.length > 0 || Math.abs(totalDue - monthNet) > 0.009) {
-    rows += `<tr class="sep"><td colspan="2">${payslipLbl(PAYSLIP_I18N.balancesSection)}</td></tr>`;
-    rows += balanceLines.join('');
-    rows += br(payslipLbl(PAYSLIP_ROW.totalPaymentDue), fmtAmt(totalDue), '', 'net-row');
-  }
-  if (!payslipAccountIsEmpty(ledgerAfter)) {
-    const acctAfter = payslipEmployeeAccountDisplay(ledgerAfter);
-    if (balanceLines.length === 0 && Math.abs(totalDue - monthNet) <= 0.009) {
-      rows += `<tr class="sep"><td colspan="2">${payslipLbl(PAYSLIP_I18N.balancesSection)}</td></tr>`;
-    }
-    rows += br(payslipLbl(PAYSLIP_ROW.empAcctAfter), acctAfter.html, acctAfter.cls);
-  }
-
-  rows += `<tr class="sep"><td colspan="2">${payslipLbl(PAYSLIP_I18N.paymentDetails)}</td></tr>`;
-  rows += br(payslipLbl(PAYSLIP_I18N.cashPaid), cashPaid > 0.009 ? fmtAmt(cashPaid) : '—');
-  rows += br(payslipLbl(PAYSLIP_I18N.bankPaid), bankPaid > 0.009 ? fmtAmt(bankPaid) : '—');
-  rows += br(payslipLbl(PAYSLIP_I18N.paymentMethod), escapeHtml(payslipPaymentMethodLabel(paymentMethod)));
-  if (payroll.payment_reference) {
-    rows += fv(payslipLbl(PAYSLIP_I18N.reference), escapeHtml(payroll.payment_reference));
-  }
-  rows += br(payslipLbl(PAYSLIP_ROW.amountPaid), fmtAmt(totalPaid), 'earn-amt', 'total-row');
 
   const dash = '—';
   const logoUrl = getPayslipLogoUrl();
   const statusHtml = payroll.status === 'PAID'
     ? `<span class="status-paid">${PAYSLIP_I18N.paid}</span>`
     : escapeHtml(payroll.status || 'PENDING');
-
-  const empPhone = emp.emp_phone ? escapeHtml(emp.emp_phone) : '';
   const empDesig = emp.designation ? escapeHtml(emp.designation) : '';
-  const companyAddr = COMPANY.address ? escapeHtml(COMPANY.address) : '';
+  const phones = (COMPANY.phones || []).length ? `Tel: ${escapeHtml((COMPANY.phones || []).join(', '))}` : '';
 
-  return `<div class="salary-payslip-sheet"><div class="salary-payslip-root" id="salary-payslip-preview">
+  return `<div class="salary-payslip-sheet"><div class="salary-payslip-root sr-compact" id="salary-payslip-preview">
   <div class="receipt-header">
-    <img class="co-logo" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(COMPANY.name)}" />
+    <img class="co-logo" src="${escapeHtml(logoUrl)}" alt="" />
     <div class="co-info">
       <h1>${escapeHtml(COMPANY.name)}</h1>
-      ${COMPANY.tagline ? `<p class="tagline">${escapeHtml(COMPANY.tagline)}</p>` : ''}
-      ${companyAddr ? `<p class="addr">${companyAddr}</p>` : ''}
-      ${phones ? `<p class="phone">Tel: ${escapeHtml(phones)}</p>` : ''}
+      ${phones ? `<p class="phone">${phones}</p>` : ''}
+    </div>
+    <div class="title-badge">
+      <div class="en">${PAYSLIP_I18N.docTitleEn}</div>
+      <div class="sub">${escapeHtml(period)}</div>
     </div>
   </div>
 
-  <div class="title-strip">
-    <div class="en">${PAYSLIP_I18N.docTitleEn}</div>
-    <div class="sub">${PAYSLIP_I18N.docSubEn}</div>
-  </div>
-
   <div class="inv-main">
-  <table class="meta-table">
-    <tbody>
-      <tr>
-        <td class="mk">${payslipLbl(PAYSLIP_I18N.salaryPeriod)}</td>
-        <td class="mv">${escapeHtml(period)}</td>
-        <td class="mk">${payslipLbl(PAYSLIP_I18N.receiptNo)}</td>
-        <td class="mv">${escapeHtml(receiptNo)}</td>
-      </tr>
-      <tr>
-        <td class="mk">${payslipLbl(PAYSLIP_I18N.paymentDate)}</td>
-        <td class="mv">${escapeHtml(fmtDate(payDate))}</td>
-        <td class="mk">${payslipLbl(PAYSLIP_I18N.status)}</td>
-        <td class="mv">${statusHtml}</td>
-      </tr>
-      <tr class="meta-emp">
-        <td class="mk">${payslipLbl(PAYSLIP_I18N.employee)}</td>
-        <td class="mv emp-name" colspan="3">${escapeHtml(emp.emp_name || dash)}${empDesig ? ` · ${empDesig}` : ''}${empPhone ? ` · ${empPhone}` : ''}</td>
-      </tr>
-    </tbody>
+  <table class="meta-table meta-compact">
+    <tr>
+      <td class="mk">${payslipLbl(PAYSLIP_I18N.employee)}</td>
+      <td class="mv emp-name" colspan="3">${escapeHtml(emp.emp_name || dash)}${empDesig ? ` · ${empDesig}` : ''}</td>
+    </tr>
+    <tr>
+      <td class="mk">${payslipLbl(PAYSLIP_I18N.paymentDate)}</td>
+      <td class="mv">${escapeHtml(fmtDate(payDate))}</td>
+      <td class="mk">${payslipLbl(PAYSLIP_I18N.status)}</td>
+      <td class="mv">${statusHtml}</td>
+    </tr>
   </table>
 
-  <table class="inv-table">
-    <colgroup>
-      <col class="col-desc" />
-      <col class="col-amt" />
-    </colgroup>
-    <thead>
-      <tr>
-        <th>${payslipLbl(PAYSLIP_I18N.description)}</th>
-        <th class="amt-h">${payslipLbl(PAYSLIP_I18N.amount)}</th>
-      </tr>
-    </thead>
+  <p class="sec-label">${payslipLbl(PAYSLIP_I18N.attendance)}</p>
+  <table class="att-strip">
+    <tr>
+      <th>${payslipLbl(PAYSLIP_I18N.present)}</th>
+      <th>${payslipLbl(PAYSLIP_I18N.leave)}</th>
+      <th>${payslipLbl(PAYSLIP_I18N.absent)}</th>
+      <th>${payslipLbl(PAYSLIP_I18N.half)}</th>
+      <th>${payslipLbl(PAYSLIP_I18N.paidDays)}</th>
+    </tr>
+    <tr>
+      <td>${present}</td>
+      <td>${leave}</td>
+      <td>${absent}</td>
+      <td>${half}</td>
+      <td>${paidDays}</td>
+    </tr>
+  </table>
+
+  <p class="sec-label">${payslipLbl(PAYSLIP_I18N.salaryDetails)}</p>
+  <table class="inv-table inv-compact">
+    <colgroup><col class="col-desc" /><col class="col-amt" /></colgroup>
+    <thead><tr><th>${payslipLbl(PAYSLIP_I18N.item)}</th><th class="amt-h">${payslipLbl(PAYSLIP_I18N.amount)}</th></tr></thead>
     <tbody>${rows}</tbody>
+  </table>
+
+  <p class="sec-label">${payslipLbl(PAYSLIP_I18N.paymentTitle)}</p>
+  <table class="inv-table inv-compact pay-block">
+    <tbody>
+      ${brIf(PAYSLIP_I18N.cashPaid, cashPaid > 0.009 ? payslipDashMoney(cashPaid) : payslipDashMoney(0))}
+      ${brIf(PAYSLIP_I18N.bankPaid, bankPaid > 0.009 ? payslipDashMoney(bankPaid) : payslipDashMoney(0))}
+      <tr class="data-row"><td class="desc">${payslipLbl(PAYSLIP_I18N.paymentMethod)}</td><td class="amt">${escapeHtml(payslipPaymentMethodLabel(paymentMethod))}</td></tr>
+      ${payroll.payment_reference ? `<tr class="data-row"><td class="desc">${payslipLbl(PAYSLIP_I18N.reference)}</td><td class="amt val-txt">${escapeHtml(payroll.payment_reference)}</td></tr>` : ''}
+      ${salaryShortPaid > 0.009 ? br(PAYSLIP_ROW.salaryShortPaid, payslipDashMoney(salaryShortPaid)) : ''}
+    </tbody>
   </table>
 
   <div class="paid-banner">
@@ -527,15 +510,15 @@ function buildPayslipBody(payroll) {
       <span>${payslipLbl(PAYSLIP_I18N.empSign)}</span>
       <span>${payslipLbl(PAYSLIP_I18N.authSign)}</span>
     </div>
-    <p class="foot">${escapeHtml(receiptNo)} · Printed ${escapeHtml(printed)} · ${escapeHtml(COMPANY.name)}</p>
+    <p class="foot">${escapeHtml(printed)}</p>
   </div>
 </div></div>`;
 }
 
 function buildPayslipHtml(payroll) {
   const emp = payroll.employee || {};
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${PAYSLIP_I18N.docTitleEn} - ${escapeHtml(emp.emp_name || '')}</title>
-<style>${getPayslipStylesheet()}</style></head><body style="margin:0;padding:0;background:#fff">
+  return `<!DOCTYPE html><html lang="en" class="salary-receipt-print-root"><head><meta charset="utf-8"><title>${PAYSLIP_I18N.docTitleEn} - ${escapeHtml(emp.emp_name || '')}</title>
+<style>${getPayslipStylesheet()}</style></head><body style="margin:0;padding:0;background:#fff;width:148mm">
 ${buildPayslipBody(payroll)}
 </body></html>`;
 }
@@ -865,13 +848,25 @@ function PayslipPreviewContent({ payroll: initialPayroll }) {
         <Box
           id="salary-receipt-preview"
           sx={{
+            width: PAYSLIP_PAGE.w,
+            minWidth: PAYSLIP_PAGE.w,
+            maxWidth: PAYSLIP_PAGE.w,
+            flexShrink: 0,
             '& .salary-payslip-sheet': {
+              width: '100%',
+              maxWidth: '100%',
+              minHeight: 0,
               height: 'auto',
               maxHeight: 'none',
               overflow: 'visible',
+              boxShadow: '0 4px 24px rgba(15,23,42,0.12)',
             },
-            '& .salary-payslip-root': { height: 'auto' },
-            '& .salary-payslip-sheet': { boxShadow: '0 4px 24px rgba(15,23,42,0.12)' },
+            '& .salary-payslip-root': {
+              minHeight: 0,
+              maxHeight: 'none',
+              height: 'auto',
+              overflow: 'visible',
+            },
           }}
           dangerouslySetInnerHTML={{ __html: buildPayslipBody(payroll) }}
         />
@@ -1278,6 +1273,19 @@ export default function SalaryTab({ view = 'sheet' }) {
     setPayslipPreview(payroll);
   }
 
+  async function handlePrintOneReceipt(payroll) {
+    if (!payroll?.emp_id && !payroll?.payroll_id) return;
+    setPrintingReceiptId(payroll.payroll_id ?? payroll.emp_id);
+    try {
+      const opened = await printPayslipFromPreview(payroll);
+      if (opened === false) showSnack('Allow pop-ups to print A5 receipt', 'warning');
+    } catch (err) {
+      showSnack(err.message || 'Print failed', 'error');
+    } finally {
+      setPrintingReceiptId(null);
+    }
+  }
+
   async function openReceiptPreview(payroll) {
     if (!payroll?.emp_id && !payroll?.payroll_id) return;
     setPrintingReceiptId(payroll.payroll_id ?? payroll.emp_id);
@@ -1398,14 +1406,21 @@ export default function SalaryTab({ view = 'sheet' }) {
     if (!w) return;
     const printExtra = `
       @page { size: A5 portrait; margin: 0; }
-      html, body { margin: 0; padding: 0; background: #fff; }
-      .salary-payslip-sheet { page-break-after: always; break-after: page; }
+      html, body { margin: 0; padding: 0; background: #fff; height: auto; min-height: 0; }
+      .salary-payslip-sheet {
+        page-break-inside: avoid;
+        break-inside: avoid;
+        page-break-after: always;
+        break-after: page;
+        min-height: 0 !important;
+      }
       .salary-payslip-sheet:last-child { page-break-after: auto; break-after: auto; }
+      .salary-payslip-root { min-height: 0 !important; max-height: none !important; }
     `;
     const pages = enriched.map((p) => buildPayslipBody(p)).join('');
     w.document.write(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${PAYSLIP_I18N.docTitleEn}</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400..700&family=Noto+Sans+Arabic:wght@400;700&display=swap" rel="stylesheet">
-<style>${getPayslipStylesheet()}${printExtra}</style></head><body style="margin:0;padding:0">${pages}</body></html>`);
+<style>${getPayslipStylesheet()}${printExtra}</style></head><body style="margin:0;padding:0;width:148mm">${pages}</body></html>`);
     w.document.close();
     w.focus();
     setTimeout(() => w.print(), 400);
@@ -1613,7 +1628,7 @@ export default function SalaryTab({ view = 'sheet' }) {
             )}
             {isReceiptView && (
               <Typography sx={{ fontSize: '0.78rem', color: '#64748b', mt: 1.75, pt: 1.5, borderTop: '1px dashed #e8edf4' }}>
-                Click <strong>View</strong> on any row to open the full salary receipt — then print or download as PDF.
+                Same columns and figures as the salary sheet (paid only). <strong>View / Print / WA</strong> opens the A5 receipt.
               </Typography>
             )}
           </Box>
@@ -1637,6 +1652,22 @@ export default function SalaryTab({ view = 'sheet' }) {
               </Box>
             ) : (
               <Box sx={{ opacity: fadeIn ? 1 : 0, transition: 'opacity 0.2s ease' }}>
+                {isReceiptView ? (
+                  <Box sx={{ p: 0 }}>
+                    <SalaryReceiptPageList
+                      rows={displayPayrolls}
+                      month={month}
+                      year={year}
+                      fmtAmt={fmtAmt}
+                      printingReceiptId={printingReceiptId}
+                      onOpenReceipt={openReceiptPreview}
+                      onPrintOne={handlePrintOneReceipt}
+                      onWhatsApp={handleSendSalaryWhatsApp}
+                      whatsAppBusyId={isSendingWhatsApp ? whatsAppPayrollId : null}
+                    />
+                  </Box>
+                ) : (
+                <>
                 <TableContainer
                   sx={{
                     maxHeight: 520,
@@ -1778,7 +1809,10 @@ export default function SalaryTab({ view = 'sheet' }) {
                               {parseFloat(p.previous_balance) > 0.009 ? fmtAmt(p.previous_balance) : '—'}
                             </TableCell>
                             {(() => {
-                              const lb = fmtHrLedgerBalanceCell(p);
+                              const acctSigned = p.status === 'PAID'
+                                ? resolveLedgerBalanceBeforeClearance(p)
+                                : undefined;
+                              const lb = fmtHrLedgerBalanceCell(p, acctSigned);
                               return (
                                 <TableCell
                                   align="right"
@@ -1987,6 +2021,8 @@ export default function SalaryTab({ view = 'sheet' }) {
                   )}
                 </Box>
                 )}
+                </>
+                )}
               </Box>
             )}
           </CardContent>
@@ -2149,10 +2185,11 @@ export default function SalaryTab({ view = 'sheet' }) {
               fontWeight: 700,
               borderRadius: '10px',
               bgcolor: '#25D366',
+              color: '#fff',
               '&:hover': { bgcolor: '#1da851' },
             }}
           >
-            {isSendingWhatsApp ? 'Sending…' : '📲 WhatsApp'}
+            {isSendingWhatsApp ? 'Preparing…' : 'Send on WhatsApp'}
           </Button>
           <Button
             variant="contained"

@@ -584,11 +584,60 @@ export function resolveSalaryAdvanceApplied(row = {}) {
   return Math.min(Math.max(0, ledgerRecovery), earnAfterAtt);
 }
 
+/** Total advance/opening credits posted to employee ledger at clearance (from snapshot). */
+export function resolveClearanceLedgerRecoveryTotal(snap = {}) {
+  if (!snap || typeof snap !== 'object') return 0;
+  const settled = parseFloat(snap.advance_settled_on_ledger ?? 0);
+  const openingRec = parseFloat(snap.opening_balance_recovered ?? 0);
+  const sum = Math.round((settled + openingRec) * 100) / 100;
+  if (sum > 0.009) return sum;
+  const fallback = parseFloat(snap.advance_this_month ?? 0);
+  return fallback > 0.009 ? fallback : 0;
+}
+
+/** Signed ledger balance immediately before this clearance (+ employee owes / − company owes). */
+export function resolveLedgerBalanceBeforeClearance(row = {}) {
+  const snap = row.clearance_snapshot;
+  const raw = row.employee_ledger_closing_before
+    ?? snap?.employee_ledger_closing_before
+    ?? snap?.employee_ledger_closing
+    ?? row.employee_ledger_closing;
+  if (raw != null && raw !== '' && !Number.isNaN(parseFloat(raw))) {
+    const opening = parseFloat(row.employee_opening_balance ?? row.employee?.opening_balance ?? 0);
+    return resolveEmployeeReceivableBalance(raw, opening);
+  }
+  return resolveSignedLedgerBalance(row);
+}
+
 /** Employee account balance after this clearance (+ owes / − company owes). */
 export function resolveLedgerBalanceAfterClearance(row = {}) {
   const snap = row.clearance_snapshot;
-  if (row.status === 'PAID') {
-    const afterRaw = row.employee_ledger_closing_after ?? snap?.employee_ledger_closing_after;
+  if (row.status === 'PAID' && snap) {
+    const before = resolveLedgerBalanceBeforeClearance(row);
+    const recovery = resolveClearanceLedgerRecoveryTotal(snap);
+    const payable = parseFloat(
+      snap.ledger_payable_settled ?? snap.ledger_payable_credit ?? row.ledger_payable_credit ?? 0
+    );
+    const advWith = parseFloat(row.advance_with_salary ?? snap.advance_with_salary ?? 0);
+    const underpaid = parseFloat(snap.salary_underpaid_carry ?? 0);
+    const hasLedgerActivity =
+      recovery > 0.009
+      || payable > 0.009
+      || advWith > 0.009
+      || underpaid > 0.009
+      || snap.employee_ledger_closing_before != null
+      || snap.employee_ledger_closing != null;
+
+    if (hasLedgerActivity) {
+      let after = before;
+      if (recovery > 0.009) after -= recovery;
+      if (payable > 0.009) after += payable;
+      if (advWith > 0.009) after += advWith;
+      if (underpaid > 0.009) after -= underpaid;
+      return Math.round(after * 100) / 100;
+    }
+
+    const afterRaw = row.employee_ledger_closing_after ?? snap.employee_ledger_closing_after;
     if (afterRaw != null && afterRaw !== '' && !Number.isNaN(parseFloat(afterRaw))) {
       const opening = parseFloat(row.employee_opening_balance ?? row.employee?.opening_balance ?? 0);
       return resolveEmployeeReceivableBalance(afterRaw, opening);

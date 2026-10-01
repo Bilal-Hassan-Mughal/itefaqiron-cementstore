@@ -12,28 +12,152 @@ export const SALARY_RECEIPT_BODY_STYLES = `
   .salary-payslip-sheet {
     width: ${PAGE.w};
     max-width: ${PAGE.w};
-    min-height: ${PAGE.h};
+    min-height: 0;
+    height: auto;
     margin: 0 auto;
     background: #fff;
     border: 1px solid #cbd5e1;
     box-shadow: 0 4px 20px rgba(15, 23, 42, 0.08);
     page-break-inside: avoid;
     break-inside: avoid;
-    overflow: hidden;
+    overflow: visible;
   }
   .salary-payslip-root * { box-sizing: border-box; }
   .salary-payslip-root {
     direction: ltr;
     font-family: 'Segoe UI', system-ui, -apple-system, Arial, sans-serif;
     width: 100%;
-    min-height: ${PAGE.h};
+    min-height: 0;
+    max-height: none;
     padding: ${PAGE.pad};
     color: #0f172a;
     background: #fff;
-    font-size: 8.5pt;
-    line-height: 1.45;
+    font-size: 7.5pt;
+    line-height: 1.32;
     display: flex;
     flex-direction: column;
+    overflow: visible;
+  }
+  .salary-payslip-root.sr-compact .receipt-header {
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+    border-bottom-width: 1px;
+  }
+  .salary-payslip-root.sr-compact .co-logo {
+    width: 40px;
+    height: 40px;
+  }
+  .salary-payslip-root.sr-compact .co-info h1 {
+    font-size: 9pt;
+  }
+  .salary-payslip-root.sr-compact .title-badge {
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .salary-payslip-root.sr-compact .title-badge .en {
+    font-size: 8pt;
+    font-weight: 900;
+    color: #1A55E3;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .salary-payslip-root.sr-compact .title-badge .sub {
+    font-size: 7.5pt;
+    font-weight: 800;
+    color: #475569;
+    margin-top: 1px;
+  }
+  .salary-payslip-root.sr-compact .sec-label {
+    margin: 4px 0 2px;
+    font-size: 6.5pt;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #64748b;
+  }
+  .salary-payslip-root.sr-compact .att-strip {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid #cbd5e1;
+    margin-bottom: 4px;
+    table-layout: fixed;
+  }
+  .salary-payslip-root.sr-compact .att-strip th {
+    background: #f1f5f9;
+    font-size: 6pt;
+    font-weight: 800;
+    padding: 3px 2px;
+    border: 1px solid #e2e8f0;
+    color: #475569;
+  }
+  .salary-payslip-root.sr-compact .att-strip td {
+    text-align: center;
+    font-size: 8pt;
+    font-weight: 900;
+    padding: 4px 2px;
+    border: 1px solid #e2e8f0;
+    color: #0f172a;
+  }
+  .salary-payslip-root.sr-compact .meta-compact td {
+    padding: 3px 6px;
+    font-size: 7pt;
+  }
+  .salary-payslip-root.sr-compact .receipt-header {
+    gap: 6px;
+    align-items: flex-start;
+  }
+  .salary-payslip-root.sr-compact .co-info h1 {
+    font-size: 8.5pt;
+    word-break: break-word;
+  }
+  .salary-payslip-root.sr-compact .title-badge .en {
+    white-space: normal;
+    line-height: 1.2;
+    max-width: 28mm;
+  }
+  .salary-payslip-root.sr-compact .inv-compact tbody td {
+    padding: 2px 4px;
+    font-size: 6.75pt;
+  }
+  .salary-payslip-root.sr-compact .inv-compact thead th {
+    padding: 3px 4px;
+    font-size: 6.25pt;
+  }
+  .salary-payslip-root.sr-compact .inv-table td.amt {
+    white-space: normal;
+    word-break: break-word;
+    font-size: 6.75pt;
+    padding-left: 2px;
+  }
+  .salary-payslip-root.sr-compact .inv-table col.col-desc { width: 52%; }
+  .salary-payslip-root.sr-compact .inv-table col.col-amt { width: 48%; }
+  .salary-payslip-root.sr-compact .inv-table td.amt.muted {
+    color: #94a3b8;
+    font-weight: 600;
+  }
+  .salary-payslip-root.sr-compact .inv-table td.amt.net-amt {
+    color: #1A55E3;
+    font-weight: 900;
+  }
+  .salary-payslip-root.sr-compact .inv-table td.amt.val-txt {
+    font-size: 6.5pt;
+    font-weight: 600;
+    text-align: right;
+    white-space: normal;
+  }
+  .salary-payslip-root.sr-compact .paid-banner {
+    margin-top: 4px;
+    padding: 6px 8px;
+  }
+  .salary-payslip-root.sr-compact .paid-banner .val {
+    font-size: 10pt;
+  }
+  .salary-payslip-root.sr-compact .sign span {
+    padding-top: 18px;
+    font-size: 6.5pt;
+  }
+  .salary-payslip-root.sr-compact .inv-footer {
+    padding-top: 6px;
   }
   .salary-payslip-root .inv-main {
     flex: 1 1 auto;
@@ -44,7 +168,7 @@ export const SALARY_RECEIPT_BODY_STYLES = `
   .salary-payslip-root .receipt-header {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     padding-bottom: 8px;
     border-bottom: 2px solid #1A55E3;
     margin-bottom: 8px;
@@ -204,6 +328,13 @@ export const SALARY_RECEIPT_BODY_STYLES = `
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
+  .salary-payslip-root .inv-table tr.sep.sub td {
+    font-size: 7pt;
+    font-weight: 700;
+    color: #64748b;
+    padding-top: 6px;
+    background: #f8fafc;
+  }
   .salary-payslip-root .inv-table tr.sep td {
     background: #e2e8f0;
     color: #0f172a;
@@ -290,22 +421,51 @@ export const SALARY_RECEIPT_BODY_STYLES = `
 
 export const SALARY_RECEIPT_PRINT_STYLES = `
   @page { size: ${PAGE.w} ${PAGE.h}; margin: 0; }
+  html.salary-receipt-print-root,
+  html.salary-receipt-print-root body {
+    margin: 0;
+    padding: 0;
+    width: ${PAGE.w};
+    height: auto;
+    background: #fff;
+  }
   @media print {
     html, body {
       margin: 0 !important;
       padding: 0 !important;
       width: ${PAGE.w} !important;
+      height: auto !important;
+      min-height: 0 !important;
       background: #fff !important;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
     }
+    body > *:not(.salary-payslip-sheet) {
+      display: none !important;
+    }
     .salary-payslip-sheet {
       width: ${PAGE.w} !important;
       max-width: ${PAGE.w} !important;
-      margin: 0 auto !important;
+      min-height: 0 !important;
+      height: auto !important;
+      margin: 0 !important;
       box-shadow: none !important;
-      border: 1px solid #cbd5e1 !important;
+      border: none !important;
       page-break-inside: avoid !important;
+      break-inside: avoid !important;
+      page-break-after: avoid !important;
+      break-after: avoid !important;
+    }
+    .salary-payslip-root {
+      min-height: 0 !important;
+      max-height: none !important;
+      height: auto !important;
+      overflow: visible !important;
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+    }
+    .salary-payslip-root .foot {
+      display: none;
     }
   }
 `;

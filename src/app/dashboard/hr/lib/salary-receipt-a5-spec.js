@@ -11,7 +11,7 @@ export const SALARY_RECEIPT_A5 = {
   heightMm: 210,
   width: '148mm',
   height: '210mm',
-  padding: '5mm 6mm 5mm 6mm',
+  padding: '4mm 5mm 4mm 5mm',
   orientation: 'portrait',
 };
 
