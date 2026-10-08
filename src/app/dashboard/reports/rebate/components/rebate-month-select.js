@@ -1,8 +1,7 @@
 'use client';
 
-import { useMemo, Fragment } from 'react';
+import { useMemo } from 'react';
 import { FormControl, Select, MenuItem, ListSubheader } from '@mui/material';
-import { Lock } from 'lucide-react';
 import {
   rebateMonthOptionLabel,
   isRebateMonthSelectable,
@@ -45,8 +44,6 @@ export default function RebateMonthSelect({
   const handleChange = (event) => {
     const next = event.target.value;
     if (!next) return;
-    const row = monthOptions.find((r) => r.month === next);
-    if (!isRebateMonthSelectable(row)) return;
     onChange(next);
   };
 
@@ -83,59 +80,52 @@ export default function RebateMonthSelect({
             No months with activity
           </MenuItem>
         )}
-        {groupedYears.map(([year, rows]) => (
-          <Fragment key={year}>
-            <ListSubheader
-              sx={{
-                fontWeight: 700,
-                fontSize: '11px',
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-                color: '#64748b',
-                lineHeight: '32px',
-                bgcolor: '#f8fafc',
-              }}
-            >
-              {year}
-            </ListSubheader>
-            {rows.map((row) => {
-              const selectable = isRebateMonthSelectable(row);
-              return (
-                <MenuItem
-                  key={row.month}
-                  value={row.month}
-                  disabled={!selectable}
-                  sx={{
-                    fontWeight: 600,
-                    fontSize: '13px',
-                    py: 1.25,
-                    opacity: selectable ? 1 : 0.72,
-                    '&.Mui-disabled': { opacity: 0.65 },
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    gap: 2,
+        {groupedYears.flatMap(([year, rows]) => [
+          <ListSubheader
+            key={`year-${year}`}
+            sx={{
+              fontWeight: 700,
+              fontSize: '11px',
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              color: '#64748b',
+              lineHeight: '32px',
+              bgcolor: '#f8fafc',
+            }}
+          >
+            {year}
+          </ListSubheader>,
+          ...rows.map((row) => (
+              <MenuItem
+                key={row.month}
+                value={row.month}
+                disabled={!isRebateMonthSelectable(row)}
+                sx={{
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  py: 1.25,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: 2,
+                }}
+              >
+                <span>{row.monthLabel}</span>
+                <span
+                  className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide"
+                  style={{
+                    color:
+                      row.status === 'paid'
+                        ? BRAND.text.green
+                        : row.status === 'unpaid'
+                          ? BRAND.text.pink
+                          : '#94a3b8',
                   }}
                 >
-                  <span>{row.monthLabel}</span>
-                  <span
-                    className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide"
-                    style={{
-                      color:
-                        row.status === 'paid'
-                          ? BRAND.text.green
-                          : row.status === 'unpaid'
-                            ? BRAND.text.pink
-                            : '#94a3b8',
-                    }}
-                  >
-                    {row.status === 'paid' && <Lock className="w-3 h-3" />}
-                    {row.status === 'paid' ? 'Paid' : row.status === 'unpaid' ? 'Unpaid' : 'Empty'}
-                  </span>
-                </MenuItem>
-              );
-            })}
-          </Fragment>
-        ))}
+                  {row.status === 'paid' ? 'Paid' : row.status === 'unpaid' ? 'Unpaid' : 'Empty'}
+                </span>
+              </MenuItem>
+            )),
+        ])}
       </Select>
     </FormControl>
   );

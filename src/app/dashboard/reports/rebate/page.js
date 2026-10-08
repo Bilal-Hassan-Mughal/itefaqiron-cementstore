@@ -27,6 +27,7 @@ import {
   formatDate,
   getCurrentMonthKey,
   getUnpaidRebateMonths,
+  buildFullMonthOptions,
   customerOptionKey,
   isSameCustomerOption,
   rebateEntryKey,
@@ -59,6 +60,7 @@ function RebateReportContent() {
 
     const [isRebateOpen, setIsRebateOpen] = useState(false);
     const [rebateRate, setRebateRate] = useState('');
+    const [rebateManualQty, setRebateManualQty] = useState('');
     const [savingRebate, setSavingRebate] = useState(false);
 
     useEffect(() => {
@@ -82,7 +84,7 @@ function RebateReportContent() {
     }, [selectedSupplierId]);
 
     const monthOptions = useMemo(
-        () => monthlyData?.monthlyBreakdown || [],
+        () => buildFullMonthOptions(monthlyData?.monthlyBreakdown || []),
         [monthlyData]
     );
 
@@ -91,18 +93,18 @@ function RebateReportContent() {
         [monthOptions]
     );
 
-    const isViewingPaidMonth =
-        searchParams.get('viewPaid') === '1' &&
-        monthlyData?.monthlyBreakdown?.some(
-            (row) => row.month === selectedMonth && row.status === 'paid'
-        );
-
     useEffect(() => {
         if (!selectedSupplierId || !selectedMonth) {
             setReportData(null);
             return;
         }
         fetchMonthDetail();
+    }, [selectedSupplierId, selectedMonth]);
+
+    useEffect(() => {
+        setRebateRate('');
+        setRebateManualQty('');
+        setIsRebateOpen(false);
     }, [selectedSupplierId, selectedMonth]);
 
     const fetchSuppliers = async () => {
@@ -160,7 +162,7 @@ function RebateReportContent() {
     const handleSaveRebate = async () => {
         if (!reportData || !rebateRate) return;
 
-        const totalQty = reportData.summary.totalQuantity;
+        const totalQty = effectiveRebateQty;
         const rate = parseFloat(rebateRate) || 0;
         const totalAmount = parseFloat((totalQty * rate).toFixed(2));
 
@@ -199,6 +201,7 @@ function RebateReportContent() {
                 alert(`Rebate of PKR ${fmtAmt(totalAmount)} saved!\nSupplier balance updated to PKR ${fmtAmt(newBal)}`);
                 setIsRebateOpen(false);
                 setRebateRate('');
+                setRebateManualQty('');
                 fetchMonthlyOverview();
                 fetchMonthDetail();
             } else {
@@ -247,9 +250,14 @@ function RebateReportContent() {
         window.URL.revokeObjectURL(url);
     };
 
-    const rebateTotalAmount = reportData
-        ? Number((reportData.summary.totalQuantity * (parseFloat(rebateRate) || 0)).toFixed(2))
-        : 0;
+    const effectiveRebateQty = useMemo(() => {
+        if (!reportData) return 0;
+        const fromPurchases = parseFloat(reportData.summary.totalQuantity) || 0;
+        if (fromPurchases > 0) return fromPurchases;
+        return parseFloat(rebateManualQty) || 0;
+    }, [reportData, rebateManualQty]);
+
+    const rebateTotalAmount = Number((effectiveRebateQty * (parseFloat(rebateRate) || 0)).toFixed(2));
 
     const supplierOptions = useMemo(() => {
         const list = suppliers.filter((s) => s.customer_category?.cus_cat_title?.toLowerCase().includes('supplier'));
@@ -257,8 +265,12 @@ function RebateReportContent() {
     }, [suppliers]);
 
     const selectedSupplier = suppliers.find((s) => s.cus_id.toString() === selectedSupplierId) || null;
-    const selectedMonthRow = monthlyData?.monthlyBreakdown?.find((row) => row.month === selectedMonth);
+    const selectedMonthRow = monthOptions.find((row) => row.month === selectedMonth);
     const isLoading = loadingMonthly || loadingDetail;
+
+    const canAddRebate = Boolean(
+        selectedSupplierId && selectedMonth && reportData && !isLoading
+    );
 
     const historySummary = useMemo(() => {
         const rows = monthlyData?.monthlyBreakdown || [];
@@ -298,10 +310,11 @@ function RebateReportContent() {
                                 </div>
                             </div>
                         </div>
-                        {reportData && reportData.summary.purchaseCount > 0 && (
+                        {(canAddRebate || (reportData && reportData.summary.purchaseCount > 0)) && (
                             <div className="flex items-center flex-wrap gap-2">
-                                {reportData.summary.rebateStatus === 'unpaid' && (
+                                {canAddRebate && (
                                     <button
+                                        type="button"
                                         onClick={() => setIsRebateOpen(true)}
                                         className={rebateBtnPrimary()}
                                         style={{ background: `linear-gradient(135deg, ${BRAND.supporting.green}, ${BRAND.text.green})` }}
@@ -309,12 +322,16 @@ function RebateReportContent() {
                                         <Plus className="w-4 h-4" /> Add Rebate
                                     </button>
                                 )}
-                                <button onClick={handleExport} className="flex items-center px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-medium transition-colors">
-                                    <Download className="w-4 h-4 mr-2" /> Export CSV
-                                </button>
-                                <button onClick={handlePrint} className="flex items-center px-4 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-sm font-medium transition-colors">
-                                    <Printer className="w-4 h-4 mr-2" /> Print
-                                </button>
+                                {reportData && reportData.summary.purchaseCount > 0 && (
+                                    <>
+                                        <button type="button" onClick={handleExport} className="flex items-center px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-medium transition-colors">
+                                            <Download className="w-4 h-4 mr-2" /> Export CSV
+                                        </button>
+                                        <button type="button" onClick={handlePrint} className="flex items-center px-4 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-sm font-medium transition-colors">
+                                            <Printer className="w-4 h-4 mr-2" /> Print
+                                        </button>
+                                    </>
+                                )}
                             </div>
                         )}
                     </div>
@@ -449,9 +466,7 @@ function RebateReportContent() {
                                             )}
                                         </div>
                                         <p className="text-xs text-slate-500 mt-1">
-                                            {isViewingPaidMonth
-                                                ? 'Read-only view of a paid month. Select an unpaid month above to add rebate.'
-                                                : 'Purchase & rebate detail for the selected month only.'}
+                                            Purchase & rebate detail for the selected month. Use Add Rebate for any month (paid, unpaid, or no purchases).
                                         </p>
                                     </div>
                                     <div className="flex items-center gap-2 text-xs flex-wrap">
@@ -825,7 +840,9 @@ function RebateReportContent() {
                                 <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-10 text-center print:hidden">
                                     <Calendar className="w-10 h-10 text-slate-400 mx-auto mb-3" />
                                     <h3 className="text-base font-bold text-slate-800">No purchases in {reportData.summary.monthLabel}</h3>
-                                    <p className="text-sm text-slate-500 mt-2">Change the month or open Rebate History to see other months.</p>
+                                    <p className="text-sm text-slate-500 mt-2">
+                                        Use <strong>Add Rebate</strong> above to post a rebate for this month (enter quantity in the form), or pick another month / Rebate History.
+                                    </p>
                                     <button
                                         type="button"
                                         onClick={goToRebateHistory}
@@ -867,10 +884,28 @@ function RebateReportContent() {
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Total Quantity (This Month)</label>
-                                    <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-blue-900 font-bold text-xl">
-                                        {fmtAmt(reportData.summary.totalQuantity)} <span className="text-sm font-semibold text-blue-600">units</span>
-                                    </div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                                        {reportData.summary.purchaseCount > 0
+                                            ? 'Total Quantity (This Month)'
+                                            : 'Rebate Quantity'}
+                                    </label>
+                                    {reportData.summary.purchaseCount > 0 ? (
+                                        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-blue-900 font-bold text-xl">
+                                            {fmtAmt(reportData.summary.totalQuantity)}{' '}
+                                            <span className="text-sm font-semibold text-blue-600">units</span>
+                                        </div>
+                                    ) : (
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            value={rebateManualQty}
+                                            onChange={(e) => setRebateManualQty(e.target.value)}
+                                            placeholder="Enter quantity for this month"
+                                            className="w-full px-3.5 py-2.5 bg-white border border-[#e2e8f0] rounded-xl outline-none font-bold text-lg focus:ring-2 focus:ring-[#1A55E3]/25 focus:border-[#1A55E3]"
+                                            autoFocus
+                                        />
+                                    )}
                                 </div>
                                 <div className="grid grid-cols-2 gap-3">
                                     <div>
@@ -882,7 +917,7 @@ function RebateReportContent() {
                                             onChange={(e) => setRebateRate(e.target.value)}
                                             placeholder="0.00"
                                             className="w-full px-3.5 py-2.5 bg-white border border-[#e2e8f0] rounded-xl outline-none font-bold text-lg focus:ring-2 focus:ring-[#1A55E3]/25 focus:border-[#1A55E3]"
-                                            autoFocus
+                                            autoFocus={reportData.summary.purchaseCount > 0}
                                         />
                                     </div>
                                     <div>
@@ -894,7 +929,12 @@ function RebateReportContent() {
                                 </div>
                                 <button
                                     onClick={handleSaveRebate}
-                                    disabled={savingRebate || !rebateRate || parseFloat(rebateRate) <= 0}
+                                    disabled={
+                                        savingRebate ||
+                                        !rebateRate ||
+                                        parseFloat(rebateRate) <= 0 ||
+                                        effectiveRebateQty <= 0
+                                    }
                                     className={`w-full ${rebateBtnPrimary('py-3.5')} disabled:opacity-50`}
                                     style={{ background: `linear-gradient(135deg, ${BRAND.primary.blue}, ${BRAND.supporting.periwinkle})` }}
                                 >

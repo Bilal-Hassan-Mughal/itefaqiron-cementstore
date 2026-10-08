@@ -32,7 +32,11 @@
     "db:seed:credentials": "node prisma/seed-credentials.js",
     "db:branches": "node scripts/setup-branches.js",
     "db:branch:migrate": "node scripts/pre-branch-push.js && npx prisma db push && node scripts/setup-branches.js",
-    "db:branch:provision": "node scripts/provision-branch-tables.js"
+    "db:branch:provision": "node scripts/provision-branch-tables.js",
+    "db:seed:sales-accounts": "node scripts/seed-sales-accounts.js 10",
+    "db:seed:sales-buyers": "node scripts/seed-sales-demo-buyers.js 10",
+    "db:seed:demo-products": "node scripts/seed-sales-demo-products.js 10",
+    "db:seed:demo-transactions": "node scripts/seed-demo-real-transactions.js"
   },
   "dependencies": {
     "@digitalpersona/core": "^0.2.6",

@@ -481,7 +481,7 @@ export async function PUT(request) {
       direct_edit = false
     } = body;
 
-    if (!id)     return errorResponse('Ledger ID is required');
+    if (!id) return errorResponse('Ledger ID is required');
     if (!cus_id) return errorResponse('Customer ID is required');
 
     // Fetch existing entry
@@ -627,20 +627,20 @@ export async function PUT(request) {
       // Old effect on balance = old_debit - old_credit
       // Desired new effect    = new_debit - new_credit
       // Adjustment            = desired - old
-      const oldDebit  = Number(parseFloat(existingLedger.debit_amount  || 0).toFixed(2));
+      const oldDebit = Number(parseFloat(existingLedger.debit_amount || 0).toFixed(2));
       const oldCredit = Number(parseFloat(existingLedger.credit_amount || 0).toFixed(2));
-      const newDebit  = Number(parseFloat(debit_amount  || 0).toFixed(2));
+      const newDebit = Number(parseFloat(debit_amount || 0).toFixed(2));
       const newCredit = Number(parseFloat(credit_amount || 0).toFixed(2));
-      
+
       const netChange = Number(((newDebit - newCredit) - (oldDebit - oldCredit)).toFixed(2));
 
       // ── Update only the metadata on the original entry (amounts unchanged) ──
       const updatedLedger = await tx.ledger.update({
         where: { l_id: id },
         data: {
-          bill_no:    bill_no !== undefined ? (bill_no ? String(bill_no) : null) : existingLedger.bill_no,
-          trnx_type:  trnx_type  || existingLedger.trnx_type,
-          details:    details    !== undefined ? (details || null) : existingLedger.details,
+          bill_no: bill_no !== undefined ? (bill_no ? String(bill_no) : null) : existingLedger.bill_no,
+          trnx_type: trnx_type || existingLedger.trnx_type,
+          details: details !== undefined ? (details || null) : existingLedger.details,
           updated_by: updated_by || existingLedger.updated_by
         }
       });
@@ -648,12 +648,12 @@ export async function PUT(request) {
       // ── Create adjustment entry if the amount changed ──
       if (netChange !== 0) {
         const currentBalance = Number(parseFloat(customer.cus_balance || 0).toFixed(2));
-        const isIncrease     = netChange > 0;
-        const adjustmentAmt  = Math.abs(netChange);
-        const newBalance     = Number((currentBalance + netChange).toFixed(2));
-        const entryBillNo    = bill_no ? String(bill_no) : existingLedger.bill_no;
-        const entryDesc      = details || existingLedger.details || '';
-        
+        const isIncrease = netChange > 0;
+        const adjustmentAmt = Math.abs(netChange);
+        const newBalance = Number((currentBalance + netChange).toFixed(2));
+        const entryBillNo = bill_no ? String(bill_no) : existingLedger.bill_no;
+        const entryDesc = details || existingLedger.details || '';
+
         const debitAmt = isIncrease ? adjustmentAmt : 0;
         const creditAmt = isIncrease ? 0 : adjustmentAmt;
         const typeLabel = isIncrease ? 'Debit' : 'Credit';
@@ -665,17 +665,17 @@ export async function PUT(request) {
             l_id: l_id_adj,
             cus_id,
             opening_balance: currentBalance,
-            debit_amount:    debitAmt,
-            credit_amount:   creditAmt,
+            debit_amount: debitAmt,
+            credit_amount: creditAmt,
             closing_balance: newBalance,
-            bill_no:         entryBillNo,
-            trnx_type:       'ADJUSTMENT',
-            details:         `Payment Edit - ${typeLabel} Adjustment ${adjustmentAmt}${entryDesc ? ' | ' + entryDesc : ''}`,
-            payments:        0,
-            cash_payment:    0,
-            bank_payment:    0,
-            updated_by:      updated_by || null,
-            ledger_type:     'Adjustment'
+            bill_no: entryBillNo,
+            trnx_type: 'ADJUSTMENT',
+            details: `Payment Edit - ${typeLabel} Adjustment ${adjustmentAmt}${entryDesc ? ' | ' + entryDesc : ''}`,
+            payments: 0,
+            cash_payment: 0,
+            bank_payment: 0,
+            updated_by: updated_by || null,
+            ledger_type: 'Adjustment'
           }
         });
 

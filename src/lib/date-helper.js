@@ -128,6 +128,21 @@ export function lastNPkDaysInclusive(days = 30) {
   return { fromDate: shiftPkDate(toDate, -(count - 1)), toDate };
 }
 
+/** From the 1st of (current month − N + 1) through today (Pakistan). */
+export function lastNCalendarMonthsFilter(monthCount = 6) {
+  const toDate = getPkDateString();
+  const [y, m] = toDate.split('-').map(Number);
+  const span = Math.max(1, Number(monthCount) || 6);
+  let startM = m - (span - 1);
+  let startY = y;
+  while (startM < 1) {
+    startM += 12;
+    startY -= 1;
+  }
+  const fromDate = `${startY}-${String(startM).padStart(2, '0')}-01`;
+  return { fromDate, toDate };
+}
+
 export function eachPkDate(fromDate, toDate) {
   const dates = [];
   if (!fromDate || !toDate || fromDate > toDate) return dates;
@@ -187,6 +202,52 @@ export function eachPkWeekInRange(fromDate, toDate) {
     if (weeks.length > 80) break;
   }
   return weeks;
+}
+
+const PK_MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** Short label for YYYY-MM, e.g. Sep 2026 */
+export function formatPkMonthKeyLabel(monthKey) {
+  const [yearStr, monthStr] = String(monthKey || '').split('-');
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  if (!year || !month) return monthKey || '';
+  return `${PK_MONTH_SHORT[month - 1] || monthStr} ${year}`;
+}
+
+/** Last calendar day of YYYY-MM (YYYY-MM-DD), capped by maxDate if earlier. */
+export function pkMonthLastDate(monthKey, maxDate) {
+  const [yearStr, monthStr] = String(monthKey || '').split('-');
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  if (!year || !month) return maxDate || '';
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  let end = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  if (maxDate && end > maxDate) end = maxDate;
+  return end;
+}
+
+/** Calendar months (YYYY-MM) overlapping a Pakistan date range, inclusive. */
+export function eachPkMonthInRange(fromDate, toDate) {
+  const months = [];
+  if (!fromDate || !toDate || fromDate > toDate) return months;
+  const [startY, startM] = fromDate.split('-').map(Number);
+  const [endY, endM] = toDate.split('-').map(Number);
+  if (!startY || !startM || !endY || !endM) return months;
+
+  let y = startY;
+  let m = startM;
+  while (y < endY || (y === endY && m <= endM)) {
+    const key = `${y}-${String(m).padStart(2, '0')}`;
+    months.push({ key, label: formatPkMonthKeyLabel(key) });
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+    if (months.length > 120) break;
+  }
+  return months;
 }
 
 export const getCreatedByName = (item, currentUser = null) => {
