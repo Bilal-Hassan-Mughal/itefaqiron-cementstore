@@ -12,13 +12,13 @@ export const DASHBOARD_ANALYTICS_WIDGETS = [
   },
   {
     id: 'dashboard-monthly-credit',
-    name: 'Monthly Credit',
-    description: 'Monthly credit / receivings bar chart',
+    name: 'Month-End — To Receive',
+    description: 'Closing balance total to collect from parties at each month end',
   },
   {
     id: 'dashboard-monthly-debit',
-    name: 'Monthly Debit',
-    description: 'Monthly debit / payments bar chart',
+    name: 'Month-End — To Pay',
+    description: 'Closing balance total to pay to parties at each month end',
   },
   {
     id: 'dashboard-monthly-profit',

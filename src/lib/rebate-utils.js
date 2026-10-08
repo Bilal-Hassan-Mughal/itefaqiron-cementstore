@@ -86,6 +86,35 @@ export const getRebateYearRange = (breakdown = []) => {
   return range;
 };
 
+const emptyRebateMonthRow = (monthKey) => ({
+  month: monthKey,
+  monthLabel: formatMonthLabel(monthKey),
+  purchaseCount: 0,
+  productCount: 0,
+  totalQuantity: 0,
+  totalAmount: 0,
+  rebatePaid: 0,
+  rebateCount: 0,
+  status: 'empty',
+  lastPaidAt: null,
+  rebateEntries: [],
+});
+
+/** All calendar months in the activity year range, merged with API breakdown rows. */
+export const buildFullMonthOptions = (breakdown = []) => {
+  const map = buildRebateMonthMap(breakdown);
+  const keys = new Set(Object.keys(map));
+  keys.add(getCurrentMonthKey());
+  for (const year of getRebateYearRange(breakdown)) {
+    for (let m = 1; m <= 12; m += 1) {
+      keys.add(buildMonthKey(year, m));
+    }
+  }
+  return [...keys]
+    .sort((a, b) => b.localeCompare(a))
+    .map((month) => map[month] || emptyRebateMonthRow(month));
+};
+
 /** Months with purchases that still need rebate payment. */
 export const getUnpaidRebateMonths = (breakdown = []) =>
   breakdown.filter((row) => row.status === 'unpaid');
@@ -115,7 +144,8 @@ export const rebateMonthOptionLabel = (row) => {
   return `${row.monthLabel} — No activity`;
 };
 
-export const isRebateMonthSelectable = (row) => row?.status === 'unpaid';
+/** Any month in the list can be opened; rebate is not blocked by paid/unpaid on other months. */
+export const isRebateMonthSelectable = (row) => Boolean(row?.month);
 
 export function RebateStatusBadge({ status, size = 'sm' }) {
   const pad = size === 'lg' ? 'px-3 py-1.5 text-sm' : 'px-2.5 py-1 text-xs';

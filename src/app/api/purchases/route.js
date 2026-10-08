@@ -930,6 +930,7 @@ export async function GET(request) {
 export async function POST(request) {
   const __branchScope = await initBranchScope(request);
   if (__branchScope.error) return __branchScope.error;
+  const branchId = __branchScope.branchId;
   const dayClosed = await rejectIfDayClosed();
   if (dayClosed) return dayClosed;
 
@@ -1159,6 +1160,7 @@ export async function POST(request) {
 
       // Prepare the data object for purchase creation
       const purchaseData = {
+        branch_id: branchId,
         cus_id: parseInt(cus_id),
         store_id: store_id ? safeParseInt(store_id) : null,
         debit_account_id: debit_account_id ? safeParseInt(debit_account_id) : null,

@@ -48,9 +48,23 @@ async function syncAccountBalancesFromEntries(tx, ledgerEntries) {
 }
 
 // Helper function to get special accounts (query fresh from database to prevent stale balances)
-async function getSpecialAccounts() {
+async function getSpecialAccounts(branchId = null) {
   try {
-    const rows = await prisma.$queryRaw`
+    const rows = branchId
+      ? await prisma.$queryRaw`
+      SELECT c.*, cat.cus_cat_title
+      FROM customers c
+      JOIN customer_categories cat ON c.cus_category = cat.cus_cat_id
+      WHERE c.branch_id = ${branchId}
+        AND (
+          LOWER(cat.cus_cat_title) LIKE '%cash%'
+          OR LOWER(cat.cus_cat_title) LIKE '%bank%'
+          OR LOWER(cat.cus_cat_title) LIKE '%creditor%'
+          OR LOWER(cat.cus_cat_title) LIKE '%debtor%'
+        )
+      ORDER BY c.cus_id ASC
+    `
+      : await prisma.$queryRaw`
       SELECT c.*, cat.cus_cat_title
       FROM customers c
       JOIN customer_categories cat ON c.cus_category = cat.cus_cat_id
@@ -88,7 +102,7 @@ async function getSpecialAccounts() {
  * Find or create a default "Cash Account" customer (used for cash-in ledger on sales/orders).
  * Matches purchases route behavior when paying cash to a supplier.
  */
-async function findOrCreateCashAccount() {
+async function findOrCreateCashAccount(branchId = 1) {
   const allCategories = await prisma.customerCategory.findMany();
   let cashCatId = null;
   for (const cat of allCategories) {
@@ -106,7 +120,9 @@ async function findOrCreateCashAccount() {
     cashCatId = createdCat.cus_cat_id;
   }
 
-  const existing = await prisma.customer.findFirst({ where: { cus_category: cashCatId } });
+  const existing = await prisma.customer.findFirst({
+    where: { cus_category: cashCatId, branch_id: branchId },
+  });
   if (existing) return existing;
 
   const allTypes = await prisma.customerType.findMany();
@@ -120,6 +136,7 @@ async function findOrCreateCashAccount() {
   const created = await prisma.customer.create({
     data: {
       cus_id: nextCusId,
+      branch_id: branchId,
       cus_name: 'Cash Account',
       cus_phone_no: '0000000000',
       cus_address: 'Main Office',
@@ -133,10 +150,11 @@ async function findOrCreateCashAccount() {
 }
 
 /** Resolves getSpecialAccounts() and ensures a cash account customer exists for ledger / balance updates. */
-async function getSpecialAccountsForSale() {
-  let accounts = await getSpecialAccounts();
+async function getSpecialAccountsForSale(branchId) {
+  const bid = branchId || 1;
+  let accounts = await getSpecialAccounts(bid);
   if (!accounts.cash) {
-    const cash = await findOrCreateCashAccount();
+    const cash = await findOrCreateCashAccount(bid);
     if (cash) accounts = { ...accounts, cash };
   }
   return accounts;
@@ -1377,7 +1395,7 @@ export async function POST(request) {
     // }
 
     // Get special accounts BEFORE transaction (for better performance)
-    const specialAccounts = isQuotation ? null : await getSpecialAccountsForSale();
+    const specialAccounts = isQuotation ? null : await getSpecialAccountsForSale(branchId);
     const validatedUpdatedBy = await resolveUpdatedByUserId(request, updated_by, prisma);
 
     // Detect if this is a loaded order (order being converted to sale)
@@ -1465,6 +1483,7 @@ export async function POST(request) {
       try {
         sale = await tx.sale.create({
           data: {
+            branch_id: branchId,
             cus_id,
             store_id: parseInt(store_id),
             total_amount: Number(parseFloat(total_amount).toFixed(2)),
@@ -2301,7 +2320,7 @@ export async function PUT(request) {
     }
 
     // Get special accounts BEFORE transaction
-    const specialAccounts = isSkipLedger ? null : await getSpecialAccountsForSale();
+    const specialAccounts = isSkipLedger ? null : await getSpecialAccountsForSale(branchId);
 
     const affectedCusIds = new Set();
     const oldOpeningBalances = {};
@@ -3114,7 +3133,7 @@ export async function DELETE(request) {
     }
 
     // Get special accounts BEFORE transaction
-    const specialAccounts = await getSpecialAccountsForSale();
+    const specialAccounts = await getSpecialAccountsForSale(branchId);
 
     const affectedCusIds = new Set();
     let existingSale = null;

@@ -14,25 +14,28 @@ const TABS = [
   { id: 'by-category', label: 'By Category', icon: Tag },
 ];
 
+/** YYYY-MM-DD for today in Pakistan (matches report API date filters). */
+function getTodayDateKey() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Karachi',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
 export default function ProfitReport() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [reportData, setReportData] = useState(null);
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [startDate, setStartDate] = useState(getTodayDateKey);
+  const [endDate, setEndDate] = useState(getTodayDateKey);
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [customers, setCustomers] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState('');
   const [activeTab, setActiveTab] = useState('by-party');
   const [search, setSearch] = useState('');
-
-  useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
-    const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0];
-    setStartDate(yearStart);
-    setEndDate(today);
-  }, []);
 
   useEffect(() => {
     if (startDate && endDate) fetchReport();

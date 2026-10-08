@@ -8,7 +8,14 @@ import {
   filterDashboardShortcuts,
   canViewDashboardLowStock,
 } from '@/lib/staff-access';
-import { eachPkWeekInRange, formatDatePK, formatPkWeekLabel, getPkDateString, lastNPkDaysInclusive } from '@/lib/date-helper';
+import {
+  eachPkWeekInRange,
+  formatDatePK,
+  formatPkWeekLabel,
+  getPkDateString,
+  lastNCalendarMonthsFilter,
+  lastNPkDaysInclusive,
+} from '@/lib/date-helper';
 import { useRouter } from 'next/navigation';
 import {
   DollarSign,
@@ -735,16 +742,14 @@ export default function DashboardContent({ activeTab }) {
 
   const [kpiFilters, setKpiFilters] = useState(last30DaysFilter);
 
-  const [monthlyCreditFilters, setMonthlyCreditFilters] = useState(last30DaysFilter);
-  const [monthlyDebitFilters, setMonthlyDebitFilters] = useState(last30DaysFilter);
+  const [monthEndFilters, setMonthEndFilters] = useState(() => lastNCalendarMonthsFilter(6));
   const [monthlyProfitFilters, setMonthlyProfitFilters] = useState(last30DaysFilter);
   const [monthlySalesFilters, setMonthlySalesFilters] = useState(last30DaysFilter);
   const [monthlyCreditData, setMonthlyCreditData] = useState([]);
   const [monthlyDebitData, setMonthlyDebitData] = useState([]);
   const [monthlyProfitData, setMonthlyProfitData] = useState([]);
   const [monthlySalesData, setMonthlySalesData] = useState([]);
-  const [monthlyCreditLoading, setMonthlyCreditLoading] = useState(false);
-  const [monthlyDebitLoading, setMonthlyDebitLoading] = useState(false);
+  const [monthEndLoading, setMonthEndLoading] = useState(false);
   const [monthlyProfitLoading, setMonthlyProfitLoading] = useState(false);
   const [monthlySalesLoading, setMonthlySalesLoading] = useState(false);
 
@@ -877,6 +882,10 @@ export default function DashboardContent({ activeTab }) {
       const params = new URLSearchParams();
       if (filters.fromDate) params.set('fromDate', filters.fromDate);
       if (filters.toDate) params.set('toDate', filters.toDate);
+      if (key === 'monthlyCredit' || key === 'monthlyDebit') {
+        params.set('ledgerGrain', 'month');
+        params.set('ledgerSeries', 'outstanding');
+      }
       const res = await fetch(`/api/dashboard/monthly-analytics?${params}`);
       const text = await res.text();
       if (!text?.trim()) {
@@ -927,14 +936,32 @@ export default function DashboardContent({ activeTab }) {
   }, [activeTab, analyticsWidgets.kpi, kpiFilters]);
 
   useEffect(() => {
-    if (activeTab !== 'dashboard' || !analyticsWidgets.monthlyCredit) return;
-    fetchMonthlyWidget(monthlyCreditFilters, setMonthlyCreditData, setMonthlyCreditLoading, 'monthlyCredit');
-  }, [activeTab, analyticsWidgets.monthlyCredit, monthlyCreditFilters]);
+    if (activeTab !== 'dashboard') return;
+    if (!analyticsWidgets.monthlyCredit && !analyticsWidgets.monthlyDebit) return;
 
-  useEffect(() => {
-    if (activeTab !== 'dashboard' || !analyticsWidgets.monthlyDebit) return;
-    fetchMonthlyWidget(monthlyDebitFilters, setMonthlyDebitData, setMonthlyDebitLoading, 'monthlyDebit');
-  }, [activeTab, analyticsWidgets.monthlyDebit, monthlyDebitFilters]);
+    const loadMonthEndClosing = async () => {
+      setMonthEndLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (monthEndFilters.fromDate) params.set('fromDate', monthEndFilters.fromDate);
+        if (monthEndFilters.toDate) params.set('toDate', monthEndFilters.toDate);
+        params.set('ledgerGrain', 'month');
+        params.set('ledgerSeries', 'outstanding');
+        const res = await fetch(`/api/dashboard/monthly-analytics?${params}`);
+        const json = res.ok ? await res.json() : null;
+        if (json?.success) {
+          setMonthlyCreditData(json.data?.monthEndToReceive || json.data?.monthlyCredit || []);
+          setMonthlyDebitData(json.data?.monthEndToPay || json.data?.monthlyDebit || []);
+        }
+      } catch (err) {
+        console.error('Error fetching month-end closing:', err);
+      } finally {
+        setMonthEndLoading(false);
+      }
+    };
+
+    loadMonthEndClosing();
+  }, [activeTab, analyticsWidgets.monthlyCredit, analyticsWidgets.monthlyDebit, monthEndFilters]);
 
   useEffect(() => {
     if (activeTab !== 'dashboard' || !analyticsWidgets.monthlyProfit) return;
@@ -1248,14 +1275,27 @@ export default function DashboardContent({ activeTab }) {
     }
   };
 
+  const monthEndClosingRows = useMemo(() => {
+    const payByPeriod = new Map(monthlyDebitData.map((row) => [row.period, row]));
+    return monthlyCreditData.map((recv) => {
+      const pay = payByPeriod.get(recv.period) || {};
+      return {
+        period: recv.period,
+        label: recv.label || recv.period,
+        asOfDate: recv.asOfDate || pay.asOfDate || '',
+        toReceive: recv.amount ?? recv.toReceive ?? 0,
+        toPay: pay.amount ?? pay.toPay ?? 0,
+      };
+    });
+  }, [monthlyCreditData, monthlyDebitData]);
+
   if (activeTab === 'dashboard') {
-    const monthlyCreditList = monthlyCreditData;
-    const monthlyDebitList = monthlyDebitData;
     const monthlySalesList = monthlySalesData;
     const monthlyProfitList = monthlyProfitData;
 
-    const totalCreditVal = monthlyCreditList.reduce((s, i) => s + i.amount, 0);
-    const totalDebitVal = monthlyDebitList.reduce((s, i) => s + i.amount, 0);
+    const latestClosingRow = monthEndClosingRows[monthEndClosingRows.length - 1];
+    const totalCreditVal = latestClosingRow?.toReceive ?? 0;
+    const totalDebitVal = latestClosingRow?.toPay ?? 0;
     const totalSalesVal = monthlySalesList.reduce((s, i) => s + i.amount, 0);
     const totalProfitVal = monthlyProfitList.reduce((s, i) => s + i.profit, 0);
     const totalBillsOverview = salesOverviewChart.billAmounts.reduce((s, v) => s + v, 0);
@@ -1568,62 +1608,97 @@ export default function DashboardContent({ activeTab }) {
 
           {/* Monthly charts grid */}
           {analyticsWidgets.anyMonthlyChart && renderAnalyticsGrid([
-            analyticsWidgets.monthlyCredit && {
-              key: 'monthly-credit',
+            (analyticsWidgets.monthlyCredit || analyticsWidgets.monthlyDebit) && {
+              key: 'month-end-closing',
               node: (
-            <ReportWidgetShell accent={CHART_COLORS.credit} title="Monthly Credit">
-              <WidgetDateFilter filters={monthlyCreditFilters} onChange={setMonthlyCreditFilters} loading={monthlyCreditLoading} accent={CHART_COLORS.credit} />
+            <ReportWidgetShell accent={CHART_COLORS.credit} title="Month-end closing balances">
+              <WidgetDateFilter filters={monthEndFilters} onChange={setMonthEndFilters} loading={monthEndLoading} accent={CHART_COLORS.credit} />
               <ReportWidgetHeader
-                title="Monthly Credit"
-                subtitle="Credit / receivings · week by week"
-                icon={Banknote}
+                title="To receive & to pay by month"
+                subtitle="After each month’s transactions — closing balance totals (party accounts, excl. cash/bank)"
+                icon={BarChart3}
                 tint={CHART_COLORS.credit.tint}
                 primary={CHART_COLORS.credit.primary}
                 accent={CHART_COLORS.credit}
               />
               <ReportChartArea accent={CHART_COLORS.credit}>
-                {renderSmoothBarChart({
-                  data: monthlyCreditList,
-                  getValue: d => d.amount,
-                  colorPrimary: CHART_COLORS.credit.primary,
-                  colorGradientStop: CHART_COLORS.credit.gradient,
-                  barId: 'gMonthlyCredit'
-                })}
+                {monthEndClosingRows.length === 0 && !monthEndLoading ? (
+                  <ChartEmptyState />
+                ) : (
+                  renderGroupedBarChart({
+                    chartId: 'monthEndClosing',
+                    labels: monthEndClosingRows.map((r) => r.label),
+                    series: [
+                      {
+                        key: 'receive',
+                        name: 'To receive',
+                        primary: CHART_COLORS.credit.primary,
+                        gradient: CHART_COLORS.credit.gradient,
+                        values: monthEndClosingRows.map((r) => r.toReceive),
+                      },
+                      {
+                        key: 'pay',
+                        name: 'To pay',
+                        primary: CHART_COLORS.debit.primary,
+                        gradient: CHART_COLORS.debit.gradient,
+                        values: monthEndClosingRows.map((r) => r.toPay),
+                      },
+                    ],
+                    formatValue: fmtK,
+                  })
+                )}
               </ReportChartArea>
+              <ReportLegendRow accent={CHART_COLORS.credit}>
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: CHART_COLORS.credit.primary }}>
+                  <span className="w-2.5 h-2.5 rounded-sm" style={{ background: CHART_COLORS.credit.primary }} />
+                  To receive
+                </span>
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: CHART_COLORS.debit.primary }}>
+                  <span className="w-2.5 h-2.5 rounded-sm" style={{ background: CHART_COLORS.debit.primary }} />
+                  To pay
+                </span>
+              </ReportLegendRow>
+              <div className="px-4 pb-4 overflow-x-auto">
+                <table className="w-full text-sm border border-slate-200 rounded-xl overflow-hidden">
+                  <thead>
+                    <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                      <th className="px-4 py-2.5 font-bold">Month</th>
+                      <th className="px-4 py-2.5 font-bold">As of</th>
+                      <th className="px-4 py-2.5 font-bold text-right">To receive (PKR)</th>
+                      <th className="px-4 py-2.5 font-bold text-right">To pay (PKR)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {monthEndClosingRows.map((row) => (
+                      <tr key={row.period} className="hover:bg-slate-50/80">
+                        <td className="px-4 py-2.5 font-semibold text-slate-800">{row.label}</td>
+                        <td className="px-4 py-2.5 text-slate-600">{row.asOfDate ? formatDatePK(row.asOfDate) : '—'}</td>
+                        <td className="px-4 py-2.5 text-right font-semibold tabular-nums" style={{ color: CHART_COLORS.credit.primary }}>
+                          {fmtAmt(row.toReceive)}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-semibold tabular-nums" style={{ color: CHART_COLORS.debit.primary }}>
+                          {fmtAmt(row.toPay)}
+                        </td>
+                      </tr>
+                    ))}
+                    {monthEndClosingRows.length === 0 && !monthEndLoading && (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
+                          No months in selected range
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
               <ReportWidgetFooter
                 accent={CHART_COLORS.credit}
-                formula={`Ledger credit · ${monthlyCreditList.length} week(s) in selected range`}
-                total={`PKR ${fmtAmt(totalCreditVal)}`}
-              />
-            </ReportWidgetShell>
-              ),
-            },
-            analyticsWidgets.monthlyDebit && {
-              key: 'monthly-debit',
-              node: (
-            <ReportWidgetShell accent={CHART_COLORS.debit} title="Monthly Debit">
-              <WidgetDateFilter filters={monthlyDebitFilters} onChange={setMonthlyDebitFilters} loading={monthlyDebitLoading} accent={CHART_COLORS.debit} />
-              <ReportWidgetHeader
-                title="Monthly Debit"
-                subtitle="Debit / payments · week by week"
-                icon={CreditCard}
-                tint={CHART_COLORS.debit.tint}
-                primary={CHART_COLORS.debit.primary}
-                accent={CHART_COLORS.debit}
-              />
-              <ReportChartArea accent={CHART_COLORS.debit}>
-                {renderSmoothBarChart({
-                  data: monthlyDebitList,
-                  getValue: d => d.amount,
-                  colorPrimary: CHART_COLORS.debit.primary,
-                  colorGradientStop: CHART_COLORS.debit.gradient,
-                  barId: 'gMonthlyDebit'
-                })}
-              </ReportChartArea>
-              <ReportWidgetFooter
-                accent={CHART_COLORS.debit}
-                formula={`Ledger debit · ${monthlyDebitList.length} week(s) in selected range`}
-                total={`PKR ${fmtAmt(totalDebitVal)}`}
+                formula={
+                  latestClosingRow
+                    ? `Latest month (${latestClosingRow.label}) after all transactions in that month`
+                    : `${monthEndClosingRows.length} month(s) in range`
+                }
+                total={`Receive PKR ${fmtAmt(totalCreditVal)} · Pay PKR ${fmtAmt(totalDebitVal)}`}
               />
             </ReportWidgetShell>
               ),

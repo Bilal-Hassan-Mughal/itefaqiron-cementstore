@@ -718,8 +718,8 @@ function SalesPageContent() {
   const [filterMaxAmount, setFilterMaxAmount] = useState('');
   const [filterAmount, setFilterAmount] = useState('');
   const [filterBalanceStatus, setFilterBalanceStatus] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [dateFrom, setDateFrom] = useState(() => getPkDateString());
+  const [dateTo, setDateTo] = useState(() => getPkDateString());
   const [saleEntryDate, setSaleEntryDate] = useState(() => getPkDateString());
   const [filterItem, setFilterItem] = useState('');
   const [filterQuantity, setFilterQuantity] = useState('');
@@ -5339,8 +5339,8 @@ function SalesPageContent() {
     setFilterMinAmount('');
     setFilterMaxAmount('');
     setFilterBalanceStatus('');
-    setDateFrom('');
-    setDateTo('');
+    setDateFrom(getPkDateString());
+    setDateTo(getPkDateString());
     setSortBy('created_at');
     setSortOrder('desc');
     setListPage(1);
