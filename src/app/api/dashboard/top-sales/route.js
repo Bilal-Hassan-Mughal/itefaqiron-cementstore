@@ -55,6 +55,18 @@ export async function GET(request) {
     const fromDate = searchParams.get('fromDate') || fallback.fromDate;
     const toDate = searchParams.get('toDate') || fallback.toDate;
     const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '15', 10) || 15, 1), 30);
+    const cusCatRaw = searchParams.get('cusCatId');
+    const cusCatId =
+      cusCatRaw && /^\d+$/.test(cusCatRaw) ? parseInt(cusCatRaw, 10) : null;
+    const customerCategorySql = cusCatId
+      ? Prisma.sql`AND c.cus_category = ${cusCatId}`
+      : Prisma.empty;
+    const cusTypeRaw = searchParams.get('cusTypeId');
+    const cusTypeId =
+      cusTypeRaw && /^\d+$/.test(cusTypeRaw) ? parseInt(cusTypeRaw, 10) : null;
+    const customerTypeSql = cusTypeId
+      ? Prisma.sql`AND c.cus_type = ${cusTypeId}`
+      : Prisma.empty;
 
     const saleDates = rangeSql(Prisma.sql`s.created_at`, fromDate, toDate);
     const returnDates = rangeSql(Prisma.sql`sr.created_at`, fromDate, toDate);
@@ -74,6 +86,8 @@ export async function GET(request) {
         WHERE s.branch_id = ${branchId}
           AND s.bill_type = 'BILL'
           ${saleDates}
+          ${customerCategorySql}
+          ${customerTypeSql}
           ${EXTRA_PRODUCT}
         GROUP BY s.cus_id, c.cus_name
       `,
@@ -84,9 +98,12 @@ export async function GET(request) {
           SUM(srd.qnty) AS qty
         FROM sale_returns sr
         INNER JOIN sale_return_details srd ON srd.return_id = sr.return_id
+        INNER JOIN customers c ON c.cus_id = sr.cus_id
         INNER JOIN products p ON p.pro_id = srd.pro_id
         WHERE sr.branch_id = ${branchId}
           ${returnDates}
+          ${customerCategorySql}
+          ${customerTypeSql}
           ${EXTRA_PRODUCT}
         GROUP BY sr.cus_id
       `,

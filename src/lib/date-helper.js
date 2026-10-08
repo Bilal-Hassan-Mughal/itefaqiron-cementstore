@@ -143,6 +143,23 @@ export function lastNCalendarMonthsFilter(monthCount = 6) {
   return { fromDate, toDate };
 }
 
+/** Current calendar year (1 Jan → today, PK). */
+export function pkCalendarYearFilter() {
+  const toDate = getPkDateString();
+  return { fromDate: `${toDate.slice(0, 4)}-01-01`, toDate };
+}
+
+/** YYYY-MM → inclusive PK date range for month-end charts. */
+export function pkMonthKeysToDateRange(fromMonthKey, toMonthKey) {
+  if (!fromMonthKey || !toMonthKey) return null;
+  if (fromMonthKey > toMonthKey) return null;
+  const today = getPkDateString();
+  const fromDate = `${fromMonthKey}-01`;
+  const toDate = pkMonthLastDate(toMonthKey, today);
+  if (toDate > today) return { fromDate, toDate: today };
+  return { fromDate, toDate };
+}
+
 export function eachPkDate(fromDate, toDate) {
   const dates = [];
   if (!fromDate || !toDate || fromDate > toDate) return dates;

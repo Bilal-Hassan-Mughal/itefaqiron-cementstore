@@ -15,6 +15,8 @@ import {
   getPkDateString,
   lastNCalendarMonthsFilter,
   lastNPkDaysInclusive,
+  pkCalendarYearFilter,
+  pkMonthKeysToDateRange,
 } from '@/lib/date-helper';
 import { useRouter } from 'next/navigation';
 import {
@@ -132,6 +134,102 @@ function buildDatePreset(days) {
     return { fromDate: `${today.slice(0, 4)}-01-01`, toDate: today };
   }
   return lastNPkDaysInclusive(Number(days) || 30);
+}
+
+function buildMonthChartPreset(months) {
+  if (months === 'year') return pkCalendarYearFilter();
+  return lastNCalendarMonthsFilter(Number(months) || 6);
+}
+
+/** Month pickers + calendar-month presets for month-end closing charts. */
+function WidgetMonthRangeFilter({ filters, onChange, loading = false, accent }) {
+  const neon = getReportNeonStyles(accent);
+  const fromMonth = filters.fromDate?.slice(0, 7) || '';
+  const toMonth = filters.toDate?.slice(0, 7) || '';
+
+  const applyFromMonth = (monthKey) => {
+    const endKey = toMonth && toMonth >= monthKey ? toMonth : monthKey;
+    const range = pkMonthKeysToDateRange(monthKey, endKey);
+    if (range) onChange(range);
+  };
+
+  const applyToMonth = (monthKey) => {
+    const startKey = fromMonth && fromMonth <= monthKey ? fromMonth : monthKey;
+    const range = pkMonthKeysToDateRange(startKey, monthKey);
+    if (range) onChange(range);
+  };
+
+  return (
+    <div
+      className={REPORT.filterBody}
+      style={{ background: neon.filterBg, borderColor: neon.divider }}
+    >
+      <Filter className="w-3.5 h-3.5 shrink-0" style={{ color: neon.primary }} />
+      <div className={REPORT.datePill} style={{ borderColor: neon.chartBorder }}>
+        <Calendar className="w-3.5 h-3.5" style={{ color: neon.primary }} />
+        <span className="text-[10px] font-semibold text-slate-500">From month</span>
+        <input
+          type="month"
+          lang="en-GB"
+          value={fromMonth}
+          onChange={(e) => applyFromMonth(e.target.value)}
+          className="text-[11px] font-medium text-slate-800 bg-transparent focus:outline-none"
+        />
+      </div>
+      <div className={REPORT.datePill} style={{ borderColor: neon.chartBorder }}>
+        <Calendar className="w-3.5 h-3.5" style={{ color: neon.primary }} />
+        <span className="text-[10px] font-semibold text-slate-500">To month</span>
+        <input
+          type="month"
+          lang="en-GB"
+          value={toMonth}
+          onChange={(e) => applyToMonth(e.target.value)}
+          className="text-[11px] font-medium text-slate-800 bg-transparent focus:outline-none"
+        />
+      </div>
+      <div className={REPORT.presetWrap} style={{ borderColor: neon.chartBorder }}>
+        {[
+          { label: '3M', months: 3 },
+          { label: '6M', months: 6 },
+          { label: '12M', months: 12 },
+          { label: 'Year', months: 'year' },
+        ].map(({ label, months }) => {
+          const preset = buildMonthChartPreset(months);
+          const active = filters.fromDate === preset.fromDate && filters.toDate === preset.toDate;
+          return (
+            <button
+              key={label}
+              type="button"
+              onClick={() => onChange(preset)}
+              className={`${REPORT.presetBtn}${active ? ` ${REPORT.presetBtnActive}` : ''}`}
+              style={active ? { color: neon.primary } : { ['--neon-accent']: neon.primary }}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+      {(filters.fromDate || filters.toDate) && (
+        <button
+          type="button"
+          onClick={() => onChange(lastNCalendarMonthsFilter(6))}
+          className="text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition-colors"
+          style={{ color: CHART_COLORS.debit.primary }}
+        >
+          Reset
+        </button>
+      )}
+      <div className="flex items-center gap-2 ml-auto shrink-0">
+        {loading && (
+          <div
+            className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin"
+            style={{ borderColor: `${neon.primary}33`, borderTopColor: 'transparent', borderRightColor: neon.primary, borderBottomColor: neon.primary, borderLeftColor: neon.primary }}
+          />
+        )}
+        <ReportFullscreenExpandButton />
+      </div>
+    </div>
+  );
 }
 
 function buildWeeklyChartData(salesList, days) {
@@ -739,17 +837,20 @@ export default function DashboardContent({ activeTab }) {
   const [recentActivityData, setRecentActivityData] = useState([]);
   const [profitData, setProfitData] = useState([]);
   const [allCategories, setAllCategories] = useState([]);
+  const [allCustomerTypes, setAllCustomerTypes] = useState([]);
 
   const [kpiFilters, setKpiFilters] = useState(last30DaysFilter);
 
-  const [monthEndFilters, setMonthEndFilters] = useState(() => lastNCalendarMonthsFilter(6));
+  const [monthEndReceiveFilters, setMonthEndReceiveFilters] = useState(() => lastNCalendarMonthsFilter(6));
+  const [monthEndPayFilters, setMonthEndPayFilters] = useState(() => lastNCalendarMonthsFilter(6));
   const [monthlyProfitFilters, setMonthlyProfitFilters] = useState(last30DaysFilter);
   const [monthlySalesFilters, setMonthlySalesFilters] = useState(last30DaysFilter);
   const [monthlyCreditData, setMonthlyCreditData] = useState([]);
   const [monthlyDebitData, setMonthlyDebitData] = useState([]);
   const [monthlyProfitData, setMonthlyProfitData] = useState([]);
   const [monthlySalesData, setMonthlySalesData] = useState([]);
-  const [monthEndLoading, setMonthEndLoading] = useState(false);
+  const [monthEndReceiveLoading, setMonthEndReceiveLoading] = useState(false);
+  const [monthEndPayLoading, setMonthEndPayLoading] = useState(false);
   const [monthlyProfitLoading, setMonthlyProfitLoading] = useState(false);
   const [monthlySalesLoading, setMonthlySalesLoading] = useState(false);
 
@@ -760,7 +861,11 @@ export default function DashboardContent({ activeTab }) {
   const [customerBalanceLoading, setCustomerBalanceLoading] = useState(false);
   const [supplierBalanceLoading, setSupplierBalanceLoading] = useState(false);
 
-  const [topCustomersSaleFilters, setTopCustomersSaleFilters] = useState(last30DaysFilter);
+  const [topCustomersSaleFilters, setTopCustomersSaleFilters] = useState(() => ({
+    ...last30DaysFilter(),
+    cusCatId: '',
+    cusTypeId: '',
+  }));
   const [topProductsSaleFilters, setTopProductsSaleFilters] = useState(last30DaysFilter);
   const [topCustomersSaleData, setTopCustomersSaleData] = useState([]);
   const [topProductsSaleData, setTopProductsSaleData] = useState([]);
@@ -936,32 +1041,56 @@ export default function DashboardContent({ activeTab }) {
   }, [activeTab, analyticsWidgets.kpi, kpiFilters]);
 
   useEffect(() => {
-    if (activeTab !== 'dashboard') return;
-    if (!analyticsWidgets.monthlyCredit && !analyticsWidgets.monthlyDebit) return;
+    if (activeTab !== 'dashboard' || !analyticsWidgets.monthlyCredit) return;
 
-    const loadMonthEndClosing = async () => {
-      setMonthEndLoading(true);
+    const loadMonthEndReceive = async () => {
+      setMonthEndReceiveLoading(true);
       try {
         const params = new URLSearchParams();
-        if (monthEndFilters.fromDate) params.set('fromDate', monthEndFilters.fromDate);
-        if (monthEndFilters.toDate) params.set('toDate', monthEndFilters.toDate);
+        if (monthEndReceiveFilters.fromDate) params.set('fromDate', monthEndReceiveFilters.fromDate);
+        if (monthEndReceiveFilters.toDate) params.set('toDate', monthEndReceiveFilters.toDate);
         params.set('ledgerGrain', 'month');
         params.set('ledgerSeries', 'outstanding');
         const res = await fetch(`/api/dashboard/monthly-analytics?${params}`);
         const json = res.ok ? await res.json() : null;
         if (json?.success) {
           setMonthlyCreditData(json.data?.monthEndToReceive || json.data?.monthlyCredit || []);
-          setMonthlyDebitData(json.data?.monthEndToPay || json.data?.monthlyDebit || []);
         }
       } catch (err) {
-        console.error('Error fetching month-end closing:', err);
+        console.error('Error fetching month-end receive:', err);
       } finally {
-        setMonthEndLoading(false);
+        setMonthEndReceiveLoading(false);
       }
     };
 
-    loadMonthEndClosing();
-  }, [activeTab, analyticsWidgets.monthlyCredit, analyticsWidgets.monthlyDebit, monthEndFilters]);
+    loadMonthEndReceive();
+  }, [activeTab, analyticsWidgets.monthlyCredit, monthEndReceiveFilters]);
+
+  useEffect(() => {
+    if (activeTab !== 'dashboard' || !analyticsWidgets.monthlyDebit) return;
+
+    const loadMonthEndPay = async () => {
+      setMonthEndPayLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (monthEndPayFilters.fromDate) params.set('fromDate', monthEndPayFilters.fromDate);
+        if (monthEndPayFilters.toDate) params.set('toDate', monthEndPayFilters.toDate);
+        params.set('ledgerGrain', 'month');
+        params.set('ledgerSeries', 'outstanding');
+        const res = await fetch(`/api/dashboard/monthly-analytics?${params}`);
+        const json = res.ok ? await res.json() : null;
+        if (json?.success) {
+          setMonthlyDebitData(json.data?.monthEndToPay || json.data?.monthlyDebit || []);
+        }
+      } catch (err) {
+        console.error('Error fetching month-end pay:', err);
+      } finally {
+        setMonthEndPayLoading(false);
+      }
+    };
+
+    loadMonthEndPay();
+  }, [activeTab, analyticsWidgets.monthlyDebit, monthEndPayFilters]);
 
   useEffect(() => {
     if (activeTab !== 'dashboard' || !analyticsWidgets.monthlyProfit) return;
@@ -1080,12 +1209,25 @@ export default function DashboardContent({ activeTab }) {
   );
 
   useEffect(() => {
-    if (activeTab !== 'dashboard' || !analyticsWidgets.anyBalanceChart) return;
-    fetch('/api/customer-category')
-      .then(r => r.ok ? r.json() : [])
-      .then(cats => setAllCategories(Array.isArray(cats) ? cats : []))
-      .catch(() => {});
-  }, [activeTab, analyticsWidgets.anyBalanceChart]);
+    if (activeTab !== 'dashboard') return;
+    const needCategories =
+      analyticsWidgets.anyBalanceChart || analyticsWidgets.topCustomersSale;
+    const needTypes = analyticsWidgets.topCustomersSale;
+    if (!needCategories && !needTypes) return;
+
+    if (needCategories) {
+      fetch('/api/customer-category')
+        .then((r) => (r.ok ? r.json() : []))
+        .then((cats) => setAllCategories(Array.isArray(cats) ? cats : []))
+        .catch(() => {});
+    }
+    if (needTypes) {
+      fetch('/api/customer-types')
+        .then((r) => (r.ok ? r.json() : []))
+        .then((types) => setAllCustomerTypes(Array.isArray(types) ? types : []))
+        .catch(() => {});
+    }
+  }, [activeTab, analyticsWidgets.anyBalanceChart, analyticsWidgets.topCustomersSale]);
 
   useEffect(() => {
     if (activeTab !== 'dashboard' || !analyticsWidgets.customerBalance) return;
@@ -1137,6 +1279,8 @@ export default function DashboardContent({ activeTab }) {
         const params = new URLSearchParams();
         if (topCustomersSaleFilters.fromDate) params.set('fromDate', topCustomersSaleFilters.fromDate);
         if (topCustomersSaleFilters.toDate) params.set('toDate', topCustomersSaleFilters.toDate);
+        if (topCustomersSaleFilters.cusCatId) params.set('cusCatId', topCustomersSaleFilters.cusCatId);
+        if (topCustomersSaleFilters.cusTypeId) params.set('cusTypeId', topCustomersSaleFilters.cusTypeId);
         const res = await fetch(`/api/dashboard/top-sales?${params}`);
         const json = res.ok ? await res.json() : null;
         if (json?.success) setTopCustomersSaleData(json.customers || []);
@@ -1275,27 +1419,36 @@ export default function DashboardContent({ activeTab }) {
     }
   };
 
-  const monthEndClosingRows = useMemo(() => {
-    const payByPeriod = new Map(monthlyDebitData.map((row) => [row.period, row]));
-    return monthlyCreditData.map((recv) => {
-      const pay = payByPeriod.get(recv.period) || {};
-      return {
-        period: recv.period,
-        label: recv.label || recv.period,
-        asOfDate: recv.asOfDate || pay.asOfDate || '',
-        toReceive: recv.amount ?? recv.toReceive ?? 0,
-        toPay: pay.amount ?? pay.toPay ?? 0,
-      };
-    });
-  }, [monthlyCreditData, monthlyDebitData]);
+  const monthEndReceiveRows = useMemo(
+    () =>
+      monthlyCreditData.map((row) => ({
+        period: row.period,
+        label: row.label || row.period,
+        asOfDate: row.asOfDate || '',
+        amount: row.amount ?? row.toReceive ?? 0,
+      })),
+    [monthlyCreditData]
+  );
+
+  const monthEndPayRows = useMemo(
+    () =>
+      monthlyDebitData.map((row) => ({
+        period: row.period,
+        label: row.label || row.period,
+        asOfDate: row.asOfDate || '',
+        amount: row.amount ?? row.toPay ?? 0,
+      })),
+    [monthlyDebitData]
+  );
 
   if (activeTab === 'dashboard') {
     const monthlySalesList = monthlySalesData;
     const monthlyProfitList = monthlyProfitData;
 
-    const latestClosingRow = monthEndClosingRows[monthEndClosingRows.length - 1];
-    const totalCreditVal = latestClosingRow?.toReceive ?? 0;
-    const totalDebitVal = latestClosingRow?.toPay ?? 0;
+    const latestReceiveRow = monthEndReceiveRows[monthEndReceiveRows.length - 1];
+    const latestPayRow = monthEndPayRows[monthEndPayRows.length - 1];
+    const totalCreditVal = latestReceiveRow?.amount ?? 0;
+    const totalDebitVal = latestPayRow?.amount ?? 0;
     const totalSalesVal = monthlySalesList.reduce((s, i) => s + i.amount, 0);
     const totalProfitVal = monthlyProfitList.reduce((s, i) => s + i.profit, 0);
     const totalBillsOverview = salesOverviewChart.billAmounts.reduce((s, v) => s + v, 0);
@@ -1608,97 +1761,70 @@ export default function DashboardContent({ activeTab }) {
 
           {/* Monthly charts grid */}
           {analyticsWidgets.anyMonthlyChart && renderAnalyticsGrid([
-            (analyticsWidgets.monthlyCredit || analyticsWidgets.monthlyDebit) && {
-              key: 'month-end-closing',
+            analyticsWidgets.monthlyCredit && {
+              key: 'month-end-receive',
               node: (
-            <ReportWidgetShell accent={CHART_COLORS.credit} title="Month-end closing balances">
-              <WidgetDateFilter filters={monthEndFilters} onChange={setMonthEndFilters} loading={monthEndLoading} accent={CHART_COLORS.credit} />
+            <ReportWidgetShell accent={CHART_COLORS.credit} title="To Receive (closing)">
+              <WidgetMonthRangeFilter filters={monthEndReceiveFilters} onChange={setMonthEndReceiveFilters} loading={monthEndReceiveLoading} accent={CHART_COLORS.credit} />
               <ReportWidgetHeader
-                title="To receive & to pay by month"
-                subtitle="After each month’s transactions — closing balance totals (party accounts, excl. cash/bank)"
-                icon={BarChart3}
+                title="To Receive"
+                subtitle="Month-end closing balance to collect · party accounts (excl. cash/bank)"
+                icon={Banknote}
                 tint={CHART_COLORS.credit.tint}
                 primary={CHART_COLORS.credit.primary}
                 accent={CHART_COLORS.credit}
               />
               <ReportChartArea accent={CHART_COLORS.credit}>
-                {monthEndClosingRows.length === 0 && !monthEndLoading ? (
-                  <ChartEmptyState />
-                ) : (
-                  renderGroupedBarChart({
-                    chartId: 'monthEndClosing',
-                    labels: monthEndClosingRows.map((r) => r.label),
-                    series: [
-                      {
-                        key: 'receive',
-                        name: 'To receive',
-                        primary: CHART_COLORS.credit.primary,
-                        gradient: CHART_COLORS.credit.gradient,
-                        values: monthEndClosingRows.map((r) => r.toReceive),
-                      },
-                      {
-                        key: 'pay',
-                        name: 'To pay',
-                        primary: CHART_COLORS.debit.primary,
-                        gradient: CHART_COLORS.debit.gradient,
-                        values: monthEndClosingRows.map((r) => r.toPay),
-                      },
-                    ],
-                    formatValue: fmtK,
-                  })
-                )}
+                {renderSmoothBarChart({
+                  data: monthEndReceiveRows,
+                  getValue: (d) => d.amount,
+                  colorPrimary: CHART_COLORS.credit.primary,
+                  colorGradientStop: CHART_COLORS.credit.gradient,
+                  barId: 'gMonthEndReceive',
+                })}
               </ReportChartArea>
-              <ReportLegendRow accent={CHART_COLORS.credit}>
-                <span className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: CHART_COLORS.credit.primary }}>
-                  <span className="w-2.5 h-2.5 rounded-sm" style={{ background: CHART_COLORS.credit.primary }} />
-                  To receive
-                </span>
-                <span className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: CHART_COLORS.debit.primary }}>
-                  <span className="w-2.5 h-2.5 rounded-sm" style={{ background: CHART_COLORS.debit.primary }} />
-                  To pay
-                </span>
-              </ReportLegendRow>
-              <div className="px-4 pb-4 overflow-x-auto">
-                <table className="w-full text-sm border border-slate-200 rounded-xl overflow-hidden">
-                  <thead>
-                    <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                      <th className="px-4 py-2.5 font-bold">Month</th>
-                      <th className="px-4 py-2.5 font-bold">As of</th>
-                      <th className="px-4 py-2.5 font-bold text-right">To receive (PKR)</th>
-                      <th className="px-4 py-2.5 font-bold text-right">To pay (PKR)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {monthEndClosingRows.map((row) => (
-                      <tr key={row.period} className="hover:bg-slate-50/80">
-                        <td className="px-4 py-2.5 font-semibold text-slate-800">{row.label}</td>
-                        <td className="px-4 py-2.5 text-slate-600">{row.asOfDate ? formatDatePK(row.asOfDate) : '—'}</td>
-                        <td className="px-4 py-2.5 text-right font-semibold tabular-nums" style={{ color: CHART_COLORS.credit.primary }}>
-                          {fmtAmt(row.toReceive)}
-                        </td>
-                        <td className="px-4 py-2.5 text-right font-semibold tabular-nums" style={{ color: CHART_COLORS.debit.primary }}>
-                          {fmtAmt(row.toPay)}
-                        </td>
-                      </tr>
-                    ))}
-                    {monthEndClosingRows.length === 0 && !monthEndLoading && (
-                      <tr>
-                        <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
-                          No months in selected range
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
               <ReportWidgetFooter
                 accent={CHART_COLORS.credit}
                 formula={
-                  latestClosingRow
-                    ? `Latest month (${latestClosingRow.label}) after all transactions in that month`
-                    : `${monthEndClosingRows.length} month(s) in range`
+                  latestReceiveRow
+                    ? `Closing to collect · ${latestReceiveRow.label} (as of ${latestReceiveRow.asOfDate ? formatDatePK(latestReceiveRow.asOfDate) : latestReceiveRow.label})`
+                    : `${monthEndReceiveRows.length} month(s) in range`
                 }
-                total={`Receive PKR ${fmtAmt(totalCreditVal)} · Pay PKR ${fmtAmt(totalDebitVal)}`}
+                total={`To receive: PKR ${fmtAmt(totalCreditVal)}`}
+              />
+            </ReportWidgetShell>
+              ),
+            },
+            analyticsWidgets.monthlyDebit && {
+              key: 'month-end-pay',
+              node: (
+            <ReportWidgetShell accent={CHART_COLORS.debit} title="To Pay (closing)">
+              <WidgetMonthRangeFilter filters={monthEndPayFilters} onChange={setMonthEndPayFilters} loading={monthEndPayLoading} accent={CHART_COLORS.debit} />
+              <ReportWidgetHeader
+                title="To Pay"
+                subtitle="Month-end closing balance to pay · party accounts (excl. cash/bank)"
+                icon={CreditCard}
+                tint={CHART_COLORS.debit.tint}
+                primary={CHART_COLORS.debit.primary}
+                accent={CHART_COLORS.debit}
+              />
+              <ReportChartArea accent={CHART_COLORS.debit}>
+                {renderSmoothBarChart({
+                  data: monthEndPayRows,
+                  getValue: (d) => d.amount,
+                  colorPrimary: CHART_COLORS.debit.primary,
+                  colorGradientStop: CHART_COLORS.debit.gradient,
+                  barId: 'gMonthEndPay',
+                })}
+              </ReportChartArea>
+              <ReportWidgetFooter
+                accent={CHART_COLORS.debit}
+                formula={
+                  latestPayRow
+                    ? `Closing to pay · ${latestPayRow.label} (as of ${latestPayRow.asOfDate ? formatDatePK(latestPayRow.asOfDate) : latestPayRow.label})`
+                    : `${monthEndPayRows.length} month(s) in range`
+                }
+                total={`To pay: PKR ${fmtAmt(totalDebitVal)}`}
               />
             </ReportWidgetShell>
               ),
@@ -1773,6 +1899,26 @@ export default function DashboardContent({ activeTab }) {
               const color = CHART_COLORS.bills.primary;
               const n = Math.min(rows.length, 15);
               const neon = getReportNeonStyles(CHART_COLORS.bills);
+              const custCats = allCategories.filter(
+                (c) =>
+                  !c.cus_cat_title.toLowerCase().includes('supplier') &&
+                  !c.cus_cat_title.toLowerCase().includes('cash') &&
+                  !c.cus_cat_title.toLowerCase().includes('bank')
+              );
+              const selectedCustCat = custCats.find(
+                (c) => String(c.cus_cat_id) === String(topCustomersSaleFilters.cusCatId)
+              );
+              const custTypes = [...allCustomerTypes].sort((a, b) =>
+                (a.cus_type_title || '').localeCompare(b.cus_type_title || '', undefined, {
+                  sensitivity: 'base',
+                })
+              );
+              const selectedCustType = custTypes.find(
+                (t) => String(t.cus_type_id) === String(topCustomersSaleFilters.cusTypeId)
+              );
+              const saleFilterLabel = [selectedCustCat?.cus_cat_title, selectedCustType?.cus_type_title]
+                .filter(Boolean)
+                .join(' · ');
               return (
                 <ReportWidgetShell accent={CHART_COLORS.bills} title="Top Customers by Sale">
                   <WidgetDateFilter
@@ -1786,6 +1932,36 @@ export default function DashboardContent({ activeTab }) {
                       <p className="text-[10px] font-bold uppercase tracking-[0.08em]" style={{ color: neon.text }}>Top Customers by Sale</p>
                       <p className="text-xs text-slate-500 mt-1">Confirmed bills · each item qty × sale rate · minus returns</p>
                     </div>
+                    <select
+                      value={topCustomersSaleFilters.cusCatId}
+                      onChange={(e) =>
+                        setTopCustomersSaleFilters((f) => ({ ...f, cusCatId: e.target.value }))
+                      }
+                      className={`${REPORT.input} min-w-[160px] py-2`}
+                      style={{ borderColor: neon.chartBorder }}
+                    >
+                      <option value="">All Categories</option>
+                      {custCats.map((c) => (
+                        <option key={c.cus_cat_id} value={c.cus_cat_id}>
+                          {c.cus_cat_title}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={topCustomersSaleFilters.cusTypeId}
+                      onChange={(e) =>
+                        setTopCustomersSaleFilters((f) => ({ ...f, cusTypeId: e.target.value }))
+                      }
+                      className={`${REPORT.input} min-w-[160px] py-2`}
+                      style={{ borderColor: neon.chartBorder }}
+                    >
+                      <option value="">All Types</option>
+                      {custTypes.map((t) => (
+                        <option key={t.cus_type_id} value={t.cus_type_id}>
+                          {t.cus_type_title}
+                        </option>
+                      ))}
+                    </select>
                     <span className={REPORT.badge} style={{ color, background: CHART_COLORS.bills.tint, borderColor: neon.badgeBorder }}>
                       Top {n}
                     </span>
@@ -1802,7 +1978,11 @@ export default function DashboardContent({ activeTab }) {
                   </ReportChartArea>
                   <ReportWidgetFooter
                     accent={CHART_COLORS.bills}
-                    formula={`BILL invoices only · item qty × rate, then minus sale-return qty × rate · top ${n} customers`}
+                    formula={
+                      saleFilterLabel
+                        ? `${saleFilterLabel} · BILL invoices only · item qty × rate, minus returns · top ${n} customers`
+                        : `BILL invoices only · item qty × rate, then minus sale-return qty × rate · top ${n} customers`
+                    }
                     total={`PKR ${fmtAmt(topCustomersSaleTotal)}`}
                   />
                 </ReportWidgetShell>

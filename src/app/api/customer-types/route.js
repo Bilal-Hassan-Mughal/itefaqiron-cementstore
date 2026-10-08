@@ -4,12 +4,15 @@ import { getNextId } from '@/lib/id-helper';
 import { initBranchScope } from '@/lib/branch-server';
 
 // GET - Fetch all customer types
-export async function GET() {
+export async function GET(request) {
+  const __branchScope = await initBranchScope(request);
+  if (__branchScope.error) return __branchScope.error;
+
   try {
     const customerTypes = await prisma.customerType.findMany({
       orderBy: {
-        created_at: 'desc'
-      }
+        created_at: 'desc',
+      },
     });
 
     return NextResponse.json(customerTypes);
