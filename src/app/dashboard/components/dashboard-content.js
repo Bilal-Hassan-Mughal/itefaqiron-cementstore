@@ -416,6 +416,79 @@ function WidgetDateFilter({ filters, onChange, loading = false, accent }) {
   );
 }
 
+/** Category / type pills aligned with dashboard date filter bar. */
+function WidgetCustomerScopeFilter({
+  cusCatId,
+  cusTypeId,
+  categories,
+  types,
+  onCategoryChange,
+  onTypeChange,
+  onClearScope,
+  accent,
+  trailing = null,
+}) {
+  const neon = getReportNeonStyles(accent);
+  const hasScope = Boolean(cusCatId || cusTypeId);
+  const selectClass =
+    'text-[11px] font-medium text-slate-800 bg-transparent border-0 focus:outline-none focus:ring-0 cursor-pointer min-w-[7rem] max-w-[11rem] truncate py-0.5 pr-6';
+
+  return (
+    <div
+      className={REPORT.filterBody}
+      style={{ background: neon.filterBg, borderColor: neon.divider }}
+    >
+      <Users className="w-3.5 h-3.5 shrink-0" style={{ color: neon.primary }} />
+      <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide shrink-0">
+        Scope
+      </span>
+      <div className={REPORT.datePill} style={{ borderColor: neon.chartBorder }}>
+        <span className="text-[10px] font-semibold text-slate-500 shrink-0">Category</span>
+        <select
+          value={cusCatId}
+          onChange={(e) => onCategoryChange(e.target.value)}
+          className={selectClass}
+          style={{ color: cusCatId ? neon.primary : undefined }}
+        >
+          <option value="">All categories</option>
+          {categories.map((c) => (
+            <option key={c.cus_cat_id} value={c.cus_cat_id}>
+              {c.cus_cat_title}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className={REPORT.datePill} style={{ borderColor: neon.chartBorder }}>
+        <span className="text-[10px] font-semibold text-slate-500 shrink-0">Type</span>
+        <select
+          value={cusTypeId}
+          onChange={(e) => onTypeChange(e.target.value)}
+          className={selectClass}
+          style={{ color: cusTypeId ? neon.primary : undefined }}
+        >
+          <option value="">All types</option>
+          {types.map((t) => (
+            <option key={t.cus_type_id} value={t.cus_type_id}>
+              {t.cus_type_title}
+            </option>
+          ))}
+        </select>
+      </div>
+      {hasScope && (
+        <button
+          type="button"
+          onClick={onClearScope}
+          className="text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition-colors shrink-0"
+          style={{ color: CHART_COLORS.debit.primary }}
+        >
+          Reset scope
+        </button>
+      )}
+      {trailing && <div className="flex items-center gap-2 ml-auto shrink-0">{trailing}</div>}
+    </div>
+  );
+}
+
 function WidgetDayFilter({ days, onChange, loading = false, accent }) {
   const neon = getReportNeonStyles(accent);
   return (
@@ -1927,45 +2000,38 @@ export default function DashboardContent({ activeTab }) {
                     loading={topCustomersSaleLoading}
                     accent={CHART_COLORS.bills}
                   />
-                  <div className={`${REPORT.cardInner} flex flex-wrap items-center gap-3 border-b`} style={{ borderColor: neon.divider }}>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.08em]" style={{ color: neon.text }}>Top Customers by Sale</p>
-                      <p className="text-xs text-slate-500 mt-1">Confirmed bills · each item qty × sale rate · minus returns</p>
-                    </div>
-                    <select
-                      value={topCustomersSaleFilters.cusCatId}
-                      onChange={(e) =>
-                        setTopCustomersSaleFilters((f) => ({ ...f, cusCatId: e.target.value }))
-                      }
-                      className={`${REPORT.input} min-w-[160px] py-2`}
-                      style={{ borderColor: neon.chartBorder }}
-                    >
-                      <option value="">All Categories</option>
-                      {custCats.map((c) => (
-                        <option key={c.cus_cat_id} value={c.cus_cat_id}>
-                          {c.cus_cat_title}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={topCustomersSaleFilters.cusTypeId}
-                      onChange={(e) =>
-                        setTopCustomersSaleFilters((f) => ({ ...f, cusTypeId: e.target.value }))
-                      }
-                      className={`${REPORT.input} min-w-[160px] py-2`}
-                      style={{ borderColor: neon.chartBorder }}
-                    >
-                      <option value="">All Types</option>
-                      {custTypes.map((t) => (
-                        <option key={t.cus_type_id} value={t.cus_type_id}>
-                          {t.cus_type_title}
-                        </option>
-                      ))}
-                    </select>
-                    <span className={REPORT.badge} style={{ color, background: CHART_COLORS.bills.tint, borderColor: neon.badgeBorder }}>
-                      Top {n}
-                    </span>
-                  </div>
+                  <WidgetCustomerScopeFilter
+                    accent={CHART_COLORS.bills}
+                    cusCatId={topCustomersSaleFilters.cusCatId}
+                    cusTypeId={topCustomersSaleFilters.cusTypeId}
+                    categories={custCats}
+                    types={custTypes}
+                    onCategoryChange={(value) =>
+                      setTopCustomersSaleFilters((f) => ({ ...f, cusCatId: value }))
+                    }
+                    onTypeChange={(value) =>
+                      setTopCustomersSaleFilters((f) => ({ ...f, cusTypeId: value }))
+                    }
+                    onClearScope={() =>
+                      setTopCustomersSaleFilters((f) => ({ ...f, cusCatId: '', cusTypeId: '' }))
+                    }
+                    trailing={
+                      <span
+                        className={REPORT.badge}
+                        style={{ color, background: CHART_COLORS.bills.tint, borderColor: neon.badgeBorder }}
+                      >
+                        Top {n}
+                      </span>
+                    }
+                  />
+                  <ReportWidgetHeader
+                    title="Top Customers by Sale"
+                    subtitle="Confirmed bills · each item qty × sale rate · minus returns"
+                    icon={Users}
+                    tint={CHART_COLORS.bills.tint}
+                    primary={CHART_COLORS.bills.primary}
+                    accent={CHART_COLORS.bills}
+                  />
                   <ReportChartArea accent={CHART_COLORS.bills}>
                     {renderRankingBarChart({
                       rows,
