@@ -119,35 +119,40 @@ const fmtAmt = (val) => {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
-function buildPaymentReceiptPayload({
-  type,
-  paymentId = null,
-  customer,
-  previousBalance,
-  remainingBalance,
-  cashAmount,
-  bankAmount,
-  discountAmount,
-  totalAmount,
-  bankAcc,
-  cashAcc,
-  description,
-}) {
+/** Build receipt only after payment is saved (avoids PAY-null and wrong date/user). */
+function paymentReceiptFromSavedPayment(
+  result,
+  { type, customerFallback, cashAcc, bankAcc, cashAmount, bankAmount, discountAmount, totalAmount }
+) {
+  const paymentId = result?.payment_id;
+  if (paymentId == null) return null;
+
+  const previousBalance = result.customer_opening_balance;
+  const remainingBalance = result.customer_closing_balance;
+  const customer = result.account
+    ? { ...result.account, cus_balance: remainingBalance }
+    : customerFallback
+      ? { ...customerFallback, cus_balance: remainingBalance }
+      : null;
+
   return {
-    type,
+    type: result.payment_type || type,
     paymentId,
-    date: new Date().toLocaleDateString('en-GB'),
-    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
-    customer: customer ? { ...customer, cus_balance: remainingBalance } : null,
+    date: result.payment_date
+      ? formatDatePK(result.payment_date)
+      : formatDatePK(result.created_at || new Date()),
+    time: formatTimePK(result.created_at || new Date()),
+    created_by_user: result.created_by_user || null,
+    customer,
     previousBalance,
     remainingBalance,
-    cashAmount,
-    bankAmount,
-    discountAmount,
-    totalAmount,
-    bankAcc,
-    cashAcc,
-    description,
+    cashAmount: parseFloat(result.cash_amount ?? cashAmount ?? 0),
+    bankAmount: parseFloat(result.bank_amount ?? bankAmount ?? 0),
+    discountAmount: parseFloat(result.discount_amount ?? discountAmount ?? 0),
+    totalAmount: parseFloat(result.total_amount ?? totalAmount ?? 0),
+    bankAcc: result.bank_account || bankAcc || null,
+    cashAcc: result.cash_account || cashAcc || null,
+    description: result.description ?? '',
   };
 }
 
@@ -1748,8 +1753,9 @@ export default function FinancePage() {
         type,
         viewOnly: true,
         paymentId: p.payment_id,
-        date: p.payment_date ? new Date(p.payment_date).toLocaleDateString('en-GB') : '—',
-        time: p.created_at ? new Date(p.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : '—',
+        date: p.payment_date ? formatDatePK(p.payment_date) : '—',
+        time: p.created_at ? formatTimePK(p.created_at) : '—',
+        created_by_user: p.created_by_user || null,
         customer: acc,
         previousBalance: prevBal,
         remainingBalance: remBal,
@@ -2598,20 +2604,7 @@ export default function FinancePage() {
       if (!isPaymentEdit) {
         setShowReceivePaymentForm(false);
         clearPaymentEditState();
-        setPaymentReceiptData(buildPaymentReceiptPayload({
-          type: 'RECEIVE',
-          customer,
-          previousBalance,
-          remainingBalance: estimatedRemaining,
-          cashAmount,
-          bankAmount,
-          discountAmount,
-          totalAmount,
-          bankAcc,
-          cashAcc,
-          description: formData.description,
-        }));
-        setShowPaymentReceipt(true);
+        setPaymentStatus({ loading: true, error: null });
       } else {
         setPaymentStatus({ loading: true, error: null });
       }
@@ -2640,8 +2633,6 @@ export default function FinancePage() {
 
       if (response.ok) {
         const result = await response.json();
-        const displayPrevBal = result.customer_opening_balance !== undefined ? result.customer_opening_balance : previousBalance;
-        const displayRemBal = result.customer_closing_balance !== undefined ? result.customer_closing_balance : estimatedRemaining;
 
         if (isPaymentEdit) {
           setShowReceivePaymentForm(false);
@@ -2649,13 +2640,22 @@ export default function FinancePage() {
           await fetchData();
           alert('Receipt transaction updated successfully.');
         } else {
-          setPaymentReceiptData((prev) => ({
-            ...prev,
-            paymentId: result.payment_id,
-            previousBalance: displayPrevBal,
-            remainingBalance: displayRemBal,
-            customer: prev?.customer ? { ...prev.customer, cus_balance: displayRemBal } : prev?.customer,
-          }));
+          const receipt = paymentReceiptFromSavedPayment(result, {
+            type: 'RECEIVE',
+            customerFallback: customer,
+            cashAcc,
+            bankAcc,
+            cashAmount,
+            bankAmount,
+            discountAmount,
+            totalAmount,
+          });
+          if (receipt) {
+            setPaymentReceiptData(receipt);
+            setShowPaymentReceipt(true);
+          } else {
+            alert('Payment saved but receipt could not be loaded. Check Finance ledger for PAY reference.');
+          }
         }
 
         queueMicrotask(() => {
@@ -2672,18 +2672,10 @@ export default function FinancePage() {
           notifyLedgerDataChanged(isPaymentEdit ? 'payment-receive-edit' : 'payment-receive');
         });
       } else {
-        if (!isPaymentEdit) {
-          setShowPaymentReceipt(false);
-          setPaymentReceiptData(null);
-        }
         const error = await response.json();
         alert(`Error: ${error.error}`);
       }
     } catch (error) {
-      if (!isPaymentEdit) {
-        setShowPaymentReceipt(false);
-        setPaymentReceiptData(null);
-      }
       console.error('Error submitting payment:', error);
       alert('Failed to process payment');
     } finally {
@@ -2722,20 +2714,7 @@ export default function FinancePage() {
       if (!isPaymentEdit) {
         setShowPayPaymentForm(false);
         clearPaymentEditState();
-        setPaymentReceiptData(buildPaymentReceiptPayload({
-          type: 'PAY',
-          customer,
-          previousBalance,
-          remainingBalance: estimatedRemaining,
-          cashAmount,
-          bankAmount,
-          discountAmount,
-          totalAmount,
-          bankAcc,
-          cashAcc,
-          description: formData.description,
-        }));
-        setShowPaymentReceipt(true);
+        setPaymentStatus({ loading: true, error: null });
       } else {
         setPaymentStatus({ loading: true, error: null });
       }
@@ -2764,8 +2743,6 @@ export default function FinancePage() {
 
       if (response.ok) {
         const result = await response.json();
-        const displayPrevBal = result.customer_opening_balance !== undefined ? result.customer_opening_balance : previousBalance;
-        const displayRemBal = result.customer_closing_balance !== undefined ? result.customer_closing_balance : estimatedRemaining;
 
         if (isPaymentEdit) {
           setShowPayPaymentForm(false);
@@ -2773,13 +2750,22 @@ export default function FinancePage() {
           await fetchData();
           alert('Payment transaction updated successfully.');
         } else {
-          setPaymentReceiptData((prev) => ({
-            ...prev,
-            paymentId: result.payment_id,
-            previousBalance: displayPrevBal,
-            remainingBalance: displayRemBal,
-            customer: prev?.customer ? { ...prev.customer, cus_balance: displayRemBal } : prev?.customer,
-          }));
+          const receipt = paymentReceiptFromSavedPayment(result, {
+            type: 'PAY',
+            customerFallback: customer,
+            cashAcc,
+            bankAcc,
+            cashAmount,
+            bankAmount,
+            discountAmount,
+            totalAmount,
+          });
+          if (receipt) {
+            setPaymentReceiptData(receipt);
+            setShowPaymentReceipt(true);
+          } else {
+            alert('Payment saved but receipt could not be loaded. Check Finance ledger for PAY reference.');
+          }
         }
 
         queueMicrotask(() => {
@@ -2796,18 +2782,10 @@ export default function FinancePage() {
           notifyLedgerDataChanged(isPaymentEdit ? 'payment-pay-edit' : 'payment-pay');
         });
       } else {
-        if (!isPaymentEdit) {
-          setShowPaymentReceipt(false);
-          setPaymentReceiptData(null);
-        }
         const error = await response.json();
         alert(`Error: ${error.error}`);
       }
     } catch (error) {
-      if (!isPaymentEdit) {
-        setShowPaymentReceipt(false);
-        setPaymentReceiptData(null);
-      }
       console.error('Error submitting payment:', error);
       alert('Failed to process payment');
     } finally {
@@ -2817,6 +2795,10 @@ export default function FinancePage() {
 
   const handleSendPaymentWhatsApp = async () => {
     const d = paymentReceiptData;
+    if (d?.paymentId == null) {
+      alert('Payment reference is missing. Re-open the voucher from the ledger.');
+      return;
+    }
     if (!d?.customer?.cus_phone_no) {
       alert('No phone number on file for this account. Add a phone on the customer record to send WhatsApp.');
       return;
@@ -2856,7 +2838,7 @@ export default function FinancePage() {
             ${d.description ? `<p style="margin:4px 0;"><strong>Note:</strong> ${d.description}</p>` : ''}
           </div>
           <div style="text-align:right;">
-            <p style="margin:4px 0;"><strong>Ref #:</strong> PAY-${d.paymentId}</p>
+            <p style="margin:4px 0;"><strong>Ref #:</strong> PAY-${d.paymentId ?? '—'}</p>
             <p style="margin:4px 0;"><strong>Date:</strong> ${d.date || '—'}</p>
             <p style="margin:4px 0;"><strong>Time:</strong> ${d.time || '—'}</p>
             <p style="margin:4px 0;"><strong>Created By:</strong> ${getCreatedByName(d, currentUser)}</p>
@@ -5655,7 +5637,11 @@ export default function FinancePage() {
           <Button
             variant="outlined"
             color="success"
-            disabled={isSendingPaymentWhatsApp || !paymentReceiptData?.customer?.cus_phone_no}
+            disabled={
+              isSendingPaymentWhatsApp ||
+              paymentReceiptData?.paymentId == null ||
+              !paymentReceiptData?.customer?.cus_phone_no
+            }
             onClick={handleSendPaymentWhatsApp}
             startIcon={isSendingPaymentWhatsApp ? <CircularProgress size={18} /> : null}
           >
@@ -5663,8 +5649,9 @@ export default function FinancePage() {
           </Button>
           <Button
             variant="contained"
+            disabled={paymentReceiptData?.paymentId == null}
             onClick={() => {
-              if (!paymentReceiptData) return;
+              if (!paymentReceiptData || paymentReceiptData.paymentId == null) return;
               const d = paymentReceiptData;
               const fmt = (v) => (v == null || v === '' ? '—' : fmtAmt(v));
               const isRed = d.type === 'PAY';

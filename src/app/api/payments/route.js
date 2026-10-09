@@ -575,8 +575,26 @@ export async function POST(request) {
         if (bankEntry) updated_balances[parseInt(bank_account_id)] = bankEntry.closing_balance;
       }
 
+      const paymentRecord = await tx.payment.findUnique({
+        where: { payment_id: payment.payment_id },
+        include: {
+          account: {
+            select: { cus_id: true, cus_name: true, cus_phone_no: true },
+          },
+          cash_account: {
+            select: { cus_id: true, cus_name: true },
+          },
+          bank_account: {
+            select: { cus_id: true, cus_name: true },
+          },
+          created_by_user: {
+            select: { full_name: true, role: true },
+          },
+        },
+      });
+
       return {
-        ...payment,
+        ...paymentRecord,
         customer_opening_balance: mainAccountEntry.opening_balance,
         customer_closing_balance: mainAccountEntry.closing_balance,
         ledger_entries: createdLedgerEntries,
@@ -742,8 +760,26 @@ export async function PUT(request) {
         mainAccountIsBankOrCash,
       });
 
+      const paymentRecord = await tx.payment.findUnique({
+        where: { payment_id: payment.payment_id },
+        include: {
+          account: {
+            select: { cus_id: true, cus_name: true, cus_phone_no: true },
+          },
+          cash_account: {
+            select: { cus_id: true, cus_name: true },
+          },
+          bank_account: {
+            select: { cus_id: true, cus_name: true },
+          },
+          created_by_user: {
+            select: { full_name: true, role: true },
+          },
+        },
+      });
+
       return {
-        ...payment,
+        ...paymentRecord,
         customer_opening_balance: ledgerResult.mainAccountEntry.opening_balance,
         customer_closing_balance: ledgerResult.mainAccountEntry.closing_balance,
         ledger_entries: ledgerResult.createdLedgerEntries,
