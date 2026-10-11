@@ -98,6 +98,50 @@ export function draftLegAmount(draft) {
   return Math.max(parseFloat(draft?.debit || 0) || 0, parseFloat(draft?.credit || 0) || 0);
 }
 
+function findEntryForAccount(entries, cusId) {
+  if (cusId == null) return null;
+  return (entries || []).find((e) => Number(e.cus_id) === Number(cusId)) || null;
+}
+
+/** Amount for one payment leg: use inline draft when that row is in the edit group, else payment record. */
+export function legAmountFromTransactionEdit(cusId, entries, drafts, fallbackAmount) {
+  const entry = findEntryForAccount(entries, cusId);
+  if (entry && drafts?.[entry.l_id] != null) {
+    return draftLegAmount(drafts[entry.l_id]);
+  }
+  return parseFloat(fallbackAmount || 0) || 0;
+}
+
+export function validateLedgerTransactionDrafts(entries, drafts) {
+  for (const entry of entries || []) {
+    const d = drafts?.[entry.l_id];
+    if (!d) continue;
+    const debit = parseFloat(d.debit || 0) || 0;
+    const credit = parseFloat(d.credit || 0) || 0;
+    if (debit < 0 || credit < 0) {
+      return 'Debit and credit amounts cannot be negative.';
+    }
+    if (debit > 0 && credit > 0) {
+      return `Entry #${entry.l_id}: enter either debit or credit, not both.`;
+    }
+  }
+  return null;
+}
+
+export function validatePaymentUpdatePayload(payload) {
+  if (!payload) return 'Could not build payment update from ledger rows.';
+  const total = parseFloat(payload.total_amount || 0) || 0;
+  const discount = parseFloat(payload.discount_amount || 0) || 0;
+  const cash = parseFloat(payload.cash_amount || 0) || 0;
+  const bank = parseFloat(payload.bank_amount || 0) || 0;
+  if (total <= 0 && cash <= 0 && bank <= 0) return null;
+  const net = total - discount;
+  if (Math.abs(net - cash - bank) > 0.02) {
+    return `Cash PKR ${fmtAmt(cash)} + Bank PKR ${fmtAmt(bank)} must equal net PKR ${fmtAmt(net)} (total minus discount).`;
+  }
+  return null;
+}
+
 /** Build PUT /api/payments body when editing a PAY-* group in the finance ledger. */
 export function buildPaymentUpdatePayloadFromTransactionEdit(entries, drafts, existingPayment) {
   if (!existingPayment || !entries?.length) return null;
@@ -105,30 +149,57 @@ export function buildPaymentUpdatePayloadFromTransactionEdit(entries, drafts, ex
   const accountId = Number(existingPayment.account_id);
   const cashId = existingPayment.cash_account_id ? Number(existingPayment.cash_account_id) : null;
   const bankId = existingPayment.bank_account_id ? Number(existingPayment.bank_account_id) : null;
-  const byCus = new Map(entries.map((e) => [Number(e.cus_id), e]));
-  const mainEntry = byCus.get(accountId);
-  if (!mainEntry) return null;
-
-  let mainAmt = draftLegAmount(drafts[mainEntry.l_id]);
-  let cashAmt = cashId && byCus.get(cashId) ? draftLegAmount(drafts[byCus.get(cashId).l_id]) : 0;
-  let bankAmt = bankId && byCus.get(bankId) ? draftLegAmount(drafts[byCus.get(bankId).l_id]) : 0;
   const discount = parseFloat(existingPayment.discount_amount || 0);
 
-  if (mainAmt <= 0) {
+  const mainEntry = findEntryForAccount(entries, accountId);
+  let mainAmt = legAmountFromTransactionEdit(
+    accountId,
+    entries,
+    drafts,
+    existingPayment.total_amount
+  );
+  let cashAmt = legAmountFromTransactionEdit(
+    cashId,
+    entries,
+    drafts,
+    existingPayment.cash_amount
+  );
+  let bankAmt = legAmountFromTransactionEdit(
+    bankId,
+    entries,
+    drafts,
+    existingPayment.bank_amount
+  );
+
+  if (mainEntry && draftLegAmount(drafts[mainEntry.l_id]) <= 0) {
     mainAmt = 0;
     cashAmt = 0;
     bankAmt = 0;
-  } else if (bankId && Math.abs(cashAmt + bankAmt + discount - mainAmt) > 0.02) {
-    bankAmt = Math.max(0, mainAmt - discount - cashAmt);
+  } else {
+    const bankEdited = Boolean(findEntryForAccount(entries, bankId));
+    const cashEdited = Boolean(findEntryForAccount(entries, cashId));
+    const mainInEdit = Boolean(mainEntry);
+
+    if (!mainInEdit && (bankEdited || cashEdited)) {
+      mainAmt = Number((cashAmt + bankAmt + discount).toFixed(2));
+    } else if (mainAmt > 0) {
+      if (!bankEdited && bankId && Math.abs(cashAmt + bankAmt + discount - mainAmt) > 0.02) {
+        bankAmt = Math.max(0, mainAmt - discount - cashAmt);
+      } else if (!cashEdited && !bankEdited && bankId) {
+        bankAmt = Math.max(0, mainAmt - discount - cashAmt);
+      }
+    }
   }
 
   const paymentDateRaw = existingPayment.payment_date;
   const payment_date = paymentDateRaw
     ? String(paymentDateRaw).slice(0, 10)
     : new Date().toISOString().slice(0, 10);
-  const mainDraft = drafts[mainEntry.l_id];
+  const mainDraft = mainEntry ? drafts[mainEntry.l_id] : null;
   const description =
-    buildLiveEditParticulars(mainEntry, mainDraft) || existingPayment.description || '';
+    (mainEntry && buildLiveEditParticulars(mainEntry, mainDraft)) ||
+    existingPayment.description ||
+    '';
 
   return {
     id: existingPayment.payment_id,

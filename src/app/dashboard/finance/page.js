@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Fragment, useMemo, useRef, useCallback, forwardRef } from 'react';
+import { useState, useEffect, Fragment, useMemo, useRef, useCallback, forwardRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { getCreatedByName, parseAppDateTime, formatDatePK, formatTimePK } from '@/lib/date-helper';
 import {
@@ -62,6 +62,8 @@ import {
   getTransactionEditCaption,
   buildLiveEditParticulars,
   buildPaymentUpdatePayloadFromTransactionEdit,
+  validateLedgerTransactionDrafts,
+  validatePaymentUpdatePayload,
 } from './payment-form-utils';
 
 const isBenignFetchError = (error) => {
@@ -1091,7 +1093,7 @@ const getSupplierBalanceAfterBill = (bill) => {
   return Number((prev - getInvoiceRemainingDue(bill)).toFixed(2));
 };
 
-export default function FinancePage() {
+function FinancePageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   // PIN auth
@@ -1339,6 +1341,11 @@ export default function FinancePage() {
       alert('Sale, purchase and order ledger entries cannot be edited here. Edit the source document instead.');
       return;
     }
+    const txKey = getLedgerTransactionKey(entry);
+    if (/^JRN-\d+$/i.test(txKey)) {
+      alert(`Journal entry ${txKey.toUpperCase()} must be edited from General Journal.`);
+      return;
+    }
     const group = getTransactionGroupForEntry(entry, ledgerEntries).filter(canEditLedgerEntry);
     if (!group.length) return;
 
@@ -1397,7 +1404,17 @@ export default function FinancePage() {
     const authOk = await requireAuth();
     if (!authOk) return;
 
+    const draftError = validateLedgerTransactionDrafts(
+      ledgerTransactionEdit.entries,
+      ledgerTransactionEdit.drafts
+    );
+    if (draftError) {
+      alert(draftError);
+      return;
+    }
+
     setSavingTransactionEdit(true);
+    let savedAnyLedgerRow = false;
     try {
       const { entries, drafts, original, transactionKey } = ledgerTransactionEdit;
 
@@ -1405,10 +1422,14 @@ export default function FinancePage() {
       if (payMatch) {
         const paymentId = parseInt(payMatch[1], 10);
         const payRes = await fetch(`/api/payments?id=${paymentId}`);
-        if (!payRes.ok) throw new Error('Payment record not found for this ledger transaction');
+        if (!payRes.ok) {
+          const err = await payRes.json().catch(() => ({}));
+          throw new Error(err.error || 'Payment record not found for this ledger transaction');
+        }
         const existingPayment = await payRes.json();
         const payload = buildPaymentUpdatePayloadFromTransactionEdit(entries, drafts, existingPayment);
-        if (!payload) throw new Error('Could not build payment update from ledger rows');
+        const payloadError = validatePaymentUpdatePayload(payload);
+        if (payloadError) throw new Error(payloadError);
         const actorUserId = getCurrentUserId();
         if (!actorUserId) throw new Error('Session expired. Please log in again.');
         const res = await fetch('/api/payments', {
@@ -1422,6 +1443,9 @@ export default function FinancePage() {
         }
         await applyPaymentResultToState(await res.json());
       } else {
+        if (/^JRN-\d+$/i.test(String(transactionKey || ''))) {
+          throw new Error('Journal entries must be edited from General Journal.');
+        }
         for (const entry of entries) {
           const d = drafts[entry.l_id];
           const o = original[entry.l_id];
@@ -1444,6 +1468,7 @@ export default function FinancePage() {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `Failed to update entry #${entry.l_id}`);
           }
+          savedAnyLedgerRow = true;
         }
       }
 
@@ -1452,7 +1477,14 @@ export default function FinancePage() {
       notifyLedgerDataChanged('ledger-transaction-edit');
     } catch (err) {
       console.error('Error saving transaction edit:', err);
-      alert(err.message || 'Failed to save transaction');
+      const suffix = savedAnyLedgerRow
+        ? ' Some rows may already have been saved — the ledger was refreshed.'
+        : '';
+      alert((err.message || 'Failed to save transaction') + suffix);
+      if (savedAnyLedgerRow) {
+        await fetchData();
+        notifyLedgerDataChanged('ledger-transaction-edit-partial');
+      }
     } finally {
       setSavingTransactionEdit(false);
     }
@@ -7206,5 +7238,23 @@ export default function FinancePage() {
         side={showReceivePaymentForm || showPayPaymentForm ? 'right' : 'center'}
       />
     </DashboardLayout>
+  );
+}
+
+export default function FinancePage() {
+  return (
+    <Suspense
+      fallback={
+        <DashboardLayout>
+          <Container maxWidth={false} sx={{ py: 4 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+              <CircularProgress size={60} />
+            </Box>
+          </Container>
+        </DashboardLayout>
+      }
+    >
+      <FinancePageContent />
+    </Suspense>
   );
 }

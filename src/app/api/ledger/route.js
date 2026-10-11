@@ -489,6 +489,25 @@ export async function PUT(request) {
     if (!existingLedger) return errorResponse('Ledger entry not found', 404);
 
     if (direct_edit) {
+      const NON_EDITABLE_DIRECT = ['SALE', 'SALE_RETURN', 'PURCHASE', 'PURCHASE_RETURN', 'ORDER'];
+      if (NON_EDITABLE_DIRECT.includes(existingLedger.trnx_type)) {
+        return errorResponse(
+          'Sale, purchase and order ledger entries cannot be edited here. Edit the source document instead.',
+          403
+        );
+      }
+
+      const billRef = String(existingLedger.bill_no || '').trim().toUpperCase();
+      if (/^PAY-\d+$/.test(billRef)) {
+        return errorResponse(
+          'Payment entries are linked to cash/bank accounts. Use Edit Latest Transaction or open the payment from the row menu so all legs stay in sync.',
+          403
+        );
+      }
+      if (/^JRN-\d+$/.test(billRef)) {
+        return errorResponse('Journal entries must be edited from General Journal.', 403);
+      }
+
       const result = await prisma.$transaction(async (tx) => {
         // 1. Update the target ledger entry with the new values
         const updateData = {};
