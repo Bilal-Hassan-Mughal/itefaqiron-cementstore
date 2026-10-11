@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { formatDatePKWithMonthName, getCreatedByName } from '@/lib/date-helper';
+import { formatDatePK, formatDatePKWithMonthName, formatTimePK, getCreatedByName } from '@/lib/date-helper';
 import DashboardLayout from '../components/dashboard-layout';
 import DateFilterInput from '../components/date-filter-input';
 import { usePinAuth } from '../../hooks/usePinAuth';
@@ -208,10 +208,13 @@ export default function SaleReturnsPage() {
     loader_id: '',
     shipping_amount: 0,
     labour_charges: 0,
+    discount: 0,
     notes: '',
     manual_sale_inv: '',
     transport_account_id: ''
   });
+
+  const [originalBillDialog, setOriginalBillDialog] = useState(null);
 
   const [transportAccounts, setTransportAccounts] = useState([]);
 
@@ -476,6 +479,19 @@ export default function SaleReturnsPage() {
     setSelectedFormType(customerType);
     setFormCustomers(loadedFormCustomers);
 
+    let remainingByPro = new Map();
+    try {
+      const retRes = await fetch(`/api/sale-returns?returnableForSale=${fullSale.sale_id}`);
+      if (retRes.ok) {
+        const retJson = await retRes.json();
+        for (const line of retJson.lines || []) {
+          remainingByPro.set(line.pro_id, line);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not load returnable quantities:', err);
+    }
+
     setFormData(prev => ({
       ...prev,
       sale_id: fullSale.sale_id,
@@ -483,21 +499,28 @@ export default function SaleReturnsPage() {
       loader_id: fullSale.loader_id || '',
       shipping_amount: parseFloat(fullSale.shipping_amount || 0),
       labour_charges: parseFloat(fullSale.labour_charges || fullSale.labour || 0),
+      discount: parseFloat(fullSale.discount || 0),
       payment: 0,
       manual_sale_inv: fullSale.sale_id.toString(),
       transport_account_id: fullSale.transport_details?.[0]?.account_id
         ? String(fullSale.transport_details[0].account_id)
         : '',
-      return_details: fullSale.sale_details?.map(detail => ({
-        pro_id: detail.pro_id,
-        store_id: detail.store_id || fullSale.store_id,
-        max_quantity: detail.qnty || 0,
-        unit_rate: detail.unit_rate || 0,
-        unit: detail.unit || 'PCS',
-        return_quantity: 0,
-        return_amount: 0,
-        is_manual: false
-      })) || []
+      return_details: fullSale.sale_details?.map(detail => {
+        const rem = remainingByPro.get(detail.pro_id);
+        const maxQty = rem ? rem.remaining_qty : detail.qnty || 0;
+        return {
+          pro_id: detail.pro_id,
+          store_id: detail.store_id || fullSale.store_id,
+          max_quantity: maxQty,
+          sold_quantity: rem?.sold_qty ?? detail.qnty ?? 0,
+          already_returned: rem?.returned_qty ?? 0,
+          unit_rate: detail.unit_rate || 0,
+          unit: detail.unit || 'PCS',
+          return_quantity: 0,
+          return_amount: 0,
+          is_manual: false,
+        };
+      }).filter((row) => row.max_quantity > 0) || [],
     }));
 
     if (fullSale.store_id && stores.length > 0) {
@@ -613,6 +636,50 @@ export default function SaleReturnsPage() {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, []);
 
+  const computeNetReturnAmount = (data) => {
+    const sub = parseFloat(data.total_return_amount) || 0;
+    const ship = parseFloat(data.shipping_amount) || 0;
+    const labour = parseFloat(data.labour_charges) || 0;
+    const disc = parseFloat(data.discount) || 0;
+    return sub - ship - labour - disc;
+  };
+
+  const returnAllRemainingItems = () => {
+    setFormData((prev) => {
+      const updatedDetails = prev.return_details.map((detail) => {
+        const qty =
+          detail.max_quantity !== null && detail.max_quantity !== undefined
+            ? detail.max_quantity
+            : detail.return_quantity;
+        const returnAmount = qty * parseFloat(detail.unit_rate || 0);
+        return {
+          ...detail,
+          return_quantity: qty,
+          return_amount: returnAmount,
+        };
+      });
+      const totalReturnAmount = updatedDetails.reduce((sum, d) => sum + (d.return_amount || 0), 0);
+      return { ...prev, return_details: updatedDetails, total_return_amount: totalReturnAmount };
+    });
+    showSnackbar('All remaining bill quantities filled for return', 'success');
+  };
+
+  const openOriginalBillPreview = async (saleId) => {
+    if (!saleId) return;
+    try {
+      const res = await fetch(`/api/sales?id=${saleId}`);
+      if (!res.ok) {
+        showSnackbar('Original sale bill not found', 'error');
+        return;
+      }
+      const sale = await res.json();
+      setOriginalBillDialog(sale);
+    } catch (err) {
+      console.error(err);
+      showSnackbar('Error loading original bill', 'error');
+    }
+  };
+
   // Handle return quantity change
   const handleReturnQuantityChange = (index, quantity) => {
     const item = formData.return_details[index];
@@ -707,14 +774,23 @@ export default function SaleReturnsPage() {
       const url = '/api/sale-returns';
       const method = editingReturn ? 'PUT' : 'POST';
 
+      const refundAmt = parseFloat(formData.payment) || 0;
+      const payType = formData.payment_type || 'CASH';
+      const cashReturn = payType === 'CASH' ? refundAmt : 0;
+      const bankReturn = payType === 'BANK_TRANSFER' || payType === 'CHEQUE' ? refundAmt : 0;
+
       const body = {
         ...formData,
         sale_id: formData.sale_id || null,
         total_amount: formData.total_return_amount,
+        discount: parseFloat(formData.discount) || 0,
         reason: formData.return_reason,
         reference: formData.notes,
         return_details: returningItems,
         manual_sale_inv: formData.manual_sale_inv,
+        cash_return: cashReturn,
+        bank_return: bankReturn,
+        bank_account_id: bankReturn > 0 ? formData.bank_account_id || null : null,
         transport_details: shippingAmt > 0 && formData.transport_account_id
           ? [{
             account_id: parseInt(formData.transport_account_id, 10),
@@ -751,6 +827,7 @@ export default function SaleReturnsPage() {
           loader_id: '',
           shipping_amount: 0,
           labour_charges: 0,
+          discount: 0,
           notes: '',
           manual_sale_inv: '',
           transport_account_id: ''
@@ -852,9 +929,13 @@ export default function SaleReturnsPage() {
       loader_id: fullReturn.loader_id || '',
       shipping_amount: parseFloat(fullReturn.shipping_amount) || 0,
       labour_charges: parseFloat(fullReturn.labour_charges) || 0,
+      discount: parseFloat(fullReturn.discount) || 0,
       notes: fullReturn.reference || '',
       manual_sale_inv: fullReturn.manual_sale_inv || ''
     });
+    if (fullReturn.sale_id) {
+      setSelectedSale({ sale_id: fullReturn.sale_id, customer: fullReturn.customer });
+    }
     setCurrentView('create');
   };
 
@@ -898,8 +979,8 @@ export default function SaleReturnsPage() {
     const remaining = netReturn - payment;
     const newBal = parseFloat(customer?.cus_balance ?? 0);
     const prevBal = parseFloat(returnItem.previous_customer_balance ?? (newBal + netReturn - payment));
-    const returnDate = new Date(returnItem.return_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const returnTime = new Date(returnItem.return_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    const returnDate = formatDatePK(returnItem.return_date || returnItem.created_at);
+    const returnTime = formatTimePK(returnItem.created_at || returnItem.return_date);
 
     const itemRows = details.map((d, i) => `
       <tr>
@@ -1278,16 +1359,23 @@ export default function SaleReturnsPage() {
                                 </Typography>
                               </TableCell>
                               <TableCell>
-                                <Chip
-                                  label={returnItem.sale_id ? `#${returnItem.sale_id}` : (returnItem.manual_sale_inv || 'No Invoice')}
-                                  size="small"
-                                  variant="outlined"
-                                  sx={{
-                                    borderRadius: '6px',
-                                    fontWeight: 'bold',
-                                    bgcolor: returnItem.sale_id ? 'primary.50' : '#f8fafc'
-                                  }}
-                                />
+                                {returnItem.sale_id ? (
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={() => openOriginalBillPreview(returnItem.sale_id)}
+                                    sx={{ borderRadius: '6px', fontWeight: 'bold', textTransform: 'none' }}
+                                  >
+                                    Bill #{returnItem.sale_id}
+                                  </Button>
+                                ) : (
+                                  <Chip
+                                    label={returnItem.manual_sale_inv || 'No Invoice'}
+                                    size="small"
+                                    variant="outlined"
+                                    sx={{ borderRadius: '6px', fontWeight: 'bold', bgcolor: '#f8fafc' }}
+                                  />
+                                )}
                               </TableCell>
                               <TableCell>
                                 <Stack direction="row" spacing={1} alignItems="center">
@@ -1529,6 +1617,14 @@ export default function SaleReturnsPage() {
                                 <Typography variant="caption" color="primary.main" sx={{ fontWeight: 'bold', textTransform: 'uppercase' }}>Selected Sale</Typography>
                                 <Typography variant="body1" sx={{ fontWeight: '700' }}>#{selectedSale.sale_id} - {selectedSale.customer?.cus_name || formCustomers.find(c => c.cus_id === selectedSale.cus_id)?.cus_name || 'Walk-in'}</Typography>
                               </Box>
+                              <Stack direction="row" spacing={1} alignItems="center">
+                                <Button size="small" variant="contained" onClick={() => openOriginalBillPreview(selectedSale.sale_id)}>
+                                  View bill
+                                </Button>
+                                <Button size="small" variant="outlined" color="success" onClick={returnAllRemainingItems} disabled={!formData.return_details.length}>
+                                  Return all
+                                </Button>
+                              </Stack>
                               <IconButton size="small" color="error" onClick={() => {
                                 setSelectedSale(null);
                                 setSelectedFormType(null);
@@ -1791,9 +1887,16 @@ export default function SaleReturnsPage() {
                         <InventoryIcon color="primary" />
                         <Typography variant="h6" sx={{ fontWeight: '700' }}>Return Bag</Typography>
                       </Stack>
-                      <Typography variant="body2" color="text.secondary">
-                        {formData.return_details.length} Items Listed
-                      </Typography>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        {formData.sale_id && formData.return_details.length > 0 && (
+                          <Button size="small" variant="outlined" onClick={returnAllRemainingItems}>
+                            Return full bill (remaining qty)
+                          </Button>
+                        )}
+                        <Typography variant="body2" color="text.secondary">
+                          {formData.return_details.length} Items Listed
+                        </Typography>
+                      </Stack>
                     </Box>
                     <TableContainer>
                       <Table>
@@ -1802,7 +1905,7 @@ export default function SaleReturnsPage() {
                             <TableCell width="50">#</TableCell>
                             <TableCell>Product Information</TableCell>
                             <TableCell>Storage</TableCell>
-                            <TableCell align="center">Max Qty</TableCell>
+                            <TableCell align="center">Remaining</TableCell>
                             <TableCell align="right">Unit Rate</TableCell>
                             <TableCell align="center" width="120">Return Qty</TableCell>
                             <TableCell align="right">Line Total</TableCell>
@@ -1847,9 +1950,15 @@ export default function SaleReturnsPage() {
                                     </Select>
                                   </TableCell>
                                   <TableCell align="center">
-                                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                                    <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
                                       {detail.max_quantity !== null ? detail.max_quantity : '∞'}
                                     </Typography>
+                                    {detail.sold_quantity != null && (
+                                      <Typography variant="caption" display="block" color="text.disabled">
+                                        sold {detail.sold_quantity}
+                                        {detail.already_returned > 0 ? ` · ret ${detail.already_returned}` : ''}
+                                      </Typography>
+                                    )}
                                   </TableCell>
                                   <TableCell align="right">
                                     <Typography variant="body2" sx={{ fontWeight: '600' }}>{fmtAmt(detail.unit_rate)}</Typography>
@@ -1959,14 +2068,31 @@ export default function SaleReturnsPage() {
                                   <Typography sx={{ fontWeight: '700', color: 'error.main' }}>- PKR {fmtAmt(formData.labour_charges)}</Typography>
                                 </Box>
                               )}
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
+                                <Typography color="text.secondary">Return discount</Typography>
+                                <TextField
+                                  type="number"
+                                  size="small"
+                                  value={formData.discount}
+                                  onChange={(e) => setFormData((p) => ({ ...p, discount: parseFloat(e.target.value) || 0 }))}
+                                  sx={{ width: 140 }}
+                                  InputProps={{ startAdornment: <InputAdornment position="start">PKR</InputAdornment> }}
+                                />
+                              </Box>
+                              {formData.discount > 0 && (
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                                  <Typography color="text.secondary">Discount (deducted)</Typography>
+                                  <Typography sx={{ fontWeight: '700', color: 'error.main' }}>- PKR {fmtAmt(formData.discount)}</Typography>
+                                </Box>
+                              )}
                               <Divider />
                               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <Box>
                                   <Typography variant="h6" sx={{ fontWeight: '800' }}>Net Return</Typography>
-                                  <Typography variant="caption" color="text.secondary">Adjusted customer balance</Typography>
+                                  <Typography variant="caption" color="text.secondary">Matches ledger grand total (products − delivery − labour − discount)</Typography>
                                 </Box>
                                 <Typography variant="h5" sx={{ fontWeight: '900', color: 'success.main' }}>
-                                  PKR {fmtAmt(formData.total_return_amount - formData.shipping_amount - formData.labour_charges)}
+                                  PKR {fmtAmt(computeNetReturnAmount(formData))}
                                 </Typography>
                               </Box>
                               <Button
@@ -1998,6 +2124,72 @@ export default function SaleReturnsPage() {
               </Stack>
             </form>
           </Container>
+
+          <Dialog open={Boolean(originalBillDialog)} onClose={() => setOriginalBillDialog(null)} maxWidth="md" fullWidth>
+            <DialogTitle sx={{ fontWeight: 800 }}>
+              Original sale bill #{originalBillDialog?.sale_id}
+              {originalBillDialog?.bill_type ? ` · ${originalBillDialog.bill_type}` : ''}
+            </DialogTitle>
+            <DialogContent dividers>
+              {originalBillDialog && (
+                <Stack spacing={2}>
+                  <Typography variant="body2">
+                    Customer: <strong>{originalBillDialog.customer?.cus_name || '—'}</strong>
+                    {' · '}
+                    Date: <strong>{formatDatePK(originalBillDialog.created_at || originalBillDialog.sale_date)}</strong>
+                  </Typography>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Product</TableCell>
+                        <TableCell align="right">Qty</TableCell>
+                        <TableCell align="right">Rate</TableCell>
+                        <TableCell align="right">Amount</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {(originalBillDialog.sale_details || []).map((d, i) => (
+                        <TableRow key={i}>
+                          <TableCell>{d.product?.pro_title || d.pro_title || `Product #${d.pro_id}`}</TableCell>
+                          <TableCell align="right">{d.qnty}</TableCell>
+                          <TableCell align="right">{fmtAmt(d.unit_rate)}</TableCell>
+                          <TableCell align="right">{fmtAmt(d.net_total ?? d.total_amount)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  <Divider />
+                  <Stack spacing={0.5}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography color="text.secondary">Products total</Typography>
+                      <Typography fontWeight={700}>{fmtAmt(originalBillDialog.total_amount)}</Typography>
+                    </Box>
+                    {parseFloat(originalBillDialog.shipping_amount || 0) > 0 && (
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography color="text.secondary">Delivery</Typography>
+                        <Typography>{fmtAmt(originalBillDialog.shipping_amount)}</Typography>
+                      </Box>
+                    )}
+                    {parseFloat(originalBillDialog.labour_charges || originalBillDialog.labour || 0) > 0 && (
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography color="text.secondary">Labour</Typography>
+                        <Typography>{fmtAmt(originalBillDialog.labour_charges || originalBillDialog.labour)}</Typography>
+                      </Box>
+                    )}
+                    {parseFloat(originalBillDialog.discount || 0) > 0 && (
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography color="text.secondary">Discount</Typography>
+                        <Typography>{fmtAmt(originalBillDialog.discount)}</Typography>
+                      </Box>
+                    )}
+                  </Stack>
+                </Stack>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setOriginalBillDialog(null)}>Close</Button>
+            </DialogActions>
+          </Dialog>
         </Box>
       </DashboardLayout>
     );

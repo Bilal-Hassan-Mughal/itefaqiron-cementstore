@@ -106,6 +106,8 @@ export default function SaleCreateView() {
     handleRemoveProductFromTable,
     moveProductRow,
     handleSaleSearch,
+    loadSaleReturnInvoiceOptions,
+    saleInvoiceSearchLoading,
     handleSaveBill,
     handleSaveDraft,
     handleSearchOrder,
@@ -778,14 +780,7 @@ export default function SaleCreateView() {
                       open={saleSearchOpen}
                       onOpen={() => {
                         setSaleSearchOpen(true);
-                        // Always search when opening, either scoped to customer or all
-                        if (formSelectedCustomer) {
-                          const customerSales = sales.filter(s => s.cus_id === formSelectedCustomer.cus_id);
-                          setSaleSearchResults(customerSales);
-                        } else {
-                          // Show latest sales if no customer selected
-                          setSaleSearchResults(sales.slice(0, 50)); // Limit to prevent lag
-                        }
+                        loadSaleReturnInvoiceOptions('');
                       }}
                       onClose={() => setSaleSearchOpen(false)}
                       options={saleSearchResults}
@@ -802,24 +797,11 @@ export default function SaleCreateView() {
                       autoHighlight={true}
                       openOnFocus={true}
                       selectOnFocus={true}
-                      onInputChange={(event, inputValue) => {
-                        if (!formSelectedCustomer) {
-                          // Search across all sales if no customer selected
-                          if (!inputValue) {
-                            setSaleSearchResults(sales.slice(0, 50));
-                            return;
-                          }
-                          const searchLower = inputValue.toLowerCase();
-                          const results = sales.filter(sale =>
-                            sale.sale_id?.toString().includes(searchLower) ||
-                            sale.invoice_number?.toLowerCase().includes(searchLower) ||
-                            sale.reference?.toLowerCase().includes(searchLower)
-                          ).slice(0, 50);
-                          setSaleSearchResults(results);
-                        } else {
-                          handleSaleSearch(inputValue);
-                        }
+                      onInputChange={(event, inputValue, reason) => {
+                        if (reason === 'reset') return;
+                        handleSaleSearch(inputValue);
                       }}
+                      loading={saleInvoiceSearchLoading}
                       renderInput={(params) => (
                         <TextField
                           {...params}
@@ -838,13 +820,14 @@ export default function SaleCreateView() {
                             ...params.InputProps,
                             endAdornment: (
                               <>
+                                {saleInvoiceSearchLoading ? <CircularProgress color="inherit" size={18} /> : null}
                                 {params.InputProps.endAdornment}
                               </>
                             ),
                           }}
                         />
                       )}
-                      noOptionsText="No sales found"
+                      noOptionsText={saleInvoiceSearchLoading ? 'Loading sales…' : 'No sales found'}
                     />
                   </Box>
                 )}

@@ -97,6 +97,13 @@ import {
 
 import { getOfflineSalesQueue, saveOfflineSale, syncOfflineSalesQueue } from '@/lib/offline-sales-helper';
 import { BRAND, COMPANY } from '@/lib/brand-theme';
+import {
+  fetchSalesForReturnInvoicePicker,
+  normalizeReturnForReceipt,
+  resolveSaleReturnReceiptAmounts,
+  buildReturnDetailsFromCart,
+  getLinkedOriginalSaleId,
+} from './components/sale-utils';
 
 const INVOICE_STORE_PHONE_LINE = `Ph:- ${(COMPANY.phones || ['0300-7560306']).filter(Boolean).join(', ')}`;
 
@@ -981,6 +988,9 @@ function SalesPageContent() {
   // Sale Return state for main form
   const [saleSearchOpen, setSaleSearchOpen] = useState(false);
   const [saleSearchResults, setSaleSearchResults] = useState([]);
+  const [saleInvoiceSearchLoading, setSaleInvoiceSearchLoading] = useState(false);
+  const saleReturnInvoiceSearchRef = useRef(null);
+  const saleReturnSearchTimerRef = useRef(null);
   const [selectedSaleForReturnMain, setSelectedSaleForReturnMain] = useState(null); // Distinct from dialog state
 
   // Product form state
@@ -1874,7 +1884,9 @@ function SalesPageContent() {
   // Get display bill number: B-1 for BILL, O-1 for ORDER, Q-1 for QUOTATION, fallback to sale_id
   const getBillDisplayNo = (sale) => {
     if (sale?.bill_type === 'SALE_RETURN' || sale?.is_return) {
-      return sale?.sale_id ? `${sale.sale_id}` : (sale?.return_id ? `${sale.return_id}` : '');
+      if (sale?.return_id != null && sale.return_id !== '') return `SR-${sale.return_id}`;
+      if (sale?.sale_id) return `${sale.sale_id}`;
+      return '';
     }
     const bt = sale?.bill_type || 'BILL';
     if (bt === 'BILL') {
@@ -2225,6 +2237,15 @@ function SalesPageContent() {
         const isEditingReturn = Boolean(editingSale && (editingSale.is_return || editingSale.bill_type === 'SALE_RETURN' || editingSale.return_id));
         const editReturnId = editingSale?.return_id || (typeof editingSale?.sale_id === 'string' ? parseInt(editingSale.sale_id.replace('SR-', '')) : editingSale?.sale_id);
 
+        const returnLines = buildReturnDetailsFromCart(
+          getCartItemsInAddOrder(),
+          formSelectedStore?.storeid || selectedSaleForReturnMain?.store_id || null
+        );
+        if (returnLines.length === 0) {
+          showSnackbar('Each return line must have quantity greater than zero', 'error');
+          return;
+        }
+
         const returnBody = {
           id: isEditingReturn ? editReturnId : undefined,
           return_id: isEditingReturn ? editReturnId : undefined,
@@ -2245,14 +2266,7 @@ function SalesPageContent() {
           reference: paymentData.notes || '',
 
           // Return details from product table
-          return_details: getCartItemsInAddOrder().map(item => ({
-            pro_id: item.pro_id,
-            store_id: item.storeid || formSelectedStore?.storeid || selectedSaleForReturnMain?.store_id || null,
-            qnty: item.quantity, // Quantity to return
-            unit_rate: item.rate.toString(),
-            total_amount: item.amount.toString(),
-            discount: '0'
-          })),
+          return_details: returnLines,
           transport_details: (() => {
             if (deliveryCharges <= 0 || transportOptions.length === 0) return [];
             const totalDel = Math.max(deliveryCharges, calculateTransportTotal());
@@ -2280,6 +2294,7 @@ function SalesPageContent() {
         setCurrentBillData({
           ...(selectedSaleForReturnMain || {}),
           return_id: null,
+          sale_id: selectedSaleForReturnMain?.sale_id ?? null,
           customer: formSelectedCustomer || selectedSaleForReturnMain?.customer || {},
           sale_details: getCartItemsInAddOrder().map((item, idx) => ({
             sale_detail_id: idx,
@@ -2347,7 +2362,11 @@ function SalesPageContent() {
               const detailRes = await fetch(`/api/sale-returns?id=${saleReturnData.return_id}`);
               if (detailRes.ok) {
                 const fullReturn = await detailRes.json();
-                setCurrentBillData((prev) => (prev?.return_id === fullReturn.return_id ? { ...prev, ...fullReturn } : prev));
+                setCurrentBillData((prev) =>
+                  prev?.return_id === fullReturn.return_id
+                    ? normalizeReturnForReceipt({ ...prev, ...fullReturn, is_return: true })
+                    : prev
+                );
               }
             } catch {
               /* local receipt is enough */
@@ -4348,6 +4367,15 @@ function SalesPageContent() {
     }
   };
 
+  const handleViewOriginalSaleFromReturn = async (bill) => {
+    const saleId = getLinkedOriginalSaleId(bill);
+    if (!saleId) {
+      showSnackbar('No linked original sale invoice', 'warning');
+      return;
+    }
+    await handleViewBill({ sale_id: saleId, is_return: false, bill_type: 'BILL' });
+  };
+
   // Handle viewing receipt (same as viewing bill)
   const handleViewReceipt = async (sale) => {
     console.log('📋 Viewing receipt:', sale);
@@ -4689,6 +4717,19 @@ function SalesPageContent() {
       if (!response.ok) throw new Error('Failed to fetch sale details');
       const fullSale = await response.json();
 
+      let remainingByPro = new Map();
+      try {
+        const retRes = await fetch(`/api/sale-returns?returnableForSale=${fullSale.sale_id}`);
+        if (retRes.ok) {
+          const retData = await retRes.json();
+          for (const line of retData.lines || []) {
+            remainingByPro.set(line.pro_id, parseFloat(line.remaining_qty) || 0);
+          }
+        }
+      } catch {
+        /* use full sale qty */
+      }
+
       console.log('📦 Loaded Sale for Return:', fullSale);
       console.log('🔍 SALE DETAILS FOR RETURN:');
       console.log('  Sale ID:', fullSale.sale_id);
@@ -4766,18 +4807,31 @@ function SalesPageContent() {
 
       // Update product table with sale items
       if (fullSale.sale_details && Array.isArray(fullSale.sale_details)) {
-        const products = getSaleDetailsForCart(fullSale.sale_details).map(detail => ({
-          id: Date.now() + Math.random(),
-          pro_id: detail.pro_id,
-          pro_title: detail.product?.pro_title || detail.product?.pro_name || 'Unknown Product',
-          storeid: fullSale.store_id,
-          store_name: stores.find(s => s.storeid === fullSale.store_id)?.store_name || 'Store',
-          quantity: parseFloat(detail.qnty) || 0,
-          rate: parseFloat(detail.unit_rate) || 0,
-          amount: parseFloat(detail.total_amount) || 0,
-          cost_price: getProductCostPrice(detail.product),
-          stock: detail.product?.pro_stock_qnty || 0
-        }));
+        const remBucket = new Map(remainingByPro);
+        const products = getSaleDetailsForCart(fullSale.sale_details)
+          .map((detail) => {
+            let qty = parseFloat(detail.qnty) || 0;
+            if (remBucket.size > 0) {
+              const rem = remBucket.get(detail.pro_id) ?? 0;
+              const use = Math.min(qty, rem);
+              remBucket.set(detail.pro_id, Math.max(0, rem - use));
+              qty = use;
+            }
+            const rate = parseFloat(detail.unit_rate) || 0;
+            return {
+              id: Date.now() + Math.random(),
+              pro_id: detail.pro_id,
+              pro_title: detail.product?.pro_title || detail.product?.pro_name || 'Unknown Product',
+              storeid: detail.store_id || fullSale.store_id,
+              store_name: stores.find(s => s.storeid === (detail.store_id || fullSale.store_id))?.store_name || 'Store',
+              quantity: qty,
+              rate,
+              amount: qty * rate || parseFloat(detail.total_amount) || 0,
+              cost_price: getProductCostPrice(detail.product),
+              stock: detail.product?.pro_stock_qnty || 0,
+            };
+          })
+          .filter((row) => row.quantity > 0);
         setProductTableData(products);
         console.log('📦 Products loaded:', products);
       }
@@ -4813,36 +4867,33 @@ function SalesPageContent() {
     }
   };
 
-  // Handle searching for sales in return form
-  const handleSaleSearch = async (searchTerm) => {
+  const loadSaleReturnInvoiceOptions = useCallback(async (searchTerm = '') => {
+    saleReturnInvoiceSearchRef.current?.abort();
+    const ac = new AbortController();
+    saleReturnInvoiceSearchRef.current = ac;
+    setSaleInvoiceSearchLoading(true);
     try {
-      if (!searchTerm.trim()) {
-        setSaleSearchResults(sales.slice(0, 50));
-        return;
-      }
-
-      // Search by sale_id, reference, or within selected customer's sales
-      const searchLower = searchTerm.toLowerCase();
-      const results = sales.filter(sale => {
-        // Filter by customer if one is selected
-        if (formSelectedCustomer && sale.cus_id !== formSelectedCustomer.cus_id) {
-          return false;
-        }
-
-        return (
-          sale.sale_id?.toString().includes(searchLower) ||
-          sale.bill_number?.toString().includes(searchLower) ||
-          getBillDisplayNo(sale).toLowerCase().includes(searchLower) ||
-          sale.invoice_number?.toLowerCase().includes(searchLower) ||
-          sale.reference?.toLowerCase().includes(searchLower)
-        );
-      }).slice(0, 50);
-
-      setSaleSearchResults(results);
+      const rows = await fetchSalesForReturnInvoicePicker({
+        cusId: formSelectedCustomer?.cus_id,
+        q: searchTerm,
+        signal: ac.signal,
+      });
+      if (!ac.signal.aborted) setSaleSearchResults(rows);
     } catch (error) {
-      console.error('Error searching sales:', error);
-      showSnackbar('Error searching sales', 'error');
+      if (error?.name === 'AbortError') return;
+      console.error('Error searching sales for return:', error);
+      if (!ac.signal.aborted) setSaleSearchResults([]);
+    } finally {
+      if (!ac.signal.aborted) setSaleInvoiceSearchLoading(false);
     }
+  }, [formSelectedCustomer]);
+
+  // Handle searching for sales in return form (API — sales list is not loaded on create view)
+  const handleSaleSearch = (searchTerm) => {
+    if (saleReturnSearchTimerRef.current) clearTimeout(saleReturnSearchTimerRef.current);
+    saleReturnSearchTimerRef.current = setTimeout(() => {
+      loadSaleReturnInvoiceOptions(searchTerm);
+    }, 280);
   };
 
   // Handle adding customer category
@@ -6058,14 +6109,7 @@ function SalesPageContent() {
                       open={saleSearchOpen}
                       onOpen={() => {
                         setSaleSearchOpen(true);
-                        // Always search when opening, either scoped to customer or all
-                        if (formSelectedCustomer) {
-                          const customerSales = sales.filter(s => s.cus_id === formSelectedCustomer.cus_id);
-                          setSaleSearchResults(customerSales);
-                        } else {
-                          // Show latest sales if no customer selected
-                          setSaleSearchResults(sales.slice(0, 50)); // Limit to prevent lag
-                        }
+                        loadSaleReturnInvoiceOptions('');
                       }}
                       onClose={() => setSaleSearchOpen(false)}
                       options={saleSearchResults}
@@ -6082,24 +6126,11 @@ function SalesPageContent() {
                       autoHighlight={true}
                       openOnFocus={true}
                       selectOnFocus={true}
-                      onInputChange={(event, inputValue) => {
-                        if (!formSelectedCustomer) {
-                          // Search across all sales if no customer selected
-                          if (!inputValue) {
-                            setSaleSearchResults(sales.slice(0, 50));
-                            return;
-                          }
-                          const searchLower = inputValue.toLowerCase();
-                          const results = sales.filter(sale =>
-                            sale.sale_id?.toString().includes(searchLower) ||
-                            sale.invoice_number?.toLowerCase().includes(searchLower) ||
-                            sale.reference?.toLowerCase().includes(searchLower)
-                          ).slice(0, 50);
-                          setSaleSearchResults(results);
-                        } else {
-                          handleSaleSearch(inputValue);
-                        }
+                      onInputChange={(event, inputValue, reason) => {
+                        if (reason === 'reset') return;
+                        handleSaleSearch(inputValue);
                       }}
+                      loading={saleInvoiceSearchLoading}
                       renderInput={(params) => (
                         <TextField
                           {...params}
@@ -6118,13 +6149,14 @@ function SalesPageContent() {
                             ...params.InputProps,
                             endAdornment: (
                               <>
+                                {saleInvoiceSearchLoading ? <CircularProgress color="inherit" size={18} /> : null}
                                 {params.InputProps.endAdornment}
                               </>
                             ),
                           }}
                         />
                       )}
-                      noOptionsText="No sales found"
+                      noOptionsText={saleInvoiceSearchLoading ? 'Loading sales…' : 'No sales found'}
                     />
                   </Box>
                 )}
@@ -9222,6 +9254,24 @@ function SalesPageContent() {
                         {getBillDisplayNo(currentBillData)}
                       </Typography>
                     </Box>
+                    {getLinkedOriginalSaleId(currentBillData) && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1, mb: 0.75, width: '100%', flexWrap: 'nowrap' }}>
+                        <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Original Sale:</Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
+                          #{getLinkedOriginalSaleId(currentBillData)}
+                        </Typography>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<VisibilityIcon sx={{ fontSize: 16 }} />}
+                          onClick={() => handleViewOriginalSaleFromReturn(currentBillData)}
+                          sx={{ py: 0.25, px: 1, minWidth: 0, fontSize: '0.75rem', textTransform: 'none' }}
+                          className="no-print"
+                        >
+                          View invoice
+                        </Button>
+                      </Box>
+                    )}
                     <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 1, mb: 0.75, width: '100%', flexWrap: 'nowrap' }}>
                       <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Date:</Typography>
                       <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
@@ -9308,57 +9358,54 @@ function SalesPageContent() {
                   {/* Payment Summary */}
                   <Box sx={{ mt: 2, width: '100%', display: 'flex', justifyContent: 'space-between', gap: 2 }}>
                     <Box sx={{ flex: '0 0 48%' }}>
-                      {!isWalkinCustomer(currentBillData?.customer) && (
+                      {(currentBillData?.is_return || !isWalkinCustomer(currentBillData?.customer)) && (
                         <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, border: '1px solid #000', width: '100%' }}>
                           <Table size="small">
                             <TableBody>
                               {currentBillData?.is_return ? (
                                 (() => {
-                                  const totalRefund = parseFloat(currentBillData.payment || 0);
-                                  const prevBal = parseFloat(currentBillData.previous_balance ?? currentBillData.previous_customer_balance ?? currentBillData.customer?.cus_balance ?? 0);
-                                  const productTotal = (currentBillData.sale_details || []).reduce((sum, item) => sum + (parseFloat(item.total_amount) || 0), 0);
-                                  const discount = parseFloat(currentBillData.discount || 0);
-                                  const labour = parseFloat(currentBillData.labour_charges || currentBillData.labour || 0);
-                                  const shipping = parseFloat(currentBillData.shipping_amount || 0);
-                                  const netReturn = productTotal - discount - labour - shipping;
-                                  const newBal = prevBal - netReturn + totalRefund;
+                                  const r = resolveSaleReturnReceiptAmounts(currentBillData);
                                   return (
                                     <>
                                       <TableRow>
                                         <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>منسوخ کردہ رقم</TableCell>
-                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{fmtAmt(productTotal)}</TableCell>
+                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{fmtAmt(r.productTotal)}</TableCell>
                                       </TableRow>
-                                      {discount > 0 && (
+                                      {r.discount > 0 && (
                                         <TableRow>
                                           <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>رعایت</TableCell>
-                                          <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>-{fmtAmt(discount)}</TableCell>
+                                          <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>-{fmtAmt(r.discount)}</TableCell>
                                         </TableRow>
                                       )}
-                                      <TableRow>
-                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>مزدوری</TableCell>
-                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>-{fmtAmt(labour)}</TableCell>
-                                      </TableRow>
-                                      <TableRow>
-                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>کرایہ</TableCell>
-                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>-{fmtAmt(shipping)}</TableCell>
-                                      </TableRow>
+                                      {r.labour > 0 && (
+                                        <TableRow>
+                                          <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>مزدوری</TableCell>
+                                          <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>-{fmtAmt(r.labour)}</TableCell>
+                                        </TableRow>
+                                      )}
+                                      {r.shipping > 0 && (
+                                        <TableRow>
+                                          <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>کرایہ</TableCell>
+                                          <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>-{fmtAmt(r.shipping)}</TableCell>
+                                        </TableRow>
+                                      )}
                                       <TableRow sx={{ bgcolor: '#e8f5e9' }}>
                                         <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>کل منسوخی</TableCell>
                                         <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: '#2e7d32' }}>
-                                          {fmtAmt(netReturn)}
+                                          {fmtAmt(r.netReturn)}
                                         </TableCell>
                                       </TableRow>
                                       <TableRow sx={{ bgcolor: '#ffe0b2' }}>
-                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>کل واپسی</TableCell>
-                                        <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: '#e65100', fontSize: '1rem' }}>{fmtAmt(totalRefund)}</TableCell>
+                                        <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>نقد/بینک واپسی</TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: '#e65100', fontSize: '1rem' }}>{fmtAmt(r.totalRefund)}</TableCell>
                                       </TableRow>
                                       <TableRow>
                                         <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>سابقہ بقایا</TableCell>
-                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{fmtAmt(prevBal)}</TableCell>
+                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}` }}>{fmtAmt(r.prevBal)}</TableCell>
                                       </TableRow>
                                       <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.balanceTotalBg }}>
                                         <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>موجودہ بقایا</TableCell>
-                                        <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>{fmtAmt(newBal)}</TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, color: SALE_INVOICE_PRINT.balanceTotalText }}>{fmtAmt(r.newBal)}</TableCell>
                                       </TableRow>
                                     </>
                                   );
@@ -9405,59 +9452,55 @@ function SalesPageContent() {
                         <Table size="small">
                           <TableBody>
                             {currentBillData?.is_return ? (
-                              // ── SALE RETURN right panel (Urdu) ──
                               (() => {
-                                const productTotal = parseFloat(currentBillData.total_amount || 0);
-                                const labour = parseFloat(currentBillData.labour_charges || 0);
-                                const delivery = parseFloat(currentBillData.shipping_amount || 0);
-                                const discount = parseFloat(currentBillData.discount || 0);
-                                // netReturn = items - labour - delivery - discount
-                                const netReturn = productTotal - labour - delivery - discount;
-                                const cash = parseFloat(currentBillData.cash_refund || currentBillData.cash_payment || 0);
-                                const bank = parseFloat(currentBillData.bank_refund || currentBillData.bank_payment || 0);
-                                // remaining = net return not yet refunded
-                                const remaining = netReturn - (cash + bank);
+                                const r = resolveSaleReturnReceiptAmounts(currentBillData);
+                                const accountLabel =
+                                  r.accountAdjustment > 0.009
+                                    ? r.cashBankRefund > 0
+                                      ? 'باقی (کھاتے میں کٹوتی)'
+                                      : 'کھاتے میں کٹوتی'
+                                    : 'باقی واپسی';
                                 return (
                                   <>
                                     <TableRow>
                                       <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رقم بل</TableCell>
-                                      <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>{fmtAmt(productTotal)}</TableCell>
+                                      <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>{fmtAmt(r.productTotal)}</TableCell>
                                     </TableRow>
-                                    {labour > 0 && (
+                                    {r.labour > 0 && (
                                       <TableRow>
                                         <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>مزدوری</TableCell>
-                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>-{fmtAmt(labour)}</TableCell>
+                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>-{fmtAmt(r.labour)}</TableCell>
                                       </TableRow>
                                     )}
-                                    {delivery > 0 && (
+                                    {r.shipping > 0 && (
                                       <TableRow>
                                         <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>کرایہ</TableCell>
-                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>-{fmtAmt(delivery)}</TableCell>
+                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>-{fmtAmt(r.shipping)}</TableCell>
                                       </TableRow>
                                     )}
-                                    {discount > 0 && (
+                                    {r.discount > 0 && (
                                       <TableRow>
                                         <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>رعایت</TableCell>
-                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>-{fmtAmt(discount)}</TableCell>
+                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>-{fmtAmt(r.discount)}</TableCell>
                                       </TableRow>
                                     )}
                                     <TableRow sx={{ bgcolor: SALE_INVOICE_PRINT.grandTotalBg }}>
                                       <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>کل واپسی رقم</TableCell>
-                                      <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>{fmtAmt(netReturn)}</TableCell>
+                                      <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: SALE_INVOICE_PRINT.bodyText }}>{fmtAmt(r.netReturn)}</TableCell>
                                     </TableRow>
                                     <TableRow>
                                       <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>نقد</TableCell>
-                                      <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>{fmtAmt(cash)}</TableCell>
+                                      <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>{fmtAmt(r.cash)}</TableCell>
                                     </TableRow>
-                                    {bank > 0 && (
+                                    {r.bank > 0 && (
                                       <TableRow>
                                         <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>{currentBillData.bank_title || 'بینک ادائیگی'}</TableCell>
-                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>{fmtAmt(bank)}</TableCell>
+                                        <TableCell align="right" sx={{ px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>{fmtAmt(r.bank)}</TableCell>
                                       </TableRow>
                                     )}
-                                    <TableRow sx={{ bgcolor: remaining > 0 ? '#ffe0b2' : '#e8f5e9' }}>
-                                      <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>باقی واجب الادا</TableCell>
-                                      <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: remaining > 0 ? '#e65100' : '#2e7d32' }}>{fmtAmt(remaining)}</TableCell>
+                                    <TableRow sx={{ bgcolor: r.accountAdjustment > 0.009 ? '#ffe0b2' : '#e8f5e9' }}>
+                                      <TableCell sx={{ fontWeight: 'bold', direction: 'rtl', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem' }}>{accountLabel}</TableCell>
+                                      <TableCell align="right" sx={{ fontWeight: 'bold', px: 1, py: 0.5, border: `1px solid ${SALE_INVOICE_PRINT.border}`, fontSize: '0.875rem', color: r.accountAdjustment > 0.009 ? '#e65100' : '#2e7d32' }}>{fmtAmt(r.accountAdjustment)}</TableCell>
                                     </TableRow>
                                   </>
                                 );
@@ -9539,6 +9582,17 @@ function SalesPageContent() {
           >
             Close
           </Button>
+          {getLinkedOriginalSaleId(currentBillData) && (
+            <Button
+              variant="outlined"
+              color="secondary"
+              startIcon={<VisibilityIcon />}
+              onClick={() => handleViewOriginalSaleFromReturn(currentBillData)}
+              sx={{ minWidth: 140, textTransform: 'none', fontWeight: 600 }}
+            >
+              Original invoice
+            </Button>
+          )}
           <Button
             variant="contained"
             startIcon={isSendingWhatsApp ? <CircularProgress size={16} sx={{ color: 'white' }} /> : null}

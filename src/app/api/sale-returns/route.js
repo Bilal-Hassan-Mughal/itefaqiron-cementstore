@@ -398,6 +398,82 @@ async function getSpecialAccounts(tx) {
   return accounts;
 }
 
+/** Sold vs already-returned quantities for a linked sale bill. */
+async function getReturnableQuantitiesBySale(tx, saleId, excludeReturnId = null) {
+  const sale = await tx.sale.findUnique({
+    where: { sale_id: saleId },
+    include: { sale_details: true },
+  });
+  if (!sale) return null;
+
+  const priorReturns = await tx.saleReturn.findMany({
+    where: {
+      sale_id: saleId,
+      ...(excludeReturnId ? { return_id: { not: excludeReturnId } } : {}),
+    },
+    include: { return_details: true },
+  });
+
+  const returnedByPro = new Map();
+  for (const pr of priorReturns) {
+    for (const d of pr.return_details) {
+      returnedByPro.set(d.pro_id, (returnedByPro.get(d.pro_id) || 0) + Number(d.qnty || 0));
+    }
+  }
+
+  const soldByPro = new Map();
+  for (const sd of sale.sale_details) {
+    soldByPro.set(sd.pro_id, (soldByPro.get(sd.pro_id) || 0) + Number(sd.qnty || 0));
+  }
+
+  const lines = [];
+  for (const [pro_id, sold_qty] of soldByPro) {
+    const returned_qty = returnedByPro.get(pro_id) || 0;
+    lines.push({
+      pro_id,
+      sold_qty,
+      returned_qty,
+      remaining_qty: Math.max(0, sold_qty - returned_qty),
+    });
+  }
+
+  return { sale_id: saleId, bill_type: sale.bill_type, lines };
+}
+
+function parseReturnQty(raw) {
+  const n = parseFloat(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Drop zero-qty lines; supports decimal quantities (parseInt was turning 0.5 into 0). */
+function sanitizeReturnDetailsForValidation(return_details) {
+  return (return_details || []).filter((rd) => parseReturnQty(rd.qnty) > 0);
+}
+
+async function validateReturnDetailsForSale(tx, saleId, return_details, excludeReturnId = null) {
+  const returnable = await getReturnableQuantitiesBySale(tx, saleId, excludeReturnId);
+  if (!returnable) {
+    throw new Error('Sale not found');
+  }
+  const remainingMap = new Map(returnable.lines.map((l) => [l.pro_id, l.remaining_qty]));
+  const returnByPro = new Map();
+  for (const rd of sanitizeReturnDetailsForValidation(return_details)) {
+    const returnQty = parseReturnQty(rd.qnty);
+    returnByPro.set(rd.pro_id, (returnByPro.get(rd.pro_id) || 0) + returnQty);
+  }
+  if (returnByPro.size === 0) {
+    throw new Error('No return line items with quantity greater than zero');
+  }
+  for (const [pro_id, returnQty] of returnByPro) {
+    const remaining = remainingMap.get(pro_id) ?? 0;
+    if (returnQty > remaining + 0.0001) {
+      throw new Error(
+        `Return qty (${returnQty}) exceeds remaining returnable qty (${remaining}) for product ${pro_id} on sale #${saleId}`
+      );
+    }
+  }
+}
+
 // GET - Fetch all sale returns with related data
 export async function GET(request) {
   const __branchScope = await initBranchScope(request);
@@ -407,6 +483,17 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id') ? parseInt(searchParams.get('id')) : null;
     const listMode = searchParams.get('list') === 'true';
+    const returnableForSale = searchParams.get('returnableForSale')
+      ? parseInt(searchParams.get('returnableForSale'), 10)
+      : null;
+
+    if (returnableForSale) {
+      const data = await getReturnableQuantitiesBySale(prisma, returnableForSale);
+      if (!data) {
+        return NextResponse.json({ error: 'Sale not found' }, { status: 404 });
+      }
+      return NextResponse.json(data);
+    }
 
     if (id) {
       // Fetch single sale return
@@ -673,10 +760,13 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
+    const activeReturnDetails = sanitizeReturnDetailsForValidation(return_details);
+    if (activeReturnDetails.length === 0) {
+      return NextResponse.json({ error: 'Add at least one line with return quantity greater than zero' }, { status: 400 });
+    }
+
     // Calculate totals from return_details for safety and consistency
-    const computedTotal = Array.isArray(return_details)
-      ? return_details.reduce((sum, d) => sum + (parseFloat(d.total_amount) || 0), 0)
-      : 0;
+    const computedTotal = activeReturnDetails.reduce((sum, d) => sum + (parseFloat(d.total_amount) || 0), 0);
     const discountAmount = parseFloat(discount || 0);
     const labourChargesAmount = parseFloat(labour_charges || 0);
     const shippingAmount = parseFloat(shipping_amount || 0);
@@ -732,22 +822,8 @@ export async function POST(request) {
       const finalBillType = bill_type || sale?.bill_type || 'BILL';
       const isQuotationReturn = finalBillType === 'QUOTATION';
 
-      // Validate each return detail if sale exists
-      if (sale) {
-        const qtyByProduct = new Map();
-        for (const d of sale.sale_details) {
-          qtyByProduct.set(d.pro_id, (qtyByProduct.get(d.pro_id) || 0) + Number(d.qnty || 0));
-        }
-        for (const rd of return_details) {
-          const soldQty = qtyByProduct.get(rd.pro_id) || 0;
-          const returnQty = parseInt(rd.qnty) || 0;
-          if (returnQty <= 0) {
-            throw new Error(`Invalid return quantity for product ${rd.pro_id}`);
-          }
-          if (returnQty > soldQty) {
-            throw new Error(`Return qty (${returnQty}) exceeds sold qty (${soldQty}) for product ${rd.pro_id}`);
-          }
-        }
+      if (sale_id) {
+        await validateReturnDetailsForSale(tx, parseInt(sale_id, 10), activeReturnDetails);
       }
 
       const customer = await validateReturnCustomer(tx, cus_id, transport_details);
@@ -775,7 +851,7 @@ export async function POST(request) {
       });
 
       // Create return details
-      const returnDetailPromises = return_details.map(async detail => {
+      const returnDetailPromises = activeReturnDetails.map(async detail => {
         // Get unit from original sale details or default
         let unit = 'PCS';
         if (sale) {
@@ -792,7 +868,7 @@ export async function POST(request) {
           data: {
             return_id: saleReturn.return_id,
             pro_id: detail.pro_id,
-            qnty: parseInt(detail.qnty),
+            qnty: parseReturnQty(detail.qnty),
             unit: unit,
             unit_rate: parseFloat(detail.unit_rate),
             total_amount: parseFloat(detail.total_amount),
@@ -812,11 +888,11 @@ export async function POST(request) {
       if (!isQuotationReturn) {
         // Restore store stock quantities (skip for quotations)
         // Use detail.store_id / storeid if available (for manual items), otherwise sale.store_id
-        const storeStockRestorePromises = return_details.map(async detail => {
+        const storeStockRestorePromises = activeReturnDetails.map(async detail => {
           const rawStoreId = detail.store_id || detail.storeid || sale?.store_id;
           const targetStoreId = rawStoreId ? parseInt(rawStoreId) : null;
           if (targetStoreId && !isNaN(targetStoreId)) {
-            await updateStoreStock(targetStoreId, detail.pro_id, parseInt(detail.qnty), 'increment', validatedUpdatedBy, tx);
+            await updateStoreStock(targetStoreId, detail.pro_id, parseReturnQty(detail.qnty), 'increment', validatedUpdatedBy, tx);
           }
         });
 
@@ -1095,9 +1171,15 @@ export async function PUT(request) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const computedTotal = Array.isArray(return_details)
-      ? return_details.reduce((sum, d) => sum + (parseFloat(d.total_amount) || (parseFloat(d.qnty || 0) * parseFloat(d.unit_rate || 0)) || 0), 0)
-      : 0;
+    const activeReturnDetailsPut = sanitizeReturnDetailsForValidation(return_details);
+    if (activeReturnDetailsPut.length === 0) {
+      return NextResponse.json({ error: 'Add at least one line with return quantity greater than zero' }, { status: 400 });
+    }
+
+    const computedTotal = activeReturnDetailsPut.reduce(
+      (sum, d) => sum + (parseFloat(d.total_amount) || (parseReturnQty(d.qnty) * parseFloat(d.unit_rate || 0)) || 0),
+      0
+    );
     const discountAmount = parseFloat(discount || 0);
     const labourChargesAmount = parseFloat(labour_charges || 0);
     const shippingAmount = parseFloat(shipping_amount || 0);
@@ -1135,6 +1217,16 @@ export async function PUT(request) {
         throw new Error('Sale return not found');
       }
 
+      const parsedSaleIdForPut =
+        (sale_id && typeof sale_id === 'string' && !sale_id.startsWith('SR-')
+          ? parseInt(sale_id, 10)
+          : typeof sale_id === 'number' && !isNaN(sale_id)
+            ? sale_id
+            : existingReturn.sale_id) || null;
+      if (parsedSaleIdForPut) {
+        await validateReturnDetailsForSale(tx, parsedSaleIdForPut, activeReturnDetailsPut, targetReturnId);
+      }
+
       // Collect affected account IDs
       const oldEntries = await tx.ledger.findMany({
         where: ledgerBillNoWhere(targetReturnId),
@@ -1149,7 +1241,7 @@ export async function PUT(request) {
         const rawStoreId = d.store_id || existingReturn.sale?.store_id;
         const targetStoreId = rawStoreId ? parseInt(rawStoreId) : null;
         if (targetStoreId && !isNaN(targetStoreId)) {
-          await updateStoreStock(targetStoreId, d.pro_id, parseInt(d.qnty), 'decrement', validatedUpdatedBy, tx);
+          await updateStoreStock(targetStoreId, d.pro_id, parseReturnQty(d.qnty), 'decrement', validatedUpdatedBy, tx);
         }
       }
 
@@ -1200,7 +1292,7 @@ export async function PUT(request) {
       });
 
       // 6. Create new return details and increment store stock
-      for (const detail of return_details) {
+      for (const detail of activeReturnDetailsPut) {
         let unit = 'PCS';
         if (existingReturn.sale) {
           const originalDetail = existingReturn.sale.sale_details?.find(sd => sd.pro_id === detail.pro_id);
@@ -1211,7 +1303,7 @@ export async function PUT(request) {
 
         const rawStoreId = detail.store_id || detail.storeid || existingReturn.sale?.store_id;
         const targetStoreId = rawStoreId ? parseInt(rawStoreId) : null;
-        const qntyNum = parseInt(detail.qnty || detail.return_quantity || 0);
+        const qntyNum = parseReturnQty(detail.qnty ?? detail.return_quantity);
         const rateNum = parseFloat(detail.unit_rate || 0);
         const lineTotal = parseFloat(detail.total_amount || detail.return_amount || (qntyNum * rateNum) || 0);
         const lineDiscount = parseFloat(detail.discount || 0);

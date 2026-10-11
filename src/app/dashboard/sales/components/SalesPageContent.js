@@ -154,6 +154,11 @@ import {
   SALES_FILTER_FIELD_SX,
   getBillTypeChipSx,
   INVOICE_STORE_PHONE_LINE,
+  fetchSalesForReturnInvoicePicker,
+  normalizeReturnForReceipt,
+  resolveSaleReturnReceiptAmounts,
+  buildReturnDetailsFromCart,
+  getLinkedOriginalSaleId,
 } from './sale-utils';
 import SaleDropdownListbox, { SaleCustomerDropdownListbox } from './SaleDropdownListbox';
 
@@ -485,6 +490,9 @@ export default function SalesPageContent() {
   // Sale Return state for main form
   const [saleSearchOpen, setSaleSearchOpen] = useState(false);
   const [saleSearchResults, setSaleSearchResults] = useState([]);
+  const [saleInvoiceSearchLoading, setSaleInvoiceSearchLoading] = useState(false);
+  const saleReturnInvoiceSearchRef = useRef(null);
+  const saleReturnSearchTimerRef = useRef(null);
   const [selectedSaleForReturnMain, setSelectedSaleForReturnMain] = useState(null); // Distinct from dialog state
 
   // Product form state
@@ -1376,7 +1384,9 @@ export default function SalesPageContent() {
   // Get display bill number: B-1 for BILL, O-1 for ORDER, Q-1 for QUOTATION, fallback to sale_id
   const getBillDisplayNo = (sale) => {
     if (sale?.bill_type === 'SALE_RETURN' || sale?.is_return) {
-      return sale?.sale_id ? `${sale.sale_id}` : (sale?.return_id ? `${sale.return_id}` : '');
+      if (sale?.return_id != null && sale.return_id !== '') return `SR-${sale.return_id}`;
+      if (sale?.sale_id) return `${sale.sale_id}`;
+      return '';
     }
     const bt = sale?.bill_type || 'BILL';
     if (bt === 'BILL') {
@@ -1694,6 +1704,15 @@ export default function SalesPageContent() {
         const isEditingReturn = Boolean(editingSale && (editingSale.is_return || editingSale.bill_type === 'SALE_RETURN' || editingSale.return_id));
         const editReturnId = editingSale?.return_id || (typeof editingSale?.sale_id === 'string' ? parseInt(editingSale.sale_id.replace('SR-', '')) : editingSale?.sale_id);
 
+        const returnLines = buildReturnDetailsFromCart(
+          getCartItemsInAddOrder(),
+          formSelectedStore?.storeid || selectedSaleForReturnMain?.store_id || null
+        );
+        if (returnLines.length === 0) {
+          showSnackbar('Each return line must have quantity greater than zero', 'error');
+          return;
+        }
+
         const returnBody = {
           id: isEditingReturn ? editReturnId : undefined,
           return_id: isEditingReturn ? editReturnId : undefined,
@@ -1714,14 +1733,7 @@ export default function SalesPageContent() {
           reference: paymentData.notes || '',
 
           // Return details from product table
-          return_details: getCartItemsInAddOrder().map(item => ({
-            pro_id: item.pro_id,
-            store_id: item.storeid || formSelectedStore?.storeid || selectedSaleForReturnMain?.store_id || null,
-            qnty: item.quantity, // Quantity to return
-            unit_rate: item.rate.toString(),
-            total_amount: item.amount.toString(),
-            discount: '0'
-          })),
+          return_details: returnLines,
           updated_by: getCurrentUserId()
         };
 
@@ -1734,6 +1746,7 @@ export default function SalesPageContent() {
         setCurrentBillData({
           ...(selectedSaleForReturnMain || {}),
           return_id: null,
+          sale_id: selectedSaleForReturnMain?.sale_id ?? null,
           customer: formSelectedCustomer || selectedSaleForReturnMain?.customer || {},
           sale_details: getCartItemsInAddOrder().map((item, idx) => ({
             sale_detail_id: idx,
@@ -1801,7 +1814,11 @@ export default function SalesPageContent() {
               const detailRes = await fetch(`/api/sale-returns?id=${saleReturnData.return_id}`);
               if (detailRes.ok) {
                 const fullReturn = await detailRes.json();
-                setCurrentBillData((prev) => (prev?.return_id === fullReturn.return_id ? { ...prev, ...fullReturn } : prev));
+                setCurrentBillData((prev) =>
+                  prev?.return_id === fullReturn.return_id
+                    ? normalizeReturnForReceipt({ ...prev, ...fullReturn, is_return: true })
+                    : prev
+                );
               }
             } catch {
               /* local receipt is enough */
@@ -3764,6 +3781,15 @@ export default function SalesPageContent() {
     }
   };
 
+  const handleViewOriginalSaleFromReturn = async (bill) => {
+    const saleId = getLinkedOriginalSaleId(bill);
+    if (!saleId) {
+      showSnackbar('No linked original sale invoice', 'warning');
+      return;
+    }
+    await handleViewBill({ sale_id: saleId, is_return: false, bill_type: 'BILL' });
+  };
+
   // Handle viewing receipt (same as viewing bill)
   const handleViewReceipt = async (sale) => {
     console.log('ðŸ“‹ Viewing receipt:', sale);
@@ -4105,6 +4131,19 @@ export default function SalesPageContent() {
       if (!response.ok) throw new Error('Failed to fetch sale details');
       const fullSale = await response.json();
 
+      let remainingByPro = new Map();
+      try {
+        const retRes = await fetch(`/api/sale-returns?returnableForSale=${fullSale.sale_id}`);
+        if (retRes.ok) {
+          const retData = await retRes.json();
+          for (const line of retData.lines || []) {
+            remainingByPro.set(line.pro_id, parseFloat(line.remaining_qty) || 0);
+          }
+        }
+      } catch {
+        /* use full sale qty */
+      }
+
       console.log('ðŸ“¦ Loaded Sale for Return:', fullSale);
       console.log('ðŸ” SALE DETAILS FOR RETURN:');
       console.log('  Sale ID:', fullSale.sale_id);
@@ -4182,18 +4221,31 @@ export default function SalesPageContent() {
 
       // Update product table with sale items
       if (fullSale.sale_details && Array.isArray(fullSale.sale_details)) {
-        const products = getSaleDetailsForCart(fullSale.sale_details).map(detail => ({
-          id: Date.now() + Math.random(),
-          pro_id: detail.pro_id,
-          pro_title: detail.product?.pro_title || detail.product?.pro_name || 'Unknown Product',
-          storeid: fullSale.store_id,
-          store_name: stores.find(s => s.storeid === fullSale.store_id)?.store_name || 'Store',
-          quantity: parseFloat(detail.qnty) || 0,
-          rate: parseFloat(detail.unit_rate) || 0,
-          amount: parseFloat(detail.total_amount) || 0,
-          cost_price: getProductCostPrice(detail.product),
-          stock: detail.product?.pro_stock_qnty || 0
-        }));
+        const remBucket = new Map(remainingByPro);
+        const products = getSaleDetailsForCart(fullSale.sale_details)
+          .map((detail) => {
+            let qty = parseFloat(detail.qnty) || 0;
+            if (remBucket.size > 0) {
+              const rem = remBucket.get(detail.pro_id) ?? 0;
+              const use = Math.min(qty, rem);
+              remBucket.set(detail.pro_id, Math.max(0, rem - use));
+              qty = use;
+            }
+            const rate = parseFloat(detail.unit_rate) || 0;
+            return {
+              id: Date.now() + Math.random(),
+              pro_id: detail.pro_id,
+              pro_title: detail.product?.pro_title || detail.product?.pro_name || 'Unknown Product',
+              storeid: detail.store_id || fullSale.store_id,
+              store_name: stores.find(s => s.storeid === (detail.store_id || fullSale.store_id))?.store_name || 'Store',
+              quantity: qty,
+              rate,
+              amount: qty * rate || parseFloat(detail.total_amount) || 0,
+              cost_price: getProductCostPrice(detail.product),
+              stock: detail.product?.pro_stock_qnty || 0,
+            };
+          })
+          .filter((row) => row.quantity > 0);
         setProductTableData(products);
         console.log('ðŸ“¦ Products loaded:', products);
       }
@@ -4229,36 +4281,33 @@ export default function SalesPageContent() {
     }
   };
 
-  // Handle searching for sales in return form
-  const handleSaleSearch = async (searchTerm) => {
+  const loadSaleReturnInvoiceOptions = useCallback(async (searchTerm = '') => {
+    saleReturnInvoiceSearchRef.current?.abort();
+    const ac = new AbortController();
+    saleReturnInvoiceSearchRef.current = ac;
+    setSaleInvoiceSearchLoading(true);
     try {
-      if (!searchTerm.trim()) {
-        setSaleSearchResults(sales.slice(0, 50));
-        return;
-      }
-
-      // Search by sale_id, reference, or within selected customer's sales
-      const searchLower = searchTerm.toLowerCase();
-      const results = sales.filter(sale => {
-        // Filter by customer if one is selected
-        if (formSelectedCustomer && sale.cus_id !== formSelectedCustomer.cus_id) {
-          return false;
-        }
-
-        return (
-          sale.sale_id?.toString().includes(searchLower) ||
-          sale.bill_number?.toString().includes(searchLower) ||
-          getBillDisplayNo(sale).toLowerCase().includes(searchLower) ||
-          sale.invoice_number?.toLowerCase().includes(searchLower) ||
-          sale.reference?.toLowerCase().includes(searchLower)
-        );
-      }).slice(0, 50);
-
-      setSaleSearchResults(results);
+      const rows = await fetchSalesForReturnInvoicePicker({
+        cusId: formSelectedCustomer?.cus_id,
+        q: searchTerm,
+        signal: ac.signal,
+      });
+      if (!ac.signal.aborted) setSaleSearchResults(rows);
     } catch (error) {
-      console.error('Error searching sales:', error);
-      showSnackbar('Error searching sales', 'error');
+      if (error?.name === 'AbortError') return;
+      console.error('Error searching sales for return:', error);
+      if (!ac.signal.aborted) setSaleSearchResults([]);
+    } finally {
+      if (!ac.signal.aborted) setSaleInvoiceSearchLoading(false);
     }
+  }, [formSelectedCustomer]);
+
+  // Handle searching for sales in return form (API — sales list is not loaded on create view)
+  const handleSaleSearch = (searchTerm) => {
+    if (saleReturnSearchTimerRef.current) clearTimeout(saleReturnSearchTimerRef.current);
+    saleReturnSearchTimerRef.current = setTimeout(() => {
+      loadSaleReturnInvoiceOptions(searchTerm);
+    }, 280);
   };
 
   // Handle adding customer category
@@ -4978,6 +5027,8 @@ export default function SalesPageContent() {
     selectedSaleForReturnMain, setSelectedSaleForReturnMain,
     saleSearchOpen, setSaleSearchOpen,
     saleSearchResults, setSaleSearchResults,
+    saleInvoiceSearchLoading,
+    loadSaleReturnInvoiceOptions,
     ledgerDialogOpen, setLedgerDialogOpen,
     ledgerLoading, setLedgerLoading,
     showAddProductPopup, setShowAddProductPopup,
@@ -5106,6 +5157,8 @@ export default function SalesPageContent() {
     handleOpenCustomerLedger,
     fetchLedgerData,
     handleViewBill,
+    handleViewOriginalSaleFromReturn,
+    getLinkedOriginalSaleId,
     resolveBillForActions,
     handleEdit,
     handlePrintBill,

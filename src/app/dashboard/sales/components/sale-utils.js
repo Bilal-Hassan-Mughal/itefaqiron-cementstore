@@ -522,3 +522,126 @@ export const getBillTypeChipSx = (billType) => {
   }
   return { bgcolor: '#e6fff4', color: '#00a868', border: '1px solid #99ebc9' };
 };
+
+/** Map API sale-return record to receipt shape (sale_details for print). */
+export function normalizeReturnForReceipt(record) {
+  if (!record) return record;
+  const isReturn =
+    record.is_return || record.bill_type === 'SALE_RETURN' || record.return_id != null;
+  if (!isReturn) return record;
+  const returnDetails = record.return_details || [];
+  const sale_details = record.sale_details?.length
+    ? record.sale_details
+    : returnDetails.map((d, idx) => ({
+        sale_detail_id: d.return_detail_id ?? idx,
+        qnty: d.qnty ?? d.return_quantity,
+        unit_rate: d.unit_rate,
+        total_amount: d.total_amount ?? d.return_amount,
+        product: d.product,
+        size: d.size,
+      }));
+  return {
+    ...record,
+    is_return: true,
+    bill_type: record.bill_type || 'SALE_RETURN',
+    sale_details,
+  };
+}
+
+/** Line items + ledger amounts for sale return receipts (matches sale-returns API grandTotal). */
+export function resolveSaleReturnReceiptAmounts(bill) {
+  const details = bill?.sale_details || bill?.return_details || [];
+  const productFromLines = details.reduce(
+    (sum, item) => sum + (parseFloat(item.total_amount ?? item.return_amount) || 0),
+    0
+  );
+  const productTotal =
+    productFromLines > 0 ? productFromLines : parseFloat(bill?.total_amount || 0);
+  const discount = parseFloat(bill?.discount || 0);
+  const labour = parseFloat(bill?.labour_charges ?? bill?.labour ?? 0);
+  const shipping = parseFloat(bill?.shipping_amount || 0);
+  const netReturn = productTotal - discount - labour - shipping;
+  const cash = parseFloat(bill?.cash_refund ?? bill?.cash_payment ?? bill?.cash_return ?? 0);
+  const bank = parseFloat(bill?.bank_refund ?? bill?.bank_payment ?? bill?.bank_return ?? 0);
+  const cashBankRefund = cash + bank;
+  const totalRefund = parseFloat(bill?.payment ?? 0) || cashBankRefund;
+  const accountAdjustment = Math.max(0, netReturn - cashBankRefund);
+  const prevBal = parseFloat(
+    bill?.previous_balance ??
+      bill?.previous_customer_balance ??
+      bill?.customer?.cus_balance ??
+      0
+  );
+  const newBal = prevBal - netReturn + totalRefund;
+  return {
+    productTotal,
+    discount,
+    labour,
+    shipping,
+    netReturn,
+    cash,
+    bank,
+    cashBankRefund,
+    accountAdjustment,
+    totalRefund,
+    prevBal,
+    newBal,
+  };
+}
+
+/** Numeric sale_id of the original bill linked to a return receipt (null if manual / unknown). */
+export function getLinkedOriginalSaleId(bill) {
+  if (!bill) return null;
+  const isReturn = bill.is_return || bill.bill_type === 'SALE_RETURN' || bill.return_id != null;
+  if (!isReturn) return null;
+  const raw = bill.actual_sale_id ?? bill.sale_id;
+  if (raw == null || raw === '') return null;
+  const str = String(raw).trim();
+  if (str.startsWith('SR-') || str.toUpperCase().startsWith('SR')) return null;
+  const n = parseInt(str.replace(/^#/, ''), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Cart rows → API return_details (skips zero qty). */
+export function buildReturnDetailsFromCart(cartItems, storeIdFallback = null) {
+  return (cartItems || [])
+    .filter((item) => (parseFloat(item.quantity) || 0) > 0)
+    .map((item) => ({
+      pro_id: item.pro_id,
+      store_id: item.storeid || item.store_id || storeIdFallback || null,
+      qnty: parseFloat(item.quantity) || 0,
+      unit_rate: String(item.rate ?? 0),
+      total_amount: String(item.amount ?? 0),
+      discount: '0',
+    }));
+}
+
+/** Load sale bills for the Sale Return "Select invoice" picker (create view does not preload the sales list). */
+export async function fetchSalesForReturnInvoicePicker(options = {}) {
+  const { cusId, q, signal } = options;
+  const params = new URLSearchParams({
+    list: 'true',
+    page: '1',
+    pageSize: '50',
+    bill_type: 'BILL',
+    sort_by: 'created_at',
+    sort_order: 'desc',
+  });
+  if (cusId != null && cusId !== '') params.set('cus_id', String(cusId));
+  const trimmed = String(q ?? '').trim();
+  if (trimmed) params.set('q', trimmed);
+
+  const res = await fetch(`/api/sales?${params.toString()}`, {
+    cache: 'no-store',
+    ...(signal ? { signal } : {}),
+  });
+  if (!res.ok) {
+    throw new Error('Failed to load sales');
+  }
+  const payload = await res.json();
+  return Array.isArray(payload?.data)
+    ? payload.data
+    : Array.isArray(payload)
+      ? payload
+      : [];
+}
