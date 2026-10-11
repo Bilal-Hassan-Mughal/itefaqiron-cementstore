@@ -125,6 +125,18 @@ export async function persistPaymentLedger(tx, ctx) {
     await tx.paymentDetail.createMany({ data: paymentDetails });
   }
 
+  const totalAmtNum = parseFloat(total_amount) || 0;
+  const cashAmtNum = parseFloat(cash_amount) || 0;
+  const bankAmtNum = parseFloat(bank_amount) || 0;
+  if (totalAmtNum <= 0 && cashAmtNum <= 0 && bankAmtNum <= 0) {
+    const bal = balanceMap[parseInt(account_id)] || 0;
+    return {
+      mainAccountEntry: { opening_balance: bal, closing_balance: bal },
+      createdLedgerEntries: [],
+      updated_balances: {},
+    };
+  }
+
   const ledgerEntries = [];
   let mainDebitAmount = 0;
   let mainCreditAmount = 0;

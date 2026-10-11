@@ -170,10 +170,15 @@ function PaymentFormDialog({
         afterHint: 'Pay Amount debits the selected account (balance increases by the entered amount).',
       };
 
+  const handleDialogClose = () => {
+    if (loading) return;
+    onClose();
+  };
+
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={handleDialogClose}
       maxWidth="sm"
       fullWidth
       disableEnforceFocus={authOpen}
@@ -187,6 +192,8 @@ function PaymentFormDialog({
       }}
       PaperProps={{
         sx: {
+          position: 'relative',
+          overflow: 'hidden',
           borderRadius: 2,
           maxWidth: 600,
           m: { xs: 1, md: 2 },
@@ -202,6 +209,28 @@ function PaymentFormDialog({
         },
       }}
     >
+      {loading && (
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 20,
+            bgcolor: 'rgba(255,255,255,0.82)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 1.5,
+            px: 3,
+          }}
+        >
+          <CircularProgress size={44} />
+          <Typography sx={{ fontWeight: 700, color: '#0f172a' }}>Processing payment…</Typography>
+          <Typography variant="body2" color="text.secondary" textAlign="center">
+            Please wait while we save and generate your receipt
+          </Typography>
+        </Box>
+      )}
       <DialogTitle
         component="div"
         sx={{
@@ -384,7 +413,7 @@ function PaymentFormDialog({
       </DialogContent>
 
       <DialogActions sx={{ p: 3, borderTop: '1px solid #e2e8f0', bgcolor: '#f8fafc' }}>
-        <Button onClick={onClose} sx={{ color: '#64748b' }}>
+        <Button onClick={onClose} disabled={loading} sx={{ color: '#64748b' }}>
           Cancel
         </Button>
         <Button

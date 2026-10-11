@@ -89,7 +89,63 @@ export function getTransactionEditCaption(entry, draft) {
   return `Editing · ${name}`;
 }
 
-/** Update description for this row only from manual debit/credit input — no cross-row sync */
+export function isLedgerBankOrCashEntry(entry) {
+  const title = (entry?.customer?.customer_category?.cus_cat_title || '').toLowerCase();
+  return title.includes('bank') || title.includes('cash');
+}
+
+export function draftLegAmount(draft) {
+  return Math.max(parseFloat(draft?.debit || 0) || 0, parseFloat(draft?.credit || 0) || 0);
+}
+
+/** Build PUT /api/payments body when editing a PAY-* group in the finance ledger. */
+export function buildPaymentUpdatePayloadFromTransactionEdit(entries, drafts, existingPayment) {
+  if (!existingPayment || !entries?.length) return null;
+
+  const accountId = Number(existingPayment.account_id);
+  const cashId = existingPayment.cash_account_id ? Number(existingPayment.cash_account_id) : null;
+  const bankId = existingPayment.bank_account_id ? Number(existingPayment.bank_account_id) : null;
+  const byCus = new Map(entries.map((e) => [Number(e.cus_id), e]));
+  const mainEntry = byCus.get(accountId);
+  if (!mainEntry) return null;
+
+  let mainAmt = draftLegAmount(drafts[mainEntry.l_id]);
+  let cashAmt = cashId && byCus.get(cashId) ? draftLegAmount(drafts[byCus.get(cashId).l_id]) : 0;
+  let bankAmt = bankId && byCus.get(bankId) ? draftLegAmount(drafts[byCus.get(bankId).l_id]) : 0;
+  const discount = parseFloat(existingPayment.discount_amount || 0);
+
+  if (mainAmt <= 0) {
+    mainAmt = 0;
+    cashAmt = 0;
+    bankAmt = 0;
+  } else if (bankId && Math.abs(cashAmt + bankAmt + discount - mainAmt) > 0.02) {
+    bankAmt = Math.max(0, mainAmt - discount - cashAmt);
+  }
+
+  const paymentDateRaw = existingPayment.payment_date;
+  const payment_date = paymentDateRaw
+    ? String(paymentDateRaw).slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
+  const mainDraft = drafts[mainEntry.l_id];
+  const description =
+    buildLiveEditParticulars(mainEntry, mainDraft) || existingPayment.description || '';
+
+  return {
+    id: existingPayment.payment_id,
+    payment_date,
+    payment_type: existingPayment.payment_type,
+    account_id: accountId,
+    total_amount: mainAmt,
+    discount_amount: discount,
+    cash_account_id: cashId,
+    cash_amount: cashAmt,
+    bank_account_id: bankId,
+    bank_amount: bankAmt,
+    description,
+  };
+}
+
+/** Update particulars text from debit/credit draft (PAY-* saves sync all legs via payments API). */
 export function buildLiveEditParticulars(entry, draft) {
   const raw = String(entry?.details || '').trim();
   const base = raw.replace(/\{.*?\}/g, '').replace(/\|/g, ' ').replace(/\s+/g, ' ').trim();

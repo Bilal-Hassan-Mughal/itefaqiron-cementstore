@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, Fragment, useMemo, useRef, useCallback, forwardRef } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { getCreatedByName, parseAppDateTime, formatDatePK, formatTimePK } from '@/lib/date-helper';
 import {
   PurchaseInvoiceA4Document,
@@ -60,6 +61,7 @@ import {
   getTransactionGroupForEntry,
   getTransactionEditCaption,
   buildLiveEditParticulars,
+  buildPaymentUpdatePayloadFromTransactionEdit,
 } from './payment-form-utils';
 
 const isBenignFetchError = (error) => {
@@ -110,7 +112,8 @@ import {
   TablePagination,
   Pagination,
   Chip as MuiChip,
-  LinearProgress
+  LinearProgress,
+  Backdrop,
 } from '@mui/material';
 
 const fmtAmt = (val) => {
@@ -1089,6 +1092,8 @@ const getSupplierBalanceAfterBill = (bill) => {
 };
 
 export default function FinancePage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
   // PIN auth
   const { requireAuth, authDialogOpen, handleAuthSuccess, handleAuthCancel } = usePinAuth();
 
@@ -1394,29 +1399,51 @@ export default function FinancePage() {
 
     setSavingTransactionEdit(true);
     try {
-      const { entries, drafts, original } = ledgerTransactionEdit;
+      const { entries, drafts, original, transactionKey } = ledgerTransactionEdit;
 
-      for (const entry of entries) {
-        const d = drafts[entry.l_id];
-        const o = original[entry.l_id];
-        if (String(d.debit) === String(o.debit) && String(d.credit) === String(o.credit)) continue;
-
-        const liveDetails = buildLiveEditParticulars(entry, d);
-        const res = await fetch('/api/ledger', {
+      const payMatch = String(transactionKey || '').match(/^PAY-(\d+)$/i);
+      if (payMatch) {
+        const paymentId = parseInt(payMatch[1], 10);
+        const payRes = await fetch(`/api/payments?id=${paymentId}`);
+        if (!payRes.ok) throw new Error('Payment record not found for this ledger transaction');
+        const existingPayment = await payRes.json();
+        const payload = buildPaymentUpdatePayloadFromTransactionEdit(entries, drafts, existingPayment);
+        if (!payload) throw new Error('Could not build payment update from ledger rows');
+        const actorUserId = getCurrentUserId();
+        if (!actorUserId) throw new Error('Session expired. Please log in again.');
+        const res = await fetch('/api/payments', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: entry.l_id,
-            cus_id: entry.cus_id,
-            direct_edit: true,
-            debit_amount: parseFloat(d.debit || 0),
-            credit_amount: parseFloat(d.credit || 0),
-            details: liveDetails || entry.details,
-          }),
+          body: JSON.stringify({ ...payload, created_by: actorUserId }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || `Failed to update entry #${entry.l_id}`);
+          throw new Error(err.error || 'Failed to update payment');
+        }
+        await applyPaymentResultToState(await res.json());
+      } else {
+        for (const entry of entries) {
+          const d = drafts[entry.l_id];
+          const o = original[entry.l_id];
+          if (String(d.debit) === String(o.debit) && String(d.credit) === String(o.credit)) continue;
+
+          const liveDetails = buildLiveEditParticulars(entry, d);
+          const res = await fetch('/api/ledger', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: entry.l_id,
+              cus_id: entry.cus_id,
+              direct_edit: true,
+              debit_amount: parseFloat(d.debit || 0),
+              credit_amount: parseFloat(d.credit || 0),
+              details: liveDetails || entry.details,
+            }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to update entry #${entry.l_id}`);
+          }
         }
       }
 
@@ -1569,8 +1596,17 @@ export default function FinancePage() {
     setMounted(true);
 
     const { openLedgers: savedTabs, activeLedgerId: savedActiveId } = loadPersistedLedgerTabs();
+    const openAllAccounts = searchParams.get('view') === 'all-accounts';
+
     if (savedTabs.length > 0) {
       setOpenLedgers(savedTabs);
+    }
+
+    if (openAllAccounts) {
+      setActiveLedgerId(null);
+      setSelectedCustomer('');
+      setAccountSearchTerm('');
+    } else if (savedTabs.length > 0) {
       const activeTab = savedTabs.find((t) => t.id === Number(savedActiveId));
       const firstVisible = savedTabs.find((t) => !t.minimized);
 
@@ -1588,7 +1624,15 @@ export default function FinancePage() {
     }
 
     setLedgerTabsHydrated(true);
-  }, []);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!ledgerTabsHydrated) return;
+    if (searchParams.get('view') !== 'all-accounts') return;
+    setActiveLedgerId(null);
+    setSelectedCustomer('');
+    setAccountSearchTerm('');
+  }, [searchParams, ledgerTabsHydrated]);
 
   useEffect(() => {
     if (!ledgerTabsHydrated) return;
@@ -2601,13 +2645,7 @@ export default function FinancePage() {
       const cashAcc = cashAccounts.find(c => c.cus_id === parseInt(formData.cash_account));
       const estimatedRemaining = previousBalance - totalAmount;
 
-      if (!isPaymentEdit) {
-        setShowReceivePaymentForm(false);
-        clearPaymentEditState();
-        setPaymentStatus({ loading: true, error: null });
-      } else {
-        setPaymentStatus({ loading: true, error: null });
-      }
+      setPaymentStatus({ loading: true, error: null });
 
       const accountId = paymentEditAccount?.cus_id || selectedCustomer;
       const paymentData = {
@@ -2640,6 +2678,8 @@ export default function FinancePage() {
           await fetchData();
           alert('Receipt transaction updated successfully.');
         } else {
+          setShowReceivePaymentForm(false);
+          clearPaymentEditState();
           const receipt = paymentReceiptFromSavedPayment(result, {
             type: 'RECEIVE',
             customerFallback: customer,
@@ -2711,13 +2751,7 @@ export default function FinancePage() {
       const cashAcc = cashAccounts.find(c => c.cus_id === parseInt(formData.cash_account));
       const estimatedRemaining = previousBalance + totalAmount;
 
-      if (!isPaymentEdit) {
-        setShowPayPaymentForm(false);
-        clearPaymentEditState();
-        setPaymentStatus({ loading: true, error: null });
-      } else {
-        setPaymentStatus({ loading: true, error: null });
-      }
+      setPaymentStatus({ loading: true, error: null });
 
       const accountId = paymentEditAccount?.cus_id || selectedCustomer;
       const paymentData = {
@@ -2750,6 +2784,8 @@ export default function FinancePage() {
           await fetchData();
           alert('Payment transaction updated successfully.');
         } else {
+          setShowPayPaymentForm(false);
+          clearPaymentEditState();
           const receipt = paymentReceiptFromSavedPayment(result, {
             type: 'PAY',
             customerFallback: customer,
@@ -3409,6 +3445,9 @@ export default function FinancePage() {
     setOpenLedgers((prev) =>
       prev.map((l) => (l.id === id ? { ...l, minimized: false, name } : l))
     );
+    if (searchParams.get('view') === 'all-accounts') {
+      router.replace('/dashboard/finance', { scroll: false });
+    }
   };
 
   const openCustomerLedger = (cusId, cusName) => {
@@ -3498,6 +3537,7 @@ export default function FinancePage() {
     setActiveLedgerId(null);
     setSelectedCustomer('');
     setAccountSearchTerm('');
+    router.replace('/dashboard/finance?view=all-accounts', { scroll: false });
   };
 
   const activeLedgerTab = openLedgers.find((l) => l.id === Number(activeLedgerId));
@@ -7143,6 +7183,21 @@ export default function FinancePage() {
           }
         }
       `}</style>
+
+      <Backdrop
+        open={paymentStatus.loading}
+        sx={{ color: '#fff', zIndex: (theme) => theme.zIndex.modal + 2 }}
+      >
+        <Box sx={{ textAlign: 'center', px: 2 }}>
+          <CircularProgress color="inherit" size={48} />
+          <Typography sx={{ mt: 2, fontWeight: 700, fontSize: '1.05rem' }}>
+            Processing payment…
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 0.5, opacity: 0.9 }}>
+            Saving ledger entries and preparing your receipt
+          </Typography>
+        </Box>
+      </Backdrop>
 
       <BiometricAuthDialog
         open={authDialogOpen}

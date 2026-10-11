@@ -1,6 +1,6 @@
 'use client';
 
-import { Menu, Mail, Bell, Home, Plus, LogOut, BookOpen } from 'lucide-react';
+import { Menu, Mail, Bell, Home, LogOut, BookOpen, LayoutGrid } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { getStaffRoleName, canStaffAccessPath, getRoleDisplayName } from '@/lib/staff-access';
@@ -49,6 +49,7 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
     viewParam === 'create';
 
   const isLedgerActive = pathname === '/dashboard/finance';
+  const isAllAccountsActive = pathname === '/dashboard/customers';
 
   const pageTitle = activeTab === 'dashboard'
     ? 'Dashboard'
@@ -67,8 +68,8 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
   const canNewPurchase = user && canStaffAccessPath(user, '/dashboard/purchases');
   const canOrders = user && canStaffAccessPath(user, '/dashboard/orders');
   const canLedger = user && canStaffAccessPath(user, '/dashboard/finance');
-  const canAddProduct = user && canStaffAccessPath(user, '/dashboard/products');
-  const hasHeaderActions = canNewSale || canNewPurchase || canOrders || canLedger || canAddProduct;
+  const canAccounts = user && canStaffAccessPath(user, '/dashboard/customers');
+  const hasHeaderActions = canNewSale || canNewPurchase || canOrders || canLedger || canAccounts;
 
   return (
     <header className="sticky top-0 z-30">
@@ -185,14 +186,18 @@ export default function Header({ sidebarOpen, setSidebarOpen, activeTab, user, b
               <span className="hidden sm:inline">Ledger</span>
             </button>
             )}
-            {canAddProduct && (
+            {canAccounts && (
             <button
               type="button"
-              onClick={() => router.push('/dashboard/products')}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-[#00D284] border border-[#00c978]/30 shadow-[0_1px_2px_rgba(0,168,104,0.2)] hover:bg-[#00c978] hover:shadow-[0_4px_12px_rgba(0,210,132,0.28)] active:bg-[#00b872] transition-all duration-200"
+              onClick={() => router.push('/dashboard/customers')}
+              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200 ${
+                isAllAccountsActive
+                  ? 'text-white bg-[#00a870] border border-[#00c978]/40 shadow-[0_4px_12px_rgba(0,210,132,0.28)] ring-2 ring-[#00D284]/25 ring-offset-1'
+                  : 'text-white bg-[#00D284] border border-[#00c978]/30 shadow-[0_1px_2px_rgba(0,168,104,0.2)] hover:bg-[#00c978] hover:shadow-[0_4px_12px_rgba(0,210,132,0.28)] active:bg-[#00b872]'
+              }`}
             >
-              <Plus className="w-4 h-4" strokeWidth={2.25} />
-              <span className="hidden sm:inline">Add Product</span>
+              <LayoutGrid className="w-4 h-4" strokeWidth={2.25} />
+              <span className="hidden sm:inline">All Accounts</span>
             </button>
             )}
             <div className="hidden md:flex items-center gap-2.5 pl-3 ml-1 border-l border-slate-200">
