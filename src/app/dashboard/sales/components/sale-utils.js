@@ -594,12 +594,27 @@ export function getLinkedOriginalSaleId(bill) {
   if (!bill) return null;
   const isReturn = bill.is_return || bill.bill_type === 'SALE_RETURN' || bill.return_id != null;
   if (!isReturn) return null;
-  const raw = bill.actual_sale_id ?? bill.sale_id;
-  if (raw == null || raw === '') return null;
-  const str = String(raw).trim();
-  if (str.startsWith('SR-') || str.toUpperCase().startsWith('SR')) return null;
-  const n = parseInt(str.replace(/^#/, ''), 10);
-  return Number.isFinite(n) && n > 0 ? n : null;
+
+  const pickNumericSaleId = (raw) => {
+    if (raw == null || raw === '') return null;
+    const str = String(raw).trim();
+    if (str.startsWith('SR-') || /^SR\d/i.test(str)) return null;
+    const n = parseInt(str.replace(/^#/, ''), 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+
+  let id =
+    pickNumericSaleId(bill.actual_sale_id)
+    ?? pickNumericSaleId(bill.linked_sale_id)
+    ?? pickNumericSaleId(bill.sale_id);
+
+  if (!id) {
+    const ref = bill.reference || bill.notes || '';
+    const m = ref.match(/(?:Return\s+from\s+)?Sale\s*#?\s*(\d+)/i);
+    if (m) id = parseInt(m[1], 10);
+  }
+
+  return Number.isFinite(id) && id > 0 ? id : null;
 }
 
 /** Cart rows → API return_details (skips zero qty). */

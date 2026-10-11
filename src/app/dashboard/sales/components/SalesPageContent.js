@@ -3752,7 +3752,7 @@ export default function SalesPageContent() {
         is_return: true,
         bill_type: 'SALE_RETURN',
         sale_id: `SR-${saleData.return_id}`,
-        actual_sale_id: saleData.sale_id,
+        actual_sale_id: saleData.sale_id ?? sale.actual_sale_id ?? null,
         sale_details: (saleData.return_details || []).map(d => ({
           ...d,
           product: d.product,
@@ -3811,7 +3811,7 @@ export default function SalesPageContent() {
         is_return: true,
         bill_type: 'SALE_RETURN',
         sale_id: `SR-${saleData.return_id}`,
-        actual_sale_id: saleData.sale_id,
+        actual_sale_id: saleData.sale_id ?? sale.actual_sale_id ?? null,
         sale_details: (saleData.return_details || []).map(d => ({
           ...d,
           product: d.product,
@@ -4423,7 +4423,7 @@ export default function SalesPageContent() {
         is_return: true,
         bill_type: 'SALE_RETURN',
         sale_id: `SR-${data.return_id}`,
-        actual_sale_id: data.sale_id,
+        actual_sale_id: data.sale_id ?? bill.actual_sale_id ?? null,
         sale_details: (data.return_details || []).map((d) => ({
           ...d,
           product: d.product,

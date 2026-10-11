@@ -23,10 +23,11 @@ import {
   Receipt as ReceiptIcon,
   Phone as PhoneIcon,
   Print as PrintIcon,
+  Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import { formatDatePK, formatTimePK, getCreatedByName } from '@/lib/date-helper';
 import { COMPANY } from '@/lib/brand-theme';
-import { SALE_INVOICE_PRINT, INVOICE_STORE_PHONE_LINE } from './sale-utils';
+import { SALE_INVOICE_PRINT, INVOICE_STORE_PHONE_LINE, getLinkedOriginalSaleId } from './sale-utils';
 import { useSalesContext } from './SalesContext';
 import { formatCustomerPhoneDisplay } from '@/lib/whatsapp-local';
 
@@ -44,7 +45,10 @@ export default function SaleViewBillDialog() {
     isSendingWhatsApp,
     handleSendWhatsApp,
     handlePrintBill,
+    handleViewOriginalSaleFromReturn,
   } = useSalesContext();
+
+  const linkedOriginalSaleId = getLinkedOriginalSaleId(selectedBill);
 
   return (
     <>
@@ -446,6 +450,17 @@ export default function SaleViewBillDialog() {
           >
             Close
           </Button>
+          {linkedOriginalSaleId && (
+            <Button
+              variant="outlined"
+              color="secondary"
+              startIcon={<VisibilityIcon />}
+              onClick={() => handleViewOriginalSaleFromReturn?.(selectedBill)}
+              sx={{ minWidth: 140, textTransform: 'none', fontWeight: 600 }}
+            >
+              Original invoice
+            </Button>
+          )}
           <Button
             variant="contained"
             startIcon={isSendingWhatsApp ? <CircularProgress size={16} sx={{ color: 'white' }} /> : null}
