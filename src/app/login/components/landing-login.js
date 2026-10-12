@@ -643,7 +643,7 @@ export default function LandingLogin() {
           font-size: 0.8125rem;
           font-weight: 800;
           letter-spacing: 0.05em;
-          color: #1A55E3;
+          color: #166534;
         }
 
         @media (max-width: 900px) {
