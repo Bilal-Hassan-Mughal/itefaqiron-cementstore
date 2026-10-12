@@ -23,6 +23,7 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  CircularProgress,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -46,6 +47,7 @@ export default function SaleReturnDialog() {
     calculateReturnTotal,
     calculateReturnNetTotal,
     handleSubmitReturn,
+    submittingReturn,
   } = useSalesContext();
 
   return (
@@ -263,9 +265,16 @@ export default function SaleReturnDialog() {
           onClick={handleSubmitReturn}
           variant="contained"
           color="error"
-          disabled={returnFormData.return_details.length === 0 || !returnFormData.reason}
+          disabled={returnFormData.return_details.length === 0 || !returnFormData.reason || submittingReturn}
         >
-          Process Return
+          {submittingReturn ? (
+            <>
+              <CircularProgress size={16} sx={{ mr: 1, color: 'white' }} />
+              Processing...
+            </>
+          ) : (
+            'Process Return'
+          )}
         </Button>
       </DialogActions>
     </Dialog>

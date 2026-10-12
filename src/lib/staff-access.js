@@ -256,6 +256,10 @@ export function canAccessMenuItem(user, item) {
   const allowed = getStaffAllowedModules(user);
   const pageId = item.id;
 
+  if (pageId === 'sales-v2' || pageId === 'sales-v2-quick') {
+    return hasPageAccess(allowed, 'sales-v2') || hasPageAccess(allowed, 'sales') || hasPageAccess(allowed, 'new-sale');
+  }
+
   if (pageId === 'hr') {
     const hrPages = ['hr', 'employees', 'attendance', 'payroll', 'salary-management'];
     return hrPages.some((id) => hasPageAccess(allowed, id));

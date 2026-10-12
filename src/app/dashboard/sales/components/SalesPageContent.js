@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect, useMemo, Suspense, useRef, useCallback, forwardRef } from 'react';
 import { formatDatePK, formatDateTimePK, formatTimePK, getCreatedByName, getPkDateString } from '@/lib/date-helper';
@@ -25,6 +25,9 @@ const SaleViewBillDialog = lazy(() => import('./SaleViewBillDialog'));
 const SaleReturnDialog = lazy(() => import('./SaleReturnDialog'));
 const SaleLedgerDialog = lazy(() => import('./SaleLedgerDialog'));
 const SaleAddProductDialog = lazy(() => import('./SaleAddProductDialog'));
+const SaleCustomerDialog = lazy(() => import('./SaleCustomerDialog'));
+const SaleQuotationDialog = lazy(() => import('./SaleQuotationDialog'));
+const SaleDraftModal = lazy(() => import('./SaleDraftModal'));
 
 // Material-UI imports
 import {
@@ -190,6 +193,10 @@ export default function SalesPageContent() {
   const [formRefLoading, setFormRefLoading] = useState(false);
   const [listLoading, setListLoading] = useState(true);
   const [savingBill, setSavingBill] = useState(false);
+  const [submittingReturn, setSubmittingReturn] = useState(false);
+  const isSavingBillRef = useRef(false);
+  const isSavingCustomerRef = useRef(false);
+  const submittingReturnRef = useRef(false);
   const [currentUser, setCurrentUser] = useState(null);
 
   const getCurrentUserId = () => {
@@ -625,6 +632,7 @@ export default function SalesPageContent() {
   const [currentDraftId, setCurrentDraftId] = useState(null);
   const [draftSearchTerm, setDraftSearchTerm] = useState('');
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [clearingAllDrafts, setClearingAllDrafts] = useState(false);
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
 
   // Additional filter states
@@ -641,10 +649,12 @@ export default function SalesPageContent() {
 
   // Helper functions
   const beginSaving = () => {
+    isSavingBillRef.current = true;
     setSavingBill(true);
   };
 
   const endSaving = () => {
+    isSavingBillRef.current = false;
     setSavingBill(false);
   };
 
@@ -1638,6 +1648,7 @@ export default function SalesPageContent() {
 
   // Save bill to database
   const handleSaveBill = async (bypass = false) => {
+    if (isSavingBillRef.current) return;
     const bypassLossCheck = (bypass === true);
     // Pre-auth validation â€” check these before triggering biometric/PIN
     if ((parseFloat(paymentData.bank || 0)) > 0 && !paymentData.bankAccountId) {
@@ -1678,6 +1689,7 @@ export default function SalesPageContent() {
       const authOk = await requireAuth();
       if (!authOk) return;
     }
+    beginSaving();
     try {
       // If bill type is SALE_RETURN, process it as a return
       if (billType === 'SALE_RETURN') {
@@ -2641,6 +2653,7 @@ export default function SalesPageContent() {
   };
 
   const handleCreateCustomer = async () => {
+    if (isSavingCustomerRef.current) return;
     // Validate required fields
     if (!newCustomer.cus_name.trim()) {
       showSnackbar('Customer name is required', 'error');
@@ -2657,7 +2670,8 @@ export default function SalesPageContent() {
       showSnackbar('Please enter a valid phone number', 'error');
       return;
     }
-    if (!newCustomer.cus_category) {
+    const catVal = newCustomer.cus_category || newCustomer.cat_id;
+    if (!catVal) {
       showSnackbar('Customer category is required', 'error');
       return;
     }
@@ -2666,9 +2680,10 @@ export default function SalesPageContent() {
       return;
     }
 
-    // Allow duplicate phone numbers â€” do not block creation by phone number.
+    // Allow duplicate phone numbers — do not block creation by phone number.
 
     try {
+      isSavingCustomerRef.current = true;
       setIsSavingCustomer(true);
       const customerData = {
         cus_name: newCustomer.cus_name.trim(),
@@ -2678,7 +2693,7 @@ export default function SalesPageContent() {
         cus_reference: (newCustomer.cus_reference || '').trim(),
         cus_account_info: (newCustomer.cus_account_info || '').trim(),
         other: (newCustomer.other || '').trim(),
-        cus_category: newCustomer.cus_category,
+        cus_category: catVal,
         cus_type: newCustomer.cus_type,
         cus_balance: parseFloat(newCustomer.cus_balance) || 0,
         CNIC: (newCustomer.CNIC || '').trim(),
@@ -2715,6 +2730,7 @@ export default function SalesPageContent() {
       console.error('Error creating customer:', error);
       showSnackbar('Error creating customer', 'error');
     } finally {
+      isSavingCustomerRef.current = false;
       setIsSavingCustomer(false);
     }
   };
@@ -3729,6 +3745,33 @@ export default function SalesPageContent() {
     setDraftModalOpen(true);
   };
 
+  const handleClearAllDrafts = async () => {
+    if (!drafts.length) return;
+    const confirmed = window.confirm(
+      `Delete all ${drafts.length} held draft bill(s)? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setClearingAllDrafts(true);
+    try {
+      const response = await fetch('/api/draft-sales?all=true', { method: 'DELETE' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        showSnackbar(data.error || 'Failed to clear drafts', 'error');
+        return;
+      }
+      setCurrentDraftId(null);
+      setDrafts([]);
+      showSnackbar(`✅ Cleared ${data.count ?? 0} draft bill(s)`, 'success');
+      await fetchDrafts();
+    } catch (error) {
+      console.error('❌ Error clearing all drafts:', error);
+      showSnackbar(`Error clearing drafts: ${error.message}`, 'error');
+    } finally {
+      setClearingAllDrafts(false);
+    }
+  };
+
   // ======================== END DRAFT SALES FUNCTIONS ========================
 
   // Handle viewing a bill
@@ -4074,9 +4117,12 @@ export default function SalesPageContent() {
 
   // Handle return submission
   const handleSubmitReturn = async () => {
+    if (submittingReturnRef.current) return;
     const authOk = await requireAuth();
     if (!authOk) return;
     try {
+      submittingReturnRef.current = true;
+      setSubmittingReturn(true);
       // Validation
       if (!returnFormData.sale_id) {
         showSnackbar('Please select a sale to return', 'error');
@@ -4118,6 +4164,9 @@ export default function SalesPageContent() {
     } catch (error) {
       console.error('Error processing sale return:', error);
       showSnackbar('Error processing sale return', 'error');
+    } finally {
+      submittingReturnRef.current = false;
+      setSubmittingReturn(false);
     }
   };
 
@@ -5002,6 +5051,7 @@ export default function SalesPageContent() {
     formRefLoading, setFormRefLoading,
     listLoading, setListLoading,
     savingBill, setSavingBill,
+    submittingReturn, setSubmittingReturn,
     editingSale, setEditingSale,
     receiptDialogOpen, setReceiptDialogOpen,
     currentBillData, setCurrentBillData,
@@ -5018,6 +5068,8 @@ export default function SalesPageContent() {
     drafts, setDrafts,
     draftSearchTerm, setDraftSearchTerm,
     isSavingDraft, setIsSavingDraft,
+    clearingAllDrafts, setClearingAllDrafts,
+    handleClearAllDrafts,
     currentDraftId, setCurrentDraftId,
     screenStack, setScreenStack,
     currentScreenIndex, setCurrentScreenIndex,
@@ -5204,7 +5256,15 @@ export default function SalesPageContent() {
 
   return (
     <SalesProvider value={salesContextValue}>
-      {currentView === 'list' ? <SaleListView /> : <SaleCreateView />}
+      <Suspense
+        fallback={
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
+            <CircularProgress />
+          </Box>
+        }
+      >
+        {currentView === 'list' ? <SaleListView /> : <SaleCreateView />}
+      </Suspense>
 
       {/* Snackbar */}
       <Snackbar
@@ -5229,13 +5289,66 @@ export default function SalesPageContent() {
         onClose={handleAuthCancel}
       />
 
+      {currentBillData && (
+        <Suspense fallback={null}>
+          <SalePrintableBill />
+        </Suspense>
+      )}
 
-      <SalePrintableBill />
-      <SaleReceiptDialog />
-      <SaleLoadOrderDialog />
-      <SaleViewBillDialog />
-      <SaleReturnDialog />
-      <SaleLedgerDialog />
+      {receiptDialogOpen && (
+        <Suspense fallback={null}>
+          <SaleReceiptDialog />
+        </Suspense>
+      )}
+
+      {loadOrderDialogOpen && (
+        <Suspense fallback={null}>
+          <SaleLoadOrderDialog />
+        </Suspense>
+      )}
+
+      {loadQuotationDialogOpen && (
+        <Suspense fallback={null}>
+          <SaleQuotationDialog />
+        </Suspense>
+      )}
+
+      {draftModalOpen && (
+        <Suspense fallback={null}>
+          <SaleDraftModal />
+        </Suspense>
+      )}
+
+      {customerPopupOpen && (
+        <Suspense fallback={null}>
+          <SaleCustomerDialog />
+        </Suspense>
+      )}
+
+      {viewBillDialog && (
+        <Suspense fallback={null}>
+          <SaleViewBillDialog />
+        </Suspense>
+      )}
+
+      {returnDialogOpen && (
+        <Suspense fallback={null}>
+          <SaleReturnDialog />
+        </Suspense>
+      )}
+
+      {ledgerDialogOpen && (
+        <Suspense fallback={null}>
+          <SaleLedgerDialog />
+        </Suspense>
+      )}
+
+      {(showAddProductPopup || showAddProductCategoryPopup || showAddProductSubCategoryPopup || showCustomerCategoryPopup || showCustomerTypePopup || showCityPopup) && (
+        <Suspense fallback={null}>
+          <SaleAddProductDialog />
+        </Suspense>
+      )}
+
       {/* Loss Warning Confirmation Dialog */}
       <Dialog
         open={lossConfirmOpen}
@@ -5303,7 +5416,6 @@ export default function SalesPageContent() {
           </Button>
         </DialogActions>
       </Dialog>
-      <SaleAddProductDialog />
     </SalesProvider>
   );
 }

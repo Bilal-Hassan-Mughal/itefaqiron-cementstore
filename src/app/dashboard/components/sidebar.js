@@ -72,7 +72,7 @@ const SECTION_META = {
   System: { fn: 'system', icon: PersonIcon },
 };
 
-const SALES_IDS = new Set(['orders', 'new-sale', 'sales', 'hold-bills', 'sale-returns', 'quotations', 'sales-analytics', 'loaders']);
+const SALES_IDS = new Set(['orders', 'new-sale', 'sales', 'sales-v2', 'hold-bills', 'sale-returns', 'quotations', 'sales-analytics', 'loaders']);
 const PURCHASE_IDS = new Set(['purchases', 'new-purchase', 'purchase-list', 'purchase-returns', 'vehicles', 'purchase-details', 'super-order']);
 const INVENTORY_IDS = new Set(['products', 'categories', 'sub-categories', 'store-stock', 'stock-transfer', 'stores', 'cargo']);
 const OPERATIONS_IDS = new Set(['day-end', 'day-end-history', 'cash-report', 'bank-report', 'bank-accounts']);
@@ -114,6 +114,7 @@ const ROUTE_MAP = {
   'vehicles': '/dashboard/vehicles',
   'ledger': '/dashboard/finance',
   'sales': '/dashboard/sales',
+  'sales-v2': '/dashboard/sales-v2',
   'hold-bills': '/dashboard/hold-bills',
   'sale-returns': '/dashboard/sales',
   'loaders': '/dashboard/loaders',
@@ -197,7 +198,8 @@ export default function Sidebar({
     { id: 'hq', name: 'Head Office', icon: StoreIcon, category: 'main', hqOnly: true },
     { id: 'dashboard', name: 'Dashboard', icon: DashboardIcon, category: 'main' },
     { id: 'orders', name: 'Order List', icon: ListAltIcon, category: 'main' },
-    { id: 'new-sale', name: 'New Sale', icon: AddIcon, category: 'main' },
+    { id: 'new-sale', name: 'Sale (Monolith)', icon: StoreIcon, category: 'main' },
+    { id: 'sales-v2', name: 'Sale V2 (Component)', icon: ShoppingCartIcon, category: 'main' },
     { id: 'purchases', name: 'New Purchase', icon: ShoppingBagIcon, category: 'main' },
     { id: 'day-end', name: 'Day End / Day Close', icon: CalendarIcon, category: 'main' },
     { id: 'day-end-history', name: 'Closing History', icon: CalendarIcon, category: 'main' },
@@ -223,7 +225,8 @@ export default function Sidebar({
     { id: 'day-end-history', name: 'Closing History', icon: CalendarIcon, category: 'financial', parent: 'Finance' },
 
     { id: 'orders', name: 'Order List', icon: ListAltIcon, category: 'sales-operations', parent: 'Sales' },
-    { id: 'sales', name: 'Sales', icon: ShoppingCartIcon, category: 'sales-operations', parent: 'Sales' },
+    { id: 'sales', name: 'Sale (Monolith)', icon: StoreIcon, category: 'sales-operations', parent: 'Sales' },
+    { id: 'sales-v2', name: 'Sale V2 (Component)', icon: ShoppingCartIcon, category: 'sales-operations', parent: 'Sales' },
     { id: 'hold-bills', name: 'Hold Bills', icon: InventoryIcon, category: 'sales-operations', parent: 'Sales' },
     { id: 'sale-returns', name: 'Sale Returns', icon: CloseIcon, category: 'sales-operations', parent: 'Sales' },
     { id: 'loaders', name: 'Loader/Transport', icon: LocalShippingIcon, category: 'sales-operations', parent: 'Sales' },
@@ -280,6 +283,10 @@ export default function Sidebar({
 
     if (currentPath.startsWith('/dashboard/sales/analytics')) {
       return { id: 'sales-analytics', category: 'sales-operations' };
+    }
+
+    if (currentPath.startsWith('/dashboard/sales-v2')) {
+      return { id: 'sales-v2', category: 'sales-operations' };
     }
 
     if (currentPath.startsWith('/dashboard/sales')) {

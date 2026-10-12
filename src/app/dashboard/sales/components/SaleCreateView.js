@@ -2253,7 +2253,7 @@ export default function SaleCreateView() {
                   onClick={() => { fetchDrafts(); setDraftModalOpen(true); }}
                   title="View hold bills"
                 >
-                  ðŸ“‹ Hold Bills ({drafts.length})
+                  📋 Hold Bills ({drafts.length})
                 </Button>
                 <Button
                   variant="contained"

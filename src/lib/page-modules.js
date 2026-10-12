@@ -46,7 +46,8 @@ export const SYSTEM_PAGES = [
   })),
 
   { id: 'orders', name: 'Order List', section: 'Quick Access', path: '/dashboard/orders' },
-  { id: 'new-sale', name: 'New Sale', section: 'Quick Access', path: '/dashboard/sales' },
+  { id: 'new-sale', name: 'Sale (Monolith)', section: 'Quick Access', path: '/dashboard/sales' },
+  { id: 'sales-v2-quick', name: 'Sale V2 (Component)', section: 'Quick Access', path: '/dashboard/sales-v2' },
   { id: 'purchases', name: 'New Purchase', section: 'Quick Access', path: '/dashboard/purchases' },
   { id: 'day-end', name: 'Day End / Day Close', section: 'Quick Access', path: '/dashboard/day-end' },
   { id: 'day-end-history', name: 'Closing History', section: 'Quick Access', path: '/dashboard/day-end/history' },
@@ -69,7 +70,8 @@ export const SYSTEM_PAGES = [
   { id: 'internal-transfer', name: 'Internal Transfer', section: 'Finance', path: '/dashboard/internal-transfer' },
   { id: 'adjustment-management', name: 'Adjustment Account', section: 'Finance', path: '/dashboard/adjustment-management' },
 
-  { id: 'sales', name: 'Sales List', section: 'Sales', path: '/dashboard/sales' },
+  { id: 'sales', name: 'Sale (Monolith)', section: 'Sales', path: '/dashboard/sales' },
+  { id: 'sales-v2', name: 'Sale V2 (Component)', section: 'Sales', path: '/dashboard/sales-v2' },
   { id: 'hold-bills', name: 'Hold Bills', section: 'Sales', path: '/dashboard/hold-bills' },
   { id: 'sale-returns', name: 'Sale Returns', section: 'Sales', path: '/dashboard/sales' },
   { id: 'loaders', name: 'Loader / Transport', section: 'Sales', path: '/dashboard/loaders' },
@@ -134,7 +136,7 @@ export const LEGACY_MODULE_TO_PAGES = {
   stock_transfer: ['stock-transfer'],
   customers: ['customercategory', 'customer-types', 'customers'],
   products: ['categories', 'sub-categories', 'products'],
-  sales: ['orders', 'new-sale', 'sales', 'hold-bills', 'sales-analytics'],
+  sales: ['orders', 'new-sale', 'sales', 'sales-v2', 'sales-v2-quick', 'hold-bills', 'sales-analytics'],
   sale_returns: ['sale-returns', 'loaders', 'quotations'],
   purchases: ['purchases', 'new-purchase', 'purchase-list', 'purchase-returns', 'vehicles', 'purchase-details', 'super-order'],
   cargo: ['cargo'],
@@ -214,6 +216,7 @@ const PATH_PAGE_RULES = [
   { prefix: '/dashboard/stock-transfer', pageIds: ['stock-transfer'] },
   { prefix: '/dashboard/settings', pageIds: ['settings'] },
   { prefix: '/dashboard/import', pageIds: ['import'] },
+  { prefix: '/dashboard/sales-v2', pageIds: ['sales-v2', 'sales-v2-quick', 'sales', 'new-sale'] },
   { prefix: '/dashboard/sales', pageIds: ['new-sale', 'sales', 'sale-returns'] },
   { prefix: '/dashboard/super-order', pageIds: ['super-order'] },
   { prefix: '/dashboard/purchases', pageIds: ['purchases', 'new-purchase', 'purchase-list', 'purchase-returns', 'purchase-details'] },
@@ -258,6 +261,9 @@ export function normalizeAllowedModules(raw) {
 
 export function hasPageAccess(allowed, pageId) {
   const expanded = expandLegacyModules(parseAllowedModules(allowed));
+  if (pageId === 'sales-v2' || pageId === 'sales-v2-quick') {
+    return expanded.includes('sales-v2') || expanded.includes('sales-v2-quick') || expanded.includes('sales') || expanded.includes('new-sale');
+  }
   return expanded.includes(pageId);
 }
 
