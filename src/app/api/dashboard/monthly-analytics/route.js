@@ -44,13 +44,18 @@ function isCashOrBankCategoryTitle(title) {
 }
 
 /** Month-end outstanding from ledger closing balances (same sign as cus_balance report). */
-async function computeMonthEndOutstanding(branchId, asOfDateStr, tables) {
+async function computeMonthEndOutstanding(branchId, asOfDateStr, tables, cusTypeId = null) {
   const asOfRange = pkDayRange(asOfDateStr);
   if (!asOfRange?.lte) return { receivable: 0, payable: 0 };
 
   const { ledger, customers } = tables;
   const ledgerBranch = Prisma.raw(sqlBranchWhere(branchId));
   const customerBranch = Prisma.raw(sqlBranchWhere(branchId, 'c'));
+  
+  // Add customer type filter if provided
+  const customerTypeFilter = cusTypeId 
+    ? Prisma.raw(`AND c.cus_type = ${cusTypeId}`) 
+    : Prisma.empty;
 
   const rows = await prisma.$queryRaw`
     SELECT l.closing_balance, c.cus_category
@@ -64,6 +69,7 @@ async function computeMonthEndOutstanding(branchId, asOfDateStr, tables) {
     ) latest ON l.l_id = latest.max_l_id
     INNER JOIN ${customers} c ON c.cus_id = l.cus_id
     WHERE ${customerBranch}
+      ${customerTypeFilter}
   `;
 
   let receivable = 0;
@@ -91,6 +97,8 @@ export async function GET(request) {
     const fallback = lastNPkDaysInclusive(30);
     const fromDate = searchParams.get('fromDate') || fallback.fromDate;
     const toDate = searchParams.get('toDate') || fallback.toDate;
+    const cusTypeIdRaw = searchParams.get('cusTypeId');
+    const cusTypeId = cusTypeIdRaw && !isNaN(parseInt(cusTypeIdRaw)) ? parseInt(cusTypeIdRaw) : null;
 
     if (!isPkDate(fromDate) || !isPkDate(toDate)) {
       return NextResponse.json(
@@ -120,15 +128,18 @@ export async function GET(request) {
           ? true
           : chartGrainAuto;
 
-    const chartPeriodExpr = useWeeklyCharts
-      ? Prisma.raw("DATE_FORMAT(created_at + INTERVAL 5 HOUR, '%Y-%m-%d')")
-      : Prisma.raw("DATE_FORMAT(created_at + INTERVAL 5 HOUR, '%Y-%m')");
-    const salePeriodExpr = useWeeklyCharts
-      ? Prisma.raw("DATE_FORMAT(s.created_at + INTERVAL 5 HOUR, '%Y-%m-%d')")
-      : Prisma.raw("DATE_FORMAT(s.created_at + INTERVAL 5 HOUR, '%Y-%m')");
-    const ledgerPeriodExpr = useWeeklyLedger
-      ? Prisma.raw("DATE_FORMAT(created_at + INTERVAL 5 HOUR, '%Y-%m-%d')")
-      : Prisma.raw("DATE_FORMAT(created_at + INTERVAL 5 HOUR, '%Y-%m')");
+    const getChartPeriodExpr = (alias = null) => {
+      const col = alias ? `${alias}.created_at` : 'created_at';
+      return useWeeklyCharts
+        ? Prisma.raw(`DATE_FORMAT(${col} + INTERVAL 5 HOUR, '%Y-%m-%d')`)
+        : Prisma.raw(`DATE_FORMAT(${col} + INTERVAL 5 HOUR, '%Y-%m')`);
+    };
+    const getLedgerPeriodExpr = (alias = null) => {
+      const col = alias ? `${alias}.created_at` : 'created_at';
+      return useWeeklyLedger
+        ? Prisma.raw(`DATE_FORMAT(${col} + INTERVAL 5 HOUR, '%Y-%m-%d')`)
+        : Prisma.raw(`DATE_FORMAT(${col} + INTERVAL 5 HOUR, '%Y-%m')`);
+    };
 
     const ledger = tableIdent('ledger');
     const customers = tableIdent('customers');
@@ -138,8 +149,16 @@ export async function GET(request) {
     const expenses = tableIdent('expenses');
 
     const ledgerBranch = Prisma.raw(sqlBranchWhere(branchId));
-    const salesBranch = Prisma.raw(sqlBranchWhere(branchId));
+    const ledgerBranchL = Prisma.raw(sqlBranchWhere(branchId, 'l'));
     const salesBranchS = Prisma.raw(sqlBranchWhere(branchId, 's'));
+    const expenseBranch = Prisma.raw(sqlBranchWhere(branchId));
+
+    const customerTypeFilterL = cusTypeId 
+      ? Prisma.raw(`AND c.cus_type = ${cusTypeId}`) 
+      : Prisma.empty;
+    const customerTypeFilterS = cusTypeId 
+      ? Prisma.raw(`AND c.cus_type = ${cusTypeId}`) 
+      : Prisma.empty;
 
     const allCategories = await prisma.customerCategory.findMany({
       select: { cus_cat_id: true, cus_cat_title: true },
@@ -155,13 +174,15 @@ export async function GET(request) {
       ? Promise.resolve([])
       : prisma.$queryRaw`
         SELECT
-          ${ledgerPeriodExpr} AS period,
-          SUM(credit_amount) AS credit_total,
-          SUM(debit_amount) AS debit_total
-        FROM ${ledger}
-        WHERE ${ledgerBranch}
-          AND created_at >= ${startDate}
-          AND created_at <= ${endDate}
+          ${getLedgerPeriodExpr('l')} AS period,
+          SUM(l.credit_amount) AS credit_total,
+          SUM(l.debit_amount) AS debit_total
+        FROM ${ledger} l
+        INNER JOIN ${customers} c ON l.cus_id = c.cus_id
+        WHERE ${ledgerBranchL}
+          AND l.created_at >= ${startDate}
+          AND l.created_at <= ${endDate}
+          ${customerTypeFilterL}
         GROUP BY period
         ORDER BY period ASC
       `;
@@ -170,38 +191,42 @@ export async function GET(request) {
       ledgerFlowQuery,
       prisma.$queryRaw`
         SELECT
-          ${chartPeriodExpr} AS period,
-          SUM(total_amount) AS total_sales,
-          COUNT(sale_id) AS total_orders
-        FROM ${sales}
-        WHERE ${salesBranch}
-          AND bill_type != 'QUOTATION'
-          AND created_at >= ${startDate}
-          AND created_at <= ${endDate}
+          ${getChartPeriodExpr('s')} AS period,
+          SUM(s.total_amount) AS total_sales,
+          COUNT(s.sale_id) AS total_orders
+        FROM ${sales} s
+        INNER JOIN ${customers} c ON s.cus_id = c.cus_id
+        WHERE ${salesBranchS}
+          AND s.bill_type != 'QUOTATION'
+          AND s.created_at >= ${startDate}
+          AND s.created_at <= ${endDate}
+          ${customerTypeFilterS}
         GROUP BY period
         ORDER BY period ASC
       `,
       prisma.$queryRaw`
         SELECT
-          ${salePeriodExpr} AS period,
+          ${getChartPeriodExpr('s')} AS period,
           SUM(sd.net_total) AS revenue,
           SUM(p.pro_cost_price * sd.qnty) AS cost
         FROM ${saleDetails} sd
         JOIN ${sales} s ON sd.sale_id = s.sale_id
+        JOIN ${customers} c ON s.cus_id = c.cus_id
         JOIN ${products} p ON sd.pro_id = p.pro_id
         WHERE ${salesBranchS}
           AND s.bill_type != 'QUOTATION'
           AND s.created_at >= ${startDate}
           AND s.created_at <= ${endDate}
+          ${customerTypeFilterS}
         GROUP BY period
         ORDER BY period ASC
       `,
       prisma.$queryRaw`
         SELECT
-          ${chartPeriodExpr} AS period,
+          ${getChartPeriodExpr()} AS period,
           SUM(exp_amount) AS total_expense
         FROM ${expenses}
-        WHERE ${ledgerBranch}
+        WHERE ${expenseBranch}
           AND created_at >= ${startDate}
           AND created_at <= ${endDate}
         GROUP BY period
@@ -256,7 +281,8 @@ export async function GET(request) {
         const { receivable, payable } = await computeMonthEndOutstanding(
           branchId,
           asOf,
-          outstandingTables
+          outstandingTables,
+          cusTypeId
         );
         const point = {
           period: month.key,

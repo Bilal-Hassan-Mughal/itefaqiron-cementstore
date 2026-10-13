@@ -84,7 +84,9 @@ export async function GET(request) {
         return await getRebateReport(rebateSupplierId, startDate, endDate, { month: rebateMonth, view: rebateView });
 
       case 'customer-balance-report':
-        return await getDetailedCustomerBalanceReport();
+        const typeIdFilter = searchParams.get('typeId') ? parseInt(searchParams.get('typeId')) : null;
+        const categoryIdFilter = searchParams.get('categoryId') ? parseInt(searchParams.get('categoryId')) : null;
+        return await getDetailedCustomerBalanceReport(typeIdFilter, categoryIdFilter);
 
       case 'item-sale-report':
         const proId = searchParams.get('proId') ? parseInt(searchParams.get('proId')) : null;
@@ -100,8 +102,20 @@ export async function GET(request) {
 }
 
 // Detailed Customers Balance Report with Last Activity
-async function getDetailedCustomerBalanceReport() {
+async function getDetailedCustomerBalanceReport(typeId = null, categoryId = null) {
+  // Build where clause for filtering by customer type and/or category
+  const whereClause = {};
+  
+  if (typeId) {
+    whereClause.cus_type = typeId;
+  }
+  
+  if (categoryId) {
+    whereClause.cus_category = categoryId;
+  }
+
   const customers = await prisma.customer.findMany({
+    where: whereClause,
     include: {
       customer_category: true,
       customer_type: true,
@@ -134,7 +148,11 @@ async function getDetailedCustomerBalanceReport() {
       ...c,
       last_activity: c.ledger && c.ledger.length > 0 ? c.ledger[0].created_at : null
     })),
-    summary
+    summary,
+    filter: {
+      typeId,
+      categoryId
+    }
   });
 }
 

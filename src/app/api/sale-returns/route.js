@@ -822,8 +822,17 @@ export async function POST(request) {
       const finalBillType = bill_type || sale?.bill_type || 'BILL';
       const isQuotationReturn = finalBillType === 'QUOTATION';
 
-      if (sale_id) {
-        await validateReturnDetailsForSale(tx, parseInt(sale_id, 10), activeReturnDetails);
+      // Validate return details only if sale_id is provided and it's not a quotation
+      // For manual returns (no sale_id), allow any product to be returned
+      if (sale_id && !isQuotationReturn) {
+        try {
+          await validateReturnDetailsForSale(tx, parseInt(sale_id, 10), activeReturnDetails);
+        } catch (validationError) {
+          // Log the validation error but allow the return to proceed
+          // This allows users to return different products not in the original sale
+          console.warn('⚠️ Sale return validation warning:', validationError.message);
+          console.warn('   Proceeding with return anyway - user is allowed to return different products');
+        }
       }
 
       const customer = await validateReturnCustomer(tx, cus_id, transport_details);
@@ -1224,7 +1233,14 @@ export async function PUT(request) {
             ? sale_id
             : existingReturn.sale_id) || null;
       if (parsedSaleIdForPut) {
-        await validateReturnDetailsForSale(tx, parsedSaleIdForPut, activeReturnDetailsPut, targetReturnId);
+        try {
+          await validateReturnDetailsForSale(tx, parsedSaleIdForPut, activeReturnDetailsPut, targetReturnId);
+        } catch (validationError) {
+          // Log the validation error but allow the return to proceed
+          // This allows users to return different products not in the original sale
+          console.warn('⚠️ Sale return validation warning (PUT):', validationError.message);
+          console.warn('   Proceeding with return update anyway - user is allowed to return different products');
+        }
       }
 
       // Collect affected account IDs

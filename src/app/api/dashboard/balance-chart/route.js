@@ -24,69 +24,81 @@ export async function GET(request) {
         cus_name: true,
         cus_balance: true,
         cus_category: true,
-        customer_category: { select: { cus_cat_title: true } }
-      }
+        customer_category: { select: { cus_cat_title: true } },
+      },
     });
 
-    // If date range given, compute net activity per customer from ledger entries
-    let ledgerSums = null;
-    if (fromDate || toDate) {
-      const dateFilter = {};
-      if (fromDate) dateFilter.gte = new Date(fromDate);
-      if (toDate) {
-        const to = new Date(toDate);
-        to.setHours(23, 59, 59, 999);
-        dateFilter.lte = to;
-      }
+    // If toDate given, compute closing balance as of that date
+    let balancesAsOf = null;
+    if (toDate) {
+      const to = new Date(toDate);
+      to.setHours(23, 59, 59, 999);
 
-      const entries = await prisma.ledger.groupBy({
-        by: ['cus_id'],
-        where: { created_at: dateFilter },
-        _sum: { debit_amount: true, credit_amount: true }
-      });
+      // Raw query to get the latest closing balance for each customer as of 'to' date
+      const latestEntries = await prisma.$queryRaw`
+        SELECT l.cus_id, l.closing_balance
+        FROM ledger l
+        INNER JOIN (
+          SELECT cus_id, MAX(l_id) AS max_l_id
+          FROM ledger
+          WHERE created_at <= ${to}
+          GROUP BY cus_id
+        ) latest ON l.l_id = latest.max_l_id
+      `;
 
-      ledgerSums = new Map(entries.map(e => [
-        e.cus_id,
-        {
-          debit:  parseFloat(e._sum.debit_amount  || 0),
-          credit: parseFloat(e._sum.credit_amount || 0)
-        }
-      ]));
+      balancesAsOf = new Map(
+        latestEntries.map((e) => [e.cus_id, parseFloat(e.closing_balance || 0)])
+      );
     }
 
     const customerList = [];
     const supplierList = [];
 
-    customers.forEach(c => {
-      const catTitle = catMap.get(c.cus_category) || (c.customer_category?.cus_cat_title || '').toLowerCase();
-      const isSupplier  = catTitle.includes('supplier');
+    customers.forEach((c) => {
+      const catTitle =
+        catMap.get(c.cus_category) || (c.customer_category?.cus_cat_title || '').toLowerCase();
+      const isSupplier = catTitle.includes('supplier');
       const isCashOrBank = catTitle.includes('cash') || catTitle.includes('bank');
       if (isCashOrBank) return;
 
       let balance;
-      if (ledgerSums) {
-        const s = ledgerSums.get(c.cus_id) || { debit: 0, credit: 0 };
-        // PAYABLE (suppliers): credit - debit = net owed to supplier
-        // RECEIVABLE (customers): debit - credit = net owed by customer
-        balance = isSupplier ? (s.credit - s.debit) : (s.debit - s.credit);
+      if (balancesAsOf) {
+        // Use historical closing balance if available, otherwise 0
+        balance = balancesAsOf.get(c.cus_id) ?? 0;
       } else {
+        // Fallback to real-time balance if no toDate filter
         balance = parseFloat(c.cus_balance || 0);
       }
 
       if (balance === 0) return;
 
+      // For suppliers, negative balance means we owe them (payable). 
+      // But usually in this system, balances are stored such that positive is receivable, negative is payable?
+      // Let's check computeMonthEndOutstanding logic: 
+      // if (bal > 0) receivable += bal; else if (bal < 0) payable += Math.abs(bal);
+      // So suppliers with negative balances are the ones we owe.
+      
       const entry = {
-        name:          c.cus_name,
-        balance:       Math.abs(balance),
-        rawBalance:    balance,
-        categoryId:    c.cus_category,
-        categoryTitle: c.customer_category?.cus_cat_title || ''
+        name: c.cus_name,
+        balance: Math.abs(balance), // Graph shows absolute magnitude
+        rawBalance: balance,
+        categoryId: c.cus_category,
+        categoryTitle: c.customer_category?.cus_cat_title || '',
       };
 
       if (isSupplier) {
-        if (!supCatId || c.cus_category === supCatId) supplierList.push(entry);
+        // Only show suppliers where we have a payable balance (negative)
+        // or if they want to see all suppliers with any balance. 
+        // User said: "current balance of suppleris account tham we have to pay"
+        // This usually means rawBalance < 0.
+        if (balance < 0) {
+          if (!supCatId || c.cus_category === supCatId) supplierList.push(entry);
+        }
       } else {
-        if (!cusCatId || c.cus_category === cusCatId) customerList.push(entry);
+        // Only show customers who owe us (positive)
+        if (balance > 0) {
+          if (!cusCatId || c.cus_category === cusCatId) customerList.push(entry);
+        }
       }
     });
 

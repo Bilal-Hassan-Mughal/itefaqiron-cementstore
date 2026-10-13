@@ -142,7 +142,7 @@ function buildMonthChartPreset(months) {
 }
 
 /** Month pickers + calendar-month presets for month-end closing charts. */
-function WidgetMonthRangeFilter({ filters, onChange, loading = false, accent }) {
+function WidgetMonthRangeFilter({ filters, onChange, loading = false, accent, children }) {
   const neon = getReportNeonStyles(accent);
   const fromMonth = filters.fromDate?.slice(0, 7) || '';
   const toMonth = filters.toDate?.slice(0, 7) || '';
@@ -159,70 +159,89 @@ function WidgetMonthRangeFilter({ filters, onChange, loading = false, accent }) 
     if (range) onChange(range);
   };
 
+  const pillClass = 'flex items-center gap-1 bg-white border rounded-lg px-1.5 py-1 shrink-0';
+  const labelClass = 'text-[9px] font-bold text-slate-400 uppercase';
+  const inputClass = 'text-[11px] font-medium text-slate-800 bg-transparent focus:outline-none w-[80px]';
+
   return (
     <div
       className={REPORT.filterBody}
-      style={{ background: neon.filterBg, borderColor: neon.divider }}
+      style={{ 
+        background: neon.filterBg, 
+        borderColor: neon.divider,
+        flexWrap: 'nowrap',
+        overflow: 'hidden',
+        paddingLeft: '0.5rem',
+        paddingRight: '0.5rem',
+        gap: '0.4rem',
+      }}
     >
-      <Filter className="w-3.5 h-3.5 shrink-0" style={{ color: neon.primary }} />
-      <div className={REPORT.datePill} style={{ borderColor: neon.chartBorder }}>
-        <Calendar className="w-3.5 h-3.5" style={{ color: neon.primary }} />
-        <span className="text-[10px] font-semibold text-slate-500">From month</span>
-        <input
-          type="month"
-          lang="en-GB"
-          value={fromMonth}
-          onChange={(e) => applyFromMonth(e.target.value)}
-          className="text-[11px] font-medium text-slate-800 bg-transparent focus:outline-none"
-        />
-      </div>
-      <div className={REPORT.datePill} style={{ borderColor: neon.chartBorder }}>
-        <Calendar className="w-3.5 h-3.5" style={{ color: neon.primary }} />
-        <span className="text-[10px] font-semibold text-slate-500">To month</span>
-        <input
-          type="month"
-          lang="en-GB"
-          value={toMonth}
-          onChange={(e) => applyToMonth(e.target.value)}
-          className="text-[11px] font-medium text-slate-800 bg-transparent focus:outline-none"
-        />
-      </div>
-      <div className={REPORT.presetWrap} style={{ borderColor: neon.chartBorder }}>
-        {[
-          { label: '3M', months: 3 },
-          { label: '6M', months: 6 },
-          { label: '12M', months: 12 },
-          { label: 'Year', months: 'year' },
-        ].map(({ label, months }) => {
-          const preset = buildMonthChartPreset(months);
-          const active = filters.fromDate === preset.fromDate && filters.toDate === preset.toDate;
-          return (
-            <button
-              key={label}
-              type="button"
-              onClick={() => onChange(preset)}
-              className={`${REPORT.presetBtn}${active ? ` ${REPORT.presetBtnActive}` : ''}`}
-              style={active ? { color: neon.primary } : { ['--neon-accent']: neon.primary }}
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
-      {(filters.fromDate || filters.toDate) && (
-        <button
-          type="button"
-          onClick={() => onChange(lastNCalendarMonthsFilter(6))}
-          className="text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition-colors"
-          style={{ color: CHART_COLORS.debit.primary }}
+      <div className="flex items-center gap-1 shrink-0">
+        <Filter className="w-3 h-3 shrink-0" style={{ color: neon.primary }} />
+        
+        {children}
+
+        <div className={pillClass} style={{ borderColor: neon.chartBorder }}>
+          <span className={labelClass}>From</span>
+          <input
+            type="month"
+            lang="en-GB"
+            value={fromMonth}
+            onChange={(e) => applyFromMonth(e.target.value)}
+            className={inputClass}
+          />
+        </div>
+        <div className={pillClass} style={{ borderColor: neon.chartBorder }}>
+          <span className={labelClass}>To</span>
+          <input
+            type="month"
+            lang="en-GB"
+            value={toMonth}
+            onChange={(e) => applyToMonth(e.target.value)}
+            className={inputClass}
+          />
+        </div>
+        <div 
+          className="flex items-center gap-0.5 bg-[#f3f4f6] p-0.5 rounded-lg border shrink-0" 
+          style={{ borderColor: neon.chartBorder }}
         >
-          Reset
-        </button>
-      )}
-      <div className="flex items-center gap-2 ml-auto shrink-0">
+          {[
+            { label: '3M', months: 3 },
+            { label: '6M', months: 6 },
+            { label: '12M', months: 12 },
+            { label: 'Year', months: 'year' },
+          ].map(({ label, months }) => {
+            const preset = buildMonthChartPreset(months);
+            const active = filters.fromDate === preset.fromDate && filters.toDate === preset.toDate;
+            return (
+              <button
+                key={label}
+                type="button"
+                onClick={() => onChange(preset)}
+                className={`px-1.5 py-1 text-[10px] font-bold rounded-md transition-all duration-150 ${
+                  active ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
+                style={active ? { color: neon.primary } : undefined}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        {(filters.fromDate || filters.toDate) && (
+          <button
+            type="button"
+            onClick={() => onChange(lastNCalendarMonthsFilter(6))}
+            className="text-[10px] font-bold px-1 py-1 rounded-lg transition-colors whitespace-nowrap text-red-500 hover:bg-red-50"
+          >
+            Reset
+          </button>
+        )}
+      </div>
+      <div className="flex items-center gap-1.5 ml-auto shrink-0">
         {loading && (
           <div
-            className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin"
+            className="w-3.5 h-3.5 border-2 border-t-transparent rounded-full animate-spin"
             style={{ borderColor: `${neon.primary}33`, borderTopColor: 'transparent', borderRightColor: neon.primary, borderBottomColor: neon.primary, borderLeftColor: neon.primary }}
           />
         )}
@@ -347,31 +366,44 @@ function ReportWidgetShell({ accent, title = 'Report', children, className = '' 
 
 function WidgetDateFilter({ filters, onChange, loading = false, accent }) {
   const neon = getReportNeonStyles(accent);
+  const pillClass = 'flex items-center gap-1 bg-white border rounded-lg px-1.5 py-1 shrink-0';
+  const labelClass = 'text-[9px] font-bold text-slate-400 uppercase';
+  const inputClass = 'text-[11px] font-medium text-slate-800 bg-transparent focus:outline-none w-[90px]';
+
   return (
     <div
       className={REPORT.filterBody}
-      style={{ background: neon.filterBg, borderColor: neon.divider }}
+      style={{ 
+        background: neon.filterBg, 
+        borderColor: neon.divider,
+        flexWrap: 'nowrap',
+        overflow: 'hidden',
+        paddingLeft: '0.5rem',
+        paddingRight: '0.5rem',
+        gap: '0.4rem',
+      }}
     >
-      <Filter className="w-3.5 h-3.5 shrink-0" style={{ color: neon.primary }} />
-      <div className={REPORT.datePill} style={{ borderColor: neon.chartBorder }}>
-        <Calendar className="w-3.5 h-3.5" style={{ color: neon.primary }} />
-        <span className="text-[10px] font-semibold text-slate-500">From</span>
+      <Filter className="w-3 h-3 shrink-0" style={{ color: neon.primary }} />
+      <div className={pillClass} style={{ borderColor: neon.chartBorder }}>
+        <span className={labelClass}>From</span>
         <input type="date" lang="en-GB"
           value={filters.fromDate}
           onChange={(e) => onChange({ ...filters, fromDate: e.target.value })}
-          className="text-[11px] font-medium text-slate-800 bg-transparent focus:outline-none"
+          className={inputClass}
         />
       </div>
-      <div className={REPORT.datePill} style={{ borderColor: neon.chartBorder }}>
-        <Calendar className="w-3.5 h-3.5" style={{ color: neon.primary }} />
-        <span className="text-[10px] font-semibold text-slate-500">To</span>
+      <div className={pillClass} style={{ borderColor: neon.chartBorder }}>
+        <span className={labelClass}>To</span>
         <input type="date" lang="en-GB"
           value={filters.toDate}
           onChange={(e) => onChange({ ...filters, toDate: e.target.value })}
-          className="text-[11px] font-medium text-slate-800 bg-transparent focus:outline-none"
+          className={inputClass}
         />
       </div>
-      <div className={REPORT.presetWrap} style={{ borderColor: neon.chartBorder }}>
+      <div 
+        className="flex items-center gap-0.5 bg-[#f3f4f6] p-0.5 rounded-lg border shrink-0" 
+        style={{ borderColor: neon.chartBorder }}
+      >
         {[
           { label: '30D', days: 30 },
           { label: '3M', days: 90 },
@@ -385,8 +417,10 @@ function WidgetDateFilter({ filters, onChange, loading = false, accent }) {
             key={label}
             type="button"
             onClick={() => onChange(preset)}
-            className={`${REPORT.presetBtn}${active ? ` ${REPORT.presetBtnActive}` : ''}`}
-            style={active ? { color: neon.primary } : { ['--neon-accent']: neon.primary }}
+            className={`px-1.5 py-1 text-[10px] font-bold rounded-md transition-all duration-150 ${
+              active ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+            style={active ? { color: neon.primary } : undefined}
           >
             {label}
           </button>
@@ -397,16 +431,15 @@ function WidgetDateFilter({ filters, onChange, loading = false, accent }) {
         <button
           type="button"
           onClick={() => onChange(EMPTY_DATE_FILTER)}
-          className="text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition-colors"
-          style={{ color: CHART_COLORS.debit.primary }}
+          className="text-[10px] font-bold px-1 py-1 rounded-lg transition-colors text-red-500 hover:bg-red-50"
         >
           Clear
         </button>
       )}
-      <div className="flex items-center gap-2 ml-auto shrink-0">
+      <div className="flex items-center gap-1.5 ml-auto shrink-0">
         {loading && (
           <div
-            className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin"
+            className="w-3.5 h-3.5 border-2 border-t-transparent rounded-full animate-spin"
             style={{ borderColor: `${neon.primary}33`, borderTopColor: 'transparent', borderRightColor: neon.primary, borderBottomColor: neon.primary, borderLeftColor: neon.primary }}
           />
         )}
@@ -431,26 +464,32 @@ function WidgetCustomerScopeFilter({
   const neon = getReportNeonStyles(accent);
   const hasScope = Boolean(cusCatId || cusTypeId);
   const selectClass =
-    'text-[11px] font-medium text-slate-800 bg-transparent border-0 focus:outline-none focus:ring-0 cursor-pointer min-w-[7rem] max-w-[11rem] truncate py-0.5 pr-6';
+    'text-[11px] font-medium text-slate-800 bg-transparent border-0 focus:outline-none focus:ring-0 cursor-pointer max-w-[90px] truncate py-0.5';
 
   return (
     <div
       className={REPORT.filterBody}
-      style={{ background: neon.filterBg, borderColor: neon.divider }}
+      style={{ 
+        background: neon.filterBg, 
+        borderColor: neon.divider,
+        flexWrap: 'nowrap',
+        overflow: 'hidden',
+        paddingLeft: '0.5rem',
+        paddingRight: '0.5rem',
+        gap: '0.4rem',
+      }}
     >
-      <Users className="w-3.5 h-3.5 shrink-0" style={{ color: neon.primary }} />
-      <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide shrink-0">
-        Scope
-      </span>
-      <div className={REPORT.datePill} style={{ borderColor: neon.chartBorder }}>
-        <span className="text-[10px] font-semibold text-slate-500 shrink-0">Category</span>
+      <Users className="w-3 h-3 shrink-0" style={{ color: neon.primary }} />
+      
+      <div className="flex items-center gap-1 bg-white border rounded-lg px-1.5 py-1 shrink-0" style={{ borderColor: neon.chartBorder }}>
+        <span className="text-[9px] font-bold text-slate-400 uppercase">Cat</span>
         <select
           value={cusCatId}
           onChange={(e) => onCategoryChange(e.target.value)}
           className={selectClass}
           style={{ color: cusCatId ? neon.primary : undefined }}
         >
-          <option value="">All categories</option>
+          <option value="">All</option>
           {categories.map((c) => (
             <option key={c.cus_cat_id} value={c.cus_cat_id}>
               {c.cus_cat_title}
@@ -458,15 +497,15 @@ function WidgetCustomerScopeFilter({
           ))}
         </select>
       </div>
-      <div className={REPORT.datePill} style={{ borderColor: neon.chartBorder }}>
-        <span className="text-[10px] font-semibold text-slate-500 shrink-0">Type</span>
+      <div className="flex items-center gap-1 bg-white border rounded-lg px-1.5 py-1 shrink-0" style={{ borderColor: neon.chartBorder }}>
+        <span className="text-[9px] font-bold text-slate-400 uppercase">Type</span>
         <select
           value={cusTypeId}
           onChange={(e) => onTypeChange(e.target.value)}
           className={selectClass}
           style={{ color: cusTypeId ? neon.primary : undefined }}
         >
-          <option value="">All types</option>
+          <option value="">All</option>
           {types.map((t) => (
             <option key={t.cus_type_id} value={t.cus_type_id}>
               {t.cus_type_title}
@@ -478,13 +517,12 @@ function WidgetCustomerScopeFilter({
         <button
           type="button"
           onClick={onClearScope}
-          className="text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition-colors shrink-0"
-          style={{ color: CHART_COLORS.debit.primary }}
+          className="text-[10px] font-bold px-1 py-1 rounded-lg transition-colors text-red-500 hover:bg-red-50"
         >
-          Reset scope
+          Reset
         </button>
       )}
-      {trailing && <div className="flex items-center gap-2 ml-auto shrink-0">{trailing}</div>}
+      {trailing && <div className="flex items-center gap-1.5 ml-auto shrink-0">{trailing}</div>}
     </div>
   );
 }
@@ -494,27 +532,40 @@ function WidgetDayFilter({ days, onChange, loading = false, accent }) {
   return (
     <div
       className={REPORT.filterBody}
-      style={{ background: neon.filterBg, borderColor: neon.divider }}
+      style={{ 
+        background: neon.filterBg, 
+        borderColor: neon.divider,
+        flexWrap: 'nowrap',
+        overflow: 'hidden',
+        paddingLeft: '0.5rem',
+        paddingRight: '0.5rem',
+        gap: '0.4rem',
+      }}
     >
-      <Filter className="w-3.5 h-3.5 shrink-0" style={{ color: neon.primary }} />
-      <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Period</span>
-      <div className={REPORT.presetWrap} style={{ borderColor: neon.chartBorder }}>
+      <Filter className="w-3 h-3 shrink-0" style={{ color: neon.primary }} />
+      <span className="text-[9px] font-bold text-slate-400 uppercase">Period</span>
+      <div 
+        className="flex items-center gap-0.5 bg-[#f3f4f6] p-0.5 rounded-lg border shrink-0" 
+        style={{ borderColor: neon.chartBorder }}
+      >
         {[7, 14, 30].map((d) => (
           <button
             key={d}
             type="button"
             onClick={() => onChange(d)}
-            className={`${REPORT.presetBtn}${days === d ? ` ${REPORT.presetBtnActive}` : ''}`}
+            className={`px-1.5 py-1 text-[10px] font-bold rounded-md transition-all duration-150 ${
+              days === d ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
             style={days === d ? { color: neon.primary } : undefined}
           >
             {d}D
           </button>
         ))}
       </div>
-      <div className="flex items-center gap-2 ml-auto shrink-0">
+      <div className="flex items-center gap-1.5 ml-auto shrink-0">
         {loading && (
           <div
-            className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin"
+            className="w-3.5 h-3.5 border-2 border-t-transparent rounded-full animate-spin"
             style={{ borderColor: `${neon.primary}33`, borderTopColor: 'transparent', borderRightColor: neon.primary, borderBottomColor: neon.primary, borderLeftColor: neon.primary }}
           />
         )}
@@ -914,8 +965,8 @@ export default function DashboardContent({ activeTab }) {
 
   const [kpiFilters, setKpiFilters] = useState(last30DaysFilter);
 
-  const [monthEndReceiveFilters, setMonthEndReceiveFilters] = useState(() => lastNCalendarMonthsFilter(6));
-  const [monthEndPayFilters, setMonthEndPayFilters] = useState(() => lastNCalendarMonthsFilter(6));
+  const [monthEndReceiveFilters, setMonthEndReceiveFilters] = useState(() => ({ ...lastNCalendarMonthsFilter(6), cusTypeId: '' }));
+  const [monthEndPayFilters, setMonthEndPayFilters] = useState(() => ({ ...lastNCalendarMonthsFilter(6), cusTypeId: '' }));
   const [monthlyProfitFilters, setMonthlyProfitFilters] = useState(last30DaysFilter);
   const [monthlySalesFilters, setMonthlySalesFilters] = useState(last30DaysFilter);
   const [monthlyCreditData, setMonthlyCreditData] = useState([]);
@@ -1060,6 +1111,7 @@ export default function DashboardContent({ activeTab }) {
       const params = new URLSearchParams();
       if (filters.fromDate) params.set('fromDate', filters.fromDate);
       if (filters.toDate) params.set('toDate', filters.toDate);
+      if (filters.cusTypeId) params.set('cusTypeId', filters.cusTypeId);
       if (key === 'monthlyCredit' || key === 'monthlyDebit') {
         params.set('ledgerGrain', 'month');
         params.set('ledgerSeries', 'outstanding');
@@ -1122,6 +1174,7 @@ export default function DashboardContent({ activeTab }) {
         const params = new URLSearchParams();
         if (monthEndReceiveFilters.fromDate) params.set('fromDate', monthEndReceiveFilters.fromDate);
         if (monthEndReceiveFilters.toDate) params.set('toDate', monthEndReceiveFilters.toDate);
+        if (monthEndReceiveFilters.cusTypeId) params.set('cusTypeId', monthEndReceiveFilters.cusTypeId);
         params.set('ledgerGrain', 'month');
         params.set('ledgerSeries', 'outstanding');
         const res = await fetch(`/api/dashboard/monthly-analytics?${params}`);
@@ -1285,7 +1338,7 @@ export default function DashboardContent({ activeTab }) {
     if (activeTab !== 'dashboard') return;
     const needCategories =
       analyticsWidgets.anyBalanceChart || analyticsWidgets.topCustomersSale;
-    const needTypes = analyticsWidgets.topCustomersSale;
+    const needTypes = analyticsWidgets.topCustomersSale || analyticsWidgets.monthlyCredit;
     if (!needCategories && !needTypes) return;
 
     if (needCategories) {
@@ -1838,7 +1891,24 @@ export default function DashboardContent({ activeTab }) {
               key: 'month-end-receive',
               node: (
             <ReportWidgetShell accent={CHART_COLORS.credit} title="To Receive (closing)">
-              <WidgetMonthRangeFilter filters={monthEndReceiveFilters} onChange={setMonthEndReceiveFilters} loading={monthEndReceiveLoading} accent={CHART_COLORS.credit} />
+              <WidgetMonthRangeFilter filters={monthEndReceiveFilters} onChange={setMonthEndReceiveFilters} loading={monthEndReceiveLoading} accent={CHART_COLORS.credit}>
+                <div 
+                  className="flex items-center gap-1 bg-white border rounded-lg px-1.5 py-1 shrink-0" 
+                  style={{ borderColor: getReportNeonStyles(CHART_COLORS.credit).chartBorder }}
+                >
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">Type</span>
+                  <select
+                    value={monthEndReceiveFilters.cusTypeId || ''}
+                    onChange={(e) => setMonthEndReceiveFilters(f => ({ ...f, cusTypeId: e.target.value }))}
+                    className="text-[11px] font-medium text-slate-800 bg-transparent focus:outline-none cursor-pointer max-w-[70px] truncate"
+                  >
+                    <option value="">All</option>
+                    {allCustomerTypes.map(t => (
+                      <option key={t.cus_type_id} value={t.cus_type_id}>{t.cus_type_title}</option>
+                    ))}
+                  </select>
+                </div>
+              </WidgetMonthRangeFilter>
               <ReportWidgetHeader
                 title="To Receive"
                 subtitle="Month-end closing balance to collect · party accounts (excl. cash/bank)"
@@ -2202,7 +2272,7 @@ export default function DashboardContent({ activeTab }) {
                   <div className="flex-1 min-w-0">
                     <p className="text-[10px] font-bold uppercase tracking-[0.08em]" style={{ color: custNeon.text }}>Top Customers by Balance</p>
                     <p className="text-xs text-slate-500 mt-1">
-                      {customerBalanceFilters.fromDate || customerBalanceFilters.toDate ? 'Net activity in selected period' : 'Outstanding balance'}
+                      {customerBalanceFilters.toDate ? `Outstanding as of ${formatDatePK(customerBalanceFilters.toDate)}` : 'Current outstanding balance'}
                     </p>
                   </div>
                   <select
@@ -2232,8 +2302,8 @@ export default function DashboardContent({ activeTab }) {
                 <ReportWidgetFooter
                   accent={CHART_COLORS.customer}
                   formula={
-                    customerBalanceFilters.fromDate || customerBalanceFilters.toDate
-                      ? `Combined net activity for top ${n} customers in selected period`
+                    customerBalanceFilters.toDate
+                      ? `Combined outstanding balance for top ${n} customers as of ${formatDatePK(customerBalanceFilters.toDate)}`
                       : `Combined outstanding balance for top ${n} customers`
                   }
                   total={`PKR ${fmtAmt(customerBalanceTotal)}`}
@@ -2262,7 +2332,7 @@ export default function DashboardContent({ activeTab }) {
                   <div className="flex-1 min-w-0">
                     <p className="text-[10px] font-bold uppercase tracking-[0.08em]" style={{ color: suppNeon.text }}>Top Suppliers by Balance</p>
                     <p className="text-xs text-slate-500 mt-1">
-                      {supplierBalanceFilters.fromDate || supplierBalanceFilters.toDate ? 'Net activity in selected period' : 'Outstanding balance'}
+                      {supplierBalanceFilters.toDate ? `Outstanding as of ${formatDatePK(supplierBalanceFilters.toDate)}` : 'Current outstanding balance'}
                     </p>
                   </div>
                   <select
@@ -2292,8 +2362,8 @@ export default function DashboardContent({ activeTab }) {
                 <ReportWidgetFooter
                   accent={CHART_COLORS.supplier}
                   formula={
-                    supplierBalanceFilters.fromDate || supplierBalanceFilters.toDate
-                      ? `Combined net activity for top ${n} suppliers in selected period`
+                    supplierBalanceFilters.toDate
+                      ? `Combined outstanding balance for top ${n} suppliers as of ${formatDatePK(supplierBalanceFilters.toDate)}`
                       : `Combined outstanding balance for top ${n} suppliers`
                   }
                   total={`PKR ${fmtAmt(supplierBalanceTotal)}`}
