@@ -1,0 +1,5600 @@
+[
+  {
+    "cus_id": 1,
+    "cus_name": "old Cash Sales",
+    "l_id": 128,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -64432,
+    "diff": -64432
+  },
+  {
+    "cus_id": 1,
+    "cus_name": "old Cash Sales",
+    "l_id": 14929,
+    "error": "Opening balance mismatch",
+    "expected": -64469,
+    "actual": 0,
+    "diff": 64469
+  },
+  {
+    "cus_id": 1,
+    "cus_name": "old Cash Sales",
+    "l_id": 14929,
+    "error": "Closing balance math error",
+    "expected": 5000,
+    "actual": 0,
+    "diff": -5000
+  },
+  {
+    "cus_id": 3,
+    "cus_name": "ihsan  chack mittha",
+    "l_id": 6937,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 16724,
+    "diff": 16724
+  },
+  {
+    "cus_id": 4,
+    "cus_name": "Asghar shahib adda .W",
+    "l_id": 230,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 371414,
+    "diff": 371414
+  },
+  {
+    "cus_id": 5,
+    "cus_name": "imtiaz shahib adda",
+    "l_id": 1767,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 184742,
+    "diff": 184742
+  },
+  {
+    "cus_id": 6,
+    "cus_name": "Blawal shehzad pindi kalo",
+    "l_id": 212,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 309505,
+    "diff": 309505
+  },
+  {
+    "cus_id": 6,
+    "cus_name": "Blawal shehzad pindi kalo",
+    "l_id": 15635,
+    "error": "Opening balance mismatch",
+    "expected": 315720,
+    "actual": 348720,
+    "diff": 33000
+  },
+  {
+    "cus_id": 6,
+    "cus_name": "Blawal shehzad pindi kalo",
+    "l_id": 18588,
+    "error": "Opening balance mismatch",
+    "expected": 348720,
+    "actual": 315720,
+    "diff": -33000
+  },
+  {
+    "cus_id": 6,
+    "cus_name": "Blawal shehzad pindi kalo",
+    "l_id": 22916,
+    "error": "Opening balance mismatch",
+    "expected": 334955,
+    "actual": 338855,
+    "diff": 3900
+  },
+  {
+    "cus_id": 6,
+    "cus_name": "Blawal shehzad pindi kalo",
+    "l_id": 22972,
+    "error": "Opening balance mismatch",
+    "expected": 339455,
+    "actual": 334955,
+    "diff": -4500
+  },
+  {
+    "cus_id": 6,
+    "cus_name": "Blawal shehzad pindi kalo",
+    "l_id": 24410,
+    "error": "Opening balance mismatch",
+    "expected": 338855,
+    "actual": 339455,
+    "diff": 600
+  },
+  {
+    "cus_id": 7,
+    "cus_name": "Haji imtiaz runsek pulli",
+    "l_id": 25043,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 18846,
+    "diff": 18846
+  },
+  {
+    "cus_id": 11,
+    "cus_name": "iqbal shahib kotsar",
+    "l_id": 3924,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 12844,
+    "diff": 12844
+  },
+  {
+    "cus_id": 16,
+    "cus_name": "Ameer Hamza pindi dhotra",
+    "l_id": 191,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 267781,
+    "diff": 267781
+  },
+  {
+    "cus_id": 19,
+    "cus_name": "Taswar shahib kotstar",
+    "l_id": 8543,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 19600,
+    "diff": 19600
+  },
+  {
+    "cus_id": 20,
+    "cus_name": "usman jokalia anas bro w",
+    "l_id": 3219,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 113964,
+    "diff": 113964
+  },
+  {
+    "cus_id": 22,
+    "cus_name": "insaf steel adda",
+    "l_id": 143,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 494972,
+    "diff": 494972
+  },
+  {
+    "cus_id": 23,
+    "cus_name": "ihsan qadri shahib adda",
+    "l_id": 349,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -21570,
+    "diff": -21570
+  },
+  {
+    "cus_id": 29,
+    "cus_name": "Asad shahib adda",
+    "l_id": 613,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 85417,
+    "diff": 85417
+  },
+  {
+    "cus_id": 30,
+    "cus_name": "iqbal shahib adda",
+    "l_id": 117,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 14592,
+    "diff": 14592
+  },
+  {
+    "cus_id": 33,
+    "cus_name": "saqib shahib pahrianwali .W",
+    "l_id": 3160,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 50833,
+    "diff": 50833
+  },
+  {
+    "cus_id": 35,
+    "cus_name": "khalid mughal shahib adda",
+    "l_id": 772,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 20604,
+    "diff": 20604
+  },
+  {
+    "cus_id": 37,
+    "cus_name": "Zaka mughal shahib pahrianwali",
+    "l_id": 2207,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 387009,
+    "diff": 387009
+  },
+  {
+    "cus_id": 43,
+    "cus_name": "Ramzan shahib adda",
+    "l_id": 3854,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 8990,
+    "diff": 8990
+  },
+  {
+    "cus_id": 48,
+    "cus_name": "saleem shahib sarang",
+    "l_id": 412,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 255746,
+    "diff": 255746
+  },
+  {
+    "cus_id": 48,
+    "cus_name": "saleem shahib sarang",
+    "l_id": 1557,
+    "error": "Opening balance mismatch",
+    "expected": 249456,
+    "actual": 254614,
+    "diff": 5158
+  },
+  {
+    "cus_id": 48,
+    "cus_name": "saleem shahib sarang",
+    "l_id": 1584,
+    "error": "Opening balance mismatch",
+    "expected": 250114,
+    "actual": 249456,
+    "diff": -658
+  },
+  {
+    "cus_id": 48,
+    "cus_name": "saleem shahib sarang",
+    "l_id": 1821,
+    "error": "Opening balance mismatch",
+    "expected": 254614,
+    "actual": 250114,
+    "diff": -4500
+  },
+  {
+    "cus_id": 53,
+    "cus_name": "haji Shabaz shahib adda",
+    "l_id": 187,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 79746,
+    "diff": 79746
+  },
+  {
+    "cus_id": 55,
+    "cus_name": "Shoukat shahib adda",
+    "l_id": 835,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 110394,
+    "diff": 110394
+  },
+  {
+    "cus_id": 59,
+    "cus_name": "Skandar shahib rojea",
+    "l_id": 358,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 56808,
+    "diff": 56808
+  },
+  {
+    "cus_id": 62,
+    "cus_name": "imran freed shahib",
+    "l_id": 1732,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 56599,
+    "diff": 56599
+  },
+  {
+    "cus_id": 63,
+    "cus_name": "tariq Qadri shahib",
+    "l_id": 1737,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 181053,
+    "diff": 181053
+  },
+  {
+    "cus_id": 65,
+    "cus_name": "zafar sahib lasuri",
+    "l_id": 6960,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 382182,
+    "diff": 382182
+  },
+  {
+    "cus_id": 66,
+    "cus_name": "Aqib Sahib adda",
+    "l_id": 5948,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 603388,
+    "diff": 603388
+  },
+  {
+    "cus_id": 67,
+    "cus_name": "Irfan Akbar sahib",
+    "l_id": 246,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 256693,
+    "diff": 256693
+  },
+  {
+    "cus_id": 70,
+    "cus_name": "Ghazanfar mirza Sahib Adda .D",
+    "l_id": 829,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 253365,
+    "diff": 253365
+  },
+  {
+    "cus_id": 71,
+    "cus_name": "Zahir Sahib Mecca iron stor",
+    "l_id": 259,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 599861,
+    "diff": 599861
+  },
+  {
+    "cus_id": 72,
+    "cus_name": "arif Sahib Chak mitha",
+    "l_id": 1022,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 68526,
+    "diff": 68526
+  },
+  {
+    "cus_id": 75,
+    "cus_name": "Mirza Arif Sahib Karkhana .K",
+    "l_id": 24591,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 704,
+    "diff": 704
+  },
+  {
+    "cus_id": 76,
+    "cus_name": "Maher kashif Sahib Mungowal.W",
+    "l_id": 9458,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 90400,
+    "diff": 90400
+  },
+  {
+    "cus_id": 81,
+    "cus_name": "Fahad Sahib mungowal",
+    "l_id": 3921,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 3024,
+    "diff": 3024
+  },
+  {
+    "cus_id": 82,
+    "cus_name": "Qaisar mughal Sahib Adda",
+    "l_id": 166,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 253250,
+    "diff": 253250
+  },
+  {
+    "cus_id": 83,
+    "cus_name": "farhan mughal shahib",
+    "l_id": 124,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 251591,
+    "diff": 251591
+  },
+  {
+    "cus_id": 85,
+    "cus_name": "kashif shahib Runseky",
+    "l_id": 196,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -800,
+    "diff": -800
+  },
+  {
+    "cus_id": 86,
+    "cus_name": "Hafiz kashif shahib hellan .D",
+    "l_id": 5606,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1605,
+    "diff": 1605
+  },
+  {
+    "cus_id": 92,
+    "cus_name": "Naveed Mughal Sahib Adda",
+    "l_id": 386,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 80185,
+    "diff": 80185
+  },
+  {
+    "cus_id": 98,
+    "cus_name": "Mirza Mudassir Sahib Chak Jano",
+    "l_id": 253,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 206970,
+    "diff": 206970
+  },
+  {
+    "cus_id": 99,
+    "cus_name": "Mustafa Sahib kot Staar",
+    "l_id": 11964,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 9,
+    "diff": 9
+  },
+  {
+    "cus_id": 100,
+    "cus_name": "Mustafa Sahib solar Waley",
+    "l_id": 495,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 330416,
+    "diff": 330416
+  },
+  {
+    "cus_id": 102,
+    "cus_name": "Mubasher Saddique Mughal Sahib",
+    "l_id": 159,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -58000,
+    "diff": -58000
+  },
+  {
+    "cus_id": 104,
+    "cus_name": "Najam Shehraz Sahib Jokalian",
+    "l_id": 863,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 63104,
+    "diff": 63104
+  },
+  {
+    "cus_id": 106,
+    "cus_name": "mazhar naz mughal sahib hardware",
+    "l_id": 11784,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 4410,
+    "diff": 4410
+  },
+  {
+    "cus_id": 111,
+    "cus_name": "Munawar Sahib Karkhana .K",
+    "l_id": 5023,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 117724,
+    "diff": 117724
+  },
+  {
+    "cus_id": 112,
+    "cus_name": "Haji boota Sahib Runmal Shareef Adda  .W",
+    "l_id": 13133,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 6276,
+    "diff": 6276
+  },
+  {
+    "cus_id": 113,
+    "cus_name": "Mirza Mustansar Sahib Karkhan .K",
+    "l_id": 8853,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 43147,
+    "diff": 43147
+  },
+  {
+    "cus_id": 115,
+    "cus_name": "classis pavers",
+    "l_id": 281,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 3205500,
+    "diff": 3205500
+  },
+  {
+    "cus_id": 117,
+    "cus_name": "Ch.Abdul Rehman Sahib",
+    "l_id": 501,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1143223,
+    "diff": 1143223
+  },
+  {
+    "cus_id": 117,
+    "cus_name": "Ch.Abdul Rehman Sahib",
+    "l_id": 25332,
+    "error": "Opening balance mismatch",
+    "expected": 989415,
+    "actual": 1273532,
+    "diff": 284117
+  },
+  {
+    "cus_id": 117,
+    "cus_name": "Ch.Abdul Rehman Sahib",
+    "l_id": 25801,
+    "error": "Opening balance mismatch",
+    "expected": 1430032,
+    "actual": 989415,
+    "diff": -440617
+  },
+  {
+    "cus_id": 117,
+    "cus_name": "Ch.Abdul Rehman Sahib",
+    "l_id": 26058,
+    "error": "Opening balance mismatch",
+    "expected": 1273532,
+    "actual": 1430032,
+    "diff": 156500
+  },
+  {
+    "cus_id": 123,
+    "cus_name": "Imtiaz Nazir Sahib  .W",
+    "l_id": 5466,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 254326,
+    "diff": 254326
+  },
+  {
+    "cus_id": 124,
+    "cus_name": "safyan shahib runsiky",
+    "l_id": 3239,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 11310,
+    "diff": 11310
+  },
+  {
+    "cus_id": 128,
+    "cus_name": "nadeem arain sahib lasuri",
+    "l_id": 22019,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -46,
+    "diff": -46
+  },
+  {
+    "cus_id": 130,
+    "cus_name": "mirza usman sb mughal builders",
+    "l_id": 7058,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 539640,
+    "diff": 539640
+  },
+  {
+    "cus_id": 135,
+    "cus_name": "haji mazhar sahib karkhana pahrianwali",
+    "l_id": 1129,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 44490,
+    "diff": 44490
+  },
+  {
+    "cus_id": 136,
+    "cus_name": "Qaisar shahib Hellan .D",
+    "l_id": 255,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1092561,
+    "diff": 1092561
+  },
+  {
+    "cus_id": 137,
+    "cus_name": "mehdi khan ransikay",
+    "l_id": 3999,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 38563,
+    "diff": 38563
+  },
+  {
+    "cus_id": 142,
+    "cus_name": "Ghulam mustafa shahib",
+    "l_id": 21288,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 89774,
+    "diff": 89774
+  },
+  {
+    "cus_id": 143,
+    "cus_name": "raza shahib asad pur",
+    "l_id": 3291,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 3602,
+    "diff": 3602
+  },
+  {
+    "cus_id": 154,
+    "cus_name": "Arshad shahib naring",
+    "l_id": 695,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 313797,
+    "diff": 313797
+  },
+  {
+    "cus_id": 157,
+    "cus_name": "Imtiaz shahib runmal",
+    "l_id": 364,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 81550,
+    "diff": 81550
+  },
+  {
+    "cus_id": 164,
+    "cus_name": "sarver sahib mungowal",
+    "l_id": 4475,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 3006,
+    "diff": 3006
+  },
+  {
+    "cus_id": 166,
+    "cus_name": "Mudsar bloch sahb .W",
+    "l_id": 23419,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 8237,
+    "diff": 8237
+  },
+  {
+    "cus_id": 172,
+    "cus_name": "javed shahib karkhana",
+    "l_id": 3625,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 15601,
+    "diff": 15601
+  },
+  {
+    "cus_id": 174,
+    "cus_name": "ittefaq fectory",
+    "l_id": 964,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1652026,
+    "diff": 1652026
+  },
+  {
+    "cus_id": 179,
+    "cus_name": "molvi naveed lasuri",
+    "l_id": 24888,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 4983,
+    "diff": 4983
+  },
+  {
+    "cus_id": 180,
+    "cus_name": "habib sahib haslawala",
+    "l_id": 844,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 8079,
+    "diff": 8079
+  },
+  {
+    "cus_id": 181,
+    "cus_name": "ITTEFAQ MUNDI fectory .K",
+    "l_id": 708,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1277133,
+    "diff": 1277133
+  },
+  {
+    "cus_id": 188,
+    "cus_name": "Malik zunair shahib",
+    "l_id": 180,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 285118,
+    "diff": 285118
+  },
+  {
+    "cus_id": 188,
+    "cus_name": "Malik zunair shahib",
+    "l_id": 12485,
+    "error": "Opening balance mismatch",
+    "expected": 61025.39999999999,
+    "actual": 66696.4,
+    "diff": 5671.000000000007
+  },
+  {
+    "cus_id": 188,
+    "cus_name": "Malik zunair shahib",
+    "l_id": 12489,
+    "error": "Opening balance mismatch",
+    "expected": 72261.4,
+    "actual": 61025.39999999999,
+    "diff": -11236.000000000007
+  },
+  {
+    "cus_id": 188,
+    "cus_name": "Malik zunair shahib",
+    "l_id": 12908,
+    "error": "Opening balance mismatch",
+    "expected": 66696.4,
+    "actual": 72261.4,
+    "diff": 5565
+  },
+  {
+    "cus_id": 189,
+    "cus_name": "sajid sahib kotla shana",
+    "l_id": 18322,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 9511,
+    "diff": 9511
+  },
+  {
+    "cus_id": 191,
+    "cus_name": "Anjam Rafeeq",
+    "l_id": 5097,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 98675,
+    "diff": 98675
+  },
+  {
+    "cus_id": 193,
+    "cus_name": "Ghulam Husain sahib solar waly",
+    "l_id": 1186,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 220224,
+    "diff": 220224
+  },
+  {
+    "cus_id": 196,
+    "cus_name": "Haji munwer shahib .D",
+    "l_id": 1753,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1155921,
+    "diff": 1155921
+  },
+  {
+    "cus_id": 202,
+    "cus_name": "Bilal walder",
+    "l_id": 1400,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 47446,
+    "diff": 47446
+  },
+  {
+    "cus_id": 204,
+    "cus_name": "Zafar Mughal sb",
+    "l_id": 468,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 139362,
+    "diff": 139362
+  },
+  {
+    "cus_id": 215,
+    "cus_name": "mirza nazir shahib cement waly runseky",
+    "l_id": 1232,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 29316,
+    "diff": 29316
+  },
+  {
+    "cus_id": 224,
+    "cus_name": "aqeel shahib g mart",
+    "l_id": 323,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 100905,
+    "diff": 100905
+  },
+  {
+    "cus_id": 230,
+    "cus_name": "mirza asjad sahib choranwala",
+    "l_id": 9066,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 102692,
+    "diff": 102692
+  },
+  {
+    "cus_id": 234,
+    "cus_name": "karamat sahib choki waly",
+    "l_id": 20168,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 390,
+    "diff": 390
+  },
+  {
+    "cus_id": 243,
+    "cus_name": "riaz klair sahib",
+    "l_id": 13763,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 9750,
+    "diff": 9750
+  },
+  {
+    "cus_id": 252,
+    "cus_name": "shehzad zaman sahib runseky",
+    "l_id": 1379,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 793,
+    "diff": 793
+  },
+  {
+    "cus_id": 262,
+    "cus_name": "haji rafqat sahib cemant waly",
+    "l_id": 448,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1342894,
+    "diff": 1342894
+  },
+  {
+    "cus_id": 282,
+    "cus_name": "umair sahib cement mangowal",
+    "l_id": 1569,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 12770,
+    "diff": 12770
+  },
+  {
+    "cus_id": 286,
+    "cus_name": "mirza bashrat shaib sentry waly",
+    "l_id": 22175,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1100,
+    "diff": 1100
+  },
+  {
+    "cus_id": 289,
+    "cus_name": "shahib zaka mughal jokalian road adda",
+    "l_id": 1984,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 22654,
+    "diff": 22654
+  },
+  {
+    "cus_id": 321,
+    "cus_name": "murtaza thekdar sahib jano chak",
+    "l_id": 17215,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 48249,
+    "diff": 48249
+  },
+  {
+    "cus_id": 329,
+    "cus_name": "aslam sahib rakshy wala",
+    "l_id": 2582,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 5100,
+    "diff": 5100
+  },
+  {
+    "cus_id": 333,
+    "cus_name": "mirza asghar sahib lasori",
+    "l_id": 318,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -154400,
+    "diff": -154400
+  },
+  {
+    "cus_id": 345,
+    "cus_name": "malik shehzad sabii .D",
+    "l_id": 24803,
+    "error": "Opening balance mismatch",
+    "expected": 73980,
+    "actual": 78630,
+    "diff": 4650
+  },
+  {
+    "cus_id": 345,
+    "cus_name": "malik shehzad sabii .D",
+    "l_id": 24817,
+    "error": "Opening balance mismatch",
+    "expected": 93080,
+    "actual": 73980,
+    "diff": -19100
+  },
+  {
+    "cus_id": 345,
+    "cus_name": "malik shehzad sabii .D",
+    "l_id": 26102,
+    "error": "Opening balance mismatch",
+    "expected": 78630,
+    "actual": 93080,
+    "diff": 14450
+  },
+  {
+    "cus_id": 346,
+    "cus_name": "yasir qadri sahib ada pahrianwali",
+    "l_id": 518,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 2294126,
+    "diff": 2294126
+  },
+  {
+    "cus_id": 351,
+    "cus_name": "sultan sahib cemant waly",
+    "l_id": 694,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 351294,
+    "diff": 351294
+  },
+  {
+    "cus_id": 363,
+    "cus_name": "amjad majun",
+    "l_id": 21810,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 36979,
+    "diff": 36979
+  },
+  {
+    "cus_id": 401,
+    "cus_name": "mirza asghar sahib karhana mano chak",
+    "l_id": 13064,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -164,
+    "diff": -164
+  },
+  {
+    "cus_id": 410,
+    "cus_name": "mirza saqib haneef sahib  chak zahir",
+    "l_id": 985,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 62063,
+    "diff": 62063
+  },
+  {
+    "cus_id": 411,
+    "cus_name": "jamia almdina faizan e madina hagarwala",
+    "l_id": 587,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 205361,
+    "diff": 205361
+  },
+  {
+    "cus_id": 429,
+    "cus_name": "hafiz rizwan sahib cement waly",
+    "l_id": 1218,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 96000,
+    "diff": 96000
+  },
+  {
+    "cus_id": 444,
+    "cus_name": "hafiz imran cement waly",
+    "l_id": 2323,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 13157,
+    "diff": 13157
+  },
+  {
+    "cus_id": 449,
+    "cus_name": "wajid ali sahib ada pahrianwali",
+    "l_id": 2370,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 145312,
+    "diff": 145312
+  },
+  {
+    "cus_id": 456,
+    "cus_name": "mumtaz ranjha jenral store",
+    "l_id": 1001,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 210900,
+    "diff": 210900
+  },
+  {
+    "cus_id": 459,
+    "cus_name": "haji mehdi karhana mungowal",
+    "l_id": 9667,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 2729,
+    "diff": 2729
+  },
+  {
+    "cus_id": 461,
+    "cus_name": "ihsan munwar mughal  ada pahrianwali",
+    "l_id": 14001,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1750,
+    "diff": 1750
+  },
+  {
+    "cus_id": 466,
+    "cus_name": "master waqis sahib chak mitha",
+    "l_id": 5809,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 986,
+    "diff": 986
+  },
+  {
+    "cus_id": 467,
+    "cus_name": "haji parvaize sahib bhata waly",
+    "l_id": 3776,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 211617,
+    "diff": 211617
+  },
+  {
+    "cus_id": 476,
+    "cus_name": "tariq mughal shaib kunda waly",
+    "l_id": 25610,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 2606,
+    "diff": 2606
+  },
+  {
+    "cus_id": 481,
+    "cus_name": "khuram qaisar sahib PROJECT",
+    "l_id": 5250,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1248033.3,
+    "diff": 1248033.3
+  },
+  {
+    "cus_id": 486,
+    "cus_name": "tariq sahib marque waly",
+    "l_id": 1681,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1406913,
+    "diff": 1406913
+  },
+  {
+    "cus_id": 508,
+    "cus_name": "shahid sahib hagerwala.W",
+    "l_id": 2845,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 7551,
+    "diff": 7551
+  },
+  {
+    "cus_id": 540,
+    "cus_name": "abbas tarar sahib kot staar",
+    "l_id": 3166,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 4739,
+    "diff": 4739
+  },
+  {
+    "cus_id": 555,
+    "cus_name": "zahid sahi sahib bagriyawala",
+    "l_id": 15417,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 23464,
+    "diff": 23464
+  },
+  {
+    "cus_id": 556,
+    "cus_name": "ch.ashiq shahib",
+    "l_id": 257,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 123100,
+    "diff": 123100
+  },
+  {
+    "cus_id": 583,
+    "cus_name": "zeeshan sahib mungowal",
+    "l_id": 1403,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 423227,
+    "diff": 423227
+  },
+  {
+    "cus_id": 600,
+    "cus_name": "qaisar shahib cement waly",
+    "l_id": 17768,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1000,
+    "diff": 1000
+  },
+  {
+    "cus_id": 606,
+    "cus_name": "kashif sahib jano chak solong",
+    "l_id": 24238,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 488,
+    "diff": 488
+  },
+  {
+    "cus_id": 610,
+    "cus_name": "bashrat sahib warraich zari traders",
+    "l_id": 946,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 455426,
+    "diff": 455426
+  },
+  {
+    "cus_id": 613,
+    "cus_name": "waqas bending ranceky",
+    "l_id": 7211,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 461199,
+    "diff": 461199
+  },
+  {
+    "cus_id": 626,
+    "cus_name": "rana mumtaz sahib ada pahrianwali",
+    "l_id": 1179,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 41130,
+    "diff": 41130
+  },
+  {
+    "cus_id": 629,
+    "cus_name": "ali mirza ittefaq bulider",
+    "l_id": 940,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 4563530,
+    "diff": 4563530
+  },
+  {
+    "cus_id": 629,
+    "cus_name": "ali mirza ittefaq bulider",
+    "l_id": 19875,
+    "error": "Opening balance mismatch",
+    "expected": 14699005,
+    "actual": 15150805,
+    "diff": 451800
+  },
+  {
+    "cus_id": 629,
+    "cus_name": "ali mirza ittefaq bulider",
+    "l_id": 19914,
+    "error": "Opening balance mismatch",
+    "expected": 14852155,
+    "actual": 14699005,
+    "diff": -153150
+  },
+  {
+    "cus_id": 629,
+    "cus_name": "ali mirza ittefaq bulider",
+    "l_id": 20064,
+    "error": "Opening balance mismatch",
+    "expected": 15150805,
+    "actual": 14852155,
+    "diff": -298650
+  },
+  {
+    "cus_id": 629,
+    "cus_name": "ali mirza ittefaq bulider",
+    "l_id": 25646,
+    "error": "Opening balance mismatch",
+    "expected": 12857236,
+    "actual": 12906022,
+    "diff": 48786
+  },
+  {
+    "cus_id": 629,
+    "cus_name": "ali mirza ittefaq bulider",
+    "l_id": 25773,
+    "error": "Opening balance mismatch",
+    "expected": 12769172,
+    "actual": 12857236,
+    "diff": 88064
+  },
+  {
+    "cus_id": 629,
+    "cus_name": "ali mirza ittefaq bulider",
+    "l_id": 25787,
+    "error": "Opening balance mismatch",
+    "expected": 12906022,
+    "actual": 12769172,
+    "diff": -136850
+  },
+  {
+    "cus_id": 631,
+    "cus_name": "kaghan concrete sargodha",
+    "l_id": 499,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1504970,
+    "diff": 1504970
+  },
+  {
+    "cus_id": 650,
+    "cus_name": "bilal sahib paroteen foam",
+    "l_id": 15041,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 303386,
+    "diff": 303386
+  },
+  {
+    "cus_id": 651,
+    "cus_name": "ch.ali haidar warraich sahib",
+    "l_id": 2214,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1606782,
+    "diff": 1606782
+  },
+  {
+    "cus_id": 658,
+    "cus_name": "mughal buliders waniky tarar",
+    "l_id": 2781,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1863068,
+    "diff": 1863068
+  },
+  {
+    "cus_id": 660,
+    "cus_name": "mirza zaman baig shaib",
+    "l_id": 12108,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 9700,
+    "diff": 9700
+  },
+  {
+    "cus_id": 674,
+    "cus_name": "subtain sahib runmal ada",
+    "l_id": 13643,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 4680,
+    "diff": 4680
+  },
+  {
+    "cus_id": 681,
+    "cus_name": "mudsar riaz sahib jnao chak",
+    "l_id": 692,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 39006,
+    "diff": 39006
+  },
+  {
+    "cus_id": 683,
+    "cus_name": "aurangzaib tarar sahib cement waly",
+    "l_id": 4087,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 84002,
+    "diff": 84002
+  },
+  {
+    "cus_id": 684,
+    "cus_name": "rana anwar sahib cement waly jokalian",
+    "l_id": 462,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 3448,
+    "diff": 3448
+  },
+  {
+    "cus_id": 696,
+    "cus_name": "amjad shaib cement waly",
+    "l_id": 1246,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1216959,
+    "diff": 1216959
+  },
+  {
+    "cus_id": 697,
+    "cus_name": "umair shaib cement waly kang chanan",
+    "l_id": 1236,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1999358,
+    "diff": 1999358
+  },
+  {
+    "cus_id": 704,
+    "cus_name": "mughal buliders deina",
+    "l_id": 17196,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 150768,
+    "diff": 150768
+  },
+  {
+    "cus_id": 736,
+    "cus_name": "naeem sahib cement waly haslanwaly",
+    "l_id": 443,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 9568,
+    "diff": 9568
+  },
+  {
+    "cus_id": 736,
+    "cus_name": "naeem sahib cement waly haslanwaly",
+    "l_id": 6141,
+    "error": "Opening balance mismatch",
+    "expected": 0.4000000000232831,
+    "actual": 330650.4,
+    "diff": 330650
+  },
+  {
+    "cus_id": 736,
+    "cus_name": "naeem sahib cement waly haslanwaly",
+    "l_id": 6306,
+    "error": "Opening balance mismatch",
+    "expected": 180650.4,
+    "actual": 0.4000000000232831,
+    "diff": -180649.99999999997
+  },
+  {
+    "cus_id": 736,
+    "cus_name": "naeem sahib cement waly haslanwaly",
+    "l_id": 6307,
+    "error": "Opening balance mismatch",
+    "expected": 330650.4,
+    "actual": 180650.4,
+    "diff": -150000.00000000003
+  },
+  {
+    "cus_id": 750,
+    "cus_name": "arslan sahib thata aliye",
+    "l_id": 466,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 123335,
+    "diff": 123335
+  },
+  {
+    "cus_id": 763,
+    "cus_name": "zafar shaib jano chak",
+    "l_id": 2254,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 10255,
+    "diff": 10255
+  },
+  {
+    "cus_id": 768,
+    "cus_name": "MUZFAR SAHIB CEMENT WALY LOUNG",
+    "l_id": 524,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 455458,
+    "diff": 455458
+  },
+  {
+    "cus_id": 768,
+    "cus_name": "MUZFAR SAHIB CEMENT WALY LOUNG",
+    "l_id": 25908,
+    "error": "Opening balance mismatch",
+    "expected": 618827,
+    "actual": 981429,
+    "diff": 362602
+  },
+  {
+    "cus_id": 768,
+    "cus_name": "MUZFAR SAHIB CEMENT WALY LOUNG",
+    "l_id": 25910,
+    "error": "Opening balance mismatch",
+    "expected": 1159919,
+    "actual": 618827,
+    "diff": -541092
+  },
+  {
+    "cus_id": 768,
+    "cus_name": "MUZFAR SAHIB CEMENT WALY LOUNG",
+    "l_id": 26072,
+    "error": "Opening balance mismatch",
+    "expected": 981429,
+    "actual": 1159919,
+    "diff": 178490
+  },
+  {
+    "cus_id": 774,
+    "cus_name": "master mehmood shahib thuta",
+    "l_id": 24928,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 76342,
+    "diff": 76342
+  },
+  {
+    "cus_id": 780,
+    "cus_name": "alharam tuff tile chak mano c/o sheikh waqas",
+    "l_id": 13408,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 7300,
+    "diff": 7300
+  },
+  {
+    "cus_id": 784,
+    "cus_name": "shabaz zaman wraich chack mitha",
+    "l_id": 1887,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 142313,
+    "diff": 142313
+  },
+  {
+    "cus_id": 786,
+    "cus_name": "imran butt sahib cement waly kulani ada",
+    "l_id": 520,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1520980,
+    "diff": 1520980
+  },
+  {
+    "cus_id": 816,
+    "cus_name": "ch.ateeq warraich sahib",
+    "l_id": 13822,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 37132,
+    "diff": 37132
+  },
+  {
+    "cus_id": 876,
+    "cus_name": "taswar sahib arzani",
+    "l_id": 163,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 584635,
+    "diff": 584635
+  },
+  {
+    "cus_id": 886,
+    "cus_name": "warraich floor mill jano chak",
+    "l_id": 11881,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 50089,
+    "diff": 50089
+  },
+  {
+    "cus_id": 913,
+    "cus_name": "zeshan shani hegarwala",
+    "l_id": 10288,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1859,
+    "diff": 1859
+  },
+  {
+    "cus_id": 914,
+    "cus_name": "umair abid rari maker ada pahrianwali",
+    "l_id": 3514,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 6896,
+    "diff": 6896
+  },
+  {
+    "cus_id": 922,
+    "cus_name": "zulafqar sahib solar lasuri",
+    "l_id": 1278,
+    "error": "Closing balance math error",
+    "expected": 9744,
+    "actual": -9744,
+    "diff": -19488
+  },
+  {
+    "cus_id": 922,
+    "cus_name": "zulafqar sahib solar lasuri",
+    "l_id": 1279,
+    "error": "Closing balance math error",
+    "expected": 256,
+    "actual": -19744,
+    "diff": -20000
+  },
+  {
+    "cus_id": 968,
+    "cus_name": "imran sahib sargodha road",
+    "l_id": 1437,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 46300,
+    "diff": 46300
+  },
+  {
+    "cus_id": 986,
+    "cus_name": "atif sahibdealer  sainthal",
+    "l_id": 2379,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 61112,
+    "diff": 61112
+  },
+  {
+    "cus_id": 1018,
+    "cus_name": "tariq ali sahib solar waly",
+    "l_id": 3328,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 184113,
+    "diff": 184113
+  },
+  {
+    "cus_id": 1032,
+    "cus_name": "shakeel mughal ransekay",
+    "l_id": 12705,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 6877,
+    "diff": 6877
+  },
+  {
+    "cus_id": 1048,
+    "cus_name": "mahria solar ada pahrianwali shehzad sahib",
+    "l_id": 2826,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 137115,
+    "diff": 137115
+  },
+  {
+    "cus_id": 1071,
+    "cus_name": "mirza khadam sahib chak zahir",
+    "l_id": 17529,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -2,
+    "diff": -2
+  },
+  {
+    "cus_id": 1079,
+    "cus_name": "faiz munshi sahib  factry",
+    "l_id": 19489,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 3000,
+    "diff": 3000
+  },
+  {
+    "cus_id": 1091,
+    "cus_name": "ittefaq kuriana store",
+    "l_id": 6688,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 828,
+    "diff": 828
+  },
+  {
+    "cus_id": 1097,
+    "cus_name": "maqsood rehmani lal kaloni",
+    "l_id": 9034,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 26458,
+    "diff": 26458
+  },
+  {
+    "cus_id": 1108,
+    "cus_name": "mehndi tarar sahib cement waly kot staar",
+    "l_id": 6760,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 161000,
+    "diff": 161000
+  },
+  {
+    "cus_id": 1120,
+    "cus_name": "ittefaq phalia builders",
+    "l_id": 431,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 747172,
+    "diff": 747172
+  },
+  {
+    "cus_id": 1157,
+    "cus_name": "ch.shahid tarar sahib chak zahir",
+    "l_id": 1636,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 22705,
+    "diff": 22705
+  },
+  {
+    "cus_id": 1159,
+    "cus_name": "shabaz sahib usman block factry charanwala",
+    "l_id": 200,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 446,
+    "diff": 446
+  },
+  {
+    "cus_id": 1167,
+    "cus_name": "mirza adil sadiq sahib phalia",
+    "l_id": 930,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 419125,
+    "diff": 419125
+  },
+  {
+    "cus_id": 1167,
+    "cus_name": "mirza adil sadiq sahib phalia",
+    "l_id": 23568,
+    "error": "Opening balance mismatch",
+    "expected": 362076,
+    "actual": 590876,
+    "diff": 228800
+  },
+  {
+    "cus_id": 1167,
+    "cus_name": "mirza adil sadiq sahib phalia",
+    "l_id": 23589,
+    "error": "Opening balance mismatch",
+    "expected": 290876,
+    "actual": 362076,
+    "diff": 71200
+  },
+  {
+    "cus_id": 1167,
+    "cus_name": "mirza adil sadiq sahib phalia",
+    "l_id": 24084,
+    "error": "Opening balance mismatch",
+    "expected": 590876,
+    "actual": 290876,
+    "diff": -300000
+  },
+  {
+    "cus_id": 1177,
+    "cus_name": "waqas sahib saria shop pahrianwali",
+    "l_id": 2064,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 21059,
+    "diff": 21059
+  },
+  {
+    "cus_id": 1183,
+    "cus_name": "mian chand fakhar shaib petter waly",
+    "l_id": 1869,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -23581,
+    "diff": -23581
+  },
+  {
+    "cus_id": 1192,
+    "cus_name": "Hamza sahib clouth house waly ada pahrianwali",
+    "l_id": 5529,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 116521,
+    "diff": 116521
+  },
+  {
+    "cus_id": 1199,
+    "cus_name": "waseem sahib sanetry waly ada pahrianwali",
+    "l_id": 2462,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 42115,
+    "diff": 42115
+  },
+  {
+    "cus_id": 1211,
+    "cus_name": "hafeez sahib ali purr",
+    "l_id": 8227,
+    "error": "Closing balance math error",
+    "expected": -211891,
+    "actual": 211891,
+    "diff": 423782
+  },
+  {
+    "cus_id": 1211,
+    "cus_name": "hafeez sahib ali purr",
+    "l_id": 8228,
+    "error": "Closing balance math error",
+    "expected": 423782,
+    "actual": 0,
+    "diff": -423782
+  },
+  {
+    "cus_id": 1213,
+    "cus_name": "waqar sahib plasco pipe mungowal",
+    "l_id": 1244,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 182551,
+    "diff": 182551
+  },
+  {
+    "cus_id": 1216,
+    "cus_name": "waris traders helan",
+    "l_id": 8520,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 37930,
+    "diff": 37930
+  },
+  {
+    "cus_id": 1219,
+    "cus_name": "azhar iqbal sahib peetar waly sanpal",
+    "l_id": 10730,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 37810,
+    "diff": 37810
+  },
+  {
+    "cus_id": 1242,
+    "cus_name": "Iftikhar sahib solar waly mano chak",
+    "l_id": 510,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 215934,
+    "diff": 215934
+  },
+  {
+    "cus_id": 1244,
+    "cus_name": "kalu kabadiyan ada pahrianwali",
+    "l_id": 11407,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 543,
+    "diff": 543
+  },
+  {
+    "cus_id": 1262,
+    "cus_name": "ustad naveed electration",
+    "l_id": 111,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 611847,
+    "diff": 611847
+  },
+  {
+    "cus_id": 1273,
+    "cus_name": "saqib parvaiz sahib sohwa",
+    "l_id": 853,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 211417,
+    "diff": 211417
+  },
+  {
+    "cus_id": 1274,
+    "cus_name": "qadri ataa tarar sahib bhuta hust",
+    "l_id": 10953,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -33420,
+    "diff": -33420
+  },
+  {
+    "cus_id": 1276,
+    "cus_name": "mirza umair sahib chack zahir",
+    "l_id": 19072,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 287850,
+    "diff": 287850
+  },
+  {
+    "cus_id": 1292,
+    "cus_name": "sufyan sahib solar waly lasuri",
+    "l_id": 1873,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1354,
+    "diff": 1354
+  },
+  {
+    "cus_id": 1296,
+    "cus_name": "arslan mirza jokalian road",
+    "l_id": 19313,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 12641,
+    "diff": 12641
+  },
+  {
+    "cus_id": 1328,
+    "cus_name": "ali raza sahib pindi dhothran",
+    "l_id": 3799,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 8242,
+    "diff": 8242
+  },
+  {
+    "cus_id": 1337,
+    "cus_name": "qamar tarar sahib runmal shareef",
+    "l_id": 14232,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1000,
+    "diff": 1000
+  },
+  {
+    "cus_id": 1343,
+    "cus_name": "shawal sahib ada pahrianwali",
+    "l_id": 3193,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 74724,
+    "diff": 74724
+  },
+  {
+    "cus_id": 1346,
+    "cus_name": "tariq bosal sahib pahrianwali",
+    "l_id": 873,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 279254,
+    "diff": 279254
+  },
+  {
+    "cus_id": 1346,
+    "cus_name": "tariq bosal sahib pahrianwali",
+    "l_id": 11735,
+    "error": "Opening balance mismatch",
+    "expected": 404327,
+    "actual": 629477,
+    "diff": 225150
+  },
+  {
+    "cus_id": 1346,
+    "cus_name": "tariq bosal sahib pahrianwali",
+    "l_id": 11737,
+    "error": "Opening balance mismatch",
+    "expected": 489477,
+    "actual": 404327,
+    "diff": -85150
+  },
+  {
+    "cus_id": 1346,
+    "cus_name": "tariq bosal sahib pahrianwali",
+    "l_id": 11739,
+    "error": "Opening balance mismatch",
+    "expected": 629477,
+    "actual": 489477,
+    "diff": -140000
+  },
+  {
+    "cus_id": 1362,
+    "cus_name": "mirza waqar rafeeq sahib chak zahir",
+    "l_id": 2356,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 186213,
+    "diff": 186213
+  },
+  {
+    "cus_id": 1362,
+    "cus_name": "mirza waqar rafeeq sahib chak zahir",
+    "l_id": 21861,
+    "error": "Opening balance mismatch",
+    "expected": 69363,
+    "actual": 145613,
+    "diff": 76250
+  },
+  {
+    "cus_id": 1362,
+    "cus_name": "mirza waqar rafeeq sahib chak zahir",
+    "l_id": 25619,
+    "error": "Opening balance mismatch",
+    "expected": 186213,
+    "actual": 69363,
+    "diff": -116850
+  },
+  {
+    "cus_id": 1369,
+    "cus_name": "manzoor ahmed sahib chani mest",
+    "l_id": 4623,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 202,
+    "diff": 202
+  },
+  {
+    "cus_id": 1379,
+    "cus_name": "paris santery & cement store  haigerwala",
+    "l_id": 9899,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -6465,
+    "diff": -6465
+  },
+  {
+    "cus_id": 1403,
+    "cus_name": "mirza usman boring mungowal",
+    "l_id": 522,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 623435,
+    "diff": 623435
+  },
+  {
+    "cus_id": 1422,
+    "cus_name": "shaan ali sahib chak mitha",
+    "l_id": 14426,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 4521,
+    "diff": 4521
+  },
+  {
+    "cus_id": 1485,
+    "cus_name": "jamshaid sahib itehad building material",
+    "l_id": 2249,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -4188,
+    "diff": -4188
+  },
+  {
+    "cus_id": 1489,
+    "cus_name": "adrees butt sahib cement shop runmal ada",
+    "l_id": 674,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 734744,
+    "diff": 734744
+  },
+  {
+    "cus_id": 1492,
+    "cus_name": "ch.afzal tarar sahib chak zahir",
+    "l_id": 12324,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 400,
+    "diff": 400
+  },
+  {
+    "cus_id": 1494,
+    "cus_name": "sajid sahib bhaira cement waly",
+    "l_id": 277,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 225920,
+    "diff": 225920
+  },
+  {
+    "cus_id": 1535,
+    "cus_name": "rizwan sahi traders kiranwala",
+    "l_id": 1220,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 268033,
+    "diff": 268033
+  },
+  {
+    "cus_id": 1542,
+    "cus_name": "riysat warraich hundai wala ada pahrianwali",
+    "l_id": 121,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 9440,
+    "diff": 9440
+  },
+  {
+    "cus_id": 1573,
+    "cus_name": "fuji zulafqar sahib cement waly patha lamba",
+    "l_id": 681,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 422050,
+    "diff": 422050
+  },
+  {
+    "cus_id": 1590,
+    "cus_name": "mubashir shehzad jokalian",
+    "l_id": 237,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 480182,
+    "diff": 480182
+  },
+  {
+    "cus_id": 1590,
+    "cus_name": "mubashir shehzad jokalian",
+    "l_id": 10452,
+    "error": "Opening balance mismatch",
+    "expected": 413465,
+    "actual": 413965,
+    "diff": 500
+  },
+  {
+    "cus_id": 1590,
+    "cus_name": "mubashir shehzad jokalian",
+    "l_id": 10453,
+    "error": "Opening balance mismatch",
+    "expected": 444181,
+    "actual": 413465,
+    "diff": -30716
+  },
+  {
+    "cus_id": 1590,
+    "cus_name": "mubashir shehzad jokalian",
+    "l_id": 10515,
+    "error": "Opening balance mismatch",
+    "expected": 413965,
+    "actual": 444181,
+    "diff": 30216
+  },
+  {
+    "cus_id": 1603,
+    "cus_name": "saqlain sahib pindi kalo",
+    "l_id": 1706,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -6244682,
+    "diff": -6244682
+  },
+  {
+    "cus_id": 1609,
+    "cus_name": "ch.qamar warrich sahib showa",
+    "l_id": 5614,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 2000,
+    "diff": 2000
+  },
+  {
+    "cus_id": 1645,
+    "cus_name": "mezaan bank",
+    "l_id": 855,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 8577,
+    "diff": 8577
+  },
+  {
+    "cus_id": 1646,
+    "cus_name": "Allied bank",
+    "l_id": 1035,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 3218,
+    "diff": 3218
+  },
+  {
+    "cus_id": 1647,
+    "cus_name": "Bop bank",
+    "l_id": 1026,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1005088.62,
+    "diff": 1005088.62
+  },
+  {
+    "cus_id": 1648,
+    "cus_name": "Hbl bank",
+    "l_id": 293,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 349047,
+    "diff": 349047
+  },
+  {
+    "cus_id": 1649,
+    "cus_name": "Al habib bank",
+    "l_id": 3090,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 421,
+    "diff": 421
+  },
+  {
+    "cus_id": 1649,
+    "cus_name": "Al habib bank",
+    "l_id": 20838,
+    "error": "Opening balance mismatch",
+    "expected": 177841,
+    "actual": 1841,
+    "diff": -176000
+  },
+  {
+    "cus_id": 1649,
+    "cus_name": "Al habib bank",
+    "l_id": 21548,
+    "error": "Opening balance mismatch",
+    "expected": -174159,
+    "actual": -174160,
+    "diff": -1
+  },
+  {
+    "cus_id": 1650,
+    "cus_name": "Ubl bank",
+    "l_id": 103,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 4020885,
+    "diff": 4020885
+  },
+  {
+    "cus_id": 1650,
+    "cus_name": "Ubl bank",
+    "l_id": 5815,
+    "error": "Opening balance mismatch",
+    "expected": 4304361,
+    "actual": 4354361,
+    "diff": 50000
+  },
+  {
+    "cus_id": 1650,
+    "cus_name": "Ubl bank",
+    "l_id": 6194,
+    "error": "Opening balance mismatch",
+    "expected": 5872291,
+    "actual": 4304361,
+    "diff": -1567930
+  },
+  {
+    "cus_id": 1650,
+    "cus_name": "Ubl bank",
+    "l_id": 6223,
+    "error": "Opening balance mismatch",
+    "expected": 4354361,
+    "actual": 5872291,
+    "diff": 1517930
+  },
+  {
+    "cus_id": 1650,
+    "cus_name": "Ubl bank",
+    "l_id": 25976,
+    "error": "Opening balance mismatch",
+    "expected": 3908968,
+    "actual": 3963968,
+    "diff": 55000
+  },
+  {
+    "cus_id": 1650,
+    "cus_name": "Ubl bank",
+    "l_id": 25979,
+    "error": "Opening balance mismatch",
+    "expected": 3968968,
+    "actual": 3908968,
+    "diff": -60000
+  },
+  {
+    "cus_id": 1650,
+    "cus_name": "Ubl bank",
+    "l_id": 26031,
+    "error": "Opening balance mismatch",
+    "expected": 3963968,
+    "actual": 3968968,
+    "diff": 5000
+  },
+  {
+    "cus_id": 1650,
+    "cus_name": "Ubl bank",
+    "l_id": 26246,
+    "error": "Opening balance mismatch",
+    "expected": 2691124,
+    "actual": 2770784,
+    "diff": 79660
+  },
+  {
+    "cus_id": 1650,
+    "cus_name": "Ubl bank",
+    "l_id": 26303,
+    "error": "Opening balance mismatch",
+    "expected": 3406304,
+    "actual": 2691124,
+    "diff": -715180
+  },
+  {
+    "cus_id": 1650,
+    "cus_name": "Ubl bank",
+    "l_id": 26308,
+    "error": "Opening balance mismatch",
+    "expected": 2770784,
+    "actual": 3406304,
+    "diff": 635520
+  },
+  {
+    "cus_id": 1651,
+    "cus_name": "Al flah bank",
+    "l_id": 2742,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 600,
+    "diff": 600
+  },
+  {
+    "cus_id": 1654,
+    "cus_name": "easy paisa",
+    "l_id": 126,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 116991.49,
+    "diff": 116991.49
+  },
+  {
+    "cus_id": 1654,
+    "cus_name": "easy paisa",
+    "l_id": 2783,
+    "error": "Opening balance mismatch",
+    "expected": 320974.49,
+    "actual": 326424.49,
+    "diff": 5450
+  },
+  {
+    "cus_id": 1654,
+    "cus_name": "easy paisa",
+    "l_id": 2788,
+    "error": "Opening balance mismatch",
+    "expected": 373724.49,
+    "actual": 320974.49,
+    "diff": -52750
+  },
+  {
+    "cus_id": 1654,
+    "cus_name": "easy paisa",
+    "l_id": 2791,
+    "error": "Opening balance mismatch",
+    "expected": 326424.49,
+    "actual": 373724.49,
+    "diff": 47300
+  },
+  {
+    "cus_id": 1660,
+    "cus_name": "Mcb bank",
+    "l_id": 500,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 290,
+    "diff": 290
+  },
+  {
+    "cus_id": 1667,
+    "cus_name": "usman feroz tarar sahib chani mahram",
+    "l_id": 13321,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 225200,
+    "diff": 225200
+  },
+  {
+    "cus_id": 1677,
+    "cus_name": "Rana furqan sahib adda pahrianwali",
+    "l_id": 18484,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 22804,
+    "diff": 22804
+  },
+  {
+    "cus_id": 1711,
+    "cus_name": "zakar sahib muslim sheih chack zahir",
+    "l_id": 12658,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 10150,
+    "diff": 10150
+  },
+  {
+    "cus_id": 1749,
+    "cus_name": "master ashraf sahib runmal sharif",
+    "l_id": 699,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 77500,
+    "diff": 77500
+  },
+  {
+    "cus_id": 1771,
+    "cus_name": "yasir tarar s/o riasat sahib adda pahrianwali",
+    "l_id": 2686,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 12000,
+    "diff": 12000
+  },
+  {
+    "cus_id": 1788,
+    "cus_name": "shahid sahib arain soler arzani",
+    "l_id": 1860,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 234290,
+    "diff": 234290
+  },
+  {
+    "cus_id": 1789,
+    "cus_name": "riaz gondal sahib hagerwala",
+    "l_id": 3774,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 254439,
+    "diff": 254439
+  },
+  {
+    "cus_id": 1797,
+    "cus_name": "inyat sahib showa warraicha",
+    "l_id": 1863,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 84106,
+    "diff": 84106
+  },
+  {
+    "cus_id": 1815,
+    "cus_name": "faisal sahib weld waly pindy kalo",
+    "l_id": 18017,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 45313,
+    "diff": 45313
+  },
+  {
+    "cus_id": 1845,
+    "cus_name": "mehdi tarar sahib chack zahir",
+    "l_id": 4362,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 10500,
+    "diff": 10500
+  },
+  {
+    "cus_id": 1856,
+    "cus_name": "kung buldin matrial mumtaz sahib",
+    "l_id": 2968,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 254315,
+    "diff": 254315
+  },
+  {
+    "cus_id": 1862,
+    "cus_name": "jawad sahib ranceky",
+    "l_id": 374,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 9548,
+    "diff": 9548
+  },
+  {
+    "cus_id": 1869,
+    "cus_name": "sajjad sahib welder chak zahir",
+    "l_id": 16457,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 15036,
+    "diff": 15036
+  },
+  {
+    "cus_id": 1870,
+    "cus_name": "abdullah bending press",
+    "l_id": 3208,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 17700,
+    "diff": 17700
+  },
+  {
+    "cus_id": 1870,
+    "cus_name": "abdullah bending press",
+    "l_id": 6492,
+    "error": "Opening balance mismatch",
+    "expected": 141112,
+    "actual": 175392,
+    "diff": 34280
+  },
+  {
+    "cus_id": 1870,
+    "cus_name": "abdullah bending press",
+    "l_id": 6519,
+    "error": "Opening balance mismatch",
+    "expected": 190392,
+    "actual": 141112,
+    "diff": -49280
+  },
+  {
+    "cus_id": 1870,
+    "cus_name": "abdullah bending press",
+    "l_id": 6530,
+    "error": "Opening balance mismatch",
+    "expected": 175392,
+    "actual": 190392,
+    "diff": 15000
+  },
+  {
+    "cus_id": 1891,
+    "cus_name": "yousaf mughal sahib",
+    "l_id": 4308,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 13620,
+    "diff": 13620
+  },
+  {
+    "cus_id": 1924,
+    "cus_name": "nosha karyana store sajid sb",
+    "l_id": 4282,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 17500,
+    "diff": 17500
+  },
+  {
+    "cus_id": 1927,
+    "cus_name": "haseeb gondal sb",
+    "l_id": 3347,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 15893,
+    "diff": 15893
+  },
+  {
+    "cus_id": 1943,
+    "cus_name": "mubashar sb janochak",
+    "l_id": 1461,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1391,
+    "diff": 1391
+  },
+  {
+    "cus_id": 1972,
+    "cus_name": "mirza kashif sb chak zahir",
+    "l_id": 23776,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 9383,
+    "diff": 9383
+  },
+  {
+    "cus_id": 1999,
+    "cus_name": "saqib ansari sb phalia iron shop",
+    "l_id": 14070,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 12250,
+    "diff": 12250
+  },
+  {
+    "cus_id": 2002,
+    "cus_name": "afzal mughal shaib pahrianwlai",
+    "l_id": 285,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 170307,
+    "diff": 170307
+  },
+  {
+    "cus_id": 2007,
+    "cus_name": "old cash advance",
+    "l_id": 441,
+    "error": "Opening balance mismatch",
+    "expected": -2400,
+    "actual": 0.5,
+    "diff": 2400.5
+  },
+  {
+    "cus_id": 2007,
+    "cus_name": "old cash advance",
+    "l_id": 7271,
+    "error": "Opening balance mismatch",
+    "expected": -279.5,
+    "actual": 2319.5,
+    "diff": 2599
+  },
+  {
+    "cus_id": 2007,
+    "cus_name": "old cash advance",
+    "l_id": 7328,
+    "error": "Opening balance mismatch",
+    "expected": 2319.5,
+    "actual": -279.5,
+    "diff": -2599
+  },
+  {
+    "cus_id": 2010,
+    "cus_name": "mirza zulafqar inyet sb adda pahrianwali",
+    "l_id": 1703,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 5300,
+    "diff": 5300
+  },
+  {
+    "cus_id": 2038,
+    "cus_name": "mirza ataaulla mechanic",
+    "l_id": 3636,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 16256,
+    "diff": 16256
+  },
+  {
+    "cus_id": 2041,
+    "cus_name": "aakash sb pindi kalo",
+    "l_id": 14949,
+    "error": "Closing balance math error",
+    "expected": -7514,
+    "actual": 7514,
+    "diff": 15028
+  },
+  {
+    "cus_id": 2046,
+    "cus_name": "tahir shehzad machiene waly",
+    "l_id": 1103,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 2800,
+    "diff": 2800
+  },
+  {
+    "cus_id": 2099,
+    "cus_name": "mirza akhtar baig dera mughalan",
+    "l_id": 907,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 44300,
+    "diff": 44300
+  },
+  {
+    "cus_id": 2136,
+    "cus_name": "godam making",
+    "l_id": 186,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 3622533,
+    "diff": 3622533
+  },
+  {
+    "cus_id": 2152,
+    "cus_name": "arif sb jokalian",
+    "l_id": 1226,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 207700,
+    "diff": 207700
+  },
+  {
+    "cus_id": 2162,
+    "cus_name": "mistri zubair sb chak jano",
+    "l_id": 4952,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 338800,
+    "diff": 338800
+  },
+  {
+    "cus_id": 2166,
+    "cus_name": "ayoub s/o ghulam haider sb",
+    "l_id": 672,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 21110,
+    "diff": 21110
+  },
+  {
+    "cus_id": 2175,
+    "cus_name": "azeem sb jokalia",
+    "l_id": 1229,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 216100,
+    "diff": 216100
+  },
+  {
+    "cus_id": 2177,
+    "cus_name": "haji akhtar numberdar sb",
+    "l_id": 263,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -2023060,
+    "diff": -2023060
+  },
+  {
+    "cus_id": 2189,
+    "cus_name": "qazi building matrial chak jevan",
+    "l_id": 4123,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -1542,
+    "diff": -1542
+  },
+  {
+    "cus_id": 2191,
+    "cus_name": "anwar sb choranwala",
+    "l_id": 3750,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 700,
+    "diff": 700
+  },
+  {
+    "cus_id": 2194,
+    "cus_name": "haji arif sb sardar rice mill",
+    "l_id": 3761,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 125300,
+    "diff": 125300
+  },
+  {
+    "cus_id": 2197,
+    "cus_name": "imtiaz sb charky",
+    "l_id": 12405,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -450000,
+    "diff": -450000
+  },
+  {
+    "cus_id": 2216,
+    "cus_name": "jamshaid warraich sb saida saghar",
+    "l_id": 10232,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -601990,
+    "diff": -601990
+  },
+  {
+    "cus_id": 2224,
+    "cus_name": "haji ijaz sb chak jano",
+    "l_id": 14118,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 42000,
+    "diff": 42000
+  },
+  {
+    "cus_id": 2243,
+    "cus_name": "ishfaq hussain sb rati pindi",
+    "l_id": 6477,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 97240,
+    "diff": 97240
+  },
+  {
+    "cus_id": 2244,
+    "cus_name": "eng. Iqbal sb lasuri ideal engineering",
+    "l_id": 7126,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -2654850,
+    "diff": -2654850
+  },
+  {
+    "cus_id": 2246,
+    "cus_name": "ali hassan sb jokalian",
+    "l_id": 477,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 536301,
+    "diff": 536301
+  },
+  {
+    "cus_id": 2250,
+    "cus_name": "aslam labour thekedar hafizabad",
+    "l_id": 687,
+    "error": "Opening balance mismatch",
+    "expected": -8400,
+    "actual": -12880,
+    "diff": -4480
+  },
+  {
+    "cus_id": 2250,
+    "cus_name": "aslam labour thekedar hafizabad",
+    "l_id": 691,
+    "error": "Opening balance mismatch",
+    "expected": -17780,
+    "actual": -8400,
+    "diff": 9380
+  },
+  {
+    "cus_id": 2250,
+    "cus_name": "aslam labour thekedar hafizabad",
+    "l_id": 920,
+    "error": "Opening balance mismatch",
+    "expected": -12880,
+    "actual": -17780,
+    "diff": -4900
+  },
+  {
+    "cus_id": 2250,
+    "cus_name": "aslam labour thekedar hafizabad",
+    "l_id": 1766,
+    "error": "Opening balance mismatch",
+    "expected": -27160,
+    "actual": -32060,
+    "diff": -4900
+  },
+  {
+    "cus_id": 2250,
+    "cus_name": "aslam labour thekedar hafizabad",
+    "l_id": 1945,
+    "error": "Opening balance mismatch",
+    "expected": -36960,
+    "actual": -27160,
+    "diff": 9800
+  },
+  {
+    "cus_id": 2250,
+    "cus_name": "aslam labour thekedar hafizabad",
+    "l_id": 2069,
+    "error": "Opening balance mismatch",
+    "expected": -32060,
+    "actual": -36960,
+    "diff": -4900
+  },
+  {
+    "cus_id": 2250,
+    "cus_name": "aslam labour thekedar hafizabad",
+    "l_id": 2312,
+    "error": "Opening balance mismatch",
+    "expected": -42660,
+    "actual": -48160,
+    "diff": -5500
+  },
+  {
+    "cus_id": 2250,
+    "cus_name": "aslam labour thekedar hafizabad",
+    "l_id": 2316,
+    "error": "Opening balance mismatch",
+    "expected": -54260,
+    "actual": -42660,
+    "diff": 11600
+  },
+  {
+    "cus_id": 2250,
+    "cus_name": "aslam labour thekedar hafizabad",
+    "l_id": 2597,
+    "error": "Opening balance mismatch",
+    "expected": -48160,
+    "actual": -54260,
+    "diff": -6100
+  },
+  {
+    "cus_id": 2255,
+    "cus_name": "jamshaid warraich sb cement khata",
+    "l_id": 134,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 170870,
+    "diff": 170870
+  },
+  {
+    "cus_id": 2272,
+    "cus_name": "govt.girls benazir high school runmal shareef",
+    "l_id": 8553,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 265996,
+    "diff": 265996
+  },
+  {
+    "cus_id": 2278,
+    "cus_name": "mirza nadeem s/o wallait sb adda pahrianwali",
+    "l_id": 2056,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 39426,
+    "diff": 39426
+  },
+  {
+    "cus_id": 2288,
+    "cus_name": "malik mubashar steel works jokalian",
+    "l_id": 555,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -2,
+    "diff": -2
+  },
+  {
+    "cus_id": 2288,
+    "cus_name": "malik mubashar steel works jokalian",
+    "l_id": 5814,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 12980,
+    "diff": 12980
+  },
+  {
+    "cus_id": 2288,
+    "cus_name": "malik mubashar steel works jokalian",
+    "l_id": 7966,
+    "error": "Opening balance mismatch",
+    "expected": 12980,
+    "actual": 0,
+    "diff": -12980
+  },
+  {
+    "cus_id": 2293,
+    "cus_name": "mian jamshaid sb plumber",
+    "l_id": 11986,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 50000,
+    "diff": 50000
+  },
+  {
+    "cus_id": 2296,
+    "cus_name": "malik asghar sb chak zahir",
+    "l_id": 15997,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 5200,
+    "diff": 5200
+  },
+  {
+    "cus_id": 2306,
+    "cus_name": "aurangzaib sb dhaboola",
+    "l_id": 16951,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -200000,
+    "diff": -200000
+  },
+  {
+    "cus_id": 2325,
+    "cus_name": "asghar sahib saria shop phalia",
+    "l_id": 2749,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1070900,
+    "diff": 1070900
+  },
+  {
+    "cus_id": 2326,
+    "cus_name": "enj.iqbal sb home",
+    "l_id": 905,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 271352,
+    "diff": 271352
+  },
+  {
+    "cus_id": 2329,
+    "cus_name": "abdullah ilyas sb deira warraichan",
+    "l_id": 6056,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 7500,
+    "diff": 7500
+  },
+  {
+    "cus_id": 2347,
+    "cus_name": "toseef sb ranmal adda",
+    "l_id": 449,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 141717,
+    "diff": 141717
+  },
+  {
+    "cus_id": 2366,
+    "cus_name": "ahsan s/o hussain sb pindi kalo",
+    "l_id": 459,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -1463000,
+    "diff": -1463000
+  },
+  {
+    "cus_id": 2370,
+    "cus_name": "haq nawaz sb kang channan",
+    "l_id": 1184,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -1414501,
+    "diff": -1414501
+  },
+  {
+    "cus_id": 2373,
+    "cus_name": "nisar sb thatha alyia",
+    "l_id": 6622,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 17900,
+    "diff": 17900
+  },
+  {
+    "cus_id": 2402,
+    "cus_name": "irfan sb warraich chack jano",
+    "l_id": 2722,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 6985,
+    "diff": 6985
+  },
+  {
+    "cus_id": 2403,
+    "cus_name": "nasir iqbal guhdo sultan",
+    "l_id": 9544,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -28000,
+    "diff": -28000
+  },
+  {
+    "cus_id": 2418,
+    "cus_name": "ghzanfer sb adda pahrianali",
+    "l_id": 627,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -186500,
+    "diff": -186500
+  },
+  {
+    "cus_id": 2421,
+    "cus_name": "nasarullah sb sohawa warraichan",
+    "l_id": 453,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -4600,
+    "diff": -4600
+  },
+  {
+    "cus_id": 2428,
+    "cus_name": "mirza electric store adda pahrianwali",
+    "l_id": 3910,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 32780,
+    "diff": 32780
+  },
+  {
+    "cus_id": 2439,
+    "cus_name": "mansha sb chak jano",
+    "l_id": 1093,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 150380,
+    "diff": 150380
+  },
+  {
+    "cus_id": 2442,
+    "cus_name": "aurangzaib dhudra sb higerwala",
+    "l_id": 267,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 293660,
+    "diff": 293660
+  },
+  {
+    "cus_id": 2442,
+    "cus_name": "aurangzaib dhudra sb higerwala",
+    "l_id": 2994,
+    "error": "Opening balance mismatch",
+    "expected": 660,
+    "actual": 31360,
+    "diff": 30700
+  },
+  {
+    "cus_id": 2442,
+    "cus_name": "aurangzaib dhudra sb higerwala",
+    "l_id": 3074,
+    "error": "Opening balance mismatch",
+    "expected": 33410,
+    "actual": 660,
+    "diff": -32750
+  },
+  {
+    "cus_id": 2442,
+    "cus_name": "aurangzaib dhudra sb higerwala",
+    "l_id": 3358,
+    "error": "Opening balance mismatch",
+    "expected": 31360,
+    "actual": 33410,
+    "diff": 2050
+  },
+  {
+    "cus_id": 2452,
+    "cus_name": "docter shahid sb sohawa warraichan",
+    "l_id": 6137,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 31828,
+    "diff": 31828
+  },
+  {
+    "cus_id": 2457,
+    "cus_name": "naveed numberdar sb chak mitha",
+    "l_id": 283,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 701995,
+    "diff": 701995
+  },
+  {
+    "cus_id": 2460,
+    "cus_name": "nawab marble & cement yasir sb",
+    "l_id": 572,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 160200,
+    "diff": 160200
+  },
+  {
+    "cus_id": 2461,
+    "cus_name": "waleed nasir sb lungay",
+    "l_id": 291,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -500000,
+    "diff": -500000
+  },
+  {
+    "cus_id": 2467,
+    "cus_name": "ishtiaq ahmad sb jonuky",
+    "l_id": 2865,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 500,
+    "diff": 500
+  },
+  {
+    "cus_id": 2469,
+    "cus_name": "haji wallait klair sb chak zahir",
+    "l_id": 4600,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 86500,
+    "diff": 86500
+  },
+  {
+    "cus_id": 2473,
+    "cus_name": "taswar sb higerwala",
+    "l_id": 17349,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 15000,
+    "diff": 15000
+  },
+  {
+    "cus_id": 2474,
+    "cus_name": "rizwan anwar gehna sb chak zahir",
+    "l_id": 558,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 936439,
+    "diff": 936439
+  },
+  {
+    "cus_id": 2480,
+    "cus_name": "gul anar sb chakwalia c/o thekedar rasheed sb",
+    "l_id": 3857,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -1505164,
+    "diff": -1505164
+  },
+  {
+    "cus_id": 2491,
+    "cus_name": "arshad bosal sb pahrianwali",
+    "l_id": 282,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 52049,
+    "diff": 52049
+  },
+  {
+    "cus_id": 2494,
+    "cus_name": "sheikh waqas sb lasori",
+    "l_id": 2961,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 27552,
+    "diff": 27552
+  },
+  {
+    "cus_id": 2495,
+    "cus_name": "afzaal sb s/o ditta sb karmanwala",
+    "l_id": 15362,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -10000,
+    "diff": -10000
+  },
+  {
+    "cus_id": 2496,
+    "cus_name": "raouf ijaz sb pindi kalo",
+    "l_id": 3290,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -339850,
+    "diff": -339850
+  },
+  {
+    "cus_id": 2497,
+    "cus_name": "master khursheed sb pini dhothra",
+    "l_id": 9369,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -700,
+    "diff": -700
+  },
+  {
+    "cus_id": 2507,
+    "cus_name": "project sheikh waqas sb",
+    "l_id": 7073,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 69000,
+    "diff": 69000
+  },
+  {
+    "cus_id": 2511,
+    "cus_name": "chamber of commerce and industry mandi bahauddin",
+    "l_id": 3138,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1429500,
+    "diff": 1429500
+  },
+  {
+    "cus_id": 2517,
+    "cus_name": "arshad sb block factory mandi bhauddin",
+    "l_id": 7734,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 142000,
+    "diff": 142000
+  },
+  {
+    "cus_id": 2520,
+    "cus_name": "ansar sandhu sb pindi kalo",
+    "l_id": 9562,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -500000,
+    "diff": -500000
+  },
+  {
+    "cus_id": 2525,
+    "cus_name": "ameen arif sb chak zahir",
+    "l_id": 1329,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 50000,
+    "diff": 50000
+  },
+  {
+    "cus_id": 2529,
+    "cus_name": "mazhar warraich sb kang sahali",
+    "l_id": 7127,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -138000,
+    "diff": -138000
+  },
+  {
+    "cus_id": 2533,
+    "cus_name": "khuram tarar sb kot star",
+    "l_id": 464,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 8542,
+    "diff": 8542
+  },
+  {
+    "cus_id": 2537,
+    "cus_name": "mirza saqib haneef project",
+    "l_id": 3128,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 2328500,
+    "diff": 2328500
+  },
+  {
+    "cus_id": 2538,
+    "cus_name": "doctor siddique sb adda pahrianwali",
+    "l_id": 790,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 20216,
+    "diff": 20216
+  },
+  {
+    "cus_id": 2539,
+    "cus_name": "adnan hussain sb lashkari chak",
+    "l_id": 6387,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 115000,
+    "diff": 115000
+  },
+  {
+    "cus_id": 2548,
+    "cus_name": "usman mudassar sb pahrianwali",
+    "l_id": 624,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -15000,
+    "diff": -15000
+  },
+  {
+    "cus_id": 2549,
+    "cus_name": "hafeez arshad sb thatha ameer",
+    "l_id": 1119,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -130000,
+    "diff": -130000
+  },
+  {
+    "cus_id": 2550,
+    "cus_name": "riaz sb saria labour phalia",
+    "l_id": 99,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 50000,
+    "diff": 50000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 107,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 2340314,
+    "diff": 2340314
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 535,
+    "error": "Opening balance mismatch",
+    "expected": 5683825.1,
+    "actual": 5783825.1,
+    "diff": 100000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 546,
+    "error": "Opening balance mismatch",
+    "expected": 5919325.1,
+    "actual": 5683825.1,
+    "diff": -235500
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 551,
+    "error": "Opening balance mismatch",
+    "expected": 5783825.1,
+    "actual": 5919325.1,
+    "diff": 135500
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 1140,
+    "error": "Opening balance mismatch",
+    "expected": 184534.1,
+    "actual": 216614.1,
+    "diff": 32080
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 1153,
+    "error": "Opening balance mismatch",
+    "expected": 253414.1,
+    "actual": 184534.1,
+    "diff": -68880
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 1155,
+    "error": "Opening balance mismatch",
+    "expected": 216614.1,
+    "actual": 253414.1,
+    "diff": 36800
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 1515,
+    "error": "Opening balance mismatch",
+    "expected": 4250608.1,
+    "actual": 4329708.1,
+    "diff": 79100
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 1524,
+    "error": "Opening balance mismatch",
+    "expected": 4369568.1,
+    "actual": 4250608.1,
+    "diff": -118960
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 1527,
+    "error": "Opening balance mismatch",
+    "expected": 4329708.1,
+    "actual": 4369568.1,
+    "diff": 39860
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 1830,
+    "error": "Opening balance mismatch",
+    "expected": 3102317.1,
+    "actual": 3107173.1,
+    "diff": 4856
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 2057,
+    "error": "Opening balance mismatch",
+    "expected": 438639.1,
+    "actual": 546439.1,
+    "diff": 107800
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 2058,
+    "error": "Opening balance mismatch",
+    "expected": 585865.1,
+    "actual": 438639.1,
+    "diff": -147226
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 2088,
+    "error": "Opening balance mismatch",
+    "expected": 546439.1,
+    "actual": 585865.1,
+    "diff": 39426
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 2300,
+    "error": "Opening balance mismatch",
+    "expected": 232631.1,
+    "actual": 482631.1,
+    "diff": 249999.99999999997
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 2304,
+    "error": "Opening balance mismatch",
+    "expected": 532631.1,
+    "actual": 232631.1,
+    "diff": -300000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 2308,
+    "error": "Opening balance mismatch",
+    "expected": 482631.1,
+    "actual": 532631.1,
+    "diff": 50000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 2345,
+    "error": "Opening balance mismatch",
+    "expected": 734688.1,
+    "actual": 3102317.1,
+    "diff": 2367629
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 2347,
+    "error": "Opening balance mismatch",
+    "expected": 3107173.1,
+    "actual": 734688.1,
+    "diff": -2372485
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 2527,
+    "error": "Opening balance mismatch",
+    "expected": 1147539.1,
+    "actual": 1181539.1,
+    "diff": 34000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 2712,
+    "error": "Opening balance mismatch",
+    "expected": 2295803.1,
+    "actual": 1147539.1,
+    "diff": -1148264
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 2716,
+    "error": "Opening balance mismatch",
+    "expected": 1181539.1,
+    "actual": 2295803.1,
+    "diff": 1114264
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 3180,
+    "error": "Opening balance mismatch",
+    "expected": 4788070.1,
+    "actual": 4800020.1,
+    "diff": 11950
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 3183,
+    "error": "Opening balance mismatch",
+    "expected": 4801270.1,
+    "actual": 4788070.1,
+    "diff": -13200
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 3186,
+    "error": "Opening balance mismatch",
+    "expected": 4800020.1,
+    "actual": 4801270.1,
+    "diff": 1250
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 3300,
+    "error": "Opening balance mismatch",
+    "expected": 75562.1,
+    "actual": 143098.1,
+    "diff": 67536
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 3321,
+    "error": "Opening balance mismatch",
+    "expected": 254930.1,
+    "actual": 75562.1,
+    "diff": -179368
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 3324,
+    "error": "Opening balance mismatch",
+    "expected": 143098.1,
+    "actual": 254930.1,
+    "diff": 111832
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 3353,
+    "error": "Opening balance mismatch",
+    "expected": 968959.1,
+    "actual": 900559.1,
+    "diff": -68400
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 3376,
+    "error": "Opening balance mismatch",
+    "expected": 971369.1,
+    "actual": 916869.1,
+    "diff": -54500
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 3408,
+    "error": "Opening balance mismatch",
+    "expected": 1398247.1,
+    "actual": 1300263.1,
+    "diff": -97984
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 3414,
+    "error": "Opening balance mismatch",
+    "expected": 1698247.1,
+    "actual": 968959.1,
+    "diff": -729288.0000000001
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 3417,
+    "error": "Opening balance mismatch",
+    "expected": 900559.1,
+    "actual": 971369.1,
+    "diff": 70810
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 3420,
+    "error": "Opening balance mismatch",
+    "expected": 916869.1,
+    "actual": 1698247.1,
+    "diff": 781378.0000000001
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 3697,
+    "error": "Opening balance mismatch",
+    "expected": 2109736.1,
+    "actual": 2064094.1,
+    "diff": -45642
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 5046,
+    "error": "Opening balance mismatch",
+    "expected": -125573.9,
+    "actual": -25573.9,
+    "diff": 100000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 5228,
+    "error": "Opening balance mismatch",
+    "expected": 1451364.1,
+    "actual": -125573.9,
+    "diff": -1576938
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 5232,
+    "error": "Opening balance mismatch",
+    "expected": -25573.9,
+    "actual": 1451364.1,
+    "diff": 1476938
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 5503,
+    "error": "Opening balance mismatch",
+    "expected": 1879823.1,
+    "actual": 1398247.1,
+    "diff": -481576
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 5506,
+    "error": "Opening balance mismatch",
+    "expected": 1300263.1,
+    "actual": 1879823.1,
+    "diff": 579560
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 5558,
+    "error": "Opening balance mismatch",
+    "expected": 2105532.1,
+    "actual": 2105932.1,
+    "diff": 400
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 5560,
+    "error": "Opening balance mismatch",
+    "expected": 2108772.1,
+    "actual": 2105532.1,
+    "diff": -3240
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 5566,
+    "error": "Opening balance mismatch",
+    "expected": 2105932.1,
+    "actual": 2108772.1,
+    "diff": 2840
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 6033,
+    "error": "Opening balance mismatch",
+    "expected": 7043230.1,
+    "actual": 7150230.1,
+    "diff": 107000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 6131,
+    "error": "Opening balance mismatch",
+    "expected": 7827980.1,
+    "actual": 7842980.1,
+    "diff": 15000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 6183,
+    "error": "Opening balance mismatch",
+    "expected": 1667951.1,
+    "actual": 7827980.1,
+    "diff": 6160029
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 6185,
+    "error": "Opening balance mismatch",
+    "expected": 7842980.1,
+    "actual": 1667951.1,
+    "diff": -6175029
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 6446,
+    "error": "Opening balance mismatch",
+    "expected": 2848151.1,
+    "actual": 7043230.1,
+    "diff": 4195079
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 6453,
+    "error": "Opening balance mismatch",
+    "expected": 7150230.1,
+    "actual": 2848151.1,
+    "diff": -4302079
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 7273,
+    "error": "Opening balance mismatch",
+    "expected": 2136412.1,
+    "actual": 2139335.1,
+    "diff": 2923
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 7330,
+    "error": "Opening balance mismatch",
+    "expected": 2175090.1,
+    "actual": 2136412.1,
+    "diff": -38678
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 7332,
+    "error": "Opening balance mismatch",
+    "expected": 2139335.1,
+    "actual": 2175090.1,
+    "diff": 35755
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 9307,
+    "error": "Opening balance mismatch",
+    "expected": 802668.1,
+    "actual": 802768.1,
+    "diff": 100
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 9319,
+    "error": "Opening balance mismatch",
+    "expected": 834360.1,
+    "actual": 802668.1,
+    "diff": -31692
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 9323,
+    "error": "Opening balance mismatch",
+    "expected": 802768.1,
+    "actual": 834360.1,
+    "diff": 31592
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 10365,
+    "error": "Opening balance mismatch",
+    "expected": 2283933.1,
+    "actual": 2437933.1,
+    "diff": 154000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 10507,
+    "error": "Opening balance mismatch",
+    "expected": -31188.9,
+    "actual": -59616.9,
+    "diff": -28428
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 10594,
+    "error": "Opening balance mismatch",
+    "expected": -31477.9,
+    "actual": -26477.9,
+    "diff": 5000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 10720,
+    "error": "Opening balance mismatch",
+    "expected": 1001612.1,
+    "actual": 2283933.1,
+    "diff": 1282321
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 10724,
+    "error": "Opening balance mismatch",
+    "expected": 2437933.1,
+    "actual": 1001612.1,
+    "diff": -1436321
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 10881,
+    "error": "Opening balance mismatch",
+    "expected": 1332455.1,
+    "actual": 1318455.1,
+    "diff": -14000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 10886,
+    "error": "Opening balance mismatch",
+    "expected": 1368455.1,
+    "actual": 1332455.1,
+    "diff": -36000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 10893,
+    "error": "Opening balance mismatch",
+    "expected": 1318455.1,
+    "actual": 1368455.1,
+    "diff": 50000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 10926,
+    "error": "Opening balance mismatch",
+    "expected": 1661699.1,
+    "actual": -31477.9,
+    "diff": -1693177
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 10929,
+    "error": "Opening balance mismatch",
+    "expected": -26477.9,
+    "actual": 1661699.1,
+    "diff": 1688177
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 11159,
+    "error": "Opening balance mismatch",
+    "expected": 541297.1,
+    "actual": 560797.1,
+    "diff": 19500
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 11349,
+    "error": "Opening balance mismatch",
+    "expected": 873392.1,
+    "actual": 541297.1,
+    "diff": -332095
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 11352,
+    "error": "Opening balance mismatch",
+    "expected": 560797.1,
+    "actual": 873392.1,
+    "diff": 312595
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 12338,
+    "error": "Opening balance mismatch",
+    "expected": 1180422.1,
+    "actual": 1255422.1,
+    "diff": 75000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 12354,
+    "error": "Opening balance mismatch",
+    "expected": 1346872.1,
+    "actual": 1180422.1,
+    "diff": -166450
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 12359,
+    "error": "Opening balance mismatch",
+    "expected": 1255422.1,
+    "actual": 1346872.1,
+    "diff": 91450
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 12478,
+    "error": "Opening balance mismatch",
+    "expected": 259144.1,
+    "actual": 218328.1,
+    "diff": -40816
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 12979,
+    "error": "Opening balance mismatch",
+    "expected": 2282762.1,
+    "actual": 2109736.1,
+    "diff": -173026
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 12982,
+    "error": "Opening balance mismatch",
+    "expected": 2064094.1,
+    "actual": 2282762.1,
+    "diff": 218668
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 13311,
+    "error": "Opening balance mismatch",
+    "expected": 402787.1,
+    "actual": 259144.1,
+    "diff": -143642.99999999997
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 13313,
+    "error": "Opening balance mismatch",
+    "expected": 218328.1,
+    "actual": 402787.1,
+    "diff": 184458.99999999997
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 14041,
+    "error": "Opening balance mismatch",
+    "expected": 631650.1,
+    "actual": 672370.1,
+    "diff": 40720
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 14046,
+    "error": "Opening balance mismatch",
+    "expected": 572910.1,
+    "actual": 631650.1,
+    "diff": 58740
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 14049,
+    "error": "Opening balance mismatch",
+    "expected": 632370.1,
+    "actual": 572910.1,
+    "diff": -59460
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 14078,
+    "error": "Opening balance mismatch",
+    "expected": 895660.1,
+    "actual": 903160.1,
+    "diff": 7500
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 14085,
+    "error": "Opening balance mismatch",
+    "expected": 898860.1,
+    "actual": 895660.1,
+    "diff": -3200
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 14089,
+    "error": "Opening balance mismatch",
+    "expected": 903160.1,
+    "actual": 898860.1,
+    "diff": -4300
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 14209,
+    "error": "Opening balance mismatch",
+    "expected": 136109.1,
+    "actual": 51109.1,
+    "diff": -85000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 14436,
+    "error": "Opening balance mismatch",
+    "expected": 1634351.1,
+    "actual": 632370.1,
+    "diff": -1001981.0000000001
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 14439,
+    "error": "Opening balance mismatch",
+    "expected": 672370.1,
+    "actual": 1634351.1,
+    "diff": 961981.0000000001
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 16607,
+    "error": "Opening balance mismatch",
+    "expected": 890495.1,
+    "actual": -31188.9,
+    "diff": -921684
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 16614,
+    "error": "Opening balance mismatch",
+    "expected": -59616.9,
+    "actual": 890495.1,
+    "diff": 950112
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 18026,
+    "error": "Opening balance mismatch",
+    "expected": 265817.1,
+    "actual": 283777.1,
+    "diff": 17960
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 18042,
+    "error": "Opening balance mismatch",
+    "expected": 413777.1,
+    "actual": 265817.1,
+    "diff": -147960
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 18045,
+    "error": "Opening balance mismatch",
+    "expected": 283777.1,
+    "actual": 413777.1,
+    "diff": 130000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 19671,
+    "error": "Opening balance mismatch",
+    "expected": 578066.1,
+    "actual": 136109.1,
+    "diff": -441957
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 19677,
+    "error": "Opening balance mismatch",
+    "expected": 51109.1,
+    "actual": 578066.1,
+    "diff": 526957
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 20940,
+    "error": "Opening balance mismatch",
+    "expected": 1827261.1,
+    "actual": 2062261.1,
+    "diff": 235000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 20943,
+    "error": "Opening balance mismatch",
+    "expected": 2076761.1,
+    "actual": 1827261.1,
+    "diff": -249500
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 20947,
+    "error": "Opening balance mismatch",
+    "expected": 2062261.1,
+    "actual": 2076761.1,
+    "diff": 14500
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 21735,
+    "error": "Opening balance mismatch",
+    "expected": 1830271.1,
+    "actual": 1862271.1,
+    "diff": 32000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 21744,
+    "error": "Opening balance mismatch",
+    "expected": 1897271.1,
+    "actual": 1830271.1,
+    "diff": -67000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 21748,
+    "error": "Opening balance mismatch",
+    "expected": 1862271.1,
+    "actual": 1897271.1,
+    "diff": 35000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 22181,
+    "error": "Opening balance mismatch",
+    "expected": 1147274.1,
+    "actual": 1177274.1,
+    "diff": 30000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 22258,
+    "error": "Opening balance mismatch",
+    "expected": 1770022.1,
+    "actual": 1147274.1,
+    "diff": -622748
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 22270,
+    "error": "Opening balance mismatch",
+    "expected": 1177274.1,
+    "actual": 1770022.1,
+    "diff": 592748
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 22943,
+    "error": "Opening balance mismatch",
+    "expected": 3181750.1,
+    "actual": 3196750.1,
+    "diff": 15000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 22953,
+    "error": "Opening balance mismatch",
+    "expected": 3263650.1,
+    "actual": 3283650.1,
+    "diff": 20000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 22971,
+    "error": "Opening balance mismatch",
+    "expected": 3538650.1,
+    "actual": 3181750.1,
+    "diff": -356900
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 22977,
+    "error": "Opening balance mismatch",
+    "expected": 3196750.1,
+    "actual": 3538650.1,
+    "diff": 341900
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 23447,
+    "error": "Opening balance mismatch",
+    "expected": 136904.1,
+    "actual": 3263650.1,
+    "diff": 3126746
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 23450,
+    "error": "Opening balance mismatch",
+    "expected": 3283650.1,
+    "actual": 136904.1,
+    "diff": -3146746
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 25309,
+    "error": "Opening balance mismatch",
+    "expected": 569303.1,
+    "actual": 570653.1,
+    "diff": 1350
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 25342,
+    "error": "Opening balance mismatch",
+    "expected": 1095173.1,
+    "actual": 1211873.1,
+    "diff": 116700
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 25345,
+    "error": "Opening balance mismatch",
+    "expected": 1215373.1,
+    "actual": 569303.1,
+    "diff": -646070.0000000001
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 25348,
+    "error": "Opening balance mismatch",
+    "expected": 570653.1,
+    "actual": 1215373.1,
+    "diff": 644720.0000000001
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 25364,
+    "error": "Opening balance mismatch",
+    "expected": 1513913.1,
+    "actual": 1095173.1,
+    "diff": -418740
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 25367,
+    "error": "Opening balance mismatch",
+    "expected": 1211873.1,
+    "actual": 1513913.1,
+    "diff": 302040
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 26232,
+    "error": "Opening balance mismatch",
+    "expected": 744688.1,
+    "actual": 814688.1,
+    "diff": 70000
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 26304,
+    "error": "Opening balance mismatch",
+    "expected": 1227378.1,
+    "actual": 744688.1,
+    "diff": -482690.0000000001
+  },
+  {
+    "cus_id": 2551,
+    "cus_name": "Cash Account",
+    "l_id": 26305,
+    "error": "Opening balance mismatch",
+    "expected": 814688.1,
+    "actual": 1227378.1,
+    "diff": 412690.0000000001
+  },
+  {
+    "cus_id": 2553,
+    "cus_name": "ihsan sb angle",
+    "l_id": 1285,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 829543,
+    "diff": 829543
+  },
+  {
+    "cus_id": 2553,
+    "cus_name": "ihsan sb angle",
+    "l_id": 15325,
+    "error": "Opening balance mismatch",
+    "expected": 47904.5,
+    "actual": -1902325.5,
+    "diff": -1950230
+  },
+  {
+    "cus_id": 2553,
+    "cus_name": "ihsan sb angle",
+    "l_id": 16606,
+    "error": "Opening balance mismatch",
+    "expected": -3870.5,
+    "actual": 47904.5,
+    "diff": 51775
+  },
+  {
+    "cus_id": 2553,
+    "cus_name": "ihsan sb angle",
+    "l_id": 17278,
+    "error": "Opening balance mismatch",
+    "expected": -1902325.5,
+    "actual": -3870.5,
+    "diff": 1898455
+  },
+  {
+    "cus_id": 2554,
+    "cus_name": "waseem sahib pipe",
+    "l_id": 1313,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -17985,
+    "diff": -17985
+  },
+  {
+    "cus_id": 2555,
+    "cus_name": "hafeez sb alipur",
+    "l_id": 6509,
+    "error": "Closing balance math error",
+    "expected": 1000000,
+    "actual": 10000000,
+    "diff": 9000000
+  },
+  {
+    "cus_id": 2555,
+    "cus_name": "hafeez sb alipur",
+    "l_id": 6560,
+    "error": "Closing balance math error",
+    "expected": 6457033.8,
+    "actual": -2542966,
+    "diff": -8999999.8
+  },
+  {
+    "cus_id": 2555,
+    "cus_name": "hafeez sb alipur",
+    "l_id": 22476,
+    "error": "Opening balance mismatch",
+    "expected": 568925,
+    "actual": 8981117.2,
+    "diff": 8412192.2
+  },
+  {
+    "cus_id": 2558,
+    "cus_name": "mughal supreme",
+    "l_id": 726,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -374853,
+    "diff": -374853
+  },
+  {
+    "cus_id": 2558,
+    "cus_name": "mughal supreme",
+    "l_id": 5361,
+    "error": "Opening balance mismatch",
+    "expected": 1540044,
+    "actual": -979138,
+    "diff": -2519182
+  },
+  {
+    "cus_id": 2558,
+    "cus_name": "mughal supreme",
+    "l_id": 5746,
+    "error": "Opening balance mismatch",
+    "expected": -162010,
+    "actual": 1540044,
+    "diff": 1702054
+  },
+  {
+    "cus_id": 2558,
+    "cus_name": "mughal supreme",
+    "l_id": 6150,
+    "error": "Opening balance mismatch",
+    "expected": -979138,
+    "actual": -162010,
+    "diff": 817128
+  },
+  {
+    "cus_id": 2558,
+    "cus_name": "mughal supreme",
+    "l_id": 11116,
+    "error": "Opening balance mismatch",
+    "expected": -732530,
+    "actual": -6805506,
+    "diff": -6072976
+  },
+  {
+    "cus_id": 2558,
+    "cus_name": "mughal supreme",
+    "l_id": 14881,
+    "error": "Opening balance mismatch",
+    "expected": -1128041,
+    "actual": -8418681,
+    "diff": -7290640
+  },
+  {
+    "cus_id": 2558,
+    "cus_name": "mughal supreme",
+    "l_id": 19670,
+    "error": "Opening balance mismatch",
+    "expected": -950163,
+    "actual": -1128041,
+    "diff": -177878
+  },
+  {
+    "cus_id": 2558,
+    "cus_name": "mughal supreme",
+    "l_id": 19672,
+    "error": "Opening balance mismatch",
+    "expected": -8418681,
+    "actual": -732530,
+    "diff": 7686151
+  },
+  {
+    "cus_id": 2558,
+    "cus_name": "mughal supreme",
+    "l_id": 19673,
+    "error": "Opening balance mismatch",
+    "expected": -6805506,
+    "actual": -950163,
+    "diff": 5855343
+  },
+  {
+    "cus_id": 2562,
+    "cus_name": "MALIK ARIF SB LAHORE",
+    "l_id": 614,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -1378850,
+    "diff": -1378850
+  },
+  {
+    "cus_id": 2563,
+    "cus_name": "SHEIKH WAQAS",
+    "l_id": 2642,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -28500,
+    "diff": -28500
+  },
+  {
+    "cus_id": 2574,
+    "cus_name": "hafeez tar waly",
+    "l_id": 10575,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1,
+    "diff": 1
+  },
+  {
+    "cus_id": 2577,
+    "cus_name": "ism steel gujranwala",
+    "l_id": 550,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -1880838,
+    "diff": -1880838
+  },
+  {
+    "cus_id": 2580,
+    "cus_name": "mapleleaf cement",
+    "l_id": 720,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -2260661,
+    "diff": -2260661
+  },
+  {
+    "cus_id": 2580,
+    "cus_name": "mapleleaf cement",
+    "l_id": 4936,
+    "error": "Opening balance mismatch",
+    "expected": -1260661,
+    "actual": -2087477,
+    "diff": -826816
+  },
+  {
+    "cus_id": 2580,
+    "cus_name": "mapleleaf cement",
+    "l_id": 5501,
+    "error": "Opening balance mismatch",
+    "expected": -1862677,
+    "actual": -1260661,
+    "diff": 602016
+  },
+  {
+    "cus_id": 2580,
+    "cus_name": "mapleleaf cement",
+    "l_id": 6534,
+    "error": "Opening balance mismatch",
+    "expected": -2087477,
+    "actual": -1862677,
+    "diff": 224800
+  },
+  {
+    "cus_id": 2581,
+    "cus_name": "paidar cement ittefaq",
+    "l_id": 560,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -2187954,
+    "diff": -2187954
+  },
+  {
+    "cus_id": 2581,
+    "cus_name": "paidar cement ittefaq",
+    "l_id": 10780,
+    "error": "Opening balance mismatch",
+    "expected": -1481952.6,
+    "actual": -2307472.6,
+    "diff": -825520
+  },
+  {
+    "cus_id": 2581,
+    "cus_name": "paidar cement ittefaq",
+    "l_id": 10875,
+    "error": "Opening balance mismatch",
+    "expected": -2296132.6,
+    "actual": -1481952.6,
+    "diff": 814180
+  },
+  {
+    "cus_id": 2581,
+    "cus_name": "paidar cement ittefaq",
+    "l_id": 10882,
+    "error": "Opening balance mismatch",
+    "expected": -2307472.6,
+    "actual": -2296132.6,
+    "diff": 11340
+  },
+  {
+    "cus_id": 2588,
+    "cus_name": "tr mughal khata",
+    "l_id": 1303,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 12398227,
+    "diff": 12398227
+  },
+  {
+    "cus_id": 2606,
+    "cus_name": "lucky cement limited",
+    "l_id": 270,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -3356047,
+    "diff": -3356047
+  },
+  {
+    "cus_id": 2623,
+    "cus_name": "malik javed awan sb",
+    "l_id": 13308,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -2730930,
+    "diff": -2730930
+  },
+  {
+    "cus_id": 2623,
+    "cus_name": "malik javed awan sb",
+    "l_id": 18706,
+    "error": "Opening balance mismatch",
+    "expected": -2730930,
+    "actual": 0,
+    "diff": 2730930
+  },
+  {
+    "cus_id": 2625,
+    "cus_name": "white maple",
+    "l_id": 19561,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -7973,
+    "diff": -7973
+  },
+  {
+    "cus_id": 2629,
+    "cus_name": "asad sb chadar gujranwala",
+    "l_id": 11748,
+    "error": "Closing balance math error",
+    "expected": 539099.5,
+    "actual": 539009.5,
+    "diff": -90
+  },
+  {
+    "cus_id": 2629,
+    "cus_name": "asad sb chadar gujranwala",
+    "l_id": 11749,
+    "error": "Closing balance math error",
+    "expected": 609909.5,
+    "actual": 610000,
+    "diff": 90.5
+  },
+  {
+    "cus_id": 2631,
+    "cus_name": "ikram steel gujranwala",
+    "l_id": 2654,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -25830,
+    "diff": -25830
+  },
+  {
+    "cus_id": 2631,
+    "cus_name": "ikram steel gujranwala",
+    "l_id": 5259,
+    "error": "Opening balance mismatch",
+    "expected": -25830,
+    "actual": -5745240,
+    "diff": -5719410
+  },
+  {
+    "cus_id": 2631,
+    "cus_name": "ikram steel gujranwala",
+    "l_id": 12978,
+    "error": "Opening balance mismatch",
+    "expected": -19565,
+    "actual": -25830,
+    "diff": -6265
+  },
+  {
+    "cus_id": 2631,
+    "cus_name": "ikram steel gujranwala",
+    "l_id": 13028,
+    "error": "Opening balance mismatch",
+    "expected": -5745240,
+    "actual": -19565,
+    "diff": 5725675
+  },
+  {
+    "cus_id": 2635,
+    "cus_name": "Pakistan solar pipe",
+    "l_id": 9798,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -386000,
+    "diff": -386000
+  },
+  {
+    "cus_id": 2637,
+    "cus_name": "haseeb mujeeb plastic",
+    "l_id": 19297,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1,
+    "diff": 1
+  },
+  {
+    "cus_id": 2643,
+    "cus_name": "pakistan flying cement",
+    "l_id": 16509,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 1580,
+    "diff": 1580
+  },
+  {
+    "cus_id": 2655,
+    "cus_name": "pakcem cement ittefaq",
+    "l_id": 8947,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 17097,
+    "diff": 17097
+  },
+  {
+    "cus_id": 2655,
+    "cus_name": "pakcem cement ittefaq",
+    "l_id": 9149,
+    "error": "Opening balance mismatch",
+    "expected": 717097,
+    "actual": -19563,
+    "diff": -736660
+  },
+  {
+    "cus_id": 2655,
+    "cus_name": "pakcem cement ittefaq",
+    "l_id": 9195,
+    "error": "Opening balance mismatch",
+    "expected": -719808,
+    "actual": 717097,
+    "diff": 1436905
+  },
+  {
+    "cus_id": 2655,
+    "cus_name": "pakcem cement ittefaq",
+    "l_id": 11818,
+    "error": "Opening balance mismatch",
+    "expected": -19563,
+    "actual": -719808,
+    "diff": -700245
+  },
+  {
+    "cus_id": 2669,
+    "cus_name": "old cash 2",
+    "l_id": 1288,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 50001,
+    "diff": 50001
+  },
+  {
+    "cus_id": 2673,
+    "cus_name": "dandoot cement ltd",
+    "l_id": 688,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -91991,
+    "diff": -91991
+  },
+  {
+    "cus_id": 2678,
+    "cus_name": "ilyas steel gujranwala",
+    "l_id": 6820,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -4073625,
+    "diff": -4073625
+  },
+  {
+    "cus_id": 2678,
+    "cus_name": "ilyas steel gujranwala",
+    "l_id": 6822,
+    "error": "Opening balance mismatch",
+    "expected": -9000,
+    "actual": 0,
+    "diff": 9000
+  },
+  {
+    "cus_id": 2678,
+    "cus_name": "ilyas steel gujranwala",
+    "l_id": 6826,
+    "error": "Opening balance mismatch",
+    "expected": -4073625,
+    "actual": -9000,
+    "diff": 4064625
+  },
+  {
+    "cus_id": 2684,
+    "cus_name": "eng.iqbal sb home",
+    "l_id": 16809,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 271352,
+    "diff": 271352
+  },
+  {
+    "cus_id": 2699,
+    "cus_name": "malik raksha",
+    "l_id": 1079,
+    "error": "Opening balance mismatch",
+    "expected": -6200,
+    "actual": -8700,
+    "diff": -2500
+  },
+  {
+    "cus_id": 2699,
+    "cus_name": "malik raksha",
+    "l_id": 10641,
+    "error": "Opening balance mismatch",
+    "expected": -9000,
+    "actual": -10500,
+    "diff": -1500
+  },
+  {
+    "cus_id": 2699,
+    "cus_name": "malik raksha",
+    "l_id": 10927,
+    "error": "Opening balance mismatch",
+    "expected": -7000,
+    "actual": -9000,
+    "diff": -2000
+  },
+  {
+    "cus_id": 2699,
+    "cus_name": "malik raksha",
+    "l_id": 10928,
+    "error": "Opening balance mismatch",
+    "expected": -10500,
+    "actual": -7000,
+    "diff": 3500
+  },
+  {
+    "cus_id": 2699,
+    "cus_name": "malik raksha",
+    "l_id": 11238,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -1500,
+    "diff": -1500
+  },
+  {
+    "cus_id": 2699,
+    "cus_name": "malik raksha",
+    "l_id": 11350,
+    "error": "Opening balance mismatch",
+    "expected": -5300,
+    "actual": 0,
+    "diff": 5300
+  },
+  {
+    "cus_id": 2699,
+    "cus_name": "malik raksha",
+    "l_id": 11351,
+    "error": "Opening balance mismatch",
+    "expected": -1500,
+    "actual": -5300,
+    "diff": -3800
+  },
+  {
+    "cus_id": 2699,
+    "cus_name": "malik raksha",
+    "l_id": 14071,
+    "error": "Opening balance mismatch",
+    "expected": -1500,
+    "actual": -3000,
+    "diff": -1500
+  },
+  {
+    "cus_id": 2699,
+    "cus_name": "malik raksha",
+    "l_id": 14437,
+    "error": "Opening balance mismatch",
+    "expected": -7000,
+    "actual": -1500,
+    "diff": 5500
+  },
+  {
+    "cus_id": 2699,
+    "cus_name": "malik raksha",
+    "l_id": 14492,
+    "error": "Opening balance mismatch",
+    "expected": -3000,
+    "actual": -7000,
+    "diff": -4000
+  },
+  {
+    "cus_id": 2699,
+    "cus_name": "malik raksha",
+    "l_id": 25576,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -2500,
+    "diff": -2500
+  },
+  {
+    "cus_id": 2699,
+    "cus_name": "malik raksha",
+    "l_id": 25802,
+    "error": "Opening balance mismatch",
+    "expected": -5500,
+    "actual": 0,
+    "diff": 5500
+  },
+  {
+    "cus_id": 2699,
+    "cus_name": "malik raksha",
+    "l_id": 25803,
+    "error": "Opening balance mismatch",
+    "expected": -2500,
+    "actual": -5500,
+    "diff": -3000
+  },
+  {
+    "cus_id": 2700,
+    "cus_name": "ditta raksha",
+    "l_id": 18803,
+    "error": "Opening balance mismatch",
+    "expected": -1800,
+    "actual": -3300,
+    "diff": -1500
+  },
+  {
+    "cus_id": 2700,
+    "cus_name": "ditta raksha",
+    "l_id": 18816,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -1800,
+    "diff": -1800
+  },
+  {
+    "cus_id": 2700,
+    "cus_name": "ditta raksha",
+    "l_id": 18880,
+    "error": "Opening balance mismatch",
+    "expected": -3300,
+    "actual": 0,
+    "diff": 3300
+  },
+  {
+    "cus_id": 2700,
+    "cus_name": "ditta raksha",
+    "l_id": 23041,
+    "error": "Opening balance mismatch",
+    "expected": -3600,
+    "actual": -5100,
+    "diff": -1500
+  },
+  {
+    "cus_id": 2700,
+    "cus_name": "ditta raksha",
+    "l_id": 23448,
+    "error": "Opening balance mismatch",
+    "expected": -3500,
+    "actual": -3600,
+    "diff": -100
+  },
+  {
+    "cus_id": 2700,
+    "cus_name": "ditta raksha",
+    "l_id": 23523,
+    "error": "Opening balance mismatch",
+    "expected": -5100,
+    "actual": -3500,
+    "diff": 1600
+  },
+  {
+    "cus_id": 2701,
+    "cus_name": "phulla raksha",
+    "l_id": 6047,
+    "error": "Opening balance mismatch",
+    "expected": -9700,
+    "actual": -11200,
+    "diff": -1500
+  },
+  {
+    "cus_id": 2701,
+    "cus_name": "phulla raksha",
+    "l_id": 6447,
+    "error": "Opening balance mismatch",
+    "expected": -3500,
+    "actual": -9700,
+    "diff": -6200
+  },
+  {
+    "cus_id": 2701,
+    "cus_name": "phulla raksha",
+    "l_id": 6456,
+    "error": "Opening balance mismatch",
+    "expected": -11200,
+    "actual": -3500,
+    "diff": 7700
+  },
+  {
+    "cus_id": 2702,
+    "cus_name": "haroon raksha",
+    "l_id": 2887,
+    "error": "Opening balance mismatch",
+    "expected": -3500,
+    "actual": -4300,
+    "diff": -800
+  },
+  {
+    "cus_id": 2702,
+    "cus_name": "haroon raksha",
+    "l_id": 3075,
+    "error": "Opening balance mismatch",
+    "expected": -6400,
+    "actual": -3500,
+    "diff": 2900
+  },
+  {
+    "cus_id": 2702,
+    "cus_name": "haroon raksha",
+    "l_id": 3076,
+    "error": "Opening balance mismatch",
+    "expected": -4300,
+    "actual": -6400,
+    "diff": -2100
+  },
+  {
+    "cus_id": 2702,
+    "cus_name": "haroon raksha",
+    "l_id": 6480,
+    "error": "Opening balance mismatch",
+    "expected": -3200,
+    "actual": -4200,
+    "diff": -1000
+  },
+  {
+    "cus_id": 2702,
+    "cus_name": "haroon raksha",
+    "l_id": 6553,
+    "error": "Opening balance mismatch",
+    "expected": -4800,
+    "actual": -3200,
+    "diff": 1600
+  },
+  {
+    "cus_id": 2702,
+    "cus_name": "haroon raksha",
+    "l_id": 6554,
+    "error": "Opening balance mismatch",
+    "expected": -4200,
+    "actual": -4800,
+    "diff": -600
+  },
+  {
+    "cus_id": 2702,
+    "cus_name": "haroon raksha",
+    "l_id": 17677,
+    "error": "Opening balance mismatch",
+    "expected": -1500,
+    "actual": -1900,
+    "diff": -400
+  },
+  {
+    "cus_id": 2702,
+    "cus_name": "haroon raksha",
+    "l_id": 17682,
+    "error": "Opening balance mismatch",
+    "expected": -3400,
+    "actual": -1500,
+    "diff": 1900
+  },
+  {
+    "cus_id": 2702,
+    "cus_name": "haroon raksha",
+    "l_id": 17786,
+    "error": "Opening balance mismatch",
+    "expected": -1900,
+    "actual": -3400,
+    "diff": -1500
+  },
+  {
+    "cus_id": 2703,
+    "cus_name": "usama raksha",
+    "l_id": 5818,
+    "error": "Opening balance mismatch",
+    "expected": -1500,
+    "actual": -5000,
+    "diff": -3500
+  },
+  {
+    "cus_id": 2703,
+    "cus_name": "usama raksha",
+    "l_id": 5929,
+    "error": "Opening balance mismatch",
+    "expected": -6400,
+    "actual": -6800,
+    "diff": -400
+  },
+  {
+    "cus_id": 2703,
+    "cus_name": "usama raksha",
+    "l_id": 6189,
+    "error": "Opening balance mismatch",
+    "expected": -7600,
+    "actual": -1500,
+    "diff": 6100
+  },
+  {
+    "cus_id": 2703,
+    "cus_name": "usama raksha",
+    "l_id": 6191,
+    "error": "Opening balance mismatch",
+    "expected": -3500,
+    "actual": -6400,
+    "diff": -2900
+  },
+  {
+    "cus_id": 2703,
+    "cus_name": "usama raksha",
+    "l_id": 6195,
+    "error": "Opening balance mismatch",
+    "expected": -6800,
+    "actual": -3500,
+    "diff": 3300
+  },
+  {
+    "cus_id": 2703,
+    "cus_name": "usama raksha",
+    "l_id": 6196,
+    "error": "Opening balance mismatch",
+    "expected": -5000,
+    "actual": -7600,
+    "diff": -2600
+  },
+  {
+    "cus_id": 2703,
+    "cus_name": "usama raksha",
+    "l_id": 8981,
+    "error": "Opening balance mismatch",
+    "expected": -3600,
+    "actual": -4000,
+    "diff": -400
+  },
+  {
+    "cus_id": 2703,
+    "cus_name": "usama raksha",
+    "l_id": 9173,
+    "error": "Opening balance mismatch",
+    "expected": -4000,
+    "actual": -3600,
+    "diff": 400
+  },
+  {
+    "cus_id": 2703,
+    "cus_name": "usama raksha",
+    "l_id": 25552,
+    "error": "Opening balance mismatch",
+    "expected": -2400,
+    "actual": -3200,
+    "diff": -800
+  },
+  {
+    "cus_id": 2703,
+    "cus_name": "usama raksha",
+    "l_id": 25774,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -2400,
+    "diff": -2400
+  },
+  {
+    "cus_id": 2703,
+    "cus_name": "usama raksha",
+    "l_id": 25980,
+    "error": "Opening balance mismatch",
+    "expected": -3200,
+    "actual": 0,
+    "diff": 3200
+  },
+  {
+    "cus_id": 2704,
+    "cus_name": "naveed raksha",
+    "l_id": 10714,
+    "error": "Opening balance mismatch",
+    "expected": 900,
+    "actual": -600,
+    "diff": -1500
+  },
+  {
+    "cus_id": 2704,
+    "cus_name": "naveed raksha",
+    "l_id": 11094,
+    "error": "Opening balance mismatch",
+    "expected": 2380,
+    "actual": 900,
+    "diff": -1480
+  },
+  {
+    "cus_id": 2704,
+    "cus_name": "naveed raksha",
+    "l_id": 11100,
+    "error": "Opening balance mismatch",
+    "expected": -600,
+    "actual": 2380,
+    "diff": 2980
+  },
+  {
+    "cus_id": 2707,
+    "cus_name": "multani raksha",
+    "l_id": 3448,
+    "error": "Opening balance mismatch",
+    "expected": -1600,
+    "actual": -1800,
+    "diff": -200
+  },
+  {
+    "cus_id": 2707,
+    "cus_name": "multani raksha",
+    "l_id": 13940,
+    "error": "Opening balance mismatch",
+    "expected": -1400,
+    "actual": -1600,
+    "diff": -200
+  },
+  {
+    "cus_id": 2707,
+    "cus_name": "multani raksha",
+    "l_id": 13985,
+    "error": "Opening balance mismatch",
+    "expected": -1800,
+    "actual": -1400,
+    "diff": 400
+  },
+  {
+    "cus_id": 2717,
+    "cus_name": "Labour",
+    "l_id": 5747,
+    "error": "Opening balance mismatch",
+    "expected": -6000,
+    "actual": 0,
+    "diff": 6000
+  },
+  {
+    "cus_id": 2717,
+    "cus_name": "Labour",
+    "l_id": 5758,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -6000,
+    "diff": -6000
+  },
+  {
+    "cus_id": 2717,
+    "cus_name": "Labour",
+    "l_id": 9152,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": -4040,
+    "diff": -4040
+  },
+  {
+    "cus_id": 2717,
+    "cus_name": "Labour",
+    "l_id": 9198,
+    "error": "Opening balance mismatch",
+    "expected": -200,
+    "actual": 0,
+    "diff": 200
+  },
+  {
+    "cus_id": 2717,
+    "cus_name": "Labour",
+    "l_id": 9199,
+    "error": "Opening balance mismatch",
+    "expected": -4040,
+    "actual": -200,
+    "diff": 3840
+  },
+  {
+    "cus_id": 2717,
+    "cus_name": "Labour",
+    "l_id": 26778,
+    "error": "Opening balance mismatch",
+    "expected": -9000,
+    "actual": -14500,
+    "diff": -5500
+  },
+  {
+    "cus_id": 2717,
+    "cus_name": "Labour",
+    "l_id": 26803,
+    "error": "Opening balance mismatch",
+    "expected": -4100,
+    "actual": -9000,
+    "diff": -4900
+  },
+  {
+    "cus_id": 2717,
+    "cus_name": "Labour",
+    "l_id": 26834,
+    "error": "Opening balance mismatch",
+    "expected": -14500,
+    "actual": -4100,
+    "diff": 10400
+  },
+  {
+    "cus_id": 2719,
+    "cus_name": "ateeb ashraf sb chak zahir",
+    "l_id": 2585,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 3200,
+    "diff": 3200
+  },
+  {
+    "cus_id": 2749,
+    "cus_name": "jamshaid sb asadpur",
+    "l_id": 3316,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 70500,
+    "diff": 70500
+  },
+  {
+    "cus_id": 2749,
+    "cus_name": "jamshaid sb asadpur",
+    "l_id": 3565,
+    "error": "Opening balance mismatch",
+    "expected": 70500,
+    "actual": 0,
+    "diff": -70500
+  },
+  {
+    "cus_id": 2754,
+    "cus_name": "haji zaka sb lasuri khurd",
+    "l_id": 6444,
+    "error": "Opening balance mismatch",
+    "expected": -401800,
+    "actual": -394300,
+    "diff": 7500
+  },
+  {
+    "cus_id": 2754,
+    "cus_name": "haji zaka sb lasuri khurd",
+    "l_id": 6452,
+    "error": "Opening balance mismatch",
+    "expected": -394300,
+    "actual": -401800,
+    "diff": -7500
+  },
+  {
+    "cus_id": 2786,
+    "cus_name": "muhammad azam sb jokalian",
+    "l_id": 10668,
+    "error": "Opening balance mismatch",
+    "expected": 0,
+    "actual": 91200,
+    "diff": 91200
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 11247,
+    "error": "Opening balance mismatch",
+    "expected": 1000,
+    "actual": 254500,
+    "diff": 253500
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 11253,
+    "error": "Opening balance mismatch",
+    "expected": 254500,
+    "actual": 1000,
+    "diff": -253500
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 11347,
+    "error": "Opening balance mismatch",
+    "expected": 1000,
+    "actual": 20500,
+    "diff": 19500
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 11353,
+    "error": "Opening balance mismatch",
+    "expected": 20500,
+    "actual": 1000,
+    "diff": -19500
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 12003,
+    "error": "Opening balance mismatch",
+    "expected": 43900,
+    "actual": 60400,
+    "diff": 16500
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 12048,
+    "error": "Opening balance mismatch",
+    "expected": 60400,
+    "actual": 43900,
+    "diff": -16500
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 14039,
+    "error": "Opening balance mismatch",
+    "expected": 6714,
+    "actual": 84714,
+    "diff": 78000
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 14044,
+    "error": "Opening balance mismatch",
+    "expected": 84714,
+    "actual": 6714,
+    "diff": -78000
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 14047,
+    "error": "Opening balance mismatch",
+    "expected": 6714,
+    "actual": 84714,
+    "diff": 78000
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 14434,
+    "error": "Opening balance mismatch",
+    "expected": 84174,
+    "actual": 6714,
+    "diff": -77460
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 14469,
+    "error": "Opening balance mismatch",
+    "expected": 84714,
+    "actual": 84174,
+    "diff": -540
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 18040,
+    "error": "Opening balance mismatch",
+    "expected": 21584,
+    "actual": -3416,
+    "diff": -25000
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 18049,
+    "error": "Opening balance mismatch",
+    "expected": -3416,
+    "actual": 21584,
+    "diff": 25000
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 18231,
+    "error": "Opening balance mismatch",
+    "expected": 47794,
+    "actual": 66594,
+    "diff": 18800
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 18236,
+    "error": "Opening balance mismatch",
+    "expected": 66144,
+    "actual": 47794,
+    "diff": -18350
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 18240,
+    "error": "Opening balance mismatch",
+    "expected": 66594,
+    "actual": 66144,
+    "diff": -450
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 19519,
+    "error": "Opening balance mismatch",
+    "expected": 5529,
+    "actual": 58405,
+    "diff": 52876
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 19520,
+    "error": "Opening balance mismatch",
+    "expected": 62077,
+    "actual": 5529,
+    "diff": -56548
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 19521,
+    "error": "Opening balance mismatch",
+    "expected": 58405,
+    "actual": 62077,
+    "diff": 3672
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 25311,
+    "error": "Opening balance mismatch",
+    "expected": 15000,
+    "actual": 15174,
+    "diff": 174
+  },
+  {
+    "cus_id": 2829,
+    "cus_name": "WalkIn Customer",
+    "l_id": 25343,
+    "error": "Opening balance mismatch",
+    "expected": 15174,
+    "actual": 15000,
+    "diff": -174
+  },
+  {
+    "cus_id": 2856,
+    "cus_name": "zafar sb chak mitha",
+    "l_id": 17512,
+    "error": "Opening balance mismatch",
+    "expected": 1132750,
+    "actual": 1254345,
+    "diff": 121595
+  },
+  {
+    "cus_id": 2856,
+    "cus_name": "zafar sb chak mitha",
+    "l_id": 17520,
+    "error": "Opening balance mismatch",
+    "expected": 454345,
+    "actual": 1132750,
+    "diff": 678405
+  },
+  {
+    "cus_id": 2856,
+    "cus_name": "zafar sb chak mitha",
+    "l_id": 17785,
+    "error": "Opening balance mismatch",
+    "expected": 1254345,
+    "actual": 454345,
+    "diff": -800000
+  },
+  {
+    "cus_id": 2899,
+    "cus_name": "mirza sajid mughal sb phalia",
+    "l_id": 21808,
+    "error": "Opening balance mismatch",
+    "expected": 174000,
+    "actual": 177600,
+    "diff": 3600
+  }
+]

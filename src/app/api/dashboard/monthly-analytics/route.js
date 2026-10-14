@@ -145,12 +145,15 @@ export async function GET(request) {
     const customers = tableIdent('customers');
     const sales = tableIdent('sales');
     const saleDetails = tableIdent('sale_details');
+    const saleReturns = tableIdent('sale_returns');
+    const saleReturnDetails = tableIdent('sale_return_details');
     const products = tableIdent('products');
     const expenses = tableIdent('expenses');
 
     const ledgerBranch = Prisma.raw(sqlBranchWhere(branchId));
     const ledgerBranchL = Prisma.raw(sqlBranchWhere(branchId, 'l'));
     const salesBranchS = Prisma.raw(sqlBranchWhere(branchId, 's'));
+    const returnsBranch = Prisma.raw(sqlBranchWhere(branchId, 'sr'));
     const expenseBranch = Prisma.raw(sqlBranchWhere(branchId));
 
     const customerTypeFilterL = cusTypeId 
@@ -197,7 +200,7 @@ export async function GET(request) {
         FROM ${sales} s
         INNER JOIN ${customers} c ON s.cus_id = c.cus_id
         WHERE ${salesBranchS}
-          AND s.bill_type != 'QUOTATION'
+          AND s.bill_type = 'BILL'
           AND s.created_at >= ${startDate}
           AND s.created_at <= ${endDate}
           ${customerTypeFilterS}
@@ -206,18 +209,43 @@ export async function GET(request) {
       `,
       prisma.$queryRaw`
         SELECT
-          ${getChartPeriodExpr('s')} AS period,
-          SUM(sd.net_total) AS revenue,
-          SUM(p.pro_cost_price * sd.qnty) AS cost
-        FROM ${saleDetails} sd
-        JOIN ${sales} s ON sd.sale_id = s.sale_id
-        JOIN ${customers} c ON s.cus_id = c.cus_id
-        JOIN ${products} p ON sd.pro_id = p.pro_id
-        WHERE ${salesBranchS}
-          AND s.bill_type != 'QUOTATION'
-          AND s.created_at >= ${startDate}
-          AND s.created_at <= ${endDate}
-          ${customerTypeFilterS}
+          period,
+          SUM(revenue) AS revenue,
+          SUM(cost) AS cost
+        FROM (
+          SELECT
+            ${getChartPeriodExpr('s')} AS period,
+            s.sale_id,
+            MAX(CAST(s.total_amount - s.shipping_amount - s.labour_charges AS DECIMAL(18,2))) AS revenue,
+            SUM(CAST(COALESCE(NULLIF(p.pro_cost_price, 0), NULLIF(p.pro_crate, 0), NULLIF(p.pro_baser_price, 0), 0) * sd.qnty AS DECIMAL(18,2))) AS cost
+          FROM ${sales} s
+          JOIN ${saleDetails} sd ON s.sale_id = sd.sale_id
+          JOIN ${products} p ON sd.pro_id = p.pro_id
+          JOIN ${customers} c ON s.cus_id = c.cus_id
+          WHERE ${salesBranchS}
+            AND s.bill_type = 'BILL'
+            AND s.created_at >= ${startDate}
+            AND s.created_at <= ${endDate}
+            ${customerTypeFilterS}
+          GROUP BY s.sale_id, period
+
+          UNION ALL
+
+          SELECT
+            ${getChartPeriodExpr('sr')} AS period,
+            sr.return_id,
+            -MAX(CAST(sr.total_amount - sr.discount - sr.labour_charges - sr.shipping_amount AS DECIMAL(18,2))) AS revenue,
+            -SUM(CAST(COALESCE(NULLIF(p.pro_cost_price, 0), NULLIF(p.pro_crate, 0), NULLIF(p.pro_baser_price, 0), 0) * srd.qnty AS DECIMAL(18,2))) AS cost
+          FROM ${saleReturns} sr
+          JOIN ${saleReturnDetails} srd ON sr.return_id = srd.return_id
+          JOIN ${products} p ON srd.pro_id = p.pro_id
+          JOIN ${customers} c ON sr.cus_id = c.cus_id
+          WHERE ${returnsBranch}
+            AND sr.created_at >= ${startDate}
+            AND sr.created_at <= ${endDate}
+            ${customerTypeFilterS}
+          GROUP BY sr.return_id, period
+        ) combined
         GROUP BY period
         ORDER BY period ASC
       `,
@@ -265,11 +293,11 @@ export async function GET(request) {
 
     const chartBuckets = useWeeklyCharts
       ? buildWeekBuckets()
-      : buildMonthBucketsFromPeriods([
-        ...salesRows.map((r) => periodKey(r.period)),
-        ...profitRows.map((r) => periodKey(r.period)),
-        ...expenseRows.map((r) => periodKey(r.period)),
-      ]);
+      : eachPkMonthInRange(fromDate, toDate).map((month) => ({
+        period: month.key,
+        label: month.label,
+        days: [month.key],
+      }));
 
     const monthlyCredit = [];
     const monthlyDebit = [];

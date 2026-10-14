@@ -46,8 +46,7 @@ export const SYSTEM_PAGES = [
   })),
 
   { id: 'orders', name: 'Order List', section: 'Quick Access', path: '/dashboard/orders' },
-  { id: 'new-sale', name: 'Sale (Monolith)', section: 'Quick Access', path: '/dashboard/sales' },
-  { id: 'sales-v2-quick', name: 'Sale V2 (Component)', section: 'Quick Access', path: '/dashboard/sales-v2' },
+  { id: 'new-sale', name: 'Sale', section: 'Quick Access', path: '/dashboard/sales' },
   { id: 'purchases', name: 'New Purchase', section: 'Quick Access', path: '/dashboard/purchases' },
   { id: 'day-end', name: 'Day End / Day Close', section: 'Quick Access', path: '/dashboard/day-end' },
   { id: 'day-end-history', name: 'Closing History', section: 'Quick Access', path: '/dashboard/day-end/history' },
@@ -70,8 +69,6 @@ export const SYSTEM_PAGES = [
   { id: 'internal-transfer', name: 'Internal Transfer', section: 'Finance', path: '/dashboard/internal-transfer' },
   { id: 'adjustment-management', name: 'Adjustment Account', section: 'Finance', path: '/dashboard/adjustment-management' },
 
-  { id: 'sales', name: 'Sale (Monolith)', section: 'Sales', path: '/dashboard/sales' },
-  { id: 'sales-v2', name: 'Sale V2 (Component)', section: 'Sales', path: '/dashboard/sales-v2' },
   { id: 'hold-bills', name: 'Hold Bills', section: 'Sales', path: '/dashboard/hold-bills' },
   { id: 'sale-returns', name: 'Sale Returns', section: 'Sales', path: '/dashboard/sales' },
   { id: 'loaders', name: 'Loader / Transport', section: 'Sales', path: '/dashboard/loaders' },

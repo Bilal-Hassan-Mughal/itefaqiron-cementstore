@@ -364,11 +364,25 @@ function ReportWidgetShell({ accent, title = 'Report', children, className = '' 
   return card;
 }
 
-function WidgetDateFilter({ filters, onChange, loading = false, accent }) {
+function WidgetDateFilter({ filters, onChange, loading = false, accent, type = 'days' }) {
   const neon = getReportNeonStyles(accent);
   const pillClass = 'flex items-center gap-1 bg-white border rounded-lg px-1.5 py-1 shrink-0';
   const labelClass = 'text-[9px] font-bold text-slate-400 uppercase';
   const inputClass = 'text-[11px] font-medium text-slate-800 bg-transparent focus:outline-none w-[90px]';
+
+  const presets = type === 'months' 
+    ? [
+        { label: '3M', val: 3 },
+        { label: '6M', val: 6 },
+        { label: '12M', val: 12 },
+        { label: 'Year', val: 'year' },
+      ]
+    : [
+        { label: '30D', val: 30 },
+        { label: '3M', val: 90 },
+        { label: '6M', val: 180 },
+        { label: 'Year', val: 'year' },
+      ];
 
   return (
     <div
@@ -404,13 +418,8 @@ function WidgetDateFilter({ filters, onChange, loading = false, accent }) {
         className="flex items-center gap-0.5 bg-[#f3f4f6] p-0.5 rounded-lg border shrink-0" 
         style={{ borderColor: neon.chartBorder }}
       >
-        {[
-          { label: '30D', days: 30 },
-          { label: '3M', days: 90 },
-          { label: '6M', days: 180 },
-          { label: 'Year', days: 'year' },
-        ].map(({ label, days }) => {
-          const preset = buildDatePreset(days);
+        {presets.map(({ label, val }) => {
+          const preset = type === 'months' ? buildMonthChartPreset(val) : buildDatePreset(val);
           const active = filters.fromDate === preset.fromDate && filters.toDate === preset.toDate;
           return (
           <button
@@ -430,10 +439,10 @@ function WidgetDateFilter({ filters, onChange, loading = false, accent }) {
       {(filters.fromDate || filters.toDate) && (
         <button
           type="button"
-          onClick={() => onChange(EMPTY_DATE_FILTER)}
+          onClick={() => onChange(type === 'months' ? buildMonthChartPreset(6) : buildDatePreset(30))}
           className="text-[10px] font-bold px-1 py-1 rounded-lg transition-colors text-red-500 hover:bg-red-50"
         >
-          Clear
+          Reset
         </button>
       )}
       <div className="flex items-center gap-1.5 ml-auto shrink-0">
@@ -959,7 +968,6 @@ export default function DashboardContent({ activeTab }) {
   const [analyticsData, setAnalyticsData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [recentActivityData, setRecentActivityData] = useState([]);
-  const [profitData, setProfitData] = useState([]);
   const [allCategories, setAllCategories] = useState([]);
   const [allCustomerTypes, setAllCustomerTypes] = useState([]);
 
@@ -967,8 +975,8 @@ export default function DashboardContent({ activeTab }) {
 
   const [monthEndReceiveFilters, setMonthEndReceiveFilters] = useState(() => ({ ...lastNCalendarMonthsFilter(6), cusTypeId: '' }));
   const [monthEndPayFilters, setMonthEndPayFilters] = useState(() => ({ ...lastNCalendarMonthsFilter(6), cusTypeId: '' }));
-  const [monthlyProfitFilters, setMonthlyProfitFilters] = useState(last30DaysFilter);
-  const [monthlySalesFilters, setMonthlySalesFilters] = useState(last30DaysFilter);
+  const [monthlyProfitFilters, setMonthlyProfitFilters] = useState(() => buildMonthChartPreset(3));
+  const [monthlySalesFilters, setMonthlySalesFilters] = useState(() => buildMonthChartPreset(3));
   const [monthlyCreditData, setMonthlyCreditData] = useState([]);
   const [monthlyDebitData, setMonthlyDebitData] = useState([]);
   const [monthlyProfitData, setMonthlyProfitData] = useState([]);
@@ -1112,6 +1120,9 @@ export default function DashboardContent({ activeTab }) {
       if (filters.fromDate) params.set('fromDate', filters.fromDate);
       if (filters.toDate) params.set('toDate', filters.toDate);
       if (filters.cusTypeId) params.set('cusTypeId', filters.cusTypeId);
+      if (key === 'monthlyProfit' || key === 'monthlySales') {
+        params.set('chartGrain', 'month');
+      }
       if (key === 'monthlyCredit' || key === 'monthlyDebit') {
         params.set('ledgerGrain', 'month');
         params.set('ledgerSeries', 'outstanding');
@@ -1438,14 +1449,6 @@ export default function DashboardContent({ activeTab }) {
     };
     fetchTopProducts();
   }, [activeTab, analyticsWidgets.topProductsSale, topProductsSaleFilters]);
-
-  useEffect(() => {
-    if (activeTab !== 'dashboard' || !analyticsWidgets.monthlyProfit) return;
-    fetch('/api/dashboard/profit')
-      .then(r => r.ok ? r.json() : { success: false })
-      .then(json => { if (json.success) setProfitData(json.data); })
-      .catch(err => console.error('Profit fetch error:', err));
-  }, [activeTab, analyticsWidgets.monthlyProfit]);
 
   useEffect(() => {
     if (activeTab === 'usermanagement') {
@@ -1976,10 +1979,10 @@ export default function DashboardContent({ activeTab }) {
               key: 'monthly-profit',
               node: (
             <ReportWidgetShell accent={CHART_COLORS.profit} title="Monthly Profit">
-              <WidgetDateFilter filters={monthlyProfitFilters} onChange={setMonthlyProfitFilters} loading={monthlyProfitLoading} accent={CHART_COLORS.profit} />
+              <WidgetDateFilter filters={monthlyProfitFilters} onChange={setMonthlyProfitFilters} loading={monthlyProfitLoading} accent={CHART_COLORS.profit} type="months" />
               <ReportWidgetHeader
                 title="Monthly Profit"
-                subtitle="Net profit · week by week"
+                subtitle="Net profit · month by month"
                 icon={TrendingUp}
                 tint={CHART_COLORS.profit.tint}
                 primary={CHART_COLORS.profit.primary}
@@ -1996,7 +1999,7 @@ export default function DashboardContent({ activeTab }) {
               </ReportChartArea>
               <ReportWidgetFooter
                 accent={CHART_COLORS.profit}
-                formula={`Revenue − cost − expenses · ${monthlyProfitList.length} week(s)`}
+                formula={`Revenue − cost − expenses · ${monthlyProfitList.length} month(s)`}
                 total={`PKR ${fmtAmt(totalProfitVal)}`}
               />
             </ReportWidgetShell>
@@ -2006,10 +2009,10 @@ export default function DashboardContent({ activeTab }) {
               key: 'monthly-sales',
               node: (
             <ReportWidgetShell accent={CHART_COLORS.sales} title="Monthly Sales">
-              <WidgetDateFilter filters={monthlySalesFilters} onChange={setMonthlySalesFilters} loading={monthlySalesLoading} accent={CHART_COLORS.sales} />
+              <WidgetDateFilter filters={monthlySalesFilters} onChange={setMonthlySalesFilters} loading={monthlySalesLoading} accent={CHART_COLORS.sales} type="months" />
               <ReportWidgetHeader
                 title="Monthly Sales"
-                subtitle="Total sales volume · week by week"
+                subtitle="Total sales volume · month by month"
                 icon={ShoppingCart}
                 tint={CHART_COLORS.sales.tint}
                 primary={CHART_COLORS.sales.primary}
@@ -2026,7 +2029,7 @@ export default function DashboardContent({ activeTab }) {
               </ReportChartArea>
               <ReportWidgetFooter
                 accent={CHART_COLORS.sales}
-                formula={`Sale totals excluding quotations · ${monthlySalesList.length} week(s)`}
+                formula={`Sale totals excluding quotations · ${monthlySalesList.length} month(s)`}
                 total={`PKR ${fmtAmt(totalSalesVal)}`}
               />
             </ReportWidgetShell>

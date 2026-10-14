@@ -2,12 +2,13 @@
 
 import { TailwindDateInput } from '../../components/date-filter-input';
 import { useState, useEffect, useMemo } from 'react';
-import { ArrowLeft, Download, Printer, Search, TrendingUp, TrendingDown, DollarSign, Percent, Users, ShoppingBag, Tag, Package } from 'lucide-react';
+import { ArrowLeft, Download, Printer, Search, TrendingUp, TrendingDown, DollarSign, Percent, Users, ShoppingBag, Tag, Package, Calendar } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '../../components/dashboard-layout';
 import { Autocomplete, TextField } from '@mui/material';
 
 const TABS = [
+  { id: 'by-month',    label: 'By Month',    icon: Calendar },
   { id: 'by-party',    label: 'By Party',    icon: Users },
   { id: 'by-bill',     label: 'By Bill',     icon: ShoppingBag },
   { id: 'by-product',  label: 'By Product',  icon: Package },
@@ -34,7 +35,7 @@ export default function ProfitReport() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [customers, setCustomers] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState('');
-  const [activeTab, setActiveTab] = useState('by-party');
+  const [activeTab, setActiveTab] = useState('by-month');
   const [search, setSearch] = useState('');
 
   useEffect(() => {
@@ -94,6 +95,46 @@ export default function ProfitReport() {
     const netProfit     = grossProfit - totalExpenses;
     return { totalSales, totalCost, totalDiscount, grossProfit, totalExpenses, netProfit,
       profitMargin: totalSales > 0 ? (grossProfit / totalSales * 100) : 0 };
+  }, [filteredSales, reportData]);
+
+  // ── by-month ──────────────────────────────────────────────────────────────
+  const byMonth = useMemo(() => {
+    const map = {};
+    
+    // Group sales/returns by month
+    filteredSales.forEach(s => {
+      const d = new Date(s.created_at);
+      const key = d.toLocaleDateString('en-CA', { year: 'numeric', month: '2-digit', timeZone: 'Asia/Karachi' });
+      const label = d.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', timeZone: 'Asia/Karachi' });
+      
+      if (!map[key]) {
+        map[key] = { key, label, totalSale: 0, totalCost: 0, totalDiscount: 0, grossProfit: 0, expenses: 0, netProfit: 0 };
+      }
+      map[key].totalSale += s.totalSale || 0;
+      map[key].totalCost += s.totalCost || 0;
+      map[key].totalDiscount += parseFloat(s.discount || 0);
+      map[key].grossProfit += s.profit || 0;
+    });
+
+    // Group expenses by month
+    (reportData?.expenses || []).forEach(e => {
+      const d = new Date(e.created_at);
+      const key = d.toLocaleDateString('en-CA', { year: 'numeric', month: '2-digit', timeZone: 'Asia/Karachi' });
+      if (!map[key]) {
+        const label = d.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', timeZone: 'Asia/Karachi' });
+        map[key] = { key, label, totalSale: 0, totalCost: 0, totalDiscount: 0, grossProfit: 0, expenses: 0, netProfit: 0 };
+      }
+      map[key].expenses += parseFloat(e.exp_amount || 0);
+    });
+
+    return Object.values(map)
+      .map(r => ({
+        ...r,
+        netProfit: r.grossProfit - r.expenses,
+        margin: r.totalSale > 0 ? (r.grossProfit / r.totalSale * 100) : 0,
+        netMargin: r.totalSale > 0 ? ((r.grossProfit - r.expenses) / r.totalSale * 100) : 0
+      }))
+      .sort((a, b) => b.key.localeCompare(a.key));
   }, [filteredSales, reportData]);
 
   // ── by-party ──────────────────────────────────────────────────────────────
@@ -209,7 +250,13 @@ export default function ProfitReport() {
     if (!reportData) return;
     let csv = `PROFIT REPORT\nPeriod: ${fmtDate(startDate)} to ${fmtDate(endDate)}\n\n`;
 
-    csv += 'PROFIT BY PARTY\n';
+    csv += 'PROFIT BY MONTH\n';
+    csv += 'Month,Sale Amt,Cost,Gross Profit,Expenses,Net Profit,Net Margin\n';
+    byMonth.forEach(r => {
+      csv += `${r.label},${fmt(r.totalSale)},${fmt(r.totalCost)},${fmt(r.grossProfit)},${fmt(r.expenses)},${fmt(r.netProfit)},${r.netMargin.toFixed(1)}%\n`;
+    });
+
+    csv += '\nPROFIT BY PARTY\n';
     csv += 'Customer,Category,Bills,Sale Amt,Cost,Discount,Profit,Margin\n';
     byParty.forEach(r => {
       csv += `${r.name},${r.cat},${r.bills},${fmt(r.totalSale)},${fmt(r.totalCost)},${fmt(r.totalDiscount)},${fmt(r.profit)},${r.margin.toFixed(1)}%\n`;
@@ -322,22 +369,30 @@ export default function ProfitReport() {
         {reportData ? (
           <div className="flex-1 overflow-auto">
             {/* Summary Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 print:hidden">
-              <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-xl p-4">
-                <p className="text-xs font-semibold text-blue-600 uppercase">Sales Revenue</p>
-                <p className="text-xl font-bold text-blue-800 mt-1">Rs. {fmt(summary.totalSales)}</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 p-4 print:hidden">
+              <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-xl p-3">
+                <p className="text-[10px] font-bold text-blue-600 uppercase tracking-tight">Sales Revenue</p>
+                <p className="text-lg font-black text-blue-800 mt-0.5">Rs. {fmt(summary.totalSales)}</p>
               </div>
-              <div className="bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 rounded-xl p-4">
-                <p className="text-xs font-semibold text-orange-600 uppercase">Cost of Goods</p>
-                <p className="text-xl font-bold text-orange-800 mt-1">Rs. {fmt(summary.totalCost)}</p>
+              <div className="bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 rounded-xl p-3">
+                <p className="text-[10px] font-bold text-orange-600 uppercase tracking-tight">Cost of Goods</p>
+                <p className="text-lg font-black text-orange-800 mt-0.5">Rs. {fmt(summary.totalCost)}</p>
               </div>
-              <div className={`bg-gradient-to-br ${summary.grossProfit >= 0 ? 'from-emerald-50 to-emerald-100 border-emerald-200' : 'from-red-50 to-red-100 border-red-200'} border rounded-xl p-4`}>
-                <p className={`text-xs font-semibold ${summary.grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'} uppercase`}>Gross Profit</p>
-                <p className={`text-xl font-bold mt-1 ${summary.grossProfit >= 0 ? 'text-emerald-800' : 'text-red-800'}`}>Rs. {fmt(summary.grossProfit)}</p>
+              <div className={`bg-gradient-to-br ${summary.grossProfit >= 0 ? 'from-emerald-50 to-emerald-100 border-emerald-200' : 'from-red-50 to-red-100 border-red-200'} border rounded-xl p-3`}>
+                <p className={`text-[10px] font-bold ${summary.grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'} uppercase tracking-tight`}>Gross Profit</p>
+                <p className={`text-lg font-black mt-0.5 ${summary.grossProfit >= 0 ? 'text-emerald-800' : 'text-red-800'}`}>Rs. {fmt(summary.grossProfit)}</p>
               </div>
-              <div className="bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 rounded-xl p-4">
-                <p className="text-xs font-semibold text-purple-600 uppercase">Profit Margin</p>
-                <p className="text-xl font-bold text-purple-800 mt-1">{summary.profitMargin.toFixed(1)}%</p>
+              <div className="bg-gradient-to-br from-rose-50 to-rose-100 border border-rose-200 rounded-xl p-3">
+                <p className="text-[10px] font-bold text-rose-600 uppercase tracking-tight">Total Expenses</p>
+                <p className="text-lg font-black text-rose-800 mt-0.5">Rs. {fmt(summary.totalExpenses)}</p>
+              </div>
+              <div className={`bg-gradient-to-br ${summary.netProfit >= 0 ? 'from-teal-50 to-teal-100 border-teal-200' : 'from-pink-50 to-pink-100 border-pink-200'} border rounded-xl p-3`}>
+                <p className={`text-[10px] font-bold ${summary.netProfit >= 0 ? 'text-teal-600' : 'text-pink-600'} uppercase tracking-tight`}>Net Profit</p>
+                <p className={`text-lg font-black mt-0.5 ${summary.netProfit >= 0 ? 'text-teal-800' : 'text-pink-800'}`}>Rs. {fmt(summary.netProfit)}</p>
+              </div>
+              <div className="bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 rounded-xl p-3">
+                <p className="text-[10px] font-bold text-purple-600 uppercase tracking-tight">Profit Margin</p>
+                <p className="text-lg font-black text-purple-800 mt-0.5">{summary.profitMargin.toFixed(1)}%</p>
               </div>
             </div>
 
@@ -379,6 +434,58 @@ export default function ProfitReport() {
 
             {/* Tab Content */}
             <div className="p-4 print:p-0">
+
+              {/* BY MONTH */}
+              {activeTab === 'by-month' && (
+                <div className="bg-white border border-slate-300 rounded-lg overflow-hidden">
+                  <div className="bg-slate-800 text-white px-4 py-2 flex items-center justify-between">
+                    <h3 className="text-sm font-bold uppercase tracking-wide">Profit by Month</h3>
+                    <span className="text-slate-300 text-xs">{byMonth.length} months</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-slate-700 text-white">
+                          <th className={thCls}>Month</th>
+                          <th className={thRCls}>Sale Amount</th>
+                          <th className={thRCls}>Cost of Goods</th>
+                          <th className={thRCls}>Gross Profit</th>
+                          <th className={thRCls}>Expenses</th>
+                          <th className={thRCls}>Net Profit</th>
+                          <th className={thRCls}>Net Margin</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {byMonth.map((r, i) => (
+                          <tr key={r.key} className={`${rowBg(i)} hover:bg-teal-50 transition-colors`}>
+                            <td className={`${tdCls} font-bold text-slate-900`}>{r.label}</td>
+                            <td className={tdRCls}>{fmt(r.totalSale)}</td>
+                            <td className={tdRCls}>{fmt(r.totalCost)}</td>
+                            <td className={`${tdRCls} font-semibold ${profitColor(r.grossProfit)}`}>{fmt(r.grossProfit)}</td>
+                            <td className={`${tdRCls} text-red-500`}>{fmt(r.expenses)}</td>
+                            <td className={`${tdRCls} font-black ${profitColor(r.netProfit)}`}>{fmt(r.netProfit)}</td>
+                            <td className={`${tdRCls} font-medium`}>{r.netMargin.toFixed(1)}%</td>
+                          </tr>
+                        ))}
+                        {byMonth.length === 0 && (
+                          <tr><td colSpan="7" className="px-6 py-12 text-center text-slate-400">No data found</td></tr>
+                        )}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-slate-800 text-white font-bold">
+                          <td className="px-3 py-3 text-right text-xs uppercase tracking-wider border-r border-slate-600">Total</td>
+                          <td className={tdRCls.replace('border-slate-200','border-slate-600')}>{fmt(summary.totalSales)}</td>
+                          <td className={tdRCls.replace('border-slate-200','border-slate-600')}>{fmt(summary.totalCost)}</td>
+                          <td className={tdRCls.replace('border-slate-200','border-slate-600')}>{fmt(summary.grossProfit)}</td>
+                          <td className={tdRCls.replace('border-slate-200','border-slate-600')}>{fmt(summary.totalExpenses)}</td>
+                          <td className={tdRCls.replace('border-slate-200','border-slate-600')}>{fmt(summary.netProfit)}</td>
+                          <td className="px-3 py-3 text-right tabular-nums">{((summary.netProfit / (summary.totalSales || 1)) * 100).toFixed(1)}%</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               {/* BY PARTY */}
               {activeTab === 'by-party' && (

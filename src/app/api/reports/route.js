@@ -1091,7 +1091,9 @@ async function getProfitReport(startDate, endDate) {
     });
 
     const discount = parseFloat(sale.discount || 0);
-    const saleNet = parseFloat(sale.total_amount || 0);
+    const shipping = parseFloat(sale.shipping_amount || 0);
+    const labour = parseFloat(sale.labour_charges || 0);
+    const saleNet = parseFloat(sale.total_amount || 0) - shipping - labour;
     const totalSale = saleNet + discount;
     const profit = totalSale - totalCost - discount;
     const profitMargin = totalSale > 0 ? (profit / totalSale * 100) : 0;
