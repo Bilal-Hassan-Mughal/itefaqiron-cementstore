@@ -182,7 +182,7 @@ export async function loadDayEndSnapshot(prisma, { dateStr, dayEndRecord, branch
         customer: { select: { cus_name: true } },
         return_details: {
           include: {
-            product: { select: { pro_title: true, pro_cost_price: true } }
+            product: { select: { pro_title: true, pro_cost_price: true, pro_crate: true, pro_baser_price: true } }
           }
         }
       },
@@ -194,12 +194,12 @@ export async function loadDayEndSnapshot(prisma, { dateStr, dayEndRecord, branch
     }),
     prisma.saleDetail.findMany({
       where: { created_at: range, sale: { bill_type: 'BILL' } },
-      include: { product: { select: { pro_title: true, pro_cost_price: true } } },
+      include: { product: { select: { pro_title: true, pro_cost_price: true, pro_crate: true, pro_baser_price: true } } },
     }),
     prisma.sale.count({ where: { created_at: range, bill_type: 'ORDER' } }),
     prisma.holdBill.count({ where: { created_at: range, status: 'DRAFT' } }),
     prisma.journal.count({ where: { journal_date: new Date(`${dateStr}T00:00:00.000Z`), status: 'DRAFT' } }),
-    prisma.product.findMany({ select: { pro_stock_qnty: true, pro_cost_price: true } }),
+    prisma.product.findMany({ select: { pro_stock_qnty: true, pro_cost_price: true, pro_crate: true, pro_baser_price: true } }),
     getCashCategoryIds(prisma),
     getBankCategoryIds(prisma),
   ]);
@@ -343,13 +343,15 @@ export async function loadDayEndSnapshot(prisma, { dateStr, dayEndRecord, branch
   const expectedClosingBank = money(openingBank + netBankFlow);
   const savedClosingBank = dayEndRecord?.bank_balance != null ? n(dayEndRecord.bank_balance) : null;
 
+  const getCostPrice = (p) => n(p?.pro_cost_price || p?.pro_crate || p?.pro_baser_price);
+
   let totalSalesCOGS = 0;
   const itemMap = {};
   saleDetails.forEach((sd) => {
     const title = sd.product?.pro_title || `Product #${sd.pro_id}`;
     const amt = n(sd.net_total || sd.total_amount);
     const qty = n(sd.qnty);
-    const cost = n(sd.product?.pro_cost_price);
+    const cost = getCostPrice(sd.product);
     totalSalesCOGS += qty * cost;
     if (!itemMap[title]) itemMap[title] = { name: title, amount: 0, qty: 0 };
     itemMap[title].amount += amt;
@@ -361,20 +363,45 @@ export async function loadDayEndSnapshot(prisma, { dateStr, dayEndRecord, branch
   saleReturns.forEach((ret) => {
     (ret.return_details || []).forEach((rd) => {
       const qty = n(rd.qnty);
-      const cost = n(rd.product?.pro_cost_price);
+      const cost = getCostPrice(rd.product);
       returnCOGS += qty * cost;
     });
   });
 
-  const totalCOGS = totalSalesCOGS;
-  const netSales = totalSales - totalSaleReturns;
-  const netCOGS = totalSalesCOGS - returnCOGS;
-  const grossProfit = netSales - netCOGS;
+  // Calculate profit matching Profit Report logic:
+  // 1. Sales net revenue excluding shipping & labour charges, plus discounts
+  let totalProfitReportSales = 0;
+  let totalProfitReportDiscount = 0;
+  sales.forEach((s) => {
+    const discount = n(s.discount);
+    const shipping = n(s.shipping_amount);
+    const labour = n(s.labour_charges);
+    const saleNet = n(s.total_amount) - shipping - labour;
+    totalProfitReportSales += (saleNet + discount);
+    totalProfitReportDiscount += discount;
+  });
+
+  // 2. Return net revenue excluding shipping, labour & discount
+  let totalProfitReportReturnSales = 0;
+  saleReturns.forEach((ret) => {
+    const discount = n(ret.discount);
+    const shipping = n(ret.shipping_amount);
+    const labour = n(ret.labour_charges);
+    const netReturnSale = n(ret.total_amount) - discount - labour - shipping;
+    totalProfitReportReturnSales += netReturnSale;
+  });
+
+  const reportTotalSales = totalProfitReportSales - totalProfitReportReturnSales;
+  const reportTotalCost = totalSalesCOGS - returnCOGS;
+  const netCOGS = reportTotalCost;
+  const reportTotalDiscount = totalProfitReportDiscount;
+
+  const grossProfit = reportTotalSales - reportTotalCost - reportTotalDiscount;
   const netProfit = grossProfit - totalExpenses;
-  const profitMargin = netSales > 0 ? parseFloat(((netProfit / netSales) * 100).toFixed(2)) : 0;
+  const profitMargin = reportTotalSales > 0 ? parseFloat(((grossProfit / reportTotalSales) * 100).toFixed(2)) : 0;
 
   const currentStockValue = products.reduce(
-    (sum, p) => sum + n(p.pro_stock_qnty) * n(p.pro_cost_price),
+    (sum, p) => sum + n(p.pro_stock_qnty) * getCostPrice(p),
     0
   );
 
