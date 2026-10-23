@@ -2,10 +2,11 @@
 
 import { TailwindDateInput } from '../../components/date-filter-input';
 import { useState, useEffect, useMemo } from 'react';
-import { ArrowLeft, Download, Printer, Search, TrendingUp, TrendingDown, DollarSign, Percent, Users, ShoppingBag, Tag, Package, Calendar } from 'lucide-react';
+import { ArrowLeft, Download, Printer, Search, TrendingUp, TrendingDown, DollarSign, Percent, Users, ShoppingBag, Tag, Package, Calendar, UserCheck, Receipt } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '../../components/dashboard-layout';
 import { Autocomplete, TextField } from '@mui/material';
+import { isEmployeeExpense } from '@/lib/employee-expense-helper';
 
 const TABS = [
   { id: 'by-month',    label: 'By Month',    icon: Calendar },
@@ -13,6 +14,7 @@ const TABS = [
   { id: 'by-bill',     label: 'By Bill',     icon: ShoppingBag },
   { id: 'by-product',  label: 'By Product',  icon: Package },
   { id: 'by-category', label: 'By Category', icon: Tag },
+  { id: 'expenses',    label: 'Expenses Breakdown', icon: Receipt },
 ];
 
 /** YYYY-MM-DD for today in Pakistan (matches report API date filters). */
@@ -91,10 +93,27 @@ export default function ProfitReport() {
     const totalCost     = filteredSales.reduce((a, s) => a + (s.totalCost || 0), 0);
     const totalDiscount = filteredSales.reduce((a, s) => a + parseFloat(s.discount || 0), 0);
     const grossProfit   = totalSales - totalCost - totalDiscount;
-    const totalExpenses = (reportData?.expenses || []).reduce((a, e) => a + parseFloat(e.exp_amount || 0), 0);
+
+    let employeeExpenses = 0;
+    let otherExpenses = 0;
+    (reportData?.expenses || []).forEach(e => {
+      const amt = parseFloat(e.exp_amount || 0);
+      const isEmp = e.is_employee_expense ?? isEmployeeExpense(e);
+      if (isEmp) {
+        employeeExpenses += amt;
+      } else {
+        otherExpenses += amt;
+      }
+    });
+
+    const totalExpenses = employeeExpenses + otherExpenses;
     const netProfit     = grossProfit - totalExpenses;
-    return { totalSales, totalCost, totalDiscount, grossProfit, totalExpenses, netProfit,
-      profitMargin: totalSales > 0 ? (grossProfit / totalSales * 100) : 0 };
+    return {
+      totalSales, totalCost, totalDiscount, grossProfit,
+      employeeExpenses, otherExpenses, totalExpenses, netProfit,
+      profitMargin: totalSales > 0 ? (grossProfit / totalSales * 100) : 0,
+      netProfitMargin: totalSales > 0 ? (netProfit / totalSales * 100) : 0
+    };
   }, [filteredSales, reportData]);
 
   // ── by-month ──────────────────────────────────────────────────────────────
@@ -108,7 +127,7 @@ export default function ProfitReport() {
       const label = d.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', timeZone: 'Asia/Karachi' });
       
       if (!map[key]) {
-        map[key] = { key, label, totalSale: 0, totalCost: 0, totalDiscount: 0, grossProfit: 0, expenses: 0, netProfit: 0 };
+        map[key] = { key, label, totalSale: 0, totalCost: 0, totalDiscount: 0, grossProfit: 0, employeeExpenses: 0, otherExpenses: 0, expenses: 0, netProfit: 0 };
       }
       map[key].totalSale += s.totalSale || 0;
       map[key].totalCost += s.totalCost || 0;
@@ -122,9 +141,16 @@ export default function ProfitReport() {
       const key = d.toLocaleDateString('en-CA', { year: 'numeric', month: '2-digit', timeZone: 'Asia/Karachi' });
       if (!map[key]) {
         const label = d.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', timeZone: 'Asia/Karachi' });
-        map[key] = { key, label, totalSale: 0, totalCost: 0, totalDiscount: 0, grossProfit: 0, expenses: 0, netProfit: 0 };
+        map[key] = { key, label, totalSale: 0, totalCost: 0, totalDiscount: 0, grossProfit: 0, employeeExpenses: 0, otherExpenses: 0, expenses: 0, netProfit: 0 };
       }
-      map[key].expenses += parseFloat(e.exp_amount || 0);
+      const amt = parseFloat(e.exp_amount || 0);
+      const isEmp = e.is_employee_expense ?? isEmployeeExpense(e);
+      if (isEmp) {
+        map[key].employeeExpenses += amt;
+      } else {
+        map[key].otherExpenses += amt;
+      }
+      map[key].expenses += amt;
     });
 
     return Object.values(map)
@@ -235,12 +261,35 @@ export default function ProfitReport() {
       .sort((a, b) => b.profit - a.profit);
   }, [filteredSales]);
 
+  // ── expenses breakdown list ───────────────────────────────────────────────
+  const expensesList = useMemo(() => {
+    return (reportData?.expenses || []).map(e => {
+      const isEmp = e.is_employee_expense ?? isEmployeeExpense(e);
+      return {
+        id: e.exp_id,
+        date: e.created_at,
+        title: e.exp_title || '-',
+        category: e.expense_title?.title || 'General',
+        detail: e.exp_detail || '-',
+        amount: parseFloat(e.exp_amount || 0),
+        isEmployee: isEmp,
+        type: isEmp ? 'Employee / Salary' : 'General Expense'
+      };
+    });
+  }, [reportData]);
+
   // ── search filter for each tab ────────────────────────────────────────────
   const q = search.toLowerCase();
   const filteredByParty    = byParty.filter(r => r.name.toLowerCase().includes(q) || r.cat.toLowerCase().includes(q));
   const filteredByBill     = byBill.filter(r => r.customer.toLowerCase().includes(q) || String(r.saleId).includes(q));
   const filteredByProduct  = byProduct.filter(r => r.name.toLowerCase().includes(q) || r.cat.toLowerCase().includes(q));
   const filteredByCategory = byCategory.filter(r => r.name.toLowerCase().includes(q));
+  const filteredExpenses   = expensesList.filter(e =>
+    e.title.toLowerCase().includes(q) ||
+    e.category.toLowerCase().includes(q) ||
+    e.detail.toLowerCase().includes(q) ||
+    e.type.toLowerCase().includes(q)
+  );
 
   const profitColor = (p) => p >= 0 ? 'text-emerald-600' : 'text-red-600';
 
@@ -251,9 +300,9 @@ export default function ProfitReport() {
     let csv = `PROFIT REPORT\nPeriod: ${fmtDate(startDate)} to ${fmtDate(endDate)}\n\n`;
 
     csv += 'PROFIT BY MONTH\n';
-    csv += 'Month,Sale Amt,Cost,Gross Profit,Expenses,Net Profit,Net Margin\n';
+    csv += 'Month,Sale Amt,Cost,Discount,Gross Profit,Employee Expense,Other Expenses,Total Expenses,Net Profit,Net Margin\n';
     byMonth.forEach(r => {
-      csv += `${r.label},${fmt(r.totalSale)},${fmt(r.totalCost)},${fmt(r.grossProfit)},${fmt(r.expenses)},${fmt(r.netProfit)},${r.netMargin.toFixed(1)}%\n`;
+      csv += `${r.label},${fmt(r.totalSale)},${fmt(r.totalCost)},${fmt(r.totalDiscount)},${fmt(r.grossProfit)},${fmt(r.employeeExpenses)},${fmt(r.otherExpenses)},${fmt(r.expenses)},${fmt(r.netProfit)},${r.netMargin.toFixed(1)}%\n`;
     });
 
     csv += '\nPROFIT BY PARTY\n';
@@ -369,30 +418,42 @@ export default function ProfitReport() {
         {reportData ? (
           <div className="flex-1 overflow-auto">
             {/* Summary Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 p-4 print:hidden">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-3 p-4 print:hidden">
               <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-xl p-3">
                 <p className="text-[10px] font-bold text-blue-600 uppercase tracking-tight">Sales Revenue</p>
-                <p className="text-lg font-black text-blue-800 mt-0.5">Rs. {fmt(summary.totalSales)}</p>
+                <p className="text-base font-black text-blue-800 mt-0.5">Rs. {fmt(summary.totalSales)}</p>
               </div>
               <div className="bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 rounded-xl p-3">
                 <p className="text-[10px] font-bold text-orange-600 uppercase tracking-tight">Cost of Goods</p>
-                <p className="text-lg font-black text-orange-800 mt-0.5">Rs. {fmt(summary.totalCost)}</p>
+                <p className="text-base font-black text-orange-800 mt-0.5">Rs. {fmt(summary.totalCost)}</p>
+              </div>
+              <div className="bg-gradient-to-br from-rose-50 to-rose-100 border border-rose-200 rounded-xl p-3">
+                <p className="text-[10px] font-bold text-rose-600 uppercase tracking-tight">Total Discount</p>
+                <p className="text-base font-black text-rose-800 mt-0.5">Rs. {fmt(summary.totalDiscount)}</p>
               </div>
               <div className={`bg-gradient-to-br ${summary.grossProfit >= 0 ? 'from-emerald-50 to-emerald-100 border-emerald-200' : 'from-red-50 to-red-100 border-red-200'} border rounded-xl p-3`}>
                 <p className={`text-[10px] font-bold ${summary.grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'} uppercase tracking-tight`}>Gross Profit</p>
-                <p className={`text-lg font-black mt-0.5 ${summary.grossProfit >= 0 ? 'text-emerald-800' : 'text-red-800'}`}>Rs. {fmt(summary.grossProfit)}</p>
+                <p className={`text-base font-black mt-0.5 ${summary.grossProfit >= 0 ? 'text-emerald-800' : 'text-red-800'}`}>Rs. {fmt(summary.grossProfit)}</p>
               </div>
-              <div className="bg-gradient-to-br from-rose-50 to-rose-100 border border-rose-200 rounded-xl p-3">
-                <p className="text-[10px] font-bold text-rose-600 uppercase tracking-tight">Total Expenses</p>
-                <p className="text-lg font-black text-rose-800 mt-0.5">Rs. {fmt(summary.totalExpenses)}</p>
+              <div className="bg-gradient-to-br from-amber-50 to-amber-100 border border-amber-200 rounded-xl p-3">
+                <p className="text-[10px] font-bold text-amber-700 uppercase tracking-tight">Employee / Salary</p>
+                <p className="text-base font-black text-amber-900 mt-0.5">Rs. {fmt(summary.employeeExpenses)}</p>
+              </div>
+              <div className="bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200 rounded-xl p-3">
+                <p className="text-[10px] font-bold text-slate-600 uppercase tracking-tight">Other Expenses</p>
+                <p className="text-base font-black text-slate-800 mt-0.5">Rs. {fmt(summary.otherExpenses)}</p>
+              </div>
+              <div className="bg-gradient-to-br from-red-50 to-red-100 border border-red-200 rounded-xl p-3">
+                <p className="text-[10px] font-bold text-red-600 uppercase tracking-tight">Total Expenses</p>
+                <p className="text-base font-black text-red-800 mt-0.5">Rs. {fmt(summary.totalExpenses)}</p>
               </div>
               <div className={`bg-gradient-to-br ${summary.netProfit >= 0 ? 'from-teal-50 to-teal-100 border-teal-200' : 'from-pink-50 to-pink-100 border-pink-200'} border rounded-xl p-3`}>
                 <p className={`text-[10px] font-bold ${summary.netProfit >= 0 ? 'text-teal-600' : 'text-pink-600'} uppercase tracking-tight`}>Net Profit</p>
-                <p className={`text-lg font-black mt-0.5 ${summary.netProfit >= 0 ? 'text-teal-800' : 'text-pink-800'}`}>Rs. {fmt(summary.netProfit)}</p>
+                <p className={`text-base font-black mt-0.5 ${summary.netProfit >= 0 ? 'text-teal-800' : 'text-pink-800'}`}>Rs. {fmt(summary.netProfit)}</p>
               </div>
               <div className="bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 rounded-xl p-3">
                 <p className="text-[10px] font-bold text-purple-600 uppercase tracking-tight">Profit Margin</p>
-                <p className="text-lg font-black text-purple-800 mt-0.5">{summary.profitMargin.toFixed(1)}%</p>
+                <p className="text-base font-black text-purple-800 mt-0.5">{summary.profitMargin.toFixed(1)}%</p>
               </div>
             </div>
 
@@ -449,8 +510,11 @@ export default function ProfitReport() {
                           <th className={thCls}>Month</th>
                           <th className={thRCls}>Sale Amount</th>
                           <th className={thRCls}>Cost of Goods</th>
+                          <th className={thRCls}>Discount</th>
                           <th className={thRCls}>Gross Profit</th>
-                          <th className={thRCls}>Expenses</th>
+                          <th className={thRCls}>Employee / Salary</th>
+                          <th className={thRCls}>Other Expenses</th>
+                          <th className={thRCls}>Total Expenses</th>
                           <th className={thRCls}>Net Profit</th>
                           <th className={thRCls}>Net Margin</th>
                         </tr>
@@ -461,14 +525,17 @@ export default function ProfitReport() {
                             <td className={`${tdCls} font-bold text-slate-900`}>{r.label}</td>
                             <td className={tdRCls}>{fmt(r.totalSale)}</td>
                             <td className={tdRCls}>{fmt(r.totalCost)}</td>
+                            <td className={`${tdRCls} text-rose-600 font-medium`}>{fmt(r.totalDiscount)}</td>
                             <td className={`${tdRCls} font-semibold ${profitColor(r.grossProfit)}`}>{fmt(r.grossProfit)}</td>
-                            <td className={`${tdRCls} text-red-500`}>{fmt(r.expenses)}</td>
+                            <td className={`${tdRCls} text-amber-600 font-semibold`}>{fmt(r.employeeExpenses)}</td>
+                            <td className={`${tdRCls} text-slate-600`}>{fmt(r.otherExpenses)}</td>
+                            <td className={`${tdRCls} text-red-500 font-semibold`}>{fmt(r.expenses)}</td>
                             <td className={`${tdRCls} font-black ${profitColor(r.netProfit)}`}>{fmt(r.netProfit)}</td>
                             <td className={`${tdRCls} font-medium`}>{r.netMargin.toFixed(1)}%</td>
                           </tr>
                         ))}
                         {byMonth.length === 0 && (
-                          <tr><td colSpan="7" className="px-6 py-12 text-center text-slate-400">No data found</td></tr>
+                          <tr><td colSpan="10" className="px-6 py-12 text-center text-slate-400">No data found</td></tr>
                         )}
                       </tbody>
                       <tfoot>
@@ -476,7 +543,10 @@ export default function ProfitReport() {
                           <td className="px-3 py-3 text-right text-xs uppercase tracking-wider border-r border-slate-600">Total</td>
                           <td className={tdRCls.replace('border-slate-200','border-slate-600')}>{fmt(summary.totalSales)}</td>
                           <td className={tdRCls.replace('border-slate-200','border-slate-600')}>{fmt(summary.totalCost)}</td>
+                          <td className={`${tdRCls.replace('border-slate-200','border-slate-600')} text-rose-300 font-medium`}>{fmt(summary.totalDiscount)}</td>
                           <td className={tdRCls.replace('border-slate-200','border-slate-600')}>{fmt(summary.grossProfit)}</td>
+                          <td className={tdRCls.replace('border-slate-200','border-slate-600')}>{fmt(summary.employeeExpenses)}</td>
+                          <td className={tdRCls.replace('border-slate-200','border-slate-600')}>{fmt(summary.otherExpenses)}</td>
                           <td className={tdRCls.replace('border-slate-200','border-slate-600')}>{fmt(summary.totalExpenses)}</td>
                           <td className={tdRCls.replace('border-slate-200','border-slate-600')}>{fmt(summary.netProfit)}</td>
                           <td className="px-3 py-3 text-right tabular-nums">{((summary.netProfit / (summary.totalSales || 1)) * 100).toFixed(1)}%</td>
@@ -719,6 +789,75 @@ export default function ProfitReport() {
                               : '0.0'}%
                           </td>
                           <td className="px-3 py-3 text-right tabular-nums">100%</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* EXPENSES BREAKDOWN */}
+              {activeTab === 'expenses' && (
+                <div className="bg-white border border-slate-300 rounded-lg overflow-hidden">
+                  <div className="bg-slate-800 text-white px-4 py-2 flex items-center justify-between">
+                    <h3 className="text-sm font-bold uppercase tracking-wide">Operating & Employee Expenses Breakdown</h3>
+                    <div className="flex items-center space-x-3 text-xs">
+                      <span className="text-amber-300 font-semibold">Employee / Salary: Rs. {fmt(summary.employeeExpenses)}</span>
+                      <span className="text-slate-400">|</span>
+                      <span className="text-slate-200">Other: Rs. {fmt(summary.otherExpenses)}</span>
+                      <span className="text-slate-400">|</span>
+                      <span className="text-rose-300 font-bold">Total: Rs. {fmt(summary.totalExpenses)}</span>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-slate-700 text-white">
+                          <th className={thCls}>#</th>
+                          <th className={thCls}>Date</th>
+                          <th className={thCls}>Expense Category</th>
+                          <th className={thCls}>Title / Subtitle</th>
+                          <th className={thCls}>Type / Classification</th>
+                          <th className={thCls}>Detail / Notes</th>
+                          <th className={thRCls}>Amount (PKR)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {filteredExpenses.map((r, i) => (
+                          <tr key={r.id} className={`${rowBg(i)} hover:bg-teal-50 transition-colors`}>
+                            <td className={tdCls}>{i + 1}</td>
+                            <td className={`${tdCls} font-medium`}>{fmtDate(r.date)}</td>
+                            <td className={`${tdCls} font-bold text-slate-900`}>{r.category}</td>
+                            <td className={tdCls}>{r.title}</td>
+                            <td className={tdCls}>
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold ${
+                                r.isEmployee
+                                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                  : 'bg-slate-100 text-slate-700 border border-slate-300'
+                              }`}>
+                                {r.type}
+                              </span>
+                            </td>
+                            <td className={`${tdCls} text-slate-500 text-xs`}>{r.detail}</td>
+                            <td className={`${tdRCls} font-black ${r.isEmployee ? 'text-amber-700' : 'text-slate-900'}`}>{fmt(r.amount)}</td>
+                          </tr>
+                        ))}
+                        {filteredExpenses.length === 0 && (
+                          <tr><td colSpan="7" className="px-6 py-12 text-center text-slate-400">No expenses found for this period</td></tr>
+                        )}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-slate-800 text-white font-bold">
+                          <td colSpan="4" className="px-3 py-3 text-right text-xs uppercase tracking-wider border-r border-slate-600">Total</td>
+                          <td className="px-3 py-3 text-xs uppercase text-amber-300 border-r border-slate-600">
+                            Emp: Rs. {fmt(summary.employeeExpenses)}
+                          </td>
+                          <td className="px-3 py-3 text-xs text-right border-r border-slate-600">
+                            Other: Rs. {fmt(summary.otherExpenses)}
+                          </td>
+                          <td className={tdRCls.replace('border-slate-200','border-slate-600')}>
+                            Rs. {fmt(summary.totalExpenses)}
+                          </td>
                         </tr>
                       </tfoot>
                     </table>

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { initBranchScope } from '@/lib/branch-server';
 import { sumSaleReportSummary } from '@/lib/sale-report-amounts';
+import { isEmployeeExpense } from '@/lib/employee-expense-helper';
 
 
 // Helper to parse dates in Pakistan Standard Time (UTC+5)
@@ -1076,7 +1077,10 @@ async function getProfitReport(startDate, endDate) {
       }
     }),
     prisma.expense.findMany({
-      where: startDate && endDate ? { created_at: parseLocalDateRange(startDate, endDate) } : {}
+      where: startDate && endDate ? { created_at: parseLocalDateRange(startDate, endDate) } : {},
+      include: {
+        expense_title: true
+      }
     })
   ]);
 
@@ -1152,7 +1156,24 @@ async function getProfitReport(startDate, endDate) {
   });
 
   const allTransactions = [...salesWithProfit, ...returnsWithProfit].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  const totalExpenses = expenses.reduce((sum, e) => sum + parseFloat(e.exp_amount || 0), 0);
+  
+  // Categorize expenses into employee / salary and other operating expenses
+  let employeeExpenses = 0;
+  let otherExpenses = 0;
+  const enrichedExpenses = expenses.map(e => {
+    const isEmployee = isEmployeeExpense(e);
+    const amt = parseFloat(e.exp_amount || 0);
+    if (isEmployee) {
+      employeeExpenses += amt;
+    } else {
+      otherExpenses += amt;
+    }
+    return {
+      ...e,
+      is_employee_expense: isEmployee
+    };
+  });
+  const totalExpenses = employeeExpenses + otherExpenses;
 
   // Calculate summary
   const totalSales = allTransactions.reduce((sum, s) => sum + s.totalSale, 0);
@@ -1166,13 +1187,15 @@ async function getProfitReport(startDate, endDate) {
     totalCost,
     totalDiscount,
     grossProfit,
+    employeeExpenses,
+    otherExpenses,
     totalExpenses,
     netProfit,
     profitMargin: totalSales > 0 ? (grossProfit / totalSales * 100) : 0,
     netProfitMargin: totalSales > 0 ? (netProfit / totalSales * 100) : 0
   };
 
-  return NextResponse.json({ sales: allTransactions, expenses, summary });
+  return NextResponse.json({ sales: allTransactions, expenses: enrichedExpenses, summary });
 }
 
 // Purchase Report - Detailed purchases report

@@ -55,9 +55,11 @@ function readDayEndUser() {
   }
 }
 
+const n = (val) => parseFloat(val || 0);
+
 const formatCurrency = (val) => {
-  const n = parseFloat(val || 0);
-  return n.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const num = n(val);
+  return num.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
 const formatDate = (dateStr) => {
@@ -591,37 +593,55 @@ export default function DayEndPage() {
               </div>
 
               <div className="space-y-6">
-                <div className="grid grid-cols-5 items-center text-center gap-2 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/50">
+                <div className={`grid ${summary?.reportTotalDiscount ? 'grid-cols-7' : 'grid-cols-5'} items-center text-center gap-2 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/50`}>
                   <div>
-                    <p className="text-xs font-semibold text-slate-500">Total Sales</p>
-                    <p className="text-sm font-black text-slate-900 mt-1">Rs. {formatCurrency(summary?.totalSales)}</p>
+                    <p className="text-xs font-semibold text-slate-500">Sales Revenue</p>
+                    <p className="text-sm font-black text-slate-900 mt-1">Rs. {formatCurrency(summary?.reportTotalSales ?? summary?.totalSales)}</p>
                   </div>
                   <div className="text-slate-400 font-bold text-lg">-</div>
                   <div>
                     <p className="text-xs font-semibold text-amber-600">Cost of Goods</p>
-                    <p className="text-sm font-black text-slate-900 mt-1">Rs. {formatCurrency(summary?.totalCOGS)}</p>
+                    <p className="text-sm font-black text-slate-900 mt-1">Rs. {formatCurrency(summary?.netCOGS ?? summary?.totalCOGS)}</p>
                   </div>
+                  {summary?.reportTotalDiscount > 0 ? (
+                    <>
+                      <div className="text-slate-400 font-bold text-lg">-</div>
+                      <div>
+                        <p className="text-xs font-semibold text-orange-600">Discount</p>
+                        <p className="text-sm font-black text-slate-900 mt-1">Rs. {formatCurrency(summary?.reportTotalDiscount)}</p>
+                      </div>
+                    </>
+                  ) : null}
                   <div className="text-slate-400 font-bold text-lg">=</div>
                   <div>
                     <p className="text-xs font-semibold text-emerald-600">Gross Profit</p>
-                    <p className="text-base font-black text-emerald-700 mt-1">Rs. {formatCurrency(summary?.grossProfit)}</p>
+                    <p className={`text-base font-black mt-1 ${n(summary?.grossProfit) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>Rs. {formatCurrency(summary?.grossProfit)}</p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-5 items-center text-center gap-2 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/50">
+                <div className={`grid ${summary?.employeeExpenses > 0 ? 'grid-cols-7' : 'grid-cols-5'} items-center text-center gap-2 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/50`}>
                   <div>
-                    <p className="text-xs font-semibold text-slate-500">Other Income</p>
-                    <p className="text-sm font-black text-slate-900 mt-1">Rs. 0.00</p>
+                    <p className="text-xs font-semibold text-emerald-600">Gross Profit</p>
+                    <p className={`text-sm font-black mt-1 ${n(summary?.grossProfit) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>Rs. {formatCurrency(summary?.grossProfit)}</p>
                   </div>
+                  {summary?.employeeExpenses > 0 ? (
+                    <>
+                      <div className="text-slate-400 font-bold text-lg">-</div>
+                      <div>
+                        <p className="text-xs font-semibold text-amber-700">Salary / Emp Exp</p>
+                        <p className="text-sm font-black text-slate-900 mt-1">Rs. {formatCurrency(summary?.employeeExpenses)}</p>
+                      </div>
+                    </>
+                  ) : null}
                   <div className="text-slate-400 font-bold text-lg">-</div>
                   <div>
                     <p className="text-xs font-semibold text-rose-600">Other Expenses</p>
-                    <p className="text-sm font-black text-slate-900 mt-1">Rs. {formatCurrency(summary?.totalExpenses)}</p>
+                    <p className="text-sm font-black text-slate-900 mt-1">Rs. {formatCurrency(summary?.otherExpenses ?? summary?.totalExpenses)}</p>
                   </div>
                   <div className="text-slate-400 font-bold text-lg">=</div>
                   <div>
                     <p className="text-xs font-semibold text-emerald-600">Net Profit</p>
-                    <p className="text-base font-black text-emerald-700 mt-1">Rs. {formatCurrency(summary?.netProfit)}</p>
+                    <p className={`text-base font-black mt-1 ${n(summary?.netProfit) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>Rs. {formatCurrency(summary?.netProfit)}</p>
                     <p className="text-[10px] font-bold text-slate-500 mt-0.5">Profit Margin: {summary?.profitMargin || 0}%</p>
                   </div>
                 </div>

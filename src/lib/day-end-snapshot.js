@@ -5,6 +5,7 @@ import {
   getLedgerOpeningBefore,
   sumCashBankLedgerFlow,
 } from '@/lib/cash-bank-report-helper';
+import { isEmployeeExpense } from '@/lib/employee-expense-helper';
 
 function n(val) {
   const num = parseFloat(val);
@@ -133,7 +134,6 @@ export async function loadDayEndSnapshot(prisma, { dateStr, dayEndRecord, branch
     ledgerEntries,
     saleReturns,
     purchaseReturns,
-    saleDetails,
     openOrdersCount,
     holdBillsCount,
     draftJournalsCount,
@@ -154,7 +154,14 @@ export async function loadDayEndSnapshot(prisma, { dateStr, dayEndRecord, branch
     }),
     prisma.sale.findMany({
       where: { created_at: range, bill_type: 'BILL' },
-      include: { customer: { select: { cus_name: true } } },
+      include: {
+        customer: { select: { cus_name: true } },
+        sale_details: {
+          include: {
+            product: { select: { pro_title: true, pro_cost_price: true, pro_crate: true, pro_baser_price: true } },
+          },
+        },
+      },
       orderBy: { created_at: 'desc' },
     }),
     prisma.purchase.findMany({
@@ -191,10 +198,6 @@ export async function loadDayEndSnapshot(prisma, { dateStr, dayEndRecord, branch
     prisma.purchaseReturn.findMany({
       where: { created_at: range },
       orderBy: { created_at: 'desc' },
-    }),
-    prisma.saleDetail.findMany({
-      where: { created_at: range, sale: { bill_type: 'BILL' } },
-      include: { product: { select: { pro_title: true, pro_cost_price: true, pro_crate: true, pro_baser_price: true } } },
     }),
     prisma.sale.count({ where: { created_at: range, bill_type: 'ORDER' } }),
     prisma.holdBill.count({ where: { created_at: range, status: 'DRAFT' } }),
@@ -249,11 +252,18 @@ export async function loadDayEndSnapshot(prisma, { dateStr, dayEndRecord, branch
   });
 
   let totalExpenses = 0;
+  let employeeExpenses = 0;
+  let otherExpenses = 0;
   let cashExpenses = 0;
   let bankExpenses = 0;
   expenses.forEach((exp) => {
     const amt = n(exp.exp_amount);
     totalExpenses += amt;
+    if (isEmployeeExpense(exp)) {
+      employeeExpenses += amt;
+    } else {
+      otherExpenses += amt;
+    }
     const cashAmt = n(exp.cash_amount);
     const bankAmt = n(exp.bank_amount);
     if (cashAmt > 0 || bankAmt > 0) {
@@ -347,15 +357,17 @@ export async function loadDayEndSnapshot(prisma, { dateStr, dayEndRecord, branch
 
   let totalSalesCOGS = 0;
   const itemMap = {};
-  saleDetails.forEach((sd) => {
-    const title = sd.product?.pro_title || `Product #${sd.pro_id}`;
-    const amt = n(sd.net_total || sd.total_amount);
-    const qty = n(sd.qnty);
-    const cost = getCostPrice(sd.product);
-    totalSalesCOGS += qty * cost;
-    if (!itemMap[title]) itemMap[title] = { name: title, amount: 0, qty: 0 };
-    itemMap[title].amount += amt;
-    itemMap[title].qty += qty;
+  sales.forEach((sale) => {
+    (sale.sale_details || []).forEach((sd) => {
+      const title = sd.product?.pro_title || `Product #${sd.pro_id}`;
+      const amt = n(sd.net_total || sd.total_amount);
+      const qty = n(sd.qnty);
+      const cost = getCostPrice(sd.product);
+      totalSalesCOGS += qty * cost;
+      if (!itemMap[title]) itemMap[title] = { name: title, amount: 0, qty: 0 };
+      itemMap[title].amount += amt;
+      itemMap[title].qty += qty;
+    });
   });
   const topSellingItems = Object.values(itemMap).sort((a, b) => b.amount - a.amount).slice(0, 5);
 
@@ -470,6 +482,8 @@ export async function loadDayEndSnapshot(prisma, { dateStr, dayEndRecord, branch
     bankPurchases: money(bankPurchases),
     creditPurchases: money(creditPurchases),
     totalExpenses: money(totalExpenses),
+    employeeExpenses: money(employeeExpenses),
+    otherExpenses: money(otherExpenses),
     cashExpenses: money(cashExpenses),
     bankExpenses: money(bankExpenses),
     totalSaleReturns: money(totalSaleReturns),
@@ -498,6 +512,8 @@ export async function loadDayEndSnapshot(prisma, { dateStr, dayEndRecord, branch
     savedClosingBank: savedClosingBank != null ? money(savedClosingBank) : null,
     totalCashAccountsBalance: money(totalCashAccountsBalance),
     totalBankAccountsBalance: money(totalBankAccountsBalance),
+    reportTotalSales: money(reportTotalSales),
+    reportTotalDiscount: money(reportTotalDiscount),
     totalCOGS: money(totalSalesCOGS),
     returnCOGS: money(returnCOGS),
     netCOGS: money(netCOGS),
