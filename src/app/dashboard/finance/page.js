@@ -164,7 +164,7 @@ function paymentReceiptFromSavedPayment(
 const customerOptionKey = (option) => String(option?.cus_id ?? '');
 const isSameCustomerOption = (a, b) => Number(a?.cus_id) === Number(b?.cus_id);
 
-const ACCOUNT_DROPDOWN_GRID = '40px minmax(0, 1fr) 148px';
+const ACCOUNT_DROPDOWN_GRID = '36px minmax(200px, 2.2fr) 130px 110px 130px';
 const ACCOUNT_GRID_LINE = '1px solid #c5c5c5';
 const accountGridRowStyle = {
   display: 'grid',
@@ -183,6 +183,60 @@ const accountGridCellStyle = {
   borderRight: ACCOUNT_GRID_LINE,
   minWidth: 0,
   boxSizing: 'border-box',
+};
+
+export function matchAccountSearch(customer, rawQuery) {
+  if (!rawQuery) return true;
+  const q = String(rawQuery).trim().toLowerCase();
+  if (!q) return true;
+
+  // 1. Account name & Urdu name
+  if ((customer.cus_name || '').toLowerCase().includes(q)) return true;
+  if ((customer.name_urdu || '').toLowerCase().includes(q)) return true;
+
+  // 2. City name & Address
+  if ((customer.city?.city_name || '').toLowerCase().includes(q)) return true;
+  if ((customer.cus_address || '').toLowerCase().includes(q)) return true;
+
+  // 3. Customer Reference & Email
+  if ((customer.cus_reference || '').toLowerCase().includes(q)) return true;
+  if ((customer.cus_email || '').toLowerCase().includes(q)) return true;
+
+  // 4. Phone numbers (exact substring in primary or secondary/WhatsApp)
+  const phone1 = String(customer.cus_phone_no || '');
+  const phone2 = String(customer.cus_phone_no2 || '');
+  if (phone1.toLowerCase().includes(q) || phone2.toLowerCase().includes(q)) return true;
+
+  // 5. Normalized digits search (matches "0300...", "92300...", "+92300...", or "300...")
+  const digitsQuery = q.replace(/\D/g, '');
+  if (digitsQuery.length >= 3) {
+    const digits1 = phone1.replace(/\D/g, '');
+    const digits2 = phone2.replace(/\D/g, '');
+    if (digits1.includes(digitsQuery) || digits2.includes(digitsQuery)) return true;
+
+    // Convert leading '0' to '92' or '92' to '0' to match Pakistani mobile formats
+    if (digitsQuery.startsWith('0')) {
+      const q92 = '92' + digitsQuery.slice(1);
+      if (digits1.includes(q92) || digits2.includes(q92)) return true;
+    } else if (digitsQuery.startsWith('92')) {
+      const q0 = '0' + digitsQuery.slice(2);
+      if (digits1.includes(q0) || digits2.includes(q0)) return true;
+    } else {
+      const qWith0 = '0' + digitsQuery;
+      const qWith92 = '92' + digitsQuery;
+      if (digits1.includes(qWith0) || digits1.includes(qWith92) ||
+          digits2.includes(qWith0) || digits2.includes(qWith92)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+const filterLedgerAccountOptions = (options, { inputValue }) => {
+  if (!inputValue || !inputValue.trim()) return options;
+  return options.filter((option) => matchAccountSearch(option, inputValue));
 };
 
 const AccountDropdownListbox = forwardRef(function AccountDropdownListbox(props, ref) {
@@ -217,6 +271,8 @@ const AccountDropdownListbox = forwardRef(function AccountDropdownListbox(props,
       >
         <span style={{ ...accountGridCellStyle, justifyContent: 'center', fontSize: 11, fontWeight: 800, color: '#1e3a5f' }}>#</span>
         <span style={{ ...accountGridCellStyle, fontSize: 11, fontWeight: 800, color: '#1e3a5f', textTransform: 'uppercase' }}>Account</span>
+        <span style={{ ...accountGridCellStyle, fontSize: 11, fontWeight: 800, color: '#1e3a5f', textTransform: 'uppercase' }}>Phone / WhatsApp</span>
+        <span style={{ ...accountGridCellStyle, fontSize: 11, fontWeight: 800, color: '#1e3a5f', textTransform: 'uppercase' }}>City</span>
         <span style={{ ...accountGridCellStyle, borderRight: 'none', justifyContent: 'flex-end', fontSize: 11, fontWeight: 800, color: '#1e3a5f', textTransform: 'uppercase' }}>Balance</span>
       </li>
       {children}
@@ -2296,10 +2352,8 @@ function FinancePageContent() {
 
   // Customer filtering logic
   const filteredCustomers = customers.filter(customer => {
-    const matchesSearch = customer.cus_name.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
-      customer.cus_phone_no?.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
-      customer.cus_email?.toLowerCase().includes(customerSearchTerm.toLowerCase());
-    return matchesSearch;
+    if (!customerSearchTerm) return true;
+    return matchAccountSearch(customer, customerSearchTerm);
   });
 
   // Account filtering logic for filter dropdown
@@ -2310,12 +2364,7 @@ function FinancePageContent() {
     if (!matchesCategory || !matchesSubCategory) return false;
 
     if (!accountSearchTerm) return true;
-    const matchesSearch = customer.cus_name.toLowerCase().includes(accountSearchTerm.toLowerCase()) ||
-      customer.cus_phone_no?.toLowerCase().includes(accountSearchTerm.toLowerCase()) ||
-      customer.cus_phone_no2?.toLowerCase().includes(accountSearchTerm.toLowerCase()) ||
-      customer.cus_reference?.toLowerCase().includes(accountSearchTerm.toLowerCase()) ||
-      customer.cus_email?.toLowerCase().includes(accountSearchTerm.toLowerCase());
-    return matchesSearch;
+    return matchAccountSearch(customer, accountSearchTerm);
   });
 
   // Dynamic Sub-Category Filtering logic based on selected Category
@@ -4001,6 +4050,7 @@ function FinancePageContent() {
                 selectOnFocus
                 size="small"
                 options={filteredAccounts}
+                filterOptions={filterLedgerAccountOptions}
                 getOptionLabel={(option) => option.cus_name}
                 getOptionKey={customerOptionKey}
                 isOptionEqualToValue={isSameCustomerOption}
@@ -4033,7 +4083,7 @@ function FinancePageContent() {
                 slotProps={{
                   popper: {
                     sx: {
-                      minWidth: 580,
+                      minWidth: { xs: '100%', sm: 680, md: 740 },
                       '& .MuiPaper-root': {
                         borderRadius: 0,
                         boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
@@ -4055,6 +4105,9 @@ function FinancePageContent() {
                 renderOption={(props, option, { index }) => {
                   const { key, ownerState, ...optionProps } = props;
                   const balance = parseFloat(option.cus_balance || 0);
+                  const phoneDisplay = option.cus_phone_no || option.cus_phone_no2 || '—';
+                  const cityDisplay = option.city?.city_name || option.cus_address || '—';
+                  const allPhones = [option.cus_phone_no, option.cus_phone_no2].filter(Boolean).join(' / ');
                   return (
                     <li key={key} {...optionProps} style={{ ...accountGridRowStyle, ...optionProps.style }}>
                       <span style={{ ...accountGridCellStyle, justifyContent: 'center', color: '#64748b', fontSize: 12 }}>
@@ -4073,6 +4126,33 @@ function FinancePageContent() {
                         }}
                       >
                         {option.cus_name}
+                      </span>
+                      <span
+                        title={allPhones}
+                        style={{
+                          ...accountGridCellStyle,
+                          fontSize: 12,
+                          color: '#334155',
+                          fontVariantNumeric: 'tabular-nums',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {phoneDisplay}
+                      </span>
+                      <span
+                        title={option.city?.city_name || option.cus_address || ''}
+                        style={{
+                          ...accountGridCellStyle,
+                          fontSize: 12,
+                          color: '#475569',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {cityDisplay}
                       </span>
                       <span
                         style={{
@@ -4885,6 +4965,7 @@ function FinancePageContent() {
                 openOnFocus={true}
                 selectOnFocus={true}
                 options={filteredCustomers}
+                filterOptions={filterLedgerAccountOptions}
                 getOptionLabel={(option) => option.cus_name}
                 getOptionKey={customerOptionKey}
                 isOptionEqualToValue={isSameCustomerOption}
@@ -4907,7 +4988,7 @@ function FinancePageContent() {
                 renderInput={(params) => (
                   <TextField
                     {...params}
-                    placeholder="Search and select account..."
+                    placeholder="Search and select account (name, phone, city)..."
                     required
                     sx={{ bgcolor: 'white', borderRadius: 2 }}
                     InputProps={{
@@ -4923,6 +5004,8 @@ function FinancePageContent() {
                 renderOption={(props, option) => {
                   const { key, ...optionProps } = props;
                   const balance = parseFloat(option.cus_balance || 0);
+                  const phoneText = [option.cus_phone_no, option.cus_phone_no2].filter(Boolean).join(' / ');
+                  const locationText = option.city?.city_name || option.cus_address;
                   return (
                     <Box component="li" key={key} {...optionProps}>
                       <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, py: 0.5, width: '100%' }}>
@@ -4934,7 +5017,8 @@ function FinancePageContent() {
                         <Box sx={{ flex: 1, minWidth: 0 }}>
                           <Typography variant="body2" fontWeight={700}>{option.cus_name}</Typography>
                           <Typography variant="caption" color="text.secondary" display="block">
-                            {option.cus_phone_no}
+                            {phoneText || 'No phone'}
+                            {locationText && ` • ${locationText}`}
                             {option.customer_type?.cus_type_title && ` • ${option.customer_type.cus_type_title}`}
                           </Typography>
                           <Typography

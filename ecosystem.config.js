@@ -3,7 +3,7 @@ module.exports = {
     {
       name: "ittefaq-pos",
       script: "node_modules/next/dist/bin/next",
-      args: "start -H 0.0.0.0 -p 3000",
+      args: "start -H 0.0.0.0 -p 3001",
       env: {
         NODE_ENV: "production",
         FINGERPRINT_MATCHER_URL: "http://127.0.0.1:5050",

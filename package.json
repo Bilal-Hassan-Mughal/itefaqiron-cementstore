@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev:next": "next dev -H 0.0.0.0",
+    "dev:next": "next dev -H 0.0.0.0 -p 3001",
     "dev:matcher": "set \"PATH=C:\\Program Files\\dotnet;%PATH%\"&& dotnet run --project fingerprint-matcher/FingerprintMatcher -c Release",
     "dev:matcher:5051": "set \"PATH=C:\\Program Files\\dotnet;%PATH%\"&& set ASPNETCORE_URLS=http://127.0.0.1:5051&& dotnet run --project fingerprint-matcher/FingerprintMatcher -c Release",
     "dev:5051": "concurrently -n next,matcher -c cyan,magenta \"npm run dev:next\" \"npm run dev:matcher:5051\"",
@@ -13,7 +13,7 @@
     "start:matcher": "dotnet fingerprint-matcher/publish/FingerprintMatcher.dll",
     "build": "node scripts/build-nodeafis.js && npx prisma generate && next build --webpack",
     "postinstall": "node scripts/build-nodeafis.js && prisma generate",
-    "start": "next start -H 0.0.0.0",
+    "start": "next start -H 0.0.0.0 -p 3001",
     "app:start": "npm --prefix laravel-pos run app:start",
     "app:dist": "npm --prefix laravel-pos run app:dist",
     "lint": "next lint",
