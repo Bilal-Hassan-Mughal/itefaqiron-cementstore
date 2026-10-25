@@ -4,6 +4,7 @@ import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 import { getPkDateString, pkBusinessDate } from '@/lib/date-helper';
 import { assertCanCloseBusinessDay, findNextCloseableDate, inspectCloseReadiness } from '@/lib/day-end-guard';
 import { buildDayEndDetails, loadDayEndSnapshot } from '@/lib/day-end-snapshot';
+import { logActivity, AUDIT_ACTIONS, AUDIT_MODULES } from '@/lib/audit-logger';
 
 function n(val) {
   const num = parseFloat(val);
@@ -313,6 +314,26 @@ export async function POST(request) {
     });
 
     const nextRequiredDate = isClosing ? await findNextCloseableDate(dateStr) : null;
+
+    if (isClosing) {
+      logActivity({
+        request,
+        branchId,
+        userId: validClosedBy,
+        action: AUDIT_ACTIONS.DAY_END_CLOSE,
+        module: AUDIT_MODULES.DAY_END,
+        entityId: result.dayEnd?.day_end_id,
+        description: `Day End closed for date ${dateStr}. Cash in Hand: Rs ${summary.expectedCashInHand}, Total Sales: Rs ${summary.totalSales}, Total Purchases: Rs ${summary.totalPurchases}.`,
+        details: {
+          business_date: dateStr,
+          expected_cash_in_hand: summary.expectedCashInHand,
+          expected_closing_bank: summary.expectedClosingBank,
+          total_sales: summary.totalSales,
+          total_purchases: summary.totalPurchases,
+          total_expenses: summary.totalExpenses,
+        },
+      }).catch(() => {});
+    }
 
     return NextResponse.json({
       ...result.dayEnd,

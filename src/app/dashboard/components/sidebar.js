@@ -162,6 +162,7 @@ const ROUTE_MAP = {
   'import': '/dashboard/import',
   'internal-transfer': '/dashboard/internal-transfer',
   'adjustment-management': '/dashboard/adjustment-management',
+  'activity-logs': '/dashboard/activity-logs',
 };
 
 // Reverse lookup: path → { itemId, category }
@@ -205,6 +206,7 @@ export default function Sidebar({
     { id: 'bank-report', name: 'Bank Report', icon: CreditCardIcon, category: 'main' },
     { id: 'bank-accounts', name: 'Bank Accounts', icon: CreditCardIcon, category: 'main' },
     { id: 'ledger', name: 'Ledger', icon: DescriptionIcon, category: 'main' },
+    { id: 'activity-logs', name: 'User Activity Logs', icon: ListAltIcon, category: 'main' },
 
     { id: 'customercategory', name: 'Account Categories', icon: LabelIcon, category: 'customer-management', parent: 'Accounts' },
     { id: 'customer-types', name: 'Account Types', icon: LabelIcon, category: 'customer-management', parent: 'Accounts', adminOnly: true },
@@ -265,6 +267,7 @@ export default function Sidebar({
     { id: 'stock-transfer', name: 'Stock Transfer', icon: SwapHorizIcon, category: 'system', parent: 'System' },
     { id: 'settings', name: 'Biometric Settings', icon: PersonIcon, category: 'system', parent: 'System', adminOnly: true },
     { id: 'import', name: 'Excel Data Import', icon: TableChartIcon, category: 'system', parent: 'System', adminOnly: true },
+    { id: 'activity-logs', name: 'User Activity Logs', icon: ListAltIcon, category: 'system', parent: 'System', adminOnly: true },
   ];
 
   const visibleMenuItems = menuItems.filter((item) => canAccessMenuItem(user, item));
@@ -355,6 +358,7 @@ export default function Sidebar({
       { path: '/dashboard/salary-management', id: 'salary-management', category: 'hr-management' },
       { path: '/dashboard/settings', id: 'settings', category: 'system' },
       { path: '/dashboard/import', id: 'import', category: 'system' },
+      { path: '/dashboard/activity-logs', id: 'activity-logs', category: 'main' },
       { path: '/dashboard', id: 'dashboard', category: 'main' },
     ];
 
@@ -406,6 +410,10 @@ export default function Sidebar({
     }
     setActiveTab(itemId);
     setSidebarOpen(false);
+    const href = getItemHref(itemId);
+    if (href && href !== pathname) {
+      router.push(href);
+    }
   };
 
 

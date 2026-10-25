@@ -126,33 +126,48 @@ export function requireBranchScope(request) {
 async function loadBranchMeta(branchId) {
   if (branchMetaCache.has(branchId)) return branchMetaCache.get(branchId);
 
-  const branch = await centralPrisma.branch.findUnique({
-    where: { branch_id: branchId },
-    select: {
-      branch_id: true,
-      branch_code: true,
-      table_prefix: true,
-      isolation_mode: true,
-      tables_provisioned: true,
-      db_host: true,
-      db_port: true,
-      db_name: true,
-      db_user: true,
-      db_password: true,
-    },
-  });
+  try {
+    const branch = await centralPrisma.branch.findUnique({
+      where: { branch_id: branchId },
+      select: {
+        branch_id: true,
+        branch_code: true,
+        table_prefix: true,
+        isolation_mode: true,
+        tables_provisioned: true,
+        db_host: true,
+        db_port: true,
+        db_name: true,
+        db_user: true,
+        db_password: true,
+      },
+    });
 
-  if (!branch) return null;
+    if (!branch) return null;
 
-  const meta = {
-    branchId,
-    tablePrefix: branch.table_prefix,
-    isolationMode: branch.isolation_mode || 'SHARED',
-    branchPrisma: getDedicatedBranchClient(branch),
-  };
+    const meta = {
+      branchId,
+      tablePrefix: branch.table_prefix,
+      isolationMode: branch.isolation_mode || 'SHARED',
+      branchPrisma: getDedicatedBranchClient(branch),
+    };
 
-  branchMetaCache.set(branchId, meta);
-  return meta;
+    branchMetaCache.set(branchId, meta);
+    return meta;
+  } catch (dbError) {
+    console.error(`⚠️ [branch-server] Error connecting to database for branch ${branchId}:`, dbError.message);
+    // If DB is temporarily unreachable and branchId is default branch, return fallback shared mode
+    if (branchId === DEFAULT_BRANCH_ID) {
+      const fallbackMeta = {
+        branchId: DEFAULT_BRANCH_ID,
+        tablePrefix: null,
+        isolationMode: 'SHARED',
+        branchPrisma: null,
+      };
+      return fallbackMeta;
+    }
+    throw dbError;
+  }
 }
 
 /** Clear cache after branch update (call from branch PATCH/POST). */

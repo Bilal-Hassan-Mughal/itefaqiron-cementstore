@@ -3,6 +3,7 @@ import { centralPrisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 import { isHqUser } from '@/lib/branch-roles';
 import { normalizeUserForClient, resolveStaffRole, toDbRole } from '@/lib/user-role';
+import { logActivity, AUDIT_ACTIONS, AUDIT_MODULES } from '@/lib/audit-logger';
 
 // Helper for JSON errors
 function errorResponse(message, status = 400) {
@@ -146,6 +147,20 @@ export async function POST(request) {
     const is_hq = userIsHq;
 
     console.log('✅ User logged in successfully:', user.email);
+
+    // Record login activity in audit logs
+    logActivity({
+      request,
+      branchId: user.branch_id,
+      userId: user.user_id,
+      userName: user.full_name,
+      role: clientUser.role,
+      action: AUDIT_ACTIONS.LOGIN,
+      module: AUDIT_MODULES.AUTH,
+      entityId: user.user_id,
+      description: `User ${user.full_name} (${user.email}) logged in successfully via ${mode}.`,
+      details: { email: user.email, login_mode: mode, branch_id: user.branch_id },
+    }).catch(() => {});
     
     return NextResponse.json({
       message: 'Login successful',

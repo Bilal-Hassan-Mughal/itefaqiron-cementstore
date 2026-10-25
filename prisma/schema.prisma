@@ -58,6 +58,7 @@ model Branch {
   subscriptions       Subscription[]
   employees           Employee[]
   hr_settings         HrSettings[]
+  activity_logs       ActivityLog[]
 
   @@map("branches")
 }
@@ -1402,4 +1403,29 @@ model PaymentDetail {
   @@index([payment_id], map: "payment_detail_payment_id_fkey")
   @@index([account_id], map: "payment_detail_account_id_fkey")
   @@map("payment_details")
+}
+
+model ActivityLog {
+  log_id      Int       @id @default(autoincrement())
+  branch_id   Int?
+  user_id     Int?
+  user_name   String?   @db.VarChar(128)
+  role        String?   @db.VarChar(50)
+  action      String    @db.VarChar(50)
+  module      String    @db.VarChar(100)
+  entity_id   String?   @db.VarChar(100)
+  description String?   @db.Text
+  details     Json?
+  ip_address  String?   @db.VarChar(64)
+  user_agent  String?   @db.VarChar(255)
+  created_at  DateTime  @default(now())
+
+  branch      Branch?   @relation(fields: [branch_id], references: [branch_id], onDelete: SetNull)
+
+  @@index([branch_id], map: "activity_logs_branch_id_fkey")
+  @@index([user_id], map: "activity_logs_user_id_idx")
+  @@index([action], map: "activity_logs_action_idx")
+  @@index([module], map: "activity_logs_module_idx")
+  @@index([created_at], map: "activity_logs_created_at_idx")
+  @@map("activity_logs")
 }

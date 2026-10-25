@@ -1141,12 +1141,14 @@ export default function DashboardContent({ activeTab }) {
         return;
       }
       if (!res.ok || !json?.success) {
-        console.error(`Error fetching ${key}:`, json?.error || `HTTP ${res.status}`);
+        console.warn(`[Dashboard] Could not fetch ${key}:`, json?.error || `HTTP ${res.status}`);
+        setRows([]);
         return;
       }
       setRows(json.data?.[key] || []);
     } catch (err) {
-      console.error(`Error fetching ${key}:`, err);
+      console.warn(`[Dashboard] Error fetching ${key}:`, err?.message || err);
+      setRows([]);
     } finally {
       setLoading(false);
     }
@@ -1455,10 +1457,12 @@ export default function DashboardContent({ activeTab }) {
       router.push('/dashboard/usermanagement');
     } else if (activeTab === 'customercategory') {
       router.push('/dashboard/customercategory');
+    } else if (activeTab === 'activity-logs') {
+      router.push('/dashboard/activity-logs');
     }
   }, [activeTab, router]);
 
-  if (activeTab === 'usermanagement' || activeTab === 'customercategory') {
+  if (activeTab === 'usermanagement' || activeTab === 'customercategory' || activeTab === 'activity-logs') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>

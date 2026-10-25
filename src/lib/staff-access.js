@@ -81,7 +81,7 @@ export const SYSTEM_ROLES = [
     description: 'Administrative access to manage operations, users, stores, inventory, and financial modules.',
     color: 'bg-blue-100 text-blue-800 border-blue-200',
     badgeGradient: 'from-blue-500 to-indigo-600',
-    defaultModules: ['dashboard', 'dashboard_analytics', 'dashboard_low_stock', 'user_management', 'store_management', 'store_stock', 'stock_transfer', 'customers', 'products', 'sales', 'sale_returns', 'purchases', 'cargo', 'finance', 'cash_bank_day_end', 'day_end_profit_summary', 'hr', 'reports', 'profit_report', 'biometrics', 'import']
+    defaultModules: ['dashboard', 'dashboard_analytics', 'dashboard_low_stock', 'user_management', 'store_management', 'store_stock', 'stock_transfer', 'customers', 'products', 'sales', 'sale_returns', 'purchases', 'cargo', 'finance', 'cash_bank_day_end', 'day_end_profit_summary', 'hr', 'reports', 'profit_report', 'biometrics', 'import', 'activity_logs']
   },
   {
     key: 'MANAGER',
@@ -265,6 +265,11 @@ export function canAccessMenuItem(user, item) {
     return hrPages.some((id) => hasPageAccess(allowed, id));
   }
 
+  if (pageId === 'activity-logs') {
+    const role = resolveStaffRole(user);
+    if (isAdminRole(role) || isSuperAdminRole(role)) return true;
+  }
+
   return hasPageAccess(allowed, pageId);
 }
 
@@ -391,6 +396,10 @@ export function canStaffAccessPath(userOrRole, pathname) {
 
   if (p === '/dashboard' || p === '/dashboard/') {
     return hasPageAccess(allowed, 'dashboard');
+  }
+
+  if (p === '/dashboard/activity-logs' || p.startsWith('/dashboard/activity-logs')) {
+    if (isAdminRole(roleName) || isSuperAdminRole(roleName)) return true;
   }
 
   const pageIds = getPageIdsForPath(p);

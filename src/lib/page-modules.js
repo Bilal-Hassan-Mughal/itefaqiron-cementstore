@@ -116,6 +116,7 @@ export const SYSTEM_PAGES = [
   { id: 'stock-transfer', name: 'Stock Transfer', section: 'System', path: '/dashboard/stock-transfer' },
   { id: 'settings', name: 'Biometric Settings', section: 'System', path: '/dashboard/settings', adminOnly: true },
   { id: 'import', name: 'Excel Data Import', section: 'System', path: '/dashboard/import', adminOnly: true },
+  { id: 'activity-logs', name: 'User Activity Logs', section: 'System', path: '/dashboard/activity-logs', adminOnly: true },
 ];
 
 export const SYSTEM_PAGE_IDS = new Set(SYSTEM_PAGES.map((p) => p.id));
@@ -150,8 +151,9 @@ export const LEGACY_MODULE_TO_PAGES = {
   day_end_profit_summary: ['day-end-profit-summary'],
   biometrics: ['settings'],
   import: ['import'],
-  system: ['usermanagement', 'stores', 'store-stock', 'stock-transfer', 'settings', 'import'],
-  system_settings: ['usermanagement', 'stores', 'store-stock', 'stock-transfer', 'settings', 'import'],
+  activity_logs: ['activity-logs'],
+  system: ['usermanagement', 'stores', 'store-stock', 'stock-transfer', 'settings', 'import', 'activity-logs'],
+  system_settings: ['usermanagement', 'stores', 'store-stock', 'stock-transfer', 'settings', 'import', 'activity-logs'],
   accounts: ['customercategory', 'customer-types', 'customers'],
   stores_stock: ['stores', 'store-stock', 'stock-transfer'],
   cash_day_end: ['day-end', 'day-end-history', 'cash-report', 'bank-report'],
@@ -213,6 +215,7 @@ const PATH_PAGE_RULES = [
   { prefix: '/dashboard/stock-transfer', pageIds: ['stock-transfer'] },
   { prefix: '/dashboard/settings', pageIds: ['settings'] },
   { prefix: '/dashboard/import', pageIds: ['import'] },
+  { prefix: '/dashboard/activity-logs', pageIds: ['activity-logs'] },
   { prefix: '/dashboard/sales-v2', pageIds: ['sales-v2', 'sales-v2-quick', 'sales', 'new-sale'] },
   { prefix: '/dashboard/sales', pageIds: ['new-sale', 'sales', 'sale-returns'] },
   { prefix: '/dashboard/super-order', pageIds: ['super-order'] },

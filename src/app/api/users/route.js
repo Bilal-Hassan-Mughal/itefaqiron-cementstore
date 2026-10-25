@@ -10,6 +10,7 @@ import {
   loadBranchMeta,
   normalizeUserForClient,
 } from '@/lib/user-management-access';
+import { logActivity, AUDIT_ACTIONS, AUDIT_MODULES } from '@/lib/audit-logger';
 
 function errorResponse(message, status = 400) {
   return NextResponse.json({ error: message }, { status });
@@ -120,6 +121,21 @@ export async function POST(request) {
       },
       include: userInclude,
     });
+
+    logActivity({
+      request,
+      branchId: scope.branchId,
+      action: AUDIT_ACTIONS.CREATE,
+      module: AUDIT_MODULES.USERS,
+      entityId: newUser.user_id,
+      description: `Created new user "${newUser.full_name}" (${newUser.email}) with role ${newUser.role}.`,
+      details: {
+        user_id: newUser.user_id,
+        email: newUser.email,
+        role: newUser.role,
+        branch_id: scope.branchId,
+      },
+    }).catch(() => {});
 
     return NextResponse.json(
       {

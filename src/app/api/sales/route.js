@@ -9,6 +9,7 @@ import { calculateClosingBalance, createLedgerEntry } from '@/lib/ledger-helper'
 import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
 import { fetchPaginatedSalesList } from '@/lib/sales-list-query';
+import { logActivity, AUDIT_ACTIONS, AUDIT_MODULES } from '@/lib/audit-logger';
 
 const SPECIAL_ACCOUNTS_CACHE_TTL_MS = 10 * 60_000;
 const saleLog = () => {};
@@ -3221,6 +3222,22 @@ export async function DELETE(request) {
         console.error(`Ledger recalc failed for customer ${cid} after DELETE:`, err);
       }
     }
+
+    // Record activity log for sale deletion
+    logActivity({
+      request,
+      branchId,
+      action: AUDIT_ACTIONS.DELETE,
+      module: AUDIT_MODULES.SALES,
+      entityId: id,
+      description: `Sale/Invoice #${id} was deleted. Total: Rs ${existingSale?.total_bill_amount || 0}.`,
+      details: {
+        sale_id: id,
+        customer_id: existingSale?.cus_id,
+        total_bill_amount: existingSale?.total_bill_amount,
+        bill_type: existingSale?.bill_type,
+      },
+    }).catch(() => {});
 
     return NextResponse.json({ message: 'Sale deleted successfully' });
   } catch (error) {

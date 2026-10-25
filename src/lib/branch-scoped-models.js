@@ -30,6 +30,7 @@ export const BRANCH_SCOPED_MODELS = new Set([
   'Employee',
   'HrSettings',
   'Payment',
+  'ActivityLog',
 ]);
 
 /** Map Prisma model name → client delegate key */
@@ -64,6 +65,7 @@ export const MODEL_DELEGATES = {
   Employee: 'employee',
   HrSettings: 'hrSettings',
   Payment: 'payment',
+  ActivityLog: 'activityLog',
 };
 
 export function getModelDelegate(model) {
