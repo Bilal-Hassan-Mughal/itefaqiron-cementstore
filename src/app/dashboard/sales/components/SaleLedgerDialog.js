@@ -144,7 +144,7 @@ export default function SaleLedgerDialog() {
   const [rowsPerPage, setRowsPerPage] = useState(100);
 
   const filteredEntries = useMemo(() => {
-    return (ledgerData?.ledgerEntries || []).filter(entry => {
+    const list = (ledgerData?.ledgerEntries || []).filter(entry => {
       if (!searchTerm.trim()) return true;
       const s = searchTerm.toLowerCase();
       return (
@@ -155,6 +155,13 @@ export default function SaleLedgerDialog() {
         String(entry.debit_amount || '').includes(s) ||
         String(entry.credit_amount || '').includes(s)
       );
+    });
+    // Latest entries first (newest date / higher ID first)
+    return [...list].sort((a, b) => {
+      const timeA = new Date(a.created_at || 0).getTime();
+      const timeB = new Date(b.created_at || 0).getTime();
+      if (timeB !== timeA) return timeB - timeA;
+      return (Number(b.l_id) || 0) - (Number(a.l_id) || 0);
     });
   }, [ledgerData, searchTerm]);
 

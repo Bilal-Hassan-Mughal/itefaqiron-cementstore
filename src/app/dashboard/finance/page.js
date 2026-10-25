@@ -321,7 +321,7 @@ const LEDGER_FILTER_COMPACT_GRID = {
   gridTemplateColumns: {
     xs: '1fr',
     sm: 'repeat(2, 1fr)',
-    md: '1fr 1fr 1.4fr 1.6fr auto',
+    md: '1fr 1fr 1.3fr 1.2fr 1.4fr auto',
   },
   gap: 1.5,
   alignItems: 'center',
@@ -4173,6 +4173,10 @@ function FinancePageContent() {
                 noOptionsText="No accounts found"
                 clearOnEscape
               />
+              <TextField fullWidth size="small" label="Search by Amount" placeholder="Debit, credit, balance..."
+                value={filterAmount} onChange={(e) => setFilterAmount(e.target.value)}
+                InputProps={{ startAdornment: <InputAdornment position="start"><DollarSign size={16} color={BRAND.primary.blue} /></InputAdornment> }}
+                sx={LEDGER_FILTER_FIELD_SX} />
               <TextField fullWidth size="small" label="Search" placeholder="Name, phone, bill..."
                 value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
                 InputProps={{ startAdornment: <InputAdornment position="start"><Search size={16} color={BRAND.primary.blue} /></InputAdornment> }}
@@ -4236,7 +4240,7 @@ function FinancePageContent() {
 
           {filtersExpanded && (
             <Box sx={{ px: { xs: 2, md: 2.5 }, pb: 2, pt: 0.5 }}>
-              <Box sx={{ ...LEDGER_FILTER_GRID, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' } }}>
+              <Box sx={{ ...LEDGER_FILTER_GRID, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' } }}>
                 <DateFilterInput
                   fullWidth
                   size="small"
@@ -4287,10 +4291,6 @@ function FinancePageContent() {
                     <MenuItem value="Adjustment">Adjustment</MenuItem>
                   </Select>
                 </FormControl>
-                <TextField fullWidth size="small" label="Search by Amount" placeholder="Debit, credit, balance..."
-                  value={filterAmount} onChange={(e) => setFilterAmount(e.target.value)}
-                  InputProps={{ startAdornment: <InputAdornment position="start"><DollarSign size={16} color={BRAND.primary.blue} /></InputAdornment> }}
-                  sx={LEDGER_FILTER_FIELD_SX} />
               </Box>
             </Box>
           )}

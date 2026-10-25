@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect, useMemo, Suspense, useRef, useCallback, forwardRef } from 'react';
 import { formatDatePK, formatDateTimePK, formatTimePK, getCreatedByName, getPkDateString } from '@/lib/date-helper';
@@ -11433,7 +11433,12 @@ function SalesPageContent() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {ledgerData.ledgerEntries.map((entry, idx) => {
+                    {[...(ledgerData.ledgerEntries || [])].sort((a, b) => {
+                      const timeA = new Date(a.created_at || 0).getTime();
+                      const timeB = new Date(b.created_at || 0).getTime();
+                      if (timeB !== timeA) return timeB - timeA;
+                      return (Number(b.l_id) || 0) - (Number(a.l_id) || 0);
+                    }).map((entry, idx) => {
                       const isCredit = parseFloat(entry.credit_amount || 0) > 0;
                       const isDebit = parseFloat(entry.debit_amount || 0) > 0 && !isCredit;
                       const hoverBg = isCredit ? '#dcfce7 !important' : isDebit ? '#fee2e2 !important' : '#e0f2fe !important';
