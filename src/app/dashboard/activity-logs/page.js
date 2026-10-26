@@ -335,14 +335,37 @@ export default function ActivityLogsPage() {
         </div>
 
         {/* Filter Controls Bar */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3.5 items-center">
-            {/* Search Box */}
-            <div className="lg:col-span-2 relative">
-              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#1A55E3] flex items-center justify-center font-bold">
+                <SlidersHorizontal className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Filter Activities</h3>
+                <p className="text-[11px] text-slate-500">Search by keywords, performer, module, or custom date window</p>
+              </div>
+            </div>
+
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 text-xs font-bold transition-all border border-rose-200/60"
+              >
+                <X className="w-3.5 h-3.5" />
+                Clear All Filters
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-12 gap-3 items-center">
+            {/* Search Box (Takes 4 cols on large screens) */}
+            <div className="lg:col-span-4 relative">
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
               <input
                 type="text"
-                placeholder="Search descriptions, IDs, names..."
+                placeholder="Search description, entity #, performer..."
                 value={search}
                 onChange={(e) => {
                   setSearch(e.target.value);
@@ -352,34 +375,34 @@ export default function ActivityLogsPage() {
               />
             </div>
 
-            {/* Action Select */}
-            <div>
+            {/* Action Select (2 cols) */}
+            <div className="lg:col-span-2 relative">
               <select
                 value={actionFilter}
                 onChange={(e) => {
                   setActionFilter(e.target.value);
                   setPage(1);
                 }}
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1A55E3]/20 focus:border-[#1A55E3] transition-all"
+                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1A55E3]/20 focus:border-[#1A55E3] transition-all cursor-pointer"
               >
                 <option value="">All Actions</option>
                 {Object.keys(ACTION_CONFIG).map((act) => (
                   <option key={act} value={act}>
-                    {act}
+                    {ACTION_CONFIG[act]?.label || act} ({act})
                   </option>
                 ))}
               </select>
             </div>
 
-            {/* Module Select */}
-            <div>
+            {/* Module Select (2 cols) */}
+            <div className="lg:col-span-2 relative">
               <select
                 value={moduleFilter}
                 onChange={(e) => {
                   setModuleFilter(e.target.value);
                   setPage(1);
                 }}
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1A55E3]/20 focus:border-[#1A55E3] transition-all"
+                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1A55E3]/20 focus:border-[#1A55E3] transition-all cursor-pointer"
               >
                 <option value="">All Modules</option>
                 {MODULE_OPTIONS.map((mod) => (
@@ -390,15 +413,15 @@ export default function ActivityLogsPage() {
               </select>
             </div>
 
-            {/* User Select */}
-            <div>
+            {/* User Select (2 cols) */}
+            <div className="lg:col-span-2 relative">
               <select
                 value={userFilter}
                 onChange={(e) => {
                   setUserFilter(e.target.value);
                   setPage(1);
                 }}
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1A55E3]/20 focus:border-[#1A55E3] transition-all"
+                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1A55E3]/20 focus:border-[#1A55E3] transition-all cursor-pointer"
               >
                 <option value="">All Users</option>
                 {usersList.map((u) => (
@@ -409,8 +432,9 @@ export default function ActivityLogsPage() {
               </select>
             </div>
 
-            {/* Date Pickers Group */}
-            <div className="flex items-center gap-2">
+            {/* Date Range Selector (2 cols) */}
+            <div className="lg:col-span-2 flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 focus-within:bg-white focus-within:ring-2 focus-within:ring-[#1A55E3]/20 focus-within:border-[#1A55E3] transition-all">
+              <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               <input
                 type="date"
                 value={fromDate}
@@ -419,9 +443,9 @@ export default function ActivityLogsPage() {
                   setPage(1);
                 }}
                 title="From Date"
-                className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1A55E3]/20"
+                className="w-full bg-transparent text-[11px] font-semibold text-slate-700 focus:outline-none min-w-0"
               />
-              <span className="text-slate-400 text-xs">to</span>
+              <span className="text-slate-400 text-[10px] font-bold uppercase shrink-0">to</span>
               <input
                 type="date"
                 value={toDate}
@@ -430,24 +454,10 @@ export default function ActivityLogsPage() {
                   setPage(1);
                 }}
                 title="To Date"
-                className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1A55E3]/20"
+                className="w-full bg-transparent text-[11px] font-semibold text-slate-700 focus:outline-none min-w-0"
               />
             </div>
           </div>
-
-          {hasActiveFilters && (
-            <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
-              <span className="text-slate-500 font-medium">Active filters applied</span>
-              <button
-                type="button"
-                onClick={handleResetFilters}
-                className="inline-flex items-center gap-1.5 text-rose-600 hover:text-rose-700 font-bold transition-colors"
-              >
-                <X className="w-3.5 h-3.5" />
-                Clear All Filters
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Audit Log Table Container */}
@@ -455,15 +465,15 @@ export default function ActivityLogsPage() {
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left">
               <thead>
-                <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  <th className="py-3.5 px-4">Date & Time</th>
-                  <th className="py-3.5 px-4">User / Performer</th>
-                  <th className="py-3.5 px-4 text-center">Action</th>
-                  <th className="py-3.5 px-4">Module</th>
-                  <th className="py-3.5 px-4">Activity Description</th>
-                  <th className="py-3.5 px-4">Target Entity</th>
-                  <th className="py-3.5 px-4">Network & Client</th>
-                  <th className="py-3.5 px-4 text-center">Payload</th>
+                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                  <th className="py-3.5 px-4 w-[160px]">Date & Time</th>
+                  <th className="py-3.5 px-4 w-[220px]">User / Performer</th>
+                  <th className="py-3.5 px-4 text-center w-[130px]">Action</th>
+                  <th className="py-3.5 px-4 w-[160px]">Module</th>
+                  <th className="py-3.5 px-4 min-w-[280px]">Activity Description</th>
+                  <th className="py-3.5 px-4 text-center w-[120px]">Target Entity</th>
+                  <th className="py-3.5 px-4 w-[160px]">Network & IP</th>
+                  <th className="py-3.5 px-4 text-center w-[90px]">Details</th>
                 </tr>
               </thead>
 
@@ -483,7 +493,7 @@ export default function ActivityLogsPage() {
                       </div>
                       <p className="text-sm font-bold text-slate-700">No activity logs recorded yet</p>
                       <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                        User actions like creating sales, closing days, editing customers, or deleting invoices will automatically log here.
+                        User actions like sales, purchases, payments, expenses, returns, and login events will be tracked here.
                       </p>
                     </td>
                   </tr>
@@ -497,29 +507,28 @@ export default function ActivityLogsPage() {
                       dot: 'bg-slate-400',
                       icon: Activity,
                     };
-                    const ActionIcon = actionInfo.icon;
                     const { date, time } = formatTimestamp(log.created_at);
 
                     return (
-                      <tr key={log.log_id || log.id} className="hover:bg-slate-50/70 transition-colors">
+                      <tr key={log.log_id || log.id} className="hover:bg-blue-50/30 transition-colors border-b border-slate-100/80">
                         {/* Timestamp */}
-                        <td className="py-3 px-4 whitespace-nowrap">
-                          <div className="font-semibold text-slate-900">{date}</div>
+                        <td className="py-3 px-4 whitespace-nowrap align-middle">
+                          <div className="font-semibold text-slate-900 leading-snug">{date}</div>
                           <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
-                            <Clock className="w-3 h-3" />
+                            <Clock className="w-3 h-3 text-slate-400" />
                             {time}
                           </div>
                         </td>
 
                         {/* Performer */}
-                        <td className="py-3 px-4 whitespace-nowrap">
+                        <td className="py-3 px-4 whitespace-nowrap align-middle">
                           <div className="flex items-center gap-2.5">
-                            <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-slate-200 to-slate-100 border border-slate-300 flex items-center justify-center text-slate-700 font-bold text-xs uppercase shadow-sm">
+                            <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-700 font-bold text-xs uppercase shadow-xs shrink-0">
                               {(log.user_name || 'U').charAt(0)}
                             </div>
-                            <div>
-                              <div className="font-bold text-slate-900">{log.user_name || 'System Auto'}</div>
-                              <div className="text-[10px] text-indigo-600 font-bold tracking-wide uppercase">
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-900 truncate">{log.user_name || 'System Auto'}</div>
+                              <div className="text-[10px] text-indigo-600 font-bold tracking-wide uppercase truncate">
                                 {log.role || 'Service'}
                               </div>
                             </div>
@@ -527,9 +536,9 @@ export default function ActivityLogsPage() {
                         </td>
 
                         {/* Action Badge */}
-                        <td className="py-3 px-4 whitespace-nowrap text-center">
+                        <td className="py-3 px-4 whitespace-nowrap text-center align-middle">
                           <span
-                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border ${actionInfo.bg} ${actionInfo.text} ${actionInfo.border}`}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border shadow-2xs ${actionInfo.bg} ${actionInfo.text} ${actionInfo.border}`}
                           >
                             <span className={`w-1.5 h-1.5 rounded-full ${actionInfo.dot}`} />
                             {actionInfo.label}
@@ -537,44 +546,44 @@ export default function ActivityLogsPage() {
                         </td>
 
                         {/* Module */}
-                        <td className="py-3 px-4 whitespace-nowrap">
-                          <span className="font-semibold text-slate-800 bg-slate-100 px-2 py-0.5 rounded text-[11px] border border-slate-200">
+                        <td className="py-3 px-4 whitespace-nowrap align-middle">
+                          <span className="inline-block font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-md text-[11px] border border-slate-200/80">
                             {log.module}
                           </span>
                         </td>
 
                         {/* Description */}
-                        <td className="py-3 px-4 max-w-sm">
-                          <p className="text-slate-800 font-medium leading-relaxed line-clamp-2">
+                        <td className="py-3 px-4 align-middle">
+                          <p className="text-slate-800 font-medium leading-relaxed">
                             {log.description || '—'}
                           </p>
                         </td>
 
                         {/* Target Entity */}
-                        <td className="py-3 px-4 whitespace-nowrap font-mono text-slate-600 font-semibold">
+                        <td className="py-3 px-4 whitespace-nowrap text-center align-middle font-mono">
                           {log.entity_id ? (
-                            <span className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded text-[11px] border border-slate-200">
+                            <span className="inline-block font-bold bg-slate-100 text-slate-800 px-2.5 py-0.5 rounded-md text-[11px] border border-slate-200">
                               #{log.entity_id}
                             </span>
                           ) : (
-                            <span className="text-slate-300">—</span>
+                            <span className="text-slate-300 font-bold">—</span>
                           )}
                         </td>
 
                         {/* Network & IP */}
-                        <td className="py-3 px-4 whitespace-nowrap">
+                        <td className="py-3 px-4 whitespace-nowrap align-middle">
                           <div className="font-mono text-[11px] text-slate-600 font-medium flex items-center gap-1.5">
-                            <Laptop className="w-3.5 h-3.5 text-slate-400" />
-                            {log.ip_address || 'Internal (Local)'}
+                            <Laptop className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="truncate">{log.ip_address || '127.0.0.1'}</span>
                           </div>
                         </td>
 
                         {/* Details Modal Trigger */}
-                        <td className="py-3 px-4 whitespace-nowrap text-center">
+                        <td className="py-3 px-4 whitespace-nowrap text-center align-middle">
                           <button
                             type="button"
                             onClick={() => setSelectedLog(log)}
-                            className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-blue-50 text-[#1A55E3] hover:bg-[#1A55E3] hover:text-white transition-all shadow-sm border border-blue-200/50"
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-blue-50 text-[#1A55E3] hover:bg-[#1A55E3] hover:text-white transition-all shadow-xs border border-blue-200/60"
                             title="Inspect detailed activity payload"
                           >
                             <Eye className="w-4 h-4" />
@@ -589,7 +598,7 @@ export default function ActivityLogsPage() {
           </div>
 
           {/* Table Footer with Pagination */}
-          <div className="p-4 bg-slate-50/70 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-medium text-slate-600">
+          <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-medium text-slate-600">
             <div>
               Showing <span className="font-bold text-slate-900">{logs.length}</span> of{' '}
               <span className="font-bold text-slate-900">{totalCount}</span> logs recorded
@@ -603,7 +612,7 @@ export default function ActivityLogsPage() {
                   setLimit(Number(e.target.value));
                   setPage(1);
                 }}
-                className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-semibold focus:outline-none"
+                className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#1A55E3]"
               >
                 <option value={15}>15</option>
                 <option value={25}>25</option>
@@ -611,12 +620,13 @@ export default function ActivityLogsPage() {
                 <option value={100}>100</option>
               </select>
 
-              <div className="flex items-center gap-1 ml-3">
+              <div className="flex items-center gap-1.5 ml-4">
                 <button
                   type="button"
                   disabled={page <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className="w-8 h-8 rounded-lg border border-slate-200 bg-white flex items-center justify-center hover:bg-slate-100 disabled:opacity-40 transition-colors"
+                  className="w-8 h-8 rounded-lg border border-slate-200 bg-white flex items-center justify-center hover:bg-slate-100 disabled:opacity-40 transition-colors shadow-2xs"
+                  title="Previous page"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
@@ -627,7 +637,8 @@ export default function ActivityLogsPage() {
                   type="button"
                   disabled={page >= totalPages}
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  className="w-8 h-8 rounded-lg border border-slate-200 bg-white flex items-center justify-center hover:bg-slate-100 disabled:opacity-40 transition-colors"
+                  className="w-8 h-8 rounded-lg border border-slate-200 bg-white flex items-center justify-center hover:bg-slate-100 disabled:opacity-40 transition-colors shadow-2xs"
+                  title="Next page"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>
