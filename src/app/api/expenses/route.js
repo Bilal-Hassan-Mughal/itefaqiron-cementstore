@@ -4,6 +4,7 @@ import { createLedgerEntry } from '@/lib/ledger-helper';
 import { getNextId } from '@/lib/id-helper';
 import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
+import { logActivity, AUDIT_ACTIONS, AUDIT_MODULES } from '@/lib/audit-logger';
 
 const EXPENSE_TX_OPTIONS = { timeout: 60000, maxWait: 60000 };
 
@@ -333,6 +334,21 @@ export async function POST(request) {
       };
     }, EXPENSE_TX_OPTIONS);
 
+    logActivity({
+      request,
+      branchId: __branchScope.branchId,
+      action: AUDIT_ACTIONS.CREATE,
+      module: AUDIT_MODULES.EXPENSES,
+      entityId: result.exp_id,
+      description: `Expense #${result.exp_id} created: "${result.exp_title || result.expense_title?.title || 'Expense'}" for Rs ${result.exp_amount || 0}.`,
+      details: {
+        exp_id: result.exp_id,
+        amount: result.exp_amount,
+        payment_status: result.payment_status,
+        payment_method: result.payment_method,
+      },
+    }).catch(() => {});
+
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     console.error('Error creating expense:', error);
@@ -551,6 +567,20 @@ export async function PUT(request) {
       return updatedExpense;
     }, EXPENSE_TX_OPTIONS);
 
+    logActivity({
+      request,
+      branchId: __branchScope.branchId,
+      action: AUDIT_ACTIONS.UPDATE,
+      module: AUDIT_MODULES.EXPENSES,
+      entityId: id,
+      description: `Expense #${id} was updated: "${result.exp_title}" for Rs ${result.exp_amount || 0}.`,
+      details: {
+        exp_id: id,
+        amount: result.exp_amount,
+        payment_status: result.payment_status,
+      },
+    }).catch(() => {});
+
     return NextResponse.json(result);
   } catch (error) {
     console.error('Error updating expense:', error);
@@ -622,6 +652,16 @@ export async function DELETE(request) {
         where: { exp_id: id }
       });
     }, EXPENSE_TX_OPTIONS);
+
+    logActivity({
+      request,
+      branchId: __branchScope.branchId,
+      action: AUDIT_ACTIONS.DELETE,
+      module: AUDIT_MODULES.EXPENSES,
+      entityId: id,
+      description: `Expense #${id} was deleted.`,
+      details: { exp_id: id },
+    }).catch(() => {});
 
     return NextResponse.json({ message: 'Expense deleted successfully' });
   } catch (error) {

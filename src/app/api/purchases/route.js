@@ -9,6 +9,7 @@ import {
 } from '@/lib/ledger-helper';
 import { initBranchScope } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
+import { logActivity, AUDIT_ACTIONS, AUDIT_MODULES } from '@/lib/audit-logger';
 
 // Helper for JSON errors
 function errorResponse(message, status = 400) {
@@ -1676,6 +1677,22 @@ export async function POST(request) {
       console.warn('Could not compute previous customer balance for purchase', result.purchase.pur_id, err.message);
     }
 
+    logActivity({
+      request,
+      branchId: __branchScope.branchId,
+      action: AUDIT_ACTIONS.CREATE,
+      module: AUDIT_MODULES.PURCHASES,
+      entityId: result.purchase.pur_id,
+      description: `Purchase #${result.purchase.pur_id} created for supplier ID ${result.purchase.cus_id}. Total: Rs ${result.purchase.total_bill_amount || 0}.`,
+      details: {
+        pur_id: result.purchase.pur_id,
+        cus_id: result.purchase.cus_id,
+        total_bill_amount: result.purchase.total_bill_amount,
+        cash_payment: result.purchase.cash_payment,
+        bank_payment: result.purchase.bank_payment,
+      },
+    }).catch(() => {});
+
     return NextResponse.json({
       ...completePurchase,
       previous_customer_balance: previousCustomerBalance
@@ -2245,6 +2262,22 @@ export async function PUT(request) {
       bankAccountIdInt ||
       (bankPaymentAmt > 0 && normalizedPaymentType === 'BANK_TRANSFER' ? credit_account_id : null);
 
+    logActivity({
+      request,
+      branchId: __branchScope.branchId,
+      action: AUDIT_ACTIONS.UPDATE,
+      module: AUDIT_MODULES.PURCHASES,
+      entityId: id,
+      description: `Purchase #${id} was updated for supplier ID ${cus_id}. Total: Rs ${total_bill_amount || 0}.`,
+      details: {
+        pur_id: id,
+        cus_id,
+        total_bill_amount,
+        cash_payment: cashPaymentAmt,
+        bank_payment: bankPaymentAmt,
+      },
+    }).catch(() => {});
+
     return NextResponse.json({
       ...result.purchase,
       customer,
@@ -2333,6 +2366,20 @@ export async function DELETE(request) {
         console.error(`Ledger recalc failed for customer ${cid}:`, err);
       }
     }
+
+    logActivity({
+      request,
+      branchId: __branchScope.branchId,
+      action: AUDIT_ACTIONS.DELETE,
+      module: AUDIT_MODULES.PURCHASES,
+      entityId: id,
+      description: `Purchase #${id} was deleted. Supplier ID: ${existingPurchase.cus_id}, Total: Rs ${existingPurchase.total_bill_amount || 0}.`,
+      details: {
+        pur_id: id,
+        cus_id: existingPurchase.cus_id,
+        total_bill_amount: existingPurchase.total_bill_amount,
+      },
+    }).catch(() => {});
 
     return NextResponse.json({ message: 'Purchase deleted successfully' });
   } catch (err) {

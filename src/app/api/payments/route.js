@@ -5,6 +5,7 @@ import { getNextId } from '@/lib/id-helper';
 import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
 import { persistPaymentLedger, recalculateLedgerBalances } from '@/lib/payment-ledger-writer';
+import { logActivity, AUDIT_ACTIONS, AUDIT_MODULES } from '@/lib/audit-logger';
 
 // GET - Fetch all payments with related data
 export async function GET(request) {
@@ -602,6 +603,25 @@ export async function POST(request) {
       };
     }, { timeout: 15000 });
 
+    const actionDesc = result.payment_type === 'RECEIVE' ? 'Received from' : 'Paid to';
+    const partyName = result.account?.cus_name || `Account #${result.account_id}`;
+    logActivity({
+      request,
+      branchId: __branchScope.branchId,
+      action: AUDIT_ACTIONS.CREATE,
+      module: AUDIT_MODULES.PAYMENTS,
+      entityId: result.payment_id,
+      description: `Payment #${result.payment_id} (${result.payment_type}): Rs ${result.net_amount || 0} ${actionDesc} ${partyName}.`,
+      details: {
+        payment_id: result.payment_id,
+        account_id: result.account_id,
+        payment_type: result.payment_type,
+        net_amount: result.net_amount,
+        cash_amount: result.cash_amount,
+        bank_amount: result.bank_amount,
+      },
+    }).catch(() => {});
+
     return NextResponse.json(result);
   } catch (error) {
     console.error('Error creating payment:', error);
@@ -849,6 +869,16 @@ export async function DELETE(request) {
       // Note: In a real application, you might want to create reversing ledger entries
       // For now, we'll just mark the payment as cancelled
     }, { timeout: 20000 });
+
+    logActivity({
+      request,
+      branchId: __branchScope.branchId,
+      action: AUDIT_ACTIONS.STATUS_CHANGE,
+      module: AUDIT_MODULES.PAYMENTS,
+      entityId: id,
+      description: `Payment #${id} was cancelled.`,
+      details: { payment_id: id, status: 'CANCELLED' },
+    }).catch(() => {});
 
     return NextResponse.json({ message: 'Payment cancelled successfully' });
   } catch (error) {

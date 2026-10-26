@@ -5,6 +5,7 @@ import { createLedgerEntry } from '@/lib/ledger-helper';
 import { getNextId } from '@/lib/id-helper';
 import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
+import { logActivity, AUDIT_ACTIONS, AUDIT_MODULES } from '@/lib/audit-logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -1125,6 +1126,21 @@ export async function POST(request) {
       });
     }
 
+    logActivity({
+      request,
+      branchId: __branchScope.branchId,
+      action: AUDIT_ACTIONS.RETURN,
+      module: AUDIT_MODULES.SALES,
+      entityId: result.saleReturn.return_id,
+      description: `Sale Return #${result.saleReturn.return_id} created for customer ID ${result.saleReturn.cus_id}. Total: Rs ${result.saleReturn.total_amount || 0}.`,
+      details: {
+        return_id: result.saleReturn.return_id,
+        sale_id: result.saleReturn.sale_id,
+        cus_id: result.saleReturn.cus_id,
+        total_amount: result.saleReturn.total_amount,
+      },
+    }).catch(() => {});
+
     return NextResponse.json(result.saleReturn, { status: 201 });
   } catch (error) {
     console.error('Error creating sale return:', error);
@@ -1616,6 +1632,16 @@ export async function DELETE(request) {
         await recalculateLedgerBalances(prisma, cid);
       }
     }
+
+    logActivity({
+      request,
+      branchId: __branchScope.branchId,
+      action: AUDIT_ACTIONS.DELETE,
+      module: AUDIT_MODULES.SALES,
+      entityId: id,
+      description: `Sale Return #${id} was deleted.`,
+      details: { return_id: id },
+    }).catch(() => {});
 
     return NextResponse.json({ message: 'Sale return deleted successfully' });
   } catch (error) {
