@@ -789,6 +789,11 @@ function PurchasesPageContent() {
   const purchaseDetailCacheRef = useRef(new Map());
   const [currentUser, setCurrentUser] = useState(null);
 
+  const isAdmin = useMemo(() => {
+    const role = (currentUser?.role || '').toUpperCase();
+    return role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'HQ_SUPER_ADMIN' || role === 'BRANCH_SUPER_ADMIN';
+  }, [currentUser]);
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -3762,11 +3767,13 @@ function PurchasesPageContent() {
                                   <EditIcon sx={{ fontSize: 17 }} />
                                 </IconButton>
                               </Tooltip>
-                              <Tooltip title="Delete">
-                                <IconButton size="small" color="error" onClick={() => handleDelete(purchase.pur_id)} sx={{ p: 0.4 }}>
-                                  <DeleteIcon sx={{ fontSize: 17 }} />
-                                </IconButton>
-                              </Tooltip>
+                              {isAdmin && (
+                                <Tooltip title="Delete">
+                                  <IconButton size="small" color="error" onClick={() => handleDelete(purchase.pur_id)} sx={{ p: 0.4 }}>
+                                    <DeleteIcon sx={{ fontSize: 17 }} />
+                                  </IconButton>
+                                </Tooltip>
+                              )}
                             </Stack>
                           </TableCell>
                         </TableRow>

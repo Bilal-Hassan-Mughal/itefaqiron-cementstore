@@ -3667,6 +3667,7 @@ function OrdersPageContent() {
                       <TableCell sx={{ fontWeight: 'bold', py: 1 }}>S. No</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', py: 1 }}>Store</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', py: 1 }}>Product</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', py: 1 }}>Description</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', py: 1 }}>Qty</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', py: 1 }}>Price</TableCell>
                       <TableCell sx={{ fontWeight: 'bold', py: 1 }}>Amount</TableCell>
@@ -3676,7 +3677,7 @@ function OrdersPageContent() {
                   <TableBody>
                     {productTableData.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                        <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                           <Typography variant="body2" color="text.secondary">
                             No products added yet
                           </Typography>
@@ -3704,6 +3705,30 @@ function OrdersPageContent() {
                             </Select>
                           </TableCell>
                           <TableCell sx={{ py: 1 }}>{product.pro_title}</TableCell>
+                          <TableCell sx={{ py: 1 }}>
+                            <TextField
+                              size="small"
+                              placeholder="Description"
+                              value={product.size || ''}
+                              onChange={(e) => {
+                                const newSize = e.target.value;
+                                setProductTableData((prev) =>
+                                  prev.map((p) =>
+                                    p.id === product.id ? { ...p, size: newSize } : p
+                                  )
+                                );
+                              }}
+                              onFocus={(e) => e.target.select()}
+                              sx={{
+                                width: 150,
+                                '& .MuiInputBase-input': {
+                                  padding: '4px 8px',
+                                  textAlign: 'left',
+                                  fontWeight: 'bold'
+                                }
+                              }}
+                            />
+                          </TableCell>
                           <TableCell sx={{ py: 1 }}>
                             <TextField
                               size="small"
