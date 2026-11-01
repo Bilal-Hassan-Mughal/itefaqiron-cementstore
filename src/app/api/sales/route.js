@@ -204,7 +204,10 @@ function accountOpeningBalance(account) {
 /** Prepares a list of ledger entries about to be deleted by re-linking any subsequent entries to preserve the starting opening balance. */
 async function prepareLedgerDeletion(tx, bill_no) {
   const entriesToDelete = await tx.ledger.findMany({
-    where: { bill_no: String(bill_no) },
+    where: {
+      bill_no: String(bill_no),
+      ledger_type: { notIn: ['Purchase', 'Purchase Return'] }
+    },
     orderBy: { l_id: 'asc' }
   });
 
@@ -2420,9 +2423,12 @@ export async function PUT(request) {
       let oldAdvanceBankAccountId = null;
 
       if (!wasSkipLedger) {
-        // 2a. Find all old ledger entries for this sale
+        // 2a. Find all old ledger entries for this sale (never touch Purchase ledger rows)
         const oldLedgerEntries = await tx.ledger.findMany({
-          where: { bill_no: String(id) }
+          where: {
+            bill_no: String(id),
+            ledger_type: { notIn: ['Purchase', 'Purchase Return'] }
+          }
         });
         oldLedgerEntries.forEach(entry => affectedCusIds.add(entry.cus_id));
 
@@ -2493,9 +2499,12 @@ export async function PUT(request) {
           }
         }
 
-        // 2d. Delete all old ledger entries
+        // 2d. Delete all old ledger entries (scoped to non-purchase only)
         await tx.ledger.deleteMany({
-          where: { bill_no: String(id) }
+          where: {
+            bill_no: String(id),
+            ledger_type: { notIn: ['Purchase', 'Purchase Return'] }
+          }
         });
         saleLog(`   🗑️ Deleted ${oldLedgerEntries.length} old ledger entries`);
       }

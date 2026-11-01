@@ -269,7 +269,10 @@ function getPurchaseLedgerBillWhere(id) {
   const purIdStr = String(id);
   return {
     OR: [
-      { bill_no: purIdStr },
+      {
+        bill_no: purIdStr,
+        ledger_type: { in: ['Purchase', 'Purchase Return'] }
+      },
       { bill_no: `PUR-${purIdStr}` },
       { bill_no: `PURCHASE-${purIdStr}` },
       { bill_no: `INC-${purIdStr}` },
