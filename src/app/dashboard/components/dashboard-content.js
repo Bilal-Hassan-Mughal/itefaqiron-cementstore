@@ -9,6 +9,7 @@ import {
   canViewDashboardLowStock,
 } from '@/lib/staff-access';
 import {
+  eachPkDate,
   eachPkWeekInRange,
   formatDatePK,
   formatPkWeekLabel,
@@ -251,12 +252,27 @@ function WidgetMonthRangeFilter({ filters, onChange, loading = false, accent, ch
   );
 }
 
+/** 7D / 14D → one bar per PK day; 30D → one bar per week. */
+function overviewChartGranularity(days) {
+  return Number(days) <= 14 ? 'day' : 'week';
+}
+
 function buildWeeklyChartData(salesList, days) {
   const range = lastNPkDaysInclusive(days);
-  const slots = eachPkWeekInRange(range.fromDate, range.toDate).map((week) => ({
-    from: week.from,
-    to: week.to,
-    dateStr: week.label || formatPkWeekLabel(week.from, week.to),
+  const byDay = overviewChartGranularity(days) === 'day';
+  const slots = (byDay
+    ? eachPkDate(range.fromDate, range.toDate).map((day) => ({
+        from: day,
+        to: day,
+        dateStr: formatPkWeekLabel(day, day),
+      }))
+    : eachPkWeekInRange(range.fromDate, range.toDate).map((week) => ({
+        from: week.from,
+        to: week.to,
+        dateStr: week.label || formatPkWeekLabel(week.from, week.to),
+      }))
+  ).map((slot) => ({
+    ...slot,
     billAmt: 0,
     orderAmt: 0,
     totalCount: 0,
@@ -276,6 +292,7 @@ function buildWeeklyChartData(salesList, days) {
     }
   });
   return {
+    granularity: byDay ? 'day' : 'week',
     labels: slots.map((d) => d.dateStr),
     billAmounts: slots.map((d) => d.billAmt),
     orderAmounts: slots.map((d) => d.orderAmt),
@@ -2186,7 +2203,7 @@ export default function DashboardContent({ activeTab }) {
             <WidgetDayFilter days={salesOverviewDays} onChange={setSalesOverviewDays} loading={weeklyDataLoading} accent={CHART_COLORS.sales} />
             <ReportWidgetHeader
               title="Sales Overview"
-              subtitle={`Bills vs Orders · week by week · last ${salesOverviewDays} days`}
+              subtitle={`Bills vs Orders · ${salesOverviewChart.granularity === 'day' ? 'day by day' : 'week by week'} · last ${salesOverviewDays} days`}
               icon={TrendingUp}
               tint={CHART_COLORS.sales.tint}
               primary={CHART_COLORS.sales.primary}
@@ -2208,7 +2225,7 @@ export default function DashboardContent({ activeTab }) {
             </ReportChartArea>
             <ReportWidgetFooter
               accent={CHART_COLORS.sales}
-              formula={`Bills PKR ${fmtAmt(totalBillsOverview)} + Orders PKR ${fmtAmt(totalOrdersOverview)} · weekly totals · last ${salesOverviewDays} days`}
+              formula={`Bills PKR ${fmtAmt(totalBillsOverview)} + Orders PKR ${fmtAmt(totalOrdersOverview)} · ${salesOverviewChart.granularity === 'day' ? 'daily' : 'weekly'} totals · last ${salesOverviewDays} days`}
               total={`PKR ${fmtAmt(totalBillsOverview + totalOrdersOverview)}`}
             />
           </ReportWidgetShell>
@@ -2221,7 +2238,7 @@ export default function DashboardContent({ activeTab }) {
             <WidgetDayFilter days={transactionsOverviewDays} onChange={setTransactionsOverviewDays} loading={weeklyDataLoading} accent={CHART_COLORS.profit} />
             <ReportWidgetHeader
               title="Transactions Overview"
-              subtitle={`All transactions vs Orders · week by week · last ${transactionsOverviewDays} days`}
+              subtitle={`All transactions vs Orders · ${transactionsOverviewChart.granularity === 'day' ? 'day by day' : 'week by week'} · last ${transactionsOverviewDays} days`}
               icon={ShoppingCart}
               tint={CHART_COLORS.profit.tint}
               primary={CHART_COLORS.profit.primary}
