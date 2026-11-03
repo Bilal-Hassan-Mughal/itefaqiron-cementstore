@@ -8,7 +8,9 @@ import { persistPaymentLedger, recalculateLedgerBalances } from '@/lib/payment-l
 import { logActivity, AUDIT_ACTIONS, AUDIT_MODULES } from '@/lib/audit-logger';
 import {
   LEDGER_AUDIT_CAUSE,
-  logLedgerRowsCreatedOrUpdated,
+  logFinancePaymentLedgerCreate,
+  logFinancePaymentLedgerUpdate,
+  logLedgerAudit,
   logLedgerRowsDeleted,
 } from '@/lib/ledger-audit';
 
@@ -627,14 +629,10 @@ export async function POST(request) {
       },
     }).catch(() => {});
 
-    logLedgerRowsCreatedOrUpdated({
+    logFinancePaymentLedgerCreate({
       request,
       branchId: __branchScope.branchId,
-      cause: LEDGER_AUDIT_CAUSE.PAYMENT_CREATE,
-      sourceModule: 'Payments',
-      sourceEntityId: result.payment_id,
-      billNo: `PAY-${result.payment_id}`,
-      rows: result.ledger_entries || [],
+      paymentRecord: result,
     });
 
     return NextResponse.json(result);
@@ -848,25 +846,11 @@ export async function PUT(request) {
       },
     }).catch(() => {});
 
-    logLedgerRowsDeleted({
+    logFinancePaymentLedgerUpdate({
       request,
       branchId: __branchScope.branchId,
-      cause: LEDGER_AUDIT_CAUSE.PAYMENT_UPDATE_REPOST,
-      sourceModule: 'Payments',
-      sourceEntityId: paymentId,
-      billNo: billRef,
-      rows: ledgerRowsBeforePaymentUpdate,
-    });
-
-    logLedgerRowsCreatedOrUpdated({
-      request,
-      branchId: __branchScope.branchId,
-      action: AUDIT_ACTIONS.UPDATE,
-      cause: LEDGER_AUDIT_CAUSE.PAYMENT_UPDATE_REPOST,
-      sourceModule: 'Payments',
-      sourceEntityId: paymentId,
-      billNo: billRef,
-      rows: result.ledger_entries || [],
+      paymentRecord: result,
+      rowsDeleted: ledgerRowsBeforePaymentUpdate,
     });
 
     return NextResponse.json(result);
@@ -891,11 +875,23 @@ export async function DELETE(request) {
       return NextResponse.json({ error: 'Payment ID is required' }, { status: 400 });
     }
 
+    const paymentId = parseInt(id, 10);
+    const billRef = `PAY-${paymentId}`;
+    const ledgerBeforeCancel = await prisma.ledger.findMany({
+      where: { bill_no: billRef },
+      orderBy: { l_id: 'asc' },
+    });
+
+    let cancelledPayment = null;
+
     // Use transaction to reverse the payment
     await prisma.$transaction(async (tx) => {
       const payment = await tx.payment.findUnique({
-        where: { payment_id: parseInt(id) },
-        include: { payment_details: true }
+        where: { payment_id: paymentId },
+        include: {
+          payment_details: true,
+          account: { select: { cus_id: true, cus_name: true } },
+        },
       });
 
       if (!payment) {
@@ -923,13 +919,15 @@ export async function DELETE(request) {
       });
 
       // Mark payment as cancelled
-      await tx.payment.update({
-        where: { payment_id: parseInt(id) },
-        data: { status: 'CANCELLED' }
+      cancelledPayment = await tx.payment.update({
+        where: { payment_id: paymentId },
+        data: { status: 'CANCELLED' },
+        include: {
+          account: { select: { cus_id: true, cus_name: true } },
+        },
       });
 
-      // Note: In a real application, you might want to create reversing ledger entries
-      // For now, we'll just mark the payment as cancelled
+      // Note: ledger rows for PAY-* are not deleted on cancel — balance adjusted on main account only.
     }, { timeout: 20000 });
 
     logActivity({
@@ -941,6 +939,27 @@ export async function DELETE(request) {
       description: `Payment #${id} was cancelled.`,
       details: { payment_id: id, status: 'CANCELLED' },
     }).catch(() => {});
+
+    logLedgerAudit({
+      request,
+      branchId: __branchScope.branchId,
+      action: AUDIT_ACTIONS.STATUS_CHANGE,
+      cause: LEDGER_AUDIT_CAUSE.PAYMENT_CANCEL,
+      entityId: billRef,
+      description: `Payment #${paymentId} cancelled (${cancelledPayment?.payment_type || '?'}). Ledger rows for ${billRef} were NOT removed (${ledgerBeforeCancel.length} row(s) still in ledger).`,
+      details: {
+        payment_id: paymentId,
+        payment_type: cancelledPayment?.payment_type,
+        account_id: cancelledPayment?.account_id,
+        account_name: cancelledPayment?.account?.cus_name,
+        ledger_rows_still_present: ledgerBeforeCancel.map((r) => ({
+          l_id: r.l_id,
+          cus_id: r.cus_id,
+          debit: r.debit_amount,
+          credit: r.credit_amount,
+        })),
+      },
+    });
 
     return NextResponse.json({ message: 'Payment cancelled successfully' });
   } catch (error) {

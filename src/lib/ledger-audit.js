@@ -9,7 +9,14 @@ export const LEDGER_AUDIT_CAUSE = {
   FINANCE_DELETE_ROW: 'finance_delete_row',
   FINANCE_DELETE_BULK: 'finance_delete_bulk',
   PAYMENT_CREATE: 'payment_create',
+  /** Finance → Pay Amount button (POST /api/payments PAY) */
+  PAYMENT_CREATE_PAY: 'finance_pay_button',
+  /** Finance → Receive Amount button (POST /api/payments RECEIVE) */
+  PAYMENT_CREATE_RECEIVE: 'finance_receive_button',
   PAYMENT_UPDATE_REPOST: 'payment_update_repost',
+  PAYMENT_UPDATE_PAY: 'finance_pay_button_edit',
+  PAYMENT_UPDATE_RECEIVE: 'finance_receive_button_edit',
+  PAYMENT_CANCEL: 'finance_payment_cancel',
   SALE_CREATE: 'sale_create',
   SALE_UPDATE_REPOST: 'sale_update_repost',
   SALE_DELETE: 'sale_delete',
@@ -130,6 +137,78 @@ export function logLedgerRowsCreatedOrUpdated({
 }
 
 /** Fetch rows before delete (call outside or inside tx with same client). */
+/** Ledger rows created from Finance Pay / Receive (POST /api/payments). */
+export function logFinancePaymentLedgerCreate({ request, branchId, paymentRecord }) {
+  const isReceive = paymentRecord.payment_type === 'RECEIVE';
+  const cause = isReceive
+    ? LEDGER_AUDIT_CAUSE.PAYMENT_CREATE_RECEIVE
+    : LEDGER_AUDIT_CAUSE.PAYMENT_CREATE_PAY;
+  const uiLabel = isReceive ? 'Receive Amount button' : 'Pay Amount button';
+  const party = paymentRecord.account?.cus_name || `Account #${paymentRecord.account_id}`;
+
+  return logLedgerRowsCreatedOrUpdated({
+    request,
+    branchId,
+    cause,
+    sourceModule: 'Finance Pay/Receive',
+    sourceEntityId: paymentRecord.payment_id,
+    billNo: `PAY-${paymentRecord.payment_id}`,
+    rows: paymentRecord.ledger_entries || [],
+    extra: {
+      payment_type: paymentRecord.payment_type,
+      ui_action: uiLabel,
+      account_id: paymentRecord.account_id,
+      account_name: party,
+      net_amount: paymentRecord.net_amount,
+      cash_amount: paymentRecord.cash_amount,
+      bank_amount: paymentRecord.bank_amount,
+      description: paymentRecord.description,
+    },
+  });
+}
+
+/** Ledger repost after editing Pay/Receive from Finance. */
+export function logFinancePaymentLedgerUpdate({
+  request,
+  branchId,
+  paymentRecord,
+  rowsDeleted = [],
+}) {
+  const isReceive = paymentRecord.payment_type === 'RECEIVE';
+  const cause = isReceive
+    ? LEDGER_AUDIT_CAUSE.PAYMENT_UPDATE_RECEIVE
+    : LEDGER_AUDIT_CAUSE.PAYMENT_UPDATE_PAY;
+  const billRef = `PAY-${paymentRecord.payment_id}`;
+
+  logLedgerRowsDeleted({
+    request,
+    branchId,
+    cause,
+    sourceModule: 'Finance Pay/Receive',
+    sourceEntityId: paymentRecord.payment_id,
+    billNo: billRef,
+    rows: rowsDeleted,
+    extra: { payment_type: paymentRecord.payment_type, ui_action: 'edit save' },
+  });
+
+  return logLedgerRowsCreatedOrUpdated({
+    request,
+    branchId,
+    action: AUDIT_ACTIONS.UPDATE,
+    cause,
+    sourceModule: 'Finance Pay/Receive',
+    sourceEntityId: paymentRecord.payment_id,
+    billNo: billRef,
+    rows: paymentRecord.ledger_entries || [],
+    extra: {
+      payment_type: paymentRecord.payment_type,
+      ui_action: 'edit save',
+      account_id: paymentRecord.account_id,
+      account_name: paymentRecord.account?.cus_name,
+    },
+  });
+}
+
 export async function fetchLedgerRowsForAudit(client, where, limit = SNAPSHOT_LIMIT) {
   const rows = await client.ledger.findMany({
     where,
