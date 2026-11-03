@@ -23,8 +23,8 @@ const EmployeeReceiveTab = lazy(() => import('./EmployeeReceiveTab'));
 /**
  * Loads only the active HR module chunk (code-split per tab).
  */
-function wrap(module) {
-  return <HrModuleLayout>{module}</HrModuleLayout>;
+function wrap(module, layoutProps) {
+  return <HrModuleLayout {...layoutProps}>{module}</HrModuleLayout>;
 }
 
 export default function HrActiveModule({ moduleId, backToHub }) {
@@ -38,11 +38,11 @@ export default function HrActiveModule({ moduleId, backToHub }) {
     case 'salary-clearance':
       return wrap(<SalaryTab view="clearance" />);
     case 'salary-advance':
-      return wrap(<SalaryAdvanceTab />);
+      return wrap(<SalaryAdvanceTab onBackToHub={backToHub} />, { dense: true, fillViewport: true });
     case 'employee-ledger':
-      return wrap(<EmployeeLedgerTab onBackToHub={backToHub} />);
+      return wrap(<EmployeeLedgerTab onBackToHub={backToHub} />, { dense: true, fillViewport: false });
     case 'employee-receive':
-      return wrap(<EmployeeReceiveTab />);
+      return wrap(<EmployeeReceiveTab onBackToHub={backToHub} />, { dense: true, fillViewport: true });
     case 'salary-receipt':
       return wrap(<SalaryTab view="receipt" />);
     default:

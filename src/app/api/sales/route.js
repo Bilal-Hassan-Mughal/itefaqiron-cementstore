@@ -2214,13 +2214,12 @@ export async function POST(request) {
       action: AUDIT_ACTIONS.CREATE,
       module: AUDIT_MODULES.SALES,
       entityId: result.sale_id,
-      description: `Sale/Invoice #${result.sale_id} (${result.bill_type || 'BILL'}) created for customer ID ${result.cus_id}. Total: Rs ${result.total_bill_amount || 0}.`,
+      description: `Sale/Invoice #${result.sale_id} (${result.bill_type || 'BILL'}) created for customer ID ${result.cus_id}. Total: Rs ${result.total_amount ?? 0}.`,
       details: {
         sale_id: result.sale_id,
         cus_id: result.cus_id,
         bill_type: result.bill_type,
         total_amount: result.total_amount,
-        total_bill_amount: result.total_bill_amount,
         cash_payment: result.cash_payment,
         bank_payment: result.bank_payment,
       },
@@ -3089,6 +3088,8 @@ export async function PUT(request) {
       where: { cus_id: parseInt(cus_id) }
     });
 
+    const updatedBillTotal = Number(result?.total_amount ?? total_amount ?? 0);
+
     // Record activity log for sale update
     logActivity({
       request,
@@ -3096,13 +3097,12 @@ export async function PUT(request) {
       action: AUDIT_ACTIONS.UPDATE,
       module: AUDIT_MODULES.SALES,
       entityId: id,
-      description: `Sale/Invoice #${id} (${bill_type || 'BILL'}) was updated. Customer ID: ${cus_id}. Total: Rs ${total_bill_amount || 0}.`,
+      description: `Sale/Invoice #${id} (${bill_type || 'BILL'}) was updated. Customer ID: ${cus_id}. Total: Rs ${updatedBillTotal}.`,
       details: {
         sale_id: id,
         cus_id,
         bill_type,
-        total_amount,
-        total_bill_amount,
+        total_amount: updatedBillTotal,
       },
     }).catch(() => {});
 

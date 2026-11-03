@@ -247,7 +247,14 @@ export async function GET(request) {
         where,
         include: {
           employee: {
-            select: { emp_id: true, emp_name: true, designation: true, department: true, basic_salary: true },
+            select: {
+              emp_id: true,
+              emp_name: true,
+              designation: true,
+              department: true,
+              basic_salary: true,
+              emp_phone: true,
+            },
           },
         },
         orderBy: { advance_date: 'desc' },
@@ -377,11 +384,15 @@ export async function POST(request) {
         reason: reason || null,
         status: 'PENDING',
         payment_split: paymentSplit,
+        payment_reference: payment_reference || null,
         ledger_bill_no: advanceLedgerBillNo(advanceId),
         employee: {
           emp_id: emp.emp_id,
           emp_name: emp.emp_name,
           designation: emp.designation,
+          department: emp.department,
+          basic_salary: parseFloat(emp.basic_salary || 0),
+          emp_phone: emp.emp_phone,
         },
       };
     }, HR_LEDGER_TX_OPTIONS);

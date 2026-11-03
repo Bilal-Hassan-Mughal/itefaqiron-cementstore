@@ -434,6 +434,12 @@ const LEDGER_VALUE_COLORS_PARTY = {
   balance: '#1347c4',
 };
 
+function isTransportCategoryEntry(entry) {
+  const cat = (entry?.customer?.customer_category?.cus_cat_title || '').toLowerCase();
+  const type = (entry?.customer?.customer_type?.cus_type_title || '').toLowerCase();
+  return cat.includes('transport') || type.includes('transport');
+}
+
 function isSupplierOrCustomerLedgerEntry(entry) {
   const cat = (entry?.customer?.customer_category?.cus_cat_title || '').toLowerCase();
   const type = (entry?.customer?.customer_type?.cus_type_title || '').toLowerCase();
@@ -445,8 +451,12 @@ function isSupplierOrCustomerLedgerEntry(entry) {
   return /supplier|creditor|customer|debtor|client/.test(label);
 }
 
+/** Transport / transporter accounts use party colors (debit red, credit green), not cash/bank colors. */
 function getLedgerValueColors(entry) {
-  return isSupplierOrCustomerLedgerEntry(entry) ? LEDGER_VALUE_COLORS_PARTY : LEDGER_VALUE_COLORS;
+  if (isSupplierOrCustomerLedgerEntry(entry) || isTransportCategoryEntry(entry)) {
+    return LEDGER_VALUE_COLORS_PARTY;
+  }
+  return LEDGER_VALUE_COLORS;
 }
 
 const LEDGER_TYPE_COLORS = {

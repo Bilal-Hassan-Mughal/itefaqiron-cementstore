@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Box, Typography, Button, TextField, Card, CardContent,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -956,9 +957,28 @@ export default function SalaryTab({ view = 'sheet' }) {
   const [snack, setSnack] = useState({ open: false, msg: '', severity: 'success' });
 
   const showSnack = (msg, severity = 'success') => setSnack({ open: true, msg, severity });
+  const searchParams = useSearchParams();
   const payrollVersion = useHrRefreshVersion(HR_KEYS.payroll);
   const advancesVersion = useHrRefreshVersion(HR_KEYS.advances);
   const { invalidatePayrollFlow } = useHrRefresh();
+
+  useEffect(() => {
+    if (!isReceiptView) return undefined;
+    const pid = searchParams.get('payroll_id');
+    if (!pid) return undefined;
+    let cancelled = false;
+    fetch(`/api/payroll?id=${parseInt(pid, 10)}`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const row = Array.isArray(data) ? data[0] : data;
+        if (!row || row.status !== 'PAID' || cancelled) return;
+        return enrichPayrollForReceipt(row).then((enriched) => {
+          if (!cancelled) setPayslipPreview(enriched);
+        });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isReceiptView, searchParams]);
 
   useEffect(() => {
     if (!isSheetView) return;

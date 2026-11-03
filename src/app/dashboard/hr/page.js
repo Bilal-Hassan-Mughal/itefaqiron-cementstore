@@ -315,6 +315,12 @@ function HrPageContent() {
   );
 
   const isFlatModule = ['attendance', 'salary-sheet', 'salary-clearance', 'salary-advance', 'employee-ledger', 'employee-receive', 'salary-receipt'].includes(activeModule);
+  const isViewportFitModule = activeModule === 'salary-advance' || activeModule === 'employee-receive';
+  const isWideHrModule = activeModule === 'employee-ledger';
+  const isEdgeToEdgeModule =
+    activeModule === 'employee-ledger' || activeModule === 'salary-advance' || activeModule === 'employee-receive';
+  /** Module renders its own toolbar — skip duplicate HR breadcrumb strip */
+  const hideFlatModuleTopChrome = activeModule === 'employee-ledger';
   const hideHrHubHeader = false;
   const { invalidate } = useHrRefresh();
 
@@ -336,7 +342,25 @@ function HrPageContent() {
 
   return (
     <DashboardLayout>
-      <Box sx={{ maxWidth: 1440, mx: 'auto', pb: 4 }}>
+      <Box
+        sx={{
+          maxWidth: isEdgeToEdgeModule && activeModule ? 'none' : 1440,
+          mx: isEdgeToEdgeModule && activeModule ? 0 : 'auto',
+          width: isEdgeToEdgeModule && activeModule ? '100%' : 'auto',
+          pb: isEdgeToEdgeModule && activeModule ? 0 : 4,
+          ...(isWideHrModule && activeModule
+            ? {
+                mt: { xs: -1.5, md: -2.5 },
+                mx: { xs: -1.5, md: -2.5 },
+                mb: { xs: -1.5, md: -2.5 },
+                width: { xs: 'calc(100% + 24px)', md: 'calc(100% + 40px)' },
+              }
+            : {}),
+          ...(isViewportFitModule && activeModule
+            ? { height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', flex: 1 }
+            : {}),
+        }}
+      >
         {/* Hub: module grid */}
         {!activeModule && (
           <Box
@@ -443,24 +467,43 @@ function HrPageContent() {
 
         {/* Module view */}
         {activeModule && activeModuleMeta && (
-          <Box ref={contentRef}>
-            {!hideHrHubHeader && (
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-                <Button
-                  startIcon={<ArrowBack />}
-                  onClick={backToHub}
-                  sx={{
-                    textTransform: 'none',
-                    fontWeight: 700,
-                    color: '#64748b',
-                    '&:hover': { bgcolor: '#f1f5f9', color: '#0f172a' },
-                  }}
-                >
-                  HR Dashboard
-                </Button>
-                <ChevronRight sx={{ color: '#cbd5e1', fontSize: 20 }} />
-                <Typography sx={{ fontWeight: 800, color: '#0f172a' }}>{activeModuleMeta.title}</Typography>
-              </Stack>
+          <Box
+            ref={contentRef}
+            sx={{
+              ...(isViewportFitModule && {
+                flex: 1,
+                minHeight: 0,
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+              }),
+            }}
+          >
+            {!hideHrHubHeader && !isViewportFitModule && !hideFlatModuleTopChrome && (
+              <Box sx={{ mb: isFlatModule ? 1.5 : 2, flexShrink: 0 }}>
+                <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
+                  <Button
+                    startIcon={<ArrowBack />}
+                    onClick={backToHub}
+                    sx={{
+                      textTransform: 'none',
+                      fontWeight: 700,
+                      color: '#64748b',
+                      '&:hover': { bgcolor: '#f1f5f9', color: '#0f172a' },
+                    }}
+                  >
+                    HR Dashboard
+                  </Button>
+                  <ChevronRight sx={{ color: '#cbd5e1', fontSize: 20 }} />
+                  <Typography sx={{ fontWeight: 800, color: '#0f172a' }}>{activeModuleMeta.title}</Typography>
+                </Stack>
+                {isFlatModule && !isViewportFitModule && (
+                  <Typography sx={{ fontSize: '0.8125rem', color: '#64748b', mt: 0.75, pl: 0.5 }}>
+                    {activeModuleMeta.description}
+                  </Typography>
+                )}
+              </Box>
             )}
 
             <Box
@@ -470,9 +513,10 @@ function HrPageContent() {
                 bgcolor: hideHrHubHeader ? 'transparent' : '#ffffff',
                 boxShadow: hideHrHubHeader || isFlatModule ? 'none' : '0 4px 24px rgba(15, 23, 42, 0.06)',
                 overflow: 'hidden',
+                ...(isViewportFitModule && { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }),
               }}
             >
-              {!hideHrHubHeader && (
+              {!hideHrHubHeader && !isFlatModule && (
                 <Box
                   sx={{
                     px: { xs: 2, md: 2.5 },
@@ -528,9 +572,15 @@ function HrPageContent() {
                 key={activeModule}
                 sx={{
                   p: isFlatModule ? 0 : { xs: 1.5, md: 2.5 },
-                  opacity: contentVisible ? 1 : 0,
-                  transform: contentVisible ? 'translateY(0)' : 'translateY(12px)',
-                  transition: 'opacity 0.3s ease, transform 0.3s ease',
+                  ...(isViewportFitModule
+                    ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }
+                    : isWideHrModule
+                      ? { opacity: contentVisible ? 1 : 0, transition: 'opacity 0.25s ease' }
+                      : {
+                          opacity: contentVisible ? 1 : 0,
+                          transform: contentVisible ? 'translateY(0)' : 'translateY(12px)',
+                          transition: 'opacity 0.3s ease, transform 0.3s ease',
+                        }),
                 }}
               >
                 <HrActiveModule moduleId={activeModule} backToHub={backToHub} />

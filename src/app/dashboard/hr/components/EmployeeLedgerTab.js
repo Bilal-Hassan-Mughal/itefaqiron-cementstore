@@ -3,63 +3,344 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
-  Box, Typography, Card, CardContent, TextField, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, Paper, MenuItem, FormControl, InputLabel,
-  Select, Chip, CircularProgress, InputAdornment, Button, Stack, ToggleButton,
-  ToggleButtonGroup, IconButton, Tooltip,
+  Box, Typography, TextField, Table, TableBody, TableCell,
+  TableContainer, TableHead, TableRow, MenuItem, Select, Chip, CircularProgress,
+  InputAdornment, Button, Stack, IconButton, Tooltip, Snackbar, Alert,
 } from '@mui/material';
 import {
-  Search, AccountBalance, Refresh, FilterList, ClearAll, PictureAsPdf, PersonSearch, ArrowBack,
+  Search, AccountBalance, Refresh, ClearAll, PictureAsPdf, PersonSearch, ArrowBack, CalendarToday,
+  ReceiptLong, Print, OpenInNew, Groups, TrendingDown, TrendingUp, CheckCircle,
 } from '@mui/icons-material';
-import { BRAND } from '@/lib/brand-theme';
+import { useRouter } from 'next/navigation';
 import { downloadEmployeeLedgerPdf } from '@/lib/employee-ledger-pdf';
 import { useHrRefreshVersion, HR_KEYS } from '../context/HrRefreshContext';
 import { fetchHrLedgerSummaryPage, fetchHrLedgerSummaryStats } from '../lib/hr-fetch';
+import { useHrEmployeeOptions } from '../hooks/useHrEmployeeOptions';
+import {
+  parseLedgerDocument,
+  fetchEmployeeReceiveReceiptById,
+  fetchEmployeeAdvanceById,
+} from '../lib/ledger-entry-documents';
+import { printEmployeeReceiveReceipt } from '@/lib/employee-receipt-pdf';
+import { printAdvanceVoucher } from '../lib/advance-voucher-actions';
+import EmployeeReceiveReceiptDialog from './EmployeeReceiveReceiptDialog';
+import SalaryAdvanceVoucherDialog from './SalaryAdvanceVoucherDialog';
 import HrLoadMoreTrigger from './shared/HrLoadMoreTrigger';
+import { HR_TABLE_HEAD_SX } from './shared/hrUiShared';
 
-const CARD_SX = {
-  borderRadius: '12px',
-  border: '1px solid #dce3ed',
-  boxShadow: '0 1px 4px rgba(15, 23, 42, 0.06)',
-  bgcolor: '#ffffff',
+/** Modern Soft UI — minimalist SaaS ledger (ice-blue canvas, teal anchor) */
+const LEDGER_PRIMARY = '#2a9d8f';
+const LEDGER_DEEP = '#1f7a6e';
+const LEDGER_LIGHT = '#48c9b0';
+const CYAN_CTA = '#22d3ee';
+const CYAN_CTA_HOVER = '#06b6d4';
+const LEDGER_TINT = '#ecfdf8';
+const LEDGER_TINT2 = '#d1faf0';
+const INK = '#1e293b';
+const MUTED = '#64748b';
+const MUTED_SOFT = '#94a3b8';
+const BORDER = '#e8edf3';
+const BORDER_STRONG = '#dce3ec';
+const COL_LINE = '#eef2f6';
+const ROW_LINE = '#f1f5f9';
+const SURFACE = '#ffffff';
+const DEBIT_COLOR = '#b91c1c';
+const CREDIT_COLOR = '#15803d';
+const MONEY_EMPTY = '#cbd5e1';
+const PAGE_BG = '#f0f4f8';
+const HERO_BG = 'linear-gradient(102deg, #1a6b66 0%, #2a9d8f 48%, #48c9b0 100%)';
+const CARD_SHADOW = '0 4px 24px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04)';
+const STAT_THEMES = {
+  ledger: { border: '#99f6e4', iconBg: '#ecfdf8', value: LEDGER_DEEP },
+  owes: { border: '#fecaca', iconBg: '#fef2f2', value: '#dc6b6b' },
+  payable: { border: '#bbf7d0', iconBg: '#f0fdf4', value: '#16a34a' },
+  settled: { border: '#cbd5e1', iconBg: '#f1f5f9', value: '#64748b' },
 };
 
-const FILTER_PANEL_SX = {
-  p: 2,
-  borderRadius: '12px',
-  bgcolor: '#f8fafc',
-  border: '1px solid #e2e8f0',
+const actionIconSx = {
+  width: 32,
+  height: 32,
+  borderRadius: '50%',
+  bgcolor: '#f1f5f9',
+  color: MUTED_SOFT,
+  border: 'none',
+  transition: 'background 0.15s ease, color 0.15s ease',
+  '&:hover': { bgcolor: LEDGER_TINT, color: LEDGER_DEEP },
+  '&.Mui-disabled': { bgcolor: '#f8fafc', color: '#cbd5e1' },
 };
 
-const LEDGER_ACCENT = '#0d9488';
-const LEDGER_TINT = '#ecfdf5';
-const NAVY = '#0f172a';
+const FILTER_H = 42;
 
-const FIELD_SX = {
-  '& .MuiOutlinedInput-root': {
-    borderRadius: '10px',
-    fontSize: '0.8125rem',
-    bgcolor: '#fff',
-    '& fieldset': { borderColor: '#cbd5e1' },
-    '&.Mui-focused fieldset': { borderColor: LEDGER_ACCENT },
+const filterAdornmentSx = {
+  height: FILTER_H,
+  maxHeight: FILTER_H,
+  alignSelf: 'center',
+  '& .MuiSvgIcon-root': { fontSize: 18, color: MUTED_SOFT },
+};
+
+const selectMenuProps = {
+  PaperProps: {
+    elevation: 0,
+    sx: {
+      mt: 0.5,
+      maxHeight: 320,
+      borderRadius: '10px',
+      border: `1px solid ${BORDER}`,
+      boxShadow: '0 8px 24px rgba(15, 23, 42, 0.08)',
+      '& .MuiMenuItem-root': { fontSize: '0.8125rem', py: 0.85, borderRadius: '6px', mx: 0.5, my: 0.15 },
+      '& .MuiMenuItem-root.Mui-selected': { bgcolor: LEDGER_TINT2, color: LEDGER_DEEP, fontWeight: 600 },
+      '& .MuiMenuItem-root.Mui-selected:hover': { bgcolor: LEDGER_TINT },
+    },
   },
-  '& .MuiInputLabel-root': { fontSize: '0.8125rem' },
-  '& .MuiInputLabel-shrink': { maxWidth: '100%' },
 };
 
-const TABLE_HEAD_CELL_SX = {
-  fontWeight: 800,
-  fontSize: '0.7rem',
-  letterSpacing: '0.04em',
-  textTransform: 'uppercase',
-  color: '#fff',
-  py: 1.25,
-  bgcolor: '#0f766e',
-  borderBottom: '2px solid #115e59',
-  position: 'sticky',
-  top: 0,
-  zIndex: 3,
+/** Uniform filter controls — fixed 42px height for Select, TextField, and date inputs */
+const filterInputSx = {
+  width: '100%',
+  '& .MuiOutlinedInput-root': {
+    height: FILTER_H,
+    minHeight: FILTER_H,
+    maxHeight: FILTER_H,
+    borderRadius: '10px',
+    bgcolor: SURFACE,
+    fontSize: '0.8125rem',
+    fontWeight: 700,
+    color: INK,
+    transition: 'box-shadow 0.15s ease, border-color 0.15s ease',
+    '& fieldset': { borderColor: '#e0e0e0' },
+    '&:hover fieldset': { borderColor: BORDER_STRONG },
+    '&.Mui-focused': { boxShadow: '0 0 0 3px rgba(42, 157, 143, 0.12)' },
+    '&.Mui-focused fieldset': { borderColor: LEDGER_PRIMARY, borderWidth: 1 },
+    '& .MuiOutlinedInput-input': {
+      py: 0,
+      px: 1.25,
+      height: `${FILTER_H}px`,
+      minHeight: `${FILTER_H}px`,
+      boxSizing: 'border-box',
+      lineHeight: `${FILTER_H}px`,
+      fontWeight: 700,
+    },
+    '& .MuiSelect-select': {
+      display: 'flex',
+      alignItems: 'center',
+      minHeight: `${FILTER_H}px !important`,
+      height: `${FILTER_H}px !important`,
+      py: '0 !important',
+      pl: '10px !important',
+      pr: '32px !important',
+      boxSizing: 'border-box',
+      fontWeight: 700,
+    },
+    '& .MuiSelect-icon': { color: MUTED_SOFT, fontSize: '1.25rem', right: 10, top: 'calc(50% - 0.6em)' },
+    '&.MuiInputBase-adornedStart': { pl: 1.1 },
+    '&.MuiInputBase-adornedStart .MuiOutlinedInput-input': { pl: 0.35, fontWeight: 500 },
+    '&.MuiInputBase-adornedEnd .MuiOutlinedInput-input': { pr: 0.5 },
+    '& input::placeholder': { color: MUTED_SOFT, opacity: 1, fontWeight: 500 },
+  },
 };
+
+function filterDateSx(hasValue) {
+  return [
+    filterInputSx,
+    {
+      '& .MuiOutlinedInput-root': { position: 'relative' },
+      '& .MuiOutlinedInput-root input': {
+        fontWeight: hasValue ? 700 : 500,
+        color: hasValue ? INK : MUTED_SOFT,
+      },
+      '& input[type="date"]::-webkit-calendar-picker-indicator': {
+        opacity: 0,
+        position: 'absolute',
+        right: 0,
+        width: 40,
+        height: FILTER_H,
+        cursor: 'pointer',
+      },
+    },
+  ];
+}
+
+const filterRowGridSx = {
+  display: 'grid',
+  gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(6, minmax(0, 1fr))' },
+  gap: { xs: 1.25, md: 1.75 },
+  alignItems: 'end',
+};
+
+function FilterField({ label, children }) {
+  return (
+    <Box sx={{ minWidth: 0, width: '100%' }}>
+      <Typography
+        component="label"
+        sx={{
+          display: 'block',
+          fontSize: '0.75rem',
+          fontWeight: 500,
+          color: MUTED,
+          mb: 0.5,
+          lineHeight: 1.2,
+          minHeight: 18,
+        }}
+      >
+        {label}
+      </Typography>
+      <Box
+        sx={{
+          height: FILTER_H,
+          display: 'flex',
+          alignItems: 'stretch',
+          '& .MuiFormControl-root': { flex: 1, minWidth: 0, height: FILTER_H },
+          '& .MuiInputBase-root': { height: `${FILTER_H}px`, minHeight: `${FILTER_H}px` },
+        }}
+      >
+        {children}
+      </Box>
+    </Box>
+  );
+}
+
+function FilterSelectValue({ children, muted = false }) {
+  return (
+    <Box component="span" sx={{ fontWeight: muted ? 500 : 700, color: muted ? MUTED_SOFT : INK, fontSize: '0.8125rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      {children}
+    </Box>
+  );
+}
+
+function SectionCard({ title, action, children, bodySx = {} }) {
+  return (
+    <Box
+      sx={{
+        bgcolor: SURFACE,
+        borderRadius: '14px',
+        border: `1px solid ${BORDER}`,
+        boxShadow: CARD_SHADOW,
+        overflow: 'hidden',
+      }}
+    >
+      {title ? (
+        <Box
+          sx={{
+            px: { xs: 2, md: 2.25 },
+            py: 1.25,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 1,
+            borderBottom: `1px solid ${ROW_LINE}`,
+            bgcolor: SURFACE,
+          }}
+        >
+          <Typography sx={{ fontWeight: 700, fontSize: '0.9375rem', color: INK, letterSpacing: '-0.02em' }}>{title}</Typography>
+          {action}
+        </Box>
+      ) : null}
+      <Box sx={{ p: { xs: 2, md: 2.25 }, ...bodySx }}>{children}</Box>
+    </Box>
+  );
+}
+
+const tableSx = {
+  borderCollapse: 'separate',
+  borderSpacing: 0,
+  tableLayout: 'fixed',
+  width: '100%',
+};
+
+function thCell(isLast) {
+  return {
+    ...HR_TABLE_HEAD_SX,
+    background: SURFACE,
+    color: LEDGER_DEEP,
+    fontSize: '0.6875rem',
+    fontWeight: 700,
+    letterSpacing: '0.05em',
+    textTransform: 'uppercase',
+    borderTop: `2px solid ${LEDGER_PRIMARY}`,
+    borderBottom: `2px solid ${LEDGER_PRIMARY}`,
+    borderRight: isLast ? 'none' : `1px solid ${COL_LINE}`,
+    position: 'sticky',
+    top: 0,
+    zIndex: 2,
+    py: 1.1,
+    px: { xs: 0.75, md: 1 },
+    whiteSpace: 'nowrap',
+  };
+}
+
+function tdCell(isLast, extra = {}) {
+  return {
+    fontSize: '0.8125rem',
+    lineHeight: 1.5,
+    py: 1.1,
+    px: { xs: 0.75, md: 1 },
+    borderBottom: `1px solid ${ROW_LINE}`,
+    borderRight: isLast ? 'none' : `1px solid ${COL_LINE}`,
+    verticalAlign: 'middle',
+    color: INK,
+    overflow: 'hidden',
+    ...extra,
+  };
+}
+
+const moneyBaseSx = {
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontVariantNumeric: 'tabular-nums',
+  letterSpacing: '-0.02em',
+  whiteSpace: 'nowrap',
+};
+
+const debitCellSx = (active) => ({
+  ...moneyBaseSx,
+  fontSize: '0.9375rem',
+  fontWeight: 700,
+  color: active ? DEBIT_COLOR : MONEY_EMPTY,
+});
+
+const creditCellSx = (active) => ({
+  ...moneyBaseSx,
+  fontSize: '0.9375rem',
+  fontWeight: 700,
+  color: active ? CREDIT_COLOR : MONEY_EMPTY,
+});
+
+const balanceCellSx = {
+  ...moneyBaseSx,
+  fontSize: '0.8125rem',
+  fontWeight: 800,
+  color: INK,
+};
+
+const cellEllipsis = {
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  maxWidth: 0,
+};
+
+/** Particulars — wrap inside cell width (do not use maxWidth:0; it breaks text vertically) */
+function ParticularsText({ text }) {
+  const label = text || '—';
+  return (
+    <Box
+      title={text || ''}
+      sx={{
+        display: '-webkit-box',
+        WebkitLineClamp: 2,
+        WebkitBoxOrient: 'vertical',
+        overflow: 'hidden',
+        whiteSpace: 'normal',
+        wordBreak: 'break-word',
+        overflowWrap: 'break-word',
+        lineHeight: 1.45,
+        fontSize: '0.8125rem',
+        color: INK,
+      }}
+    >
+      {label}
+    </Box>
+  );
+}
 
 const ENTRY_TYPES = [
   { value: 'ALL', label: 'All types' },
@@ -93,6 +374,17 @@ function fmtDateTime(value) {
   });
 }
 
+/** Compact date for table cells — avoids ellipsis on narrow date column */
+function fmtDateTableParts(value) {
+  if (!value) return null;
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return null;
+  return {
+    date: dt.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+    time: dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }),
+  };
+}
+
 function balanceTone(closing) {
   const n = parseFloat(closing || 0);
   if (n > 0.009) return '#0f172a';
@@ -108,72 +400,71 @@ function fmtSignedBalance(closing) {
   return n < 0 ? `-${body}` : body;
 }
 
-const LEDGER_TABLE_SX = {
-  tableLayout: 'fixed',
-  width: '100%',
-  borderCollapse: 'separate',
-  borderSpacing: 0,
-  '& .MuiTableCell-root': {
-    borderRight: '1px solid #e2e8f0',
-    borderBottom: '1px solid #e2e8f0',
-    px: 1.25,
-    py: 0.85,
-    verticalAlign: 'middle',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-  },
-  '& .MuiTableRow-root .MuiTableCell-root:first-of-type': {
-    borderLeft: '1px solid #e2e8f0',
-  },
-  '& .MuiTableHead-root .MuiTableCell-root': {
-    borderTop: '1px solid #115e59',
-  },
-};
-
 function ledgerColGroup(showEmployeeColumn) {
   if (showEmployeeColumn) {
     return (
       <colgroup>
-        <col style={{ width: '11%' }} />
-        <col style={{ width: '11%' }} />
+        <col style={{ width: '8.5%' }} />
+        <col style={{ width: '8.5%' }} />
+        <col style={{ width: '4%' }} />
         <col style={{ width: '8%' }} />
-        <col style={{ width: '9%' }} />
-        <col style={{ width: '23%' }} />
-        <col style={{ width: '9%' }} />
-        <col style={{ width: '9%' }} />
+        <col style={{ width: '26%' }} />
+        <col style={{ width: '9.5%' }} />
+        <col style={{ width: '9.5%' }} />
+        <col style={{ width: '8.5%' }} />
         <col style={{ width: '10%' }} />
-        <col style={{ width: '9%' }} />
+        <col style={{ width: '7.5%' }} />
       </colgroup>
     );
   }
   return (
     <colgroup>
-      <col style={{ width: '11%' }} />
       <col style={{ width: '9%' }} />
-      <col style={{ width: '10%' }} />
+      <col style={{ width: '6%' }} />
+      <col style={{ width: '8%' }} />
       <col style={{ width: '30%' }} />
       <col style={{ width: '10%' }} />
       <col style={{ width: '10%' }} />
-      <col style={{ width: '11%' }} />
-      <col style={{ width: '9%' }} />
+      <col style={{ width: '10%' }} />
+      <col style={{ width: '10%' }} />
+      <col style={{ width: '7%' }} />
     </colgroup>
   );
 }
 
 function typeChipStyle(type) {
   const t = String(type || '').toUpperCase();
-  if (t === 'ADVANCE') return { bgcolor: '#fef2f2', color: '#b91c1c' };
-  if (t === 'RECEIPT' || t === 'ADVANCE_SETTLED' || t === 'PAYROLL_RECOVERY') return { bgcolor: '#f0fdf4', color: '#15803d' };
-  if (t === 'ADVANCE_REV') return { bgcolor: '#fff7ed', color: '#c2410c' };
-  if (t === 'OPENING') return { bgcolor: '#eff6ff', color: '#1d4ed8' };
-  if (t === 'SALARY_PAYMENT') return { bgcolor: '#eef2ff', color: '#4338ca' };
-  if (t === 'PAYROLL_PAYABLE') return { bgcolor: '#fef3c7', color: '#b45309' };
-  return { bgcolor: '#f1f5f9', color: '#475569' };
+  const pill = (bgcolor, color, border) => ({ bgcolor, color, border: `1px solid ${border}` });
+  if (t === 'ADVANCE') return pill('#fee2e2', '#b91c1c', '#fecaca');
+  if (t === 'RECEIPT') return pill('#dcfce7', '#15803d', '#bbf7d0');
+  if (t === 'ADVANCE_SETTLED' || t === 'PAYROLL_RECOVERY') return pill('#ecfdf5', '#047857', '#a7f3d0');
+  if (t === 'ADVANCE_REV') return pill('#ffedd5', '#c2410c', '#fed7aa');
+  if (t === 'OPENING') return pill(LEDGER_TINT, LEDGER_DEEP, '#99f6e4');
+  if (t === 'SALARY_PAYMENT') return pill('#e0e7ff', '#4338ca', '#c7d2fe');
+  if (t === 'PAYROLL_PAYABLE' || t === 'SALARY_UNDERPAID') return pill('#fef3c7', '#b45309', '#fde68a');
+  return pill('#f1f5f9', '#475569', '#e2e8f0');
 }
 
 function typeLabel(type) {
   const found = ENTRY_TYPES.find((x) => x.value === type);
   return found?.label || type || '—';
+}
+
+/** Shorter chip text so columns do not truncate awkwardly */
+function typeShortLabel(type) {
+  const map = {
+    RECEIPT: 'Received',
+    ADVANCE: 'Advance',
+    ADVANCE_REV: 'Cancelled',
+    ADVANCE_SETTLED: 'Recovered',
+    PAYROLL_RECOVERY: 'Recovery',
+    OPENING: 'Opening',
+    SALARY_PAYMENT: 'Salary',
+    PAYROLL_PAYABLE: 'Payable',
+    SALARY_DED: 'Deduction',
+    SALARY_UNDERPAID: 'Underpaid',
+  };
+  return map[String(type || '').toUpperCase()] || typeLabel(type);
 }
 
 function buildTransactionsQuery({ empId, from, to, type, q, reconcile = false }) {
@@ -189,7 +480,9 @@ function buildTransactionsQuery({ empId, from, to, type, q, reconcile = false })
 
 export default function EmployeeLedgerTab({ onBackToHub }) {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const scrollRef = useRef(null);
+  const { activeEmployees } = useHrEmployeeOptions();
 
   const [summary, setSummary] = useState([]);
   const [summaryTotal, setSummaryTotal] = useState(0);
@@ -204,6 +497,12 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
   const [loadingSummary, setLoadingSummary] = useState(true);
   const [loadingEntries, setLoadingEntries] = useState(true);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [paymentAccounts, setPaymentAccounts] = useState([]);
+  const [receiveReceipt, setReceiveReceipt] = useState(null);
+  const [receiveOpen, setReceiveOpen] = useState(false);
+  const [voucherAdvance, setVoucherAdvance] = useState(null);
+  const [docLoadingKey, setDocLoadingKey] = useState(null);
+  const [snack, setSnack] = useState({ open: false, msg: '', severity: 'success' });
 
   const [balanceFilter, setBalanceFilter] = useState('ALL');
   const [empPickerSearch, setEmpPickerSearch] = useState('');
@@ -216,6 +515,17 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
   const [entrySearchDebounced, setEntrySearchDebounced] = useState('');
 
   const ledgerVersion = useHrRefreshVersion(HR_KEYS.ledger);
+
+  const showSnack = useCallback((msg, severity = 'success') => {
+    setSnack({ open: true, msg, severity });
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/customers?dropdown=true')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setPaymentAccounts(Array.isArray(data) ? data : []))
+      .catch(() => setPaymentAccounts([]));
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setEntrySearchDebounced(entrySearch.trim()), 450);
@@ -443,6 +753,47 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
     return parts.join(' · ') || 'none';
   }, [activeFilterChips]);
 
+  const openLedgerDocument = useCallback(async (row, mode = 'view') => {
+    const doc = parseLedgerDocument(row);
+    if (!doc) {
+      showSnack('No printable receipt for this entry', 'info');
+      return;
+    }
+    const key = `${row.el_id}-${mode}`;
+    setDocLoadingKey(key);
+    try {
+      if (doc.kind === 'receive') {
+        const receipt = await fetchEmployeeReceiveReceiptById(doc.id);
+        if (mode === 'print') {
+          const opened = await printEmployeeReceiveReceipt(receipt);
+          if (opened === false) showSnack('Allow pop-ups to print receipt', 'warning');
+        } else {
+          setReceiveReceipt(receipt);
+          setReceiveOpen(true);
+        }
+        return;
+      }
+      if (doc.kind === 'advance') {
+        const advance = await fetchEmployeeAdvanceById(doc.id, doc.empId);
+        if (mode === 'print') {
+          const opened = await printAdvanceVoucher(advance, { paymentAccounts, employeeOptions: activeEmployees });
+          if (opened === false) showSnack('Allow pop-ups to print voucher', 'warning');
+        } else {
+          setVoucherAdvance(advance);
+        }
+        return;
+      }
+      if (doc.kind === 'salary') {
+        router.push(`/dashboard/hr?module=salary-receipt&payroll_id=${doc.id}`, { scroll: false });
+        showSnack('Opening salary receipt module', 'info');
+      }
+    } catch (err) {
+      showSnack(err.message || 'Could not open document', 'error');
+    } finally {
+      setDocLoadingKey(null);
+    }
+  }, [activeEmployees, paymentAccounts, router, showSnack]);
+
   const handleDownloadPdf = async () => {
     if (visibleEntries.length === 0) return;
     setPdfLoading(true);
@@ -463,457 +814,576 @@ export default function EmployeeLedgerTab({ onBackToHub }) {
   };
 
   const showEmployeeColumn = !selectedEmpId;
-  const colSpan = showEmployeeColumn ? 9 : 8;
+  const colSpan = showEmployeeColumn ? 10 : 9;
 
   const ledgerViewTitle = selectedEmployee
     ? `${selectedEmployee.emp_name}${selectedEmployee.designation ? ` · ${selectedEmployee.designation}` : ''}`
     : 'All employees';
 
+  const statTiles = useMemo(() => [
+    { label: 'On ledger', value: portfolioDisplay.total, icon: Groups, theme: STAT_THEMES.ledger },
+    { label: 'Employee owes', value: fmtAmt(portfolioDisplay.receivable), icon: TrendingDown, theme: STAT_THEMES.owes },
+    { label: 'Company owes', value: fmtAmt(portfolioDisplay.payable), icon: TrendingUp, theme: STAT_THEMES.payable },
+    { label: 'Settled', value: portfolioDisplay.settledCount, icon: CheckCircle, theme: STAT_THEMES.settled },
+  ], [portfolioDisplay]);
+
+  const tableHeaders = showEmployeeColumn
+    ? ['Date', 'Employee', 'Mode', 'Bill #', 'Particulars', 'Debit', 'Credit', 'Balance', 'Type', 'Actions']
+    : ['Date', 'Mode', 'Bill #', 'Particulars', 'Debit', 'Credit', 'Balance', 'Type', 'Actions'];
+
+  const lastCol = tableHeaders.length - 1;
+
   return (
-    <Box sx={{ px: { xs: 1, md: 0 }, py: { xs: 0.5, md: 0 } }}>
-      <Card sx={{ ...CARD_SX, overflow: 'hidden' }}>
-        <Box
-          sx={{
-            px: { xs: 2, md: 2.5 },
-            py: 1.75,
-            borderBottom: '1px solid #e2e8f0',
-            bgcolor: '#fff',
-          }}
-        >
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ md: 'center' }}>
-            <Stack direction="row" alignItems="center" spacing={1.5} sx={{ flex: 1, minWidth: 0 }}>
-              {onBackToHub && (
-                <Button
-                  size="small"
-                  startIcon={<ArrowBack sx={{ fontSize: 18 }} />}
-                  onClick={onBackToHub}
-                  sx={{ textTransform: 'none', fontWeight: 700, color: '#64748b', flexShrink: 0 }}
-                >
-                  HR modules
-                </Button>
-              )}
-              <AccountBalance sx={{ color: LEDGER_ACCENT, fontSize: 28, flexShrink: 0, display: { xs: 'none', sm: 'block' } }} />
-              <Box sx={{ minWidth: 0 }}>
-                <Typography sx={{ fontWeight: 900, fontSize: '1.125rem', color: NAVY, lineHeight: 1.25 }}>
-                  Employee Account Ledger
-                </Typography>
-                <Stack direction="row" flexWrap="wrap" gap={0.75} alignItems="center" sx={{ mt: 0.5 }}>
-                  <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>
-                    {ledgerViewTitle}
-                  </Typography>
-                  {selectedEmployee && closingDisplay != null && (
-                    <Typography sx={{ fontSize: '0.75rem', fontWeight: 800, color: '#0f172a', fontFamily: 'ui-monospace, monospace' }}>
-                      Balance: {closingDisplay}
-                    </Typography>
-                  )}
-                </Stack>
-              </Box>
-            </Stack>
-            <Stack direction="row" spacing={1} flexShrink={0}>
-              <Tooltip title="Refresh">
-                <IconButton
-                  size="small"
-                  onClick={handleRefresh}
-                  disabled={loadingSummary || loadingEntries}
-                  sx={{ border: '1px solid #e2e8f0' }}
-                >
-                  <Refresh sx={{ fontSize: 20, color: LEDGER_ACCENT }} />
-                </IconButton>
-              </Tooltip>
-              <Button
+    <Box sx={{ width: '100%', minHeight: '100%', background: PAGE_BG, display: 'flex', flexDirection: 'column', pb: 3 }}>
+      <Box
+        sx={{
+          px: { xs: 2, md: 3 },
+          pt: { xs: 1.5, md: 2 },
+          pb: { xs: 2.25, md: 2.75 },
+          background: HERO_BG,
+          boxShadow: '0 8px 32px rgba(26, 107, 102, 0.22)',
+        }}
+      >
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.25 }}>
+          {onBackToHub && (
+            <Button
+              onClick={onBackToHub}
+              startIcon={<ArrowBack sx={{ fontSize: 18 }} />}
+              sx={{
+                textTransform: 'none',
+                fontWeight: 600,
+                fontSize: '0.875rem',
+                color: 'rgba(255,255,255,0.92)',
+                minWidth: 0,
+                px: 0.5,
+                mr: 0.5,
+                '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' },
+              }}
+            >
+              Go Back
+            </Button>
+          )}
+          <Box
+            sx={{
+              width: 46,
+              height: 46,
+              borderRadius: '14px',
+              bgcolor: 'rgba(255,255,255,0.2)',
+              border: '1px solid rgba(255,255,255,0.35)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <AccountBalance sx={{ fontSize: 26, color: '#fff' }} />
+          </Box>
+          <Box sx={{ flex: '1 1 200px', minWidth: 0 }}>
+            <Typography sx={{ fontWeight: 800, fontSize: '1.2rem', color: '#fff', letterSpacing: '-0.03em', lineHeight: 1.15 }}>
+              Employee account ledger
+            </Typography>
+            <Typography sx={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.88)', mt: 0.25 }}>{ledgerViewTitle}</Typography>
+          </Box>
+          {selectedEmployee && closingDisplay != null && (
+            <Chip
+              label={`Balance ${closingDisplay}`}
+              size="small"
+              sx={{
+                fontWeight: 800,
+                fontFamily: 'ui-monospace, monospace',
+                bgcolor: 'rgba(255,255,255,0.95)',
+                color: LEDGER_DEEP,
+                border: 'none',
+              }}
+            />
+          )}
+          <Stack direction="row" spacing={0.75} sx={{ ml: { sm: 'auto' } }}>
+            <Tooltip title="Refresh">
+              <IconButton
                 size="small"
-                variant="contained"
-                startIcon={pdfLoading ? <CircularProgress size={16} color="inherit" /> : <PictureAsPdf />}
-                onClick={handleDownloadPdf}
-                disabled={pdfLoading || loadingEntries || visibleEntries.length === 0}
-                sx={{ textTransform: 'none', fontWeight: 800, bgcolor: LEDGER_ACCENT, '&:hover': { bgcolor: '#0f766e' } }}
+                onClick={handleRefresh}
+                disabled={loadingSummary || loadingEntries}
+                sx={{
+                  bgcolor: 'rgba(255,255,255,0.15)',
+                  color: '#fff',
+                  border: '1px solid rgba(255,255,255,0.28)',
+                  borderRadius: '10px',
+                  '&:hover': { bgcolor: 'rgba(255,255,255,0.28)' },
+                }}
               >
-                Download PDF
-              </Button>
-            </Stack>
+                <Refresh sx={{ fontSize: 20 }} />
+              </IconButton>
+            </Tooltip>
+            <Button
+              size="small"
+              variant="contained"
+              disableElevation
+              startIcon={pdfLoading ? <CircularProgress size={16} color="inherit" /> : <PictureAsPdf />}
+              onClick={handleDownloadPdf}
+              disabled={pdfLoading || loadingEntries || visibleEntries.length === 0}
+              sx={{
+                textTransform: 'none',
+                fontWeight: 700,
+                borderRadius: '10px',
+                color: '#0f172a',
+                bgcolor: CYAN_CTA,
+                px: 2.25,
+                boxShadow: '0 4px 14px rgba(34, 211, 238, 0.35)',
+                '&:hover': { bgcolor: CYAN_CTA_HOVER },
+                '&.Mui-disabled': { bgcolor: 'rgba(255,255,255,0.35)', color: 'rgba(255,255,255,0.7)' },
+              }}
+            >
+              Export PDF
+            </Button>
           </Stack>
         </Box>
+      </Box>
 
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: { xs: '1fr 1fr', lg: 'repeat(4, 1fr)' },
-            gap: 0,
-            borderBottom: '1px solid #e2e8f0',
-            bgcolor: '#fafbfc',
-          }}
-        >
-          {[
-            { label: 'On ledger', value: portfolioDisplay.total, accent: '#1A55E3' },
-            { label: 'Employee owes', value: fmtAmt(portfolioDisplay.receivable), accent: '#b91c1c' },
-            { label: 'Company owes', value: fmtAmt(portfolioDisplay.payable), accent: '#15803d' },
-            { label: 'Settled', value: portfolioDisplay.settledCount, accent: '#64748b' },
-          ].map((s, i) => (
-            <Box
-              key={s.label}
-              sx={{
-                px: 2,
-                py: 1.25,
-                borderRight: { lg: i < 3 ? '1px solid #e2e8f0' : 'none' },
-                borderBottom: { xs: i < 2 ? '1px solid #e2e8f0' : 'none', lg: 'none' },
-              }}
-            >
-              <Typography sx={{ fontSize: '0.62rem', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                {s.label}
-              </Typography>
-              <Typography sx={{ fontSize: '1.05rem', fontWeight: 900, color: s.accent, fontFamily: 'monospace', mt: 0.25 }}>
-                {s.value}
-              </Typography>
-            </Box>
-          ))}
-        </Box>
-
-        <CardContent sx={{ p: { xs: 1.5, md: 2.5 } }}>
-          <Box sx={{ ...FILTER_PANEL_SX, boxShadow: 'inset 0 1px 0 #fff' }}>
-            <Stack
-              direction={{ xs: 'column', sm: 'row' }}
-              alignItems={{ sm: 'center' }}
-              justifyContent="space-between"
-              spacing={1}
-              sx={{ mb: 2 }}
-            >
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <FilterList sx={{ fontSize: 20, color: LEDGER_ACCENT }} />
-                <Typography sx={{ fontWeight: 800, fontSize: '0.875rem', color: NAVY }}>Filters</Typography>
-              </Stack>
-              <Button
-                size="small"
-                variant="outlined"
-                startIcon={<ClearAll />}
-                onClick={resetAllFilters}
-                sx={{ textTransform: 'none', fontWeight: 700, borderColor: '#cbd5e1', color: '#475569', alignSelf: { xs: 'flex-start', sm: 'center' } }}
+      <Box sx={{ px: { xs: 2, md: 3 }, pt: 2, pb: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' }, gap: 1.5 }}>
+          {statTiles.map((s) => {
+            const Icon = s.icon;
+            const th = s.theme;
+            return (
+              <Box
+                key={s.label}
+                sx={{
+                  borderRadius: '12px',
+                  border: `1px solid ${th.border}`,
+                  bgcolor: SURFACE,
+                  px: 1.5,
+                  py: 1.35,
+                  boxShadow: '0 2px 12px rgba(15, 23, 42, 0.04)',
+                  background: `linear-gradient(145deg, ${SURFACE} 0%, ${th.iconBg} 120%)`,
+                }}
               >
-                Reset all filters
-              </Button>
-            </Stack>
-
-            <Box
-              sx={{
-                display: 'grid',
-                gridTemplateColumns: { xs: '1fr', md: '1.4fr 1fr', lg: '2fr 1.2fr 1fr' },
-                gap: 2,
-                alignItems: 'start',
-              }}
-            >
-              <Box>
-                <FormControl fullWidth size="small" sx={{ ...FIELD_SX, minWidth: 200 }}>
-                  <InputLabel id="ledger-emp-label" shrink>Employee account</InputLabel>
-                  <Select
-                    labelId="ledger-emp-label"
-                    label="Employee account"
-                    notched
-                    displayEmpty
-                    value={selectedEmpId}
-                    onChange={(e) => setSelectedEmpId(e.target.value)}
-                    MenuProps={{ PaperProps: { sx: { maxHeight: 360 } } }}
-                    renderValue={(val) => {
-                      if (!val) return 'All employees — combined view';
-                      const e = summaryByEmpId.get(String(val));
-                      return e ? `${e.emp_name}${e.designation ? ` · ${e.designation}` : ''}` : 'Employee account';
+                <Stack direction="row" alignItems="center" spacing={1.25}>
+                  <Box
+                    sx={{
+                      width: 42,
+                      height: 42,
+                      borderRadius: '11px',
+                      bgcolor: th.iconBg,
+                      border: `1px solid ${th.border}`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
                     }}
                   >
-                    <MenuItem value="">
-                      <Typography sx={{ fontWeight: 700, fontSize: '0.8125rem' }}>All employees</Typography>
-                    </MenuItem>
-                    {employeesForSelect.map((e) => (
-                        <MenuItem key={e.emp_id} value={String(e.emp_id)}>
-                          <Stack direction="row" justifyContent="space-between" width="100%" spacing={1}>
-                            <Typography sx={{ fontSize: '0.8125rem', fontWeight: 600 }}>
-                              {e.emp_name}
-                              {e.designation ? ` · ${e.designation}` : ''}
-                            </Typography>
-                            <Typography sx={{ fontSize: '0.75rem', color: '#475569', fontWeight: 700, fontFamily: 'ui-monospace, monospace', flexShrink: 0 }}>
-                              {fmtSignedBalance(e.closing_balance)}
-                            </Typography>
-                          </Stack>
-                        </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                    <Icon sx={{ fontSize: 21, color: th.value }} />
+                  </Box>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography sx={{ fontSize: '0.6875rem', fontWeight: 600, color: MUTED }}>{s.label}</Typography>
+                    <Typography sx={{ fontSize: '1.0625rem', fontWeight: 800, color: th.value, fontFamily: 'ui-monospace, monospace', lineHeight: 1.25, letterSpacing: '-0.02em' }}>
+                      {s.value}
+                    </Typography>
+                  </Box>
+                </Stack>
               </Box>
+            );
+          })}
+        </Box>
 
-              <Box>
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Narrow account list"
-                  placeholder="Name, designation, department"
-                  value={empPickerSearch}
-                  onChange={(e) => setEmpPickerSearch(e.target.value)}
-                  sx={FIELD_SX}
-                  InputLabelProps={{ shrink: true }}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <PersonSearch sx={{ fontSize: 20, color: '#94a3b8' }} />
-                      </InputAdornment>
-                    ),
-                  }}
-                />
-                {summaryHasMore && (
-                  <Button
-                    size="small"
-                    onClick={loadMoreSummary}
-                    disabled={summaryLoadingMore}
-                    sx={{ mt: 1, textTransform: 'none', fontWeight: 700 }}
-                  >
-                    {summaryLoadingMore ? 'Loading…' : `Load more accounts (${summary.length}/${summaryTotal})`}
-                  </Button>
-                )}
-              </Box>
-              <Box>
-                <FormControl fullWidth size="small" sx={{ ...FIELD_SX, minWidth: 160 }}>
-                  <InputLabel id="ledger-type-label" shrink>Transaction type</InputLabel>
-                  <Select
-                    labelId="ledger-type-label"
-                    label="Transaction type"
-                    notched
-                    value={entryType}
-                    onChange={(e) => setEntryType(e.target.value)}
-                  >
-                    {ENTRY_TYPES.map((t) => (
-                      <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Box>
-            </Box>
-
-            <Box
-              sx={{
-                display: 'grid',
-                gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: '1fr 1fr 1.2fr' },
-                gap: 2,
-                mt: 2,
-                alignItems: 'start',
-              }}
+        <SectionCard
+          title="Filters"
+          action={(
+            <Button
+              size="small"
+              onClick={resetAllFilters}
+              startIcon={<ClearAll sx={{ fontSize: 15 }} />}
+              sx={{ textTransform: 'none', fontWeight: 600, color: MUTED, fontSize: '0.8125rem', '&:hover': { color: LEDGER_DEEP, bgcolor: LEDGER_TINT } }}
             >
+              Reset all
+            </Button>
+          )}
+          bodySx={{ pt: 0.25 }}
+        >
+        <Stack spacing={1.75}>
+          <Box sx={filterRowGridSx}>
+            <FilterField label="Employee">
+              <Select
+                fullWidth
+                displayEmpty
+                value={selectedEmpId}
+                onChange={(e) => setSelectedEmpId(e.target.value)}
+                MenuProps={selectMenuProps}
+                sx={filterInputSx}
+                renderValue={(val) => {
+                  if (!val) return <FilterSelectValue>All employees</FilterSelectValue>;
+                  const e = summaryByEmpId.get(String(val));
+                  return (
+                    <FilterSelectValue>
+                      {e ? `${e.emp_name}${e.designation ? ` · ${e.designation}` : ''}` : 'Employee'}
+                    </FilterSelectValue>
+                  );
+                }}
+              >
+                <MenuItem value="">All employees</MenuItem>
+                {employeesForSelect.map((e) => (
+                  <MenuItem key={e.emp_id} value={String(e.emp_id)}>
+                    <Stack direction="row" justifyContent="space-between" width="100%" spacing={1}>
+                      <Typography sx={{ fontSize: '0.8125rem', fontWeight: 500 }} noWrap>{e.emp_name}{e.designation ? ` · ${e.designation}` : ''}</Typography>
+                      <Typography sx={{ fontSize: '0.75rem', color: MUTED, fontWeight: 600, fontFamily: 'ui-monospace, monospace', flexShrink: 0 }}>{fmtSignedBalance(e.closing_balance)}</Typography>
+                    </Stack>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FilterField>
+
+            <FilterField label="Transaction type">
+              <Select
+                fullWidth
+                displayEmpty
+                value={entryType}
+                onChange={(e) => setEntryType(e.target.value)}
+                MenuProps={selectMenuProps}
+                sx={filterInputSx}
+                renderValue={(val) => {
+                  const found = ENTRY_TYPES.find((t) => t.value === val);
+                  return <FilterSelectValue>{found?.label || 'All types'}</FilterSelectValue>;
+                }}
+              >
+                {ENTRY_TYPES.map((t) => (<MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>))}
+              </Select>
+            </FilterField>
+
+            <FilterField label="From">
               <TextField
                 fullWidth
-                size="small"
                 type="date"
-                label="From date"
-                InputLabelProps={{ shrink: true }}
                 value={entryFrom}
                 onChange={(e) => setEntryFrom(e.target.value)}
-                sx={FIELD_SX}
-              />
-              <TextField
-                fullWidth
-                size="small"
-                type="date"
-                label="To date"
-                InputLabelProps={{ shrink: true }}
-                value={entryTo}
-                onChange={(e) => setEntryTo(e.target.value)}
-                sx={FIELD_SX}
-              />
-              <TextField
-                fullWidth
-                size="small"
-                label="Search in ledger"
-                placeholder="Bill number or particulars"
-                value={entrySearch}
-                onChange={(e) => setEntrySearch(e.target.value)}
-                sx={FIELD_SX}
-                InputLabelProps={{ shrink: true }}
+                sx={filterDateSx(!!entryFrom)}
                 InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <Search sx={{ fontSize: 18, color: '#94a3b8' }} />
+                  endAdornment: (
+                    <InputAdornment position="end" sx={filterAdornmentSx}>
+                      <CalendarToday />
                     </InputAdornment>
                   ),
                 }}
               />
+            </FilterField>
+
+            <FilterField label="To">
+              <TextField
+                fullWidth
+                type="date"
+                value={entryTo}
+                onChange={(e) => setEntryTo(e.target.value)}
+                sx={filterDateSx(!!entryTo)}
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end" sx={filterAdornmentSx}>
+                      <CalendarToday />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </FilterField>
+
+            <Box sx={{ gridColumn: { xs: '1 / -1', sm: 'span 2', lg: selectedEmpId ? 'span 2' : 'span 1' } }}>
+              <FilterField label="Search">
+                <TextField
+                  fullWidth
+                  placeholder="Bill #, name, particulars…"
+                  value={entrySearch}
+                  onChange={(e) => setEntrySearch(e.target.value)}
+                  sx={filterInputSx}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={filterAdornmentSx}>
+                        <Search />
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </FilterField>
             </Box>
 
             {!selectedEmpId && (
-              <Box sx={{ mt: 2 }}>
-                  <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', mb: 0.75, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    Account balance (all-employees view)
-                  </Typography>
-                  <ToggleButtonGroup
-                    exclusive
-                    size="small"
-                    value={balanceFilter}
-                    onChange={(_, v) => v && setBalanceFilter(v)}
-                    sx={{
-                      flexWrap: 'wrap',
-                      gap: 0.75,
-                      '& .MuiToggleButtonGroup-grouped': { border: '1px solid #cbd5e1 !important', mx: 0 },
-                      '& .MuiToggleButton-root': {
-                        textTransform: 'none',
-                        fontWeight: 600,
-                        fontSize: '0.78rem',
-                        px: 1.5,
-                        py: 0.5,
-                        borderRadius: '8px !important',
-                      },
-                    }}
-                  >
-                    <ToggleButton value="ALL">All</ToggleButton>
-                    <ToggleButton value="OWES" sx={{ '&.Mui-selected': { bgcolor: '#fef2f2', color: '#b91c1c' } }}>Employee owes</ToggleButton>
-                    <ToggleButton value="WE_OWE" sx={{ '&.Mui-selected': { bgcolor: '#f0fdf4', color: '#15803d' } }}>Company owes</ToggleButton>
-                    <ToggleButton value="ZERO">Settled</ToggleButton>
-                  </ToggleButtonGroup>
-              </Box>
-            )}
-
-            {activeFilterChips.length > 0 && (
-              <Stack direction="row" flexWrap="wrap" gap={0.75} sx={{ mt: 2, pt: 1.5, borderTop: '1px dashed #cbd5e1' }}>
-                <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', alignSelf: 'center', mr: 0.5 }}>
-                  Active:
-                </Typography>
-                {activeFilterChips.map((c) => (
-                  <Chip
-                    key={c.key}
-                    size="small"
-                    label={c.label}
-                    onDelete={c.clear}
-                    sx={{ fontWeight: 600, fontSize: '0.72rem', bgcolor: '#fff', border: '1px solid #e2e8f0' }}
-                  />
-                ))}
-              </Stack>
+              <FilterField label="Balance">
+                <Select
+                  fullWidth
+                  value={balanceFilter}
+                  onChange={(e) => setBalanceFilter(e.target.value)}
+                  MenuProps={selectMenuProps}
+                  sx={filterInputSx}
+                  renderValue={(val) => {
+                    const labels = { ALL: 'All accounts', OWES: 'Employee owes', WE_OWE: 'Company owes', ZERO: 'Settled' };
+                    return <FilterSelectValue>{labels[val] || 'All accounts'}</FilterSelectValue>;
+                  }}
+                >
+                  <MenuItem value="ALL">All accounts</MenuItem>
+                  <MenuItem value="OWES">Employee owes</MenuItem>
+                  <MenuItem value="WE_OWE">Company owes</MenuItem>
+                  <MenuItem value="ZERO">Settled</MenuItem>
+                </Select>
+              </FilterField>
             )}
           </Box>
 
-          {selectedEmployee && (
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 1, mt: 2 }}>
-              {[
-                { label: 'Starting balance', value: fmtAmt(selectedEmployee.opening_balance) },
-                { label: 'Total debit (filtered)', value: fmtAmt(entryTotals.debit), color: '#b91c1c' },
-                { label: 'Total credit (filtered)', value: fmtAmt(entryTotals.credit), color: '#15803d' },
-                {
-                  label: 'Account balance',
-                  value: fmtSignedBalance(closingBalance ?? selectedEmployee.closing_balance),
-                  color: '#0f172a',
-                },
-              ].map((s) => (
-                <Box key={s.label} sx={{ p: 1.25, borderRadius: '10px', bgcolor: '#fff', border: '1px solid #e2e8f0' }}>
-                  <Typography sx={{ fontSize: '0.65rem', color: '#64748b', fontWeight: 600 }}>{s.label}</Typography>
-                  <Typography sx={{ fontSize: '0.95rem', fontWeight: 800, fontFamily: 'ui-monospace, monospace', color: s.color || '#0f172a', mt: 0.25 }}>
-                    {s.value}
-                  </Typography>
-                </Box>
-              ))}
-            </Box>
+          {!selectedEmpId && (
+            <FilterField label="Employee list">
+              <TextField
+                fullWidth
+                placeholder="Filter dropdown names…"
+                value={empPickerSearch}
+                onChange={(e) => setEmpPickerSearch(e.target.value)}
+                sx={filterInputSx}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start" sx={filterAdornmentSx}>
+                      <PersonSearch />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </FilterField>
           )}
+        </Stack>
 
-          <Box sx={{ mt: 3, mb: 1.5, pl: 1.5, borderLeft: `4px solid ${LEDGER_ACCENT}` }}>
-            <Stack direction="row" alignItems="center" flexWrap="wrap" gap={1}>
-              <Typography sx={{ fontWeight: 900, fontSize: '1rem', color: NAVY }}>Ledger transactions</Typography>
-              <Chip size="small" label={`${visibleEntries.length} rows`} sx={{ fontWeight: 800, bgcolor: LEDGER_TINT, color: '#0f766e' }} />
-              {(loadingSummary || loadingEntries) && <CircularProgress size={18} sx={{ color: LEDGER_ACCENT }} />}
-              <Typography sx={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-                Newest first · scroll down for older · date & time order
-              </Typography>
-            </Stack>
+        {(summaryHasMore || activeFilterChips.length > 0) && (
+          <Stack direction="row" flexWrap="wrap" gap={0.75} alignItems="center" sx={{ mt: 1, pt: 1, borderTop: `1px solid ${ROW_LINE}` }}>
+            {summaryHasMore && (
+              <Button size="small" variant="text" onClick={loadMoreSummary} disabled={summaryLoadingMore} sx={{ textTransform: 'none', fontWeight: 600, color: LEDGER_PRIMARY }}>
+                {summaryLoadingMore ? 'Loading…' : `Load more accounts (${summary.length}/${summaryTotal})`}
+              </Button>
+            )}
+            {activeFilterChips.map((c) => (
+              <Chip key={c.key} size="small" label={c.label} onDelete={c.clear} sx={{ height: 26, fontSize: '0.75rem', bgcolor: '#fff', border: `1px solid ${BORDER}` }} />
+            ))}
+          </Stack>
+        )}
+
+        {selectedEmployee && (
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }, gap: 1, mt: 1.25 }}>
+            {[
+              { label: 'Opening', value: fmtAmt(selectedEmployee.opening_balance) },
+              { label: 'Debit', value: fmtAmt(entryTotals.debit), color: '#dc2626' },
+              { label: 'Credit', value: fmtAmt(entryTotals.credit), color: '#16a34a' },
+              { label: 'Balance', value: fmtSignedBalance(closingBalance ?? selectedEmployee.closing_balance), color: INK },
+            ].map((s) => (
+              <Box key={s.label} sx={{ px: 1.25, py: 0.9, borderRadius: '10px', border: `1px solid ${BORDER}`, bgcolor: '#fafbfc' }}>
+                <Typography sx={{ fontSize: '0.6875rem', fontWeight: 700, color: MUTED }}>{s.label}</Typography>
+                <Typography sx={{ fontSize: '0.9375rem', fontWeight: 800, fontFamily: 'ui-monospace, monospace', color: s.color || INK }}>{s.value}</Typography>
+              </Box>
+            ))}
           </Box>
+        )}
+        </SectionCard>
 
-          <TableContainer
-            ref={scrollRef}
-            component={Paper}
-            elevation={0}
-            sx={{
-              border: '1px solid #cbd5e1',
-              borderRadius: '12px',
-              maxHeight: { xs: 440, md: 560 },
-              bgcolor: '#fff',
-              overflow: 'auto',
-            }}
-          >
-            <Table size="small" stickyHeader sx={{ ...LEDGER_TABLE_SX, minWidth: showEmployeeColumn ? 960 : 820 }}>
-              {ledgerColGroup(showEmployeeColumn)}
-              <TableHead>
+        <SectionCard
+          title="Transactions"
+          action={(
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Box
+                sx={{
+                  minWidth: 28,
+                  height: 28,
+                  px: 0.75,
+                  borderRadius: '999px',
+                  bgcolor: LEDGER_DEEP,
+                  color: '#fff',
+                  fontSize: '0.75rem',
+                  fontWeight: 800,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                {visibleEntries.length}
+              </Box>
+              {(loadingSummary || loadingEntries) && <CircularProgress size={16} sx={{ color: LEDGER_PRIMARY }} />}
+              <Typography sx={{ fontSize: '0.75rem', color: MUTED, display: { xs: 'none', sm: 'block' } }}>Newest first</Typography>
+            </Stack>
+          )}
+          bodySx={{ p: { xs: 1.25, md: 1.5 }, pt: { xs: 1, md: 1.25 } }}
+        >
+        <TableContainer
+          ref={scrollRef}
+          sx={{
+            overflowX: 'hidden',
+            border: `1px solid ${BORDER}`,
+            borderRadius: '12px',
+            bgcolor: SURFACE,
+            width: '100%',
+          }}
+        >
+          <Table stickyHeader size="small" sx={tableSx}>
+            {ledgerColGroup(showEmployeeColumn)}
+            <TableHead>
+              <TableRow>
+                {tableHeaders.map((h, i) => (
+                  <TableCell
+                    key={h}
+                    sx={thCell(i === lastCol)}
+                    align={h === 'Debit' || h === 'Credit' || h === 'Balance' ? 'right' : h === 'Actions' ? 'center' : 'left'}
+                  >
+                    {h}
+                  </TableCell>
+                ))}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loadingEntries && visibleEntries.length === 0 ? (
                 <TableRow>
-                  {(showEmployeeColumn
-                    ? ['Date & time', 'Employee', 'Cash/Bank', 'Bill #', 'Particulars', 'Debit (Rs)', 'Credit (Rs)', 'Balance (Rs)', 'Type']
-                    : ['Date & time', 'Cash/Bank', 'Bill #', 'Particulars', 'Debit (Rs)', 'Credit (Rs)', 'Balance (Rs)', 'Type']
-                  ).map((h) => (
-                    <TableCell
-                      key={h}
-                      sx={TABLE_HEAD_CELL_SX}
-                      align={h.includes('Debit') || h.includes('Credit') || h.includes('Balance') ? 'right' : 'left'}
-                    >
-                      {h}
-                    </TableCell>
-                  ))}
+                  <TableCell colSpan={colSpan} align="center" sx={{ py: 6, borderRight: 'none' }}>
+                    <CircularProgress size={28} sx={{ color: LEDGER_PRIMARY }} />
+                  </TableCell>
                 </TableRow>
-              </TableHead>
-              <TableBody>
-                {loadingEntries && visibleEntries.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={colSpan} align="center" sx={{ py: 6 }}>
-                      <CircularProgress size={28} sx={{ color: BRAND.primary.blue }} />
-                    </TableCell>
-                  </TableRow>
-                ) : visibleEntries.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={colSpan} align="center" sx={{ py: 4, color: '#94a3b8' }}>
-                      No transactions match your filters
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  visibleEntries.map((row, idx) => {
-                    const chip = typeChipStyle(row.trnx_type);
-                    return (
-                      <TableRow
-                        key={row.el_id}
-                        hover
-                        sx={{ bgcolor: idx % 2 === 0 ? '#fff' : '#f8fafc', '&:last-child td': { borderBottom: 'none' } }}
+              ) : visibleEntries.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={colSpan} align="center" sx={{ py: 4, color: MUTED, borderRight: 'none' }}>
+                    No transactions match your filters
+                  </TableCell>
+                </TableRow>
+              ) : (
+                visibleEntries.map((row, idx) => {
+                  const chip = typeChipStyle(row.trnx_type);
+                  const doc = parseLedgerDocument(row);
+                  const actionKey = `${row.el_id}-view`;
+                  const loadingAction = docLoadingKey === actionKey || docLoadingKey === `${row.el_id}-print`;
+                  const dateParts = fmtDateTableParts(row.created_at);
+                  const zebra = idx % 2 === 1 ? '#f8fafc' : SURFACE;
+                  const td = (last, extra = {}) => tdCell(last, { bgcolor: zebra, ...extra });
+                  return (
+                    <TableRow key={row.el_id} hover sx={{ '&:hover td': { bgcolor: `${LEDGER_TINT} !important` } }}>
+                      <TableCell
+                        sx={td(false, {
+                          color: MUTED,
+                          fontSize: '0.75rem',
+                          maxWidth: 'none',
+                          overflow: 'visible',
+                          whiteSpace: 'normal',
+                          lineHeight: 1.35,
+                        })}
+                        title={fmtDateTime(row.created_at)}
                       >
-                        <TableCell sx={{ fontSize: '0.72rem', whiteSpace: 'nowrap', lineHeight: 1.35 }}>
-                          {fmtDateTime(row.created_at)}
-                        </TableCell>
-                        {showEmployeeColumn && (
-                          <TableCell sx={{ fontSize: '0.8125rem', fontWeight: 600, maxWidth: 140 }}>
-                            <Button
-                              size="small"
-                              onClick={() => setSelectedEmpId(String(row.emp_id))}
-                              sx={{ textTransform: 'none', fontWeight: 700, fontSize: '0.8125rem', p: 0, minWidth: 0, justifyContent: 'flex-start', color: '#1347c4' }}
-                            >
-                              {row.emp_name || '—'}
-                            </Button>
-                          </TableCell>
+                        {dateParts ? (
+                          <>
+                            <Box component="span" sx={{ display: 'block', fontWeight: 600, color: INK }}>{dateParts.date}</Box>
+                            <Box component="span" sx={{ display: 'block', fontSize: '0.6875rem', color: MUTED_SOFT }}>{dateParts.time}</Box>
+                          </>
+                        ) : (
+                          '—'
                         )}
-                        <TableCell sx={{ fontSize: '0.72rem', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap' }}>
-                          {row.payment_channel || (row.trnx_type === 'SALARY_PAYMENT' ? 'Salary' : '—')}
+                      </TableCell>
+                      {showEmployeeColumn && (
+                        <TableCell sx={td(false, cellEllipsis)}>
+                          <Button
+                            size="small"
+                            onClick={() => setSelectedEmpId(String(row.emp_id))}
+                            title={row.emp_name || ''}
+                            sx={{
+                              textTransform: 'none',
+                              fontWeight: 600,
+                              fontSize: '0.8125rem',
+                              p: 0,
+                              minWidth: 0,
+                              maxWidth: '100%',
+                              color: LEDGER_DEEP,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              display: 'block',
+                              textAlign: 'left',
+                              '&:hover': { color: LEDGER_PRIMARY, bgcolor: 'transparent' },
+                            }}
+                          >
+                            {row.emp_name || '—'}
+                          </Button>
                         </TableCell>
-                        <TableCell sx={{ fontSize: '0.72rem', fontWeight: 600 }}>{row.bill_no || '—'}</TableCell>
-                        <TableCell sx={{ maxWidth: 280, fontSize: '0.75rem' }}>{row.details || '—'}</TableCell>
-                        <TableCell align="right" sx={{ color: row.debit_amount > 0 ? '#b91c1c' : '#cbd5e1', fontFamily: 'monospace', fontSize: '0.75rem' }}>
-                          {row.debit_amount > 0 ? fmtAmt(row.debit_amount) : (row.trnx_type === 'SALARY_PAYMENT' ? '—' : '—')}
-                        </TableCell>
-                        <TableCell align="right" sx={{ color: row.credit_amount > 0 ? '#15803d' : '#cbd5e1', fontFamily: 'monospace', fontSize: '0.75rem' }}>
-                          {row.credit_amount > 0 ? fmtAmt(row.credit_amount) : '—'}
-                        </TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 800, fontFamily: 'ui-monospace, monospace', fontSize: '0.75rem', color: balanceTone(row.closing_balance) }}>
-                          {fmtSignedBalance(row.closing_balance)}
-                        </TableCell>
-                        <TableCell sx={{ fontSize: '0.72rem', fontWeight: 700, color: chip.color }}>
-                          {typeLabel(row.trnx_type)}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
-            <HrLoadMoreTrigger
-              rootRef={scrollRef}
-              hasMore={entriesHasMore}
-              loading={entriesLoadingMore}
-              onLoadMore={loadMoreEntries}
-              label="Load older transactions"
-            />
-          </TableContainer>
-        </CardContent>
-      </Card>
+                      )}
+                      <TableCell sx={td(false, { ...cellEllipsis, fontSize: '0.75rem', color: MUTED })} title={row.payment_channel || ''}>
+                        {row.payment_channel || (row.trnx_type === 'SALARY_PAYMENT' ? 'Salary' : '—')}
+                      </TableCell>
+                      <TableCell sx={td(false, { ...cellEllipsis, fontSize: '0.75rem', fontWeight: 600 })} title={row.bill_no || ''}>
+                        {row.bill_no || '—'}
+                      </TableCell>
+                      <TableCell sx={td(false, { overflow: 'hidden', whiteSpace: 'normal' })}>
+                        <ParticularsText text={row.details} />
+                      </TableCell>
+                      <TableCell align="right" sx={td(false, debitCellSx(row.debit_amount > 0))}>
+                        {row.debit_amount > 0 ? fmtAmt(row.debit_amount) : '—'}
+                      </TableCell>
+                      <TableCell align="right" sx={td(false, creditCellSx(row.credit_amount > 0))}>
+                        {row.credit_amount > 0 ? fmtAmt(row.credit_amount) : '—'}
+                      </TableCell>
+                      <TableCell align="right" sx={td(false, { ...balanceCellSx, color: balanceTone(row.closing_balance) })}>
+                        {fmtSignedBalance(row.closing_balance)}
+                      </TableCell>
+                      <TableCell align="center" sx={td(false, { overflow: 'visible', maxWidth: 'none' })}>
+                        <Chip
+                          label={typeShortLabel(row.trnx_type)}
+                          title={typeLabel(row.trnx_type)}
+                          size="small"
+                          sx={{
+                            height: 26,
+                            maxWidth: '100%',
+                            fontWeight: 700,
+                            fontSize: '0.6875rem',
+                            bgcolor: chip.bgcolor,
+                            color: chip.color,
+                            border: chip.border,
+                            borderRadius: '999px',
+                            '& .MuiChip-label': { px: 1, overflow: 'hidden', textOverflow: 'ellipsis' },
+                          }}
+                        />
+                      </TableCell>
+                      <TableCell align="center" sx={td(true, { overflow: 'visible', maxWidth: 'none', px: 0.5 })}>
+                        {doc ? (
+                          <Stack direction="row" spacing={0.35} justifyContent="center" flexWrap="nowrap">
+                            <Tooltip title={doc.kind === 'salary' ? 'Salary receipt' : 'View receipt'}>
+                              <span>
+                                <IconButton size="small" disabled={loadingAction} onClick={() => openLedgerDocument(row, 'view')} sx={actionIconSx}>
+                                  {loadingAction && docLoadingKey === actionKey ? <CircularProgress size={14} /> : doc.kind === 'salary' ? <OpenInNew sx={{ fontSize: 16 }} /> : <ReceiptLong sx={{ fontSize: 16 }} />}
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            {doc.kind !== 'salary' && (
+                              <Tooltip title="Print A5">
+                                <span>
+                                  <IconButton size="small" disabled={loadingAction} onClick={() => openLedgerDocument(row, 'print')} sx={actionIconSx}>
+                                    {loadingAction && docLoadingKey === `${row.el_id}-print` ? <CircularProgress size={14} /> : <Print sx={{ fontSize: 16 }} />}
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            )}
+                          </Stack>
+                        ) : (
+                          <Typography sx={{ fontSize: '0.65rem', color: '#cbd5e1' }}>—</Typography>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+          <HrLoadMoreTrigger rootRef={scrollRef} hasMore={entriesHasMore} loading={entriesLoadingMore} onLoadMore={loadMoreEntries} label="Load older transactions" />
+        </TableContainer>
+        </SectionCard>
+      </Box>
+
+      <EmployeeReceiveReceiptDialog
+        open={receiveOpen && !!receiveReceipt}
+        onClose={() => { setReceiveOpen(false); setReceiveReceipt(null); }}
+        receipt={receiveReceipt}
+        employeeOptions={activeEmployees}
+        onNotify={showSnack}
+      />
+
+      <SalaryAdvanceVoucherDialog
+        open={!!voucherAdvance}
+        onClose={() => setVoucherAdvance(null)}
+        advance={voucherAdvance}
+        paymentAccounts={paymentAccounts}
+        employeeOptions={activeEmployees}
+        onNotify={showSnack}
+      />
+
+      <Snackbar open={snack.open} autoHideDuration={3500} onClose={() => setSnack((s) => ({ ...s, open: false }))} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}>
+        <Alert severity={snack.severity} sx={{ borderRadius: '12px' }}>{snack.msg}</Alert>
+      </Snackbar>
     </Box>
   );
 }

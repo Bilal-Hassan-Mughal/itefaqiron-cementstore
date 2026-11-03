@@ -111,7 +111,8 @@ import {
   Money as MoneyIcon,
   MoreVert as MoreVertIcon,
   Folder as FolderIcon,
-  FolderOpen as FolderOpenIcon
+  FolderOpen as FolderOpenIcon,
+  AssignmentReturn as ReturnIcon,
 } from '@mui/icons-material';
 
 const EMPTY_PRODUCT_FORM_DATA = {
@@ -1296,7 +1297,9 @@ function PurchasesPageContent() {
       const purchasesRes = await fetch('/api/purchases?list=true');
       if (purchasesRes.ok) {
         const purchasesData = await purchasesRes.json();
-        setPurchases(Array.isArray(purchasesData) ? purchasesData : []);
+        const list = Array.isArray(purchasesData) ? purchasesData : [];
+        setPurchases(list);
+        return list;
       }
     } catch (error) {
       console.error('Error fetching purchase list:', error);
@@ -1308,6 +1311,7 @@ function PurchasesPageContent() {
     } finally {
       setListLoading(false);
     }
+    return [];
   }, []);
 
   const ensureFormLookups = useCallback(async () => {
@@ -2246,11 +2250,6 @@ function PurchasesPageContent() {
       return;
     }
 
-    if (purchaseType === 'return' && !selectedPurchaseForReturn) {
-      alert('Please select a purchase to return');
-      return;
-    }
-
     if (formData.purchase_details.length === 0) {
       alert('Please add at least one product to the purchase');
       return;
@@ -2741,79 +2740,136 @@ function PurchasesPageContent() {
     router.push(FINANCE_LEDGER_PATH);
   };
 
-  // Handle purchase search for returns - filter by selected supplier
-  const handlePurchaseSearch = (searchValue) => {
-    // If no supplier selected, don't search
-    if (!formSelectedCustomer) {
+  const samePurchaseCustomerId = (purchaseCusId, supplierCusId) =>
+    String(purchaseCusId ?? '') === String(supplierCusId ?? '');
+
+  /** Build return dropdown options (supplier-scoped when set; global search by invoice / pur_id when typing) */
+  const refreshPurchaseReturnOptions = useCallback((searchValue = '', purchasesOverride = null) => {
+    const q = String(searchValue || '').trim().toLowerCase();
+    const supplierId = formSelectedCustomer?.cus_id ?? formData.cus_id;
+    const source = purchasesOverride ?? purchases;
+
+    let pool = source.filter((p) => p.purchase_type !== 'return');
+
+    if (supplierId != null && supplierId !== '') {
+      pool = pool.filter((p) => samePurchaseCustomerId(p.cus_id, supplierId));
+    } else if (!q) {
       setPurchaseSearchResults([]);
       return;
     }
 
-    if (!searchValue || searchValue.trim() === '') {
-      // Show all purchases from the selected supplier if search is empty
-      const supplierPurchases = purchases.filter(purchase => purchase.cus_id === formSelectedCustomer.cus_id);
-      setPurchaseSearchResults(supplierPurchases);
+    if (!q) {
+      setPurchaseSearchResults(pool.slice(0, 50));
       return;
     }
 
-    const searchLower = searchValue.toLowerCase();
-    // Filter purchases by selected supplier AND search term
-    const results = purchases.filter(purchase => {
-      // Only show purchases from selected supplier
-      if (purchase.cus_id !== formSelectedCustomer.cus_id) {
-        return false;
-      }
-      // Then filter by search term
-      return (
-        purchase.invoice_number?.toLowerCase().includes(searchLower) ||
-        purchase.pur_id?.toString().includes(searchLower)
-      );
+    const results = pool.filter((p) => {
+      const invoice = (p.invoice_number || '').toLowerCase();
+      const idStr = String(p.pur_id ?? '');
+      const supplierName = (p.customer?.cus_name || '').toLowerCase();
+      return invoice.includes(q) || idStr.includes(q) || supplierName.includes(q);
     });
 
-    setPurchaseSearchResults(results);
+    setPurchaseSearchResults(results.slice(0, 50));
+  }, [purchases, formSelectedCustomer, formData.cus_id]);
+
+  const handlePurchaseSearch = (searchValue) => {
+    refreshPurchaseReturnOptions(searchValue);
   };
 
-  // Handle loading purchase data for return
-  const handleLoadPurchaseForReturn = (purchase) => {
-    console.log('📦 Loading purchase for return:', purchase);
+  useEffect(() => {
+    if (purchaseType === 'return' && currentView === 'create') {
+      refreshPurchaseReturnOptions('');
+    }
+  }, [formSelectedCustomer, purchaseType, currentView, purchases.length, refreshPurchaseReturnOptions]);
 
-    // Set the selected purchase
+  const applyPurchaseForReturnForm = useCallback((purchase, customerRows = customers) => {
     setSelectedPurchaseForReturn(purchase);
-
-    // Load purchase data into form
-    const customer = customers.find(c => c.cus_id === purchase.cus_id);
-    setFormSelectedCustomer(customer || null);
-
-    // Load all purchase details
-    setFormData(prev => ({
+    applyPurchaseToForm(purchase, customerRows);
+    setFormData((prev) => ({
       ...prev,
-      cus_id: purchase.cus_id,
-      store_id: purchase.store_id?.toString() || '',
-      total_amount: purchase.total_amount.toString(),
-      unloading_amount: purchase.unloading_amount.toString(),
-      fare_amount: purchase.fare_amount.toString(),
-      transport_amount: purchase.transport_amount?.toString() || '',
-      labour_amount: purchase.labour_amount?.toString() || '',
-      out_labour_amount: purchase.out_labour_amount?.toString() || '',
-      out_delivery_amount: purchase.out_delivery_amount?.toString() || '',
-      incity_own_labour: purchase.incity_own_labour?.toString() || '',
-      incity_own_delivery: purchase.incity_own_delivery?.toString() || '',
-      incity_charges_total: purchase.incity_charges_total?.toString() || '',
-      include_incity: purchase.include_incity || false,
-      include_labour: purchase.include_labour || false,
-      include_cargo_in_costprice: purchase.include_cargo_in_costprice || false,
-      discount: purchase.discount.toString(),
-      vehicle_no: purchase.vehicle_no || '',
-      purchase_details: purchase.purchase_details?.map(detail => ({
-        ...detail,
-        // For return, negate the quantity
-        qnty: detail.qnty
-      })) || []
+      date: getTodayDateStr(),
+      invoice_number: '',
+      cash_payment: '',
+      bank_payment: '',
     }));
-
-    // Close search
+    const customer = customerRows.find((c) => c.cus_id === purchase.cus_id);
+    setCustomerSearchTerm(customer?.cus_name || purchase.customer?.cus_name || '');
     setPurchaseSearchOpen(false);
     setPurchaseSearchResults([]);
+  }, [applyPurchaseToForm, customers]);
+
+  // Load purchase into return entry (from return form autocomplete or list action)
+  const handleLoadPurchaseForReturn = (purchase) => {
+    if (!purchase?.pur_id) return;
+    setPurchaseType('return');
+    setEditingPurchase(null);
+    applyPurchaseForReturnForm(purchase);
+  };
+
+  const handleStartPurchaseReturnFromList = async (purchase, e) => {
+    if (e) e.stopPropagation();
+    if (!purchase?.pur_id) return;
+
+    setCurrentView('create');
+    setEditPurchaseLoading(true);
+    try {
+      await ensureFormLookups();
+
+      let full = purchaseDetailCacheRef.current.get(purchase.pur_id);
+      if (!full?.purchase_details?.length) {
+        const res = await fetch(`/api/purchases?id=${purchase.pur_id}`);
+        if (res.ok) {
+          full = await res.json();
+          purchaseDetailCacheRef.current.set(full.pur_id, full);
+        } else {
+          full = purchase;
+        }
+      }
+
+      if (full.purchase_type === 'return') {
+        setSnackbar({
+          open: true,
+          message: 'This bill is already a purchase return — pick the original purchase instead',
+          severity: 'warning',
+        });
+        return;
+      }
+
+      if (!full.purchase_details?.length) {
+        setSnackbar({
+          open: true,
+          message: 'Could not load line items for this purchase',
+          severity: 'error',
+        });
+        return;
+      }
+
+      let customerRows = customers;
+      if (!customerRows.length) {
+        const customersRes = await fetch('/api/customers?dropdown=true');
+        if (customersRes.ok) customerRows = await customersRes.json();
+      }
+
+      setPurchaseType('return');
+      setEditingPurchase(null);
+      applyPurchaseForReturnForm(full, customerRows);
+
+      setSnackbar({
+        open: true,
+        message: `Purchase #${full.pur_id} loaded — complete return invoice and save`,
+        severity: 'info',
+      });
+    } catch (error) {
+      console.error('Error loading purchase for return:', error);
+      setSnackbar({
+        open: true,
+        message: 'Could not open purchase return',
+        severity: 'error',
+      });
+    } finally {
+      setEditPurchaseLoading(false);
+    }
   };
 
   const handleCloseViewDialog = () => {
@@ -3767,6 +3823,16 @@ function PurchasesPageContent() {
                                   <EditIcon sx={{ fontSize: 17 }} />
                                 </IconButton>
                               </Tooltip>
+                              <Tooltip title="Purchase return">
+                                <IconButton
+                                  size="small"
+                                  sx={{ color: '#7c3aed', p: 0.4 }}
+                                  onMouseEnter={() => prefetchPurchaseForEdit(purchase.pur_id)}
+                                  onClick={(ev) => handleStartPurchaseReturnFromList(purchase, ev)}
+                                >
+                                  <ReturnIcon sx={{ fontSize: 17 }} />
+                                </IconButton>
+                              </Tooltip>
                               {isAdmin && (
                                 <Tooltip title="Delete">
                                   <IconButton size="small" color="error" onClick={() => handleDelete(purchase.pur_id)} sx={{ p: 0.4 }}>
@@ -3899,8 +3965,8 @@ function PurchasesPageContent() {
                 minWidth: { lg: 140 },
                 flexShrink: 0,
               }}>
-                {purchaseType === 'return' && selectedPurchaseForReturn
-                  ? `Return #${selectedPurchaseForReturn.pur_id}`
+                {purchaseType === 'return'
+                  ? (selectedPurchaseForReturn ? `Return for #${selectedPurchaseForReturn.pur_id}` : 'Direct purchase return')
                   : 'Purchase entry'}
               </Typography>
 
@@ -4286,32 +4352,40 @@ function PurchasesPageContent() {
 
                   {purchaseType === 'return' && (
                     <Box sx={PURCHASE_ENTRY_CELL_SX}>
-                      <Typography sx={PURCHASE_ENTRY_LABEL_SX}>SELECT PURCHASE</Typography>
+                      <Typography sx={PURCHASE_ENTRY_LABEL_SX}>
+                        LINK PURCHASE <Box component="span" sx={{ fontWeight: 500, opacity: 0.85 }}>(optional)</Box>
+                      </Typography>
                       <Autocomplete
                         size="small"
                         open={purchaseSearchOpen}
                         onOpen={() => {
                           setPurchaseSearchOpen(true);
-                          if (formSelectedCustomer) {
-                            setPurchaseSearchResults(purchases.filter(p => p.cus_id === formSelectedCustomer.cus_id));
-                          }
+                          void (async () => {
+                            const list = purchases.length > 0 ? purchases : await fetchPurchaseList();
+                            refreshPurchaseReturnOptions('', list);
+                          })();
                         }}
                         onClose={() => setPurchaseSearchOpen(false)}
                         options={purchaseSearchResults}
+                        filterOptions={(options) => options}
+                        isOptionEqualToValue={(a, b) => String(a?.pur_id) === String(b?.pur_id)}
                         getOptionLabel={(option) => `#${option.pur_id} - ${option.invoice_number || 'N/A'} (${Number(option.total_amount)})`}
                         value={selectedPurchaseForReturn}
                         onChange={(event, newValue) => {
                           if (newValue) handleLoadPurchaseForReturn(newValue);
+                          else setSelectedPurchaseForReturn(null);
                         }}
-                        onInputChange={(event, inputValue) => handlePurchaseSearch(inputValue)}
-                        autoSelect
+                        onInputChange={(event, inputValue, reason) => {
+                          if (reason === 'input' || reason === 'clear') {
+                            handlePurchaseSearch(inputValue);
+                          }
+                        }}
                         autoHighlight
                         openOnFocus
-                        selectOnFocus
                         renderInput={(params) => (
                           <TextField
                             {...params}
-                            placeholder="Search invoice..."
+                            placeholder={formSelectedCustomer ? 'Search invoice or purchase #…' : 'Pick supplier or type invoice #…'}
                             onFocus={(e) => e.target.select()}
                             sx={PURCHASE_ENTRY_CONTROL_SX}
                             InputProps={{
@@ -4324,7 +4398,13 @@ function PurchasesPageContent() {
                             }}
                           />
                         )}
-                        noOptionsText={purchaseSearchResults.length === 0 ? 'No purchases found' : ''}
+                        noOptionsText={
+                          !formSelectedCustomer && !formData.cus_id
+                            ? 'Select supplier or type invoice / purchase #'
+                            : purchases.length === 0
+                              ? 'Loading purchases…'
+                              : 'No matching purchases'
+                        }
                       />
                     </Box>
                   )}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { formatDatePK, formatDateTimePK, parseAppDateTime } from '@/lib/date-helper';
+import { formatDatePK, formatDateTimePK, parseAppDateTime, getPkDateString, pkDayRange } from '@/lib/date-helper';
 import { notifyLedgerDataChanged } from '@/lib/ledger-tabs';
 import {
   Plus,
@@ -65,7 +65,7 @@ export default function ExpensesPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedExpenseType, setSelectedExpenseType] = useState('');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('ALL');
-  const [datePreset, setDatePreset] = useState('all');
+  const [datePreset, setDatePreset] = useState('today');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [sortBy, setSortBy] = useState('created_at');
@@ -205,13 +205,21 @@ export default function ExpensesPage() {
         const itemDate = parseAppDateTime(expense.payment_date || expense.created_at);
         if (!itemDate) return true;
         const now = new Date();
-        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        if (datePreset === 'today' && itemDate < startOfToday) return false;
+        if (datePreset === 'today') {
+          const range = pkDayRange(getPkDateString());
+          if (range && (itemDate < range.gte || itemDate > range.lte)) return false;
+        }
         if (datePreset === 'week' && itemDate < new Date(now.getTime() - 7 * 86400000)) return false;
         if (datePreset === 'month' && itemDate < new Date(now.getFullYear(), now.getMonth(), 1)) return false;
         if (datePreset === 'custom') {
-          if (dateFrom && itemDate < new Date(dateFrom)) return false;
-          if (dateTo) { const toD = new Date(dateTo); toD.setHours(23,59,59,999); if (itemDate > toD) return false; }
+          if (dateFrom) {
+            const fromR = pkDayRange(dateFrom);
+            if (fromR && itemDate < fromR.gte) return false;
+          }
+          if (dateTo) {
+            const toR = pkDayRange(dateTo);
+            if (toR && itemDate > toR.lte) return false;
+          }
         }
       }
       return true;
@@ -407,10 +415,10 @@ export default function ExpensesPage() {
 
   const clearFilters = () => {
     setSearchTerm(''); setSelectedExpenseType(''); setPaymentMethodFilter('ALL');
-    setDatePreset('all'); setDateFrom(''); setDateTo(''); setSortBy('created_at'); setSortOrder('desc'); setPage(1);
+    setDatePreset('today'); setDateFrom(''); setDateTo(''); setSortBy('created_at'); setSortOrder('desc'); setPage(1);
   };
 
-  const isFiltered = Boolean(searchTerm || selectedExpenseType || paymentMethodFilter !== 'ALL' || datePreset !== 'all' || dateFrom || dateTo);
+  const isFiltered = Boolean(searchTerm || selectedExpenseType || paymentMethodFilter !== 'ALL' || datePreset !== 'today' || dateFrom || dateTo);
 
   const exportToCSV = () => {
     if (finalExpenses.length === 0) { alert('No expense records to export'); return; }
@@ -628,7 +636,11 @@ export default function ExpensesPage() {
                 <FileSpreadsheet style={{ width: 13, height: 13, color: '#e11d48' }} /> Operating Expenses Ledger
               </span>
               <span style={{ color: '#cbd5e1' }}>|</span>
-              <span style={{ color: '#64748b' }}>Showing <strong style={{ color: '#0f172a' }}>{paginatedExpenses.length}</strong> of <strong style={{ color: '#0f172a' }}>{finalExpenses.length}</strong> rows</span>
+              <span style={{ color: '#64748b' }}>
+                Showing <strong style={{ color: '#0f172a' }}>{paginatedExpenses.length}</strong> of <strong style={{ color: '#0f172a' }}>{finalExpenses.length}</strong> rows
+                {datePreset === 'today' && <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, color: '#0d9488', background: '#ecfdf5', padding: '2px 8px', borderRadius: 999 }}>Today (PK)</span>}
+                {datePreset === 'all' && <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: '#64748b' }}>All time</span>}
+              </span>
             </div>
             <div style={{ fontSize: 12, color: '#64748b' }}>
               Filtered Total: <strong style={{ color: '#e11d48', fontVariantNumeric: 'tabular-nums', fontFamily: 'monospace' }}>Rs. {fmtAmt(totalStats.filteredSum)}</strong>

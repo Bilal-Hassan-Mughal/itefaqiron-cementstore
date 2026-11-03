@@ -2825,10 +2825,13 @@ function SalesPageContent() {
           setReceiptDialogOpen(false);
           setCurrentBillData(null);
         }
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
         console.error('❌ API Error Response:', errorData);
         console.error('❌ Response Status:', response.status);
-        showSnackbar(errorData.error || `Failed to save bill (${response.status})`, 'error');
+        showSnackbar(
+          errorData.error || errorData.details || `Failed to save bill (${response.status})`,
+          'error'
+        );
       }
     } catch (error) {
       if (!editingSale) {

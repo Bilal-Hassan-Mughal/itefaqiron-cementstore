@@ -111,8 +111,7 @@ async function resolveOpeningBalance(tx, cus_id, target_created_at) {
 
 /**
  * Post transporter ledger on sale return.
- * - Manual return (no linked sale): CREDIT transporter — same direction as a normal sale transport line.
- * - Linked return (reversing original bill transport): DEBIT transporter — undo the original sale credit.
+ * CREDIT the transport account — same direction as a normal sale transport line (Credit column).
  */
 async function postReturnTransportLedger(tx, {
   returnId,
@@ -127,6 +126,13 @@ async function postReturnTransportLedger(tx, {
   const shipping = parseFloat(shippingAmount || 0);
   if (shipping <= 0) return;
 
+  const parsedLinkedSaleId =
+    saleId != null && saleId !== '' ? parseInt(saleId, 10) : null;
+  const linkedSaleId =
+    Number.isFinite(parsedLinkedSaleId) && parsedLinkedSaleId > 0
+      ? parsedLinkedSaleId
+      : null;
+
   const targets = [];
 
   if (Array.isArray(transport_details) && transport_details.length > 0) {
@@ -139,10 +145,10 @@ async function postReturnTransportLedger(tx, {
       }
       if (amt > 0) targets.push({ cus_id: accountId, amount: amt });
     }
-  } else if (saleId) {
+  } else if (linkedSaleId) {
     const originalTransportLedgerEntries = await tx.ledger.findMany({
       where: {
-        bill_no: String(saleId),
+        bill_no: String(linkedSaleId),
         details: { contains: 'Transport' },
         credit_amount: { gt: 0 },
       },
@@ -160,8 +166,6 @@ async function postReturnTransportLedger(tx, {
   }
 
   const ts = entryTimestamp || new Date();
-  const isManualReturn = !saleId;
-  const useTransportCredit = isManualReturn;
 
   for (const { cus_id, amount } of targets) {
     const lineAmount = Number(parseFloat(amount).toFixed(2));
@@ -177,13 +181,13 @@ async function postReturnTransportLedger(tx, {
     const transportReturnEntry = createLedgerEntry({
       cus_id,
       opening_balance: opening,
-      debit_amount: useTransportCredit ? 0 : lineAmount,
-      credit_amount: useTransportCredit ? lineAmount : 0,
+      debit_amount: 0,
+      credit_amount: lineAmount,
       bill_no: saleReturnBillNo(returnId),
-      trnx_type: useTransportCredit ? 'CREDIT' : 'DEBIT',
-      details: useTransportCredit
-        ? `Transport Charges - Sale Return #${returnId} - ${customerName || 'Customer'} (Credit)`
-        : `Transport Charges - Sale Return #${returnId} - Original Bill #${saleId} (Debit/Reversal)`,
+      trnx_type: 'CREDIT',
+      details: linkedSaleId
+        ? `Transport Charges - Sale Return #${returnId} - Original Bill #${linkedSaleId} (Credit)`
+        : `Transport Charges - Sale Return #${returnId} - ${customerName || 'Customer'} (Credit)`,
       payments: 0,
       updated_by: validatedUpdatedBy,
       ledger_type: 'Sale Return',
@@ -1102,7 +1106,7 @@ export async function POST(request) {
 
         await postReturnTransportLedger(tx, {
           returnId: saleReturn.return_id,
-          saleId: sale_id || null,
+          saleId: parsedSaleIdForPost,
           shippingAmount,
           transport_details,
           customerName: customer.cus_name,

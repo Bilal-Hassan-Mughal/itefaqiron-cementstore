@@ -98,6 +98,7 @@ export async function fetchRegisterEmployeeDropdown(db, branchId) {
     select: {
       emp_id: true,
       emp_name: true,
+      emp_phone: true,
       designation: true,
       opening_balance: true,
       basic_salary: true,
@@ -110,6 +111,7 @@ export async function fetchRegisterEmployeeDropdown(db, branchId) {
     return {
       emp_id: emp.emp_id,
       emp_name: emp.emp_name,
+      emp_phone: emp.emp_phone,
       designation: emp.designation,
       basic_salary: parseFloat(emp.basic_salary ?? 0),
       opening_balance: opening,
