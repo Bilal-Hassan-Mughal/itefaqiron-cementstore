@@ -5,6 +5,11 @@ import { getNextId } from '@/lib/id-helper';
 import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
 import { logActivity, AUDIT_ACTIONS, AUDIT_MODULES } from '@/lib/audit-logger';
+import {
+  LEDGER_AUDIT_CAUSE,
+  logLedgerRowsCreatedOrUpdated,
+  logLedgerRowsDeleted,
+} from '@/lib/ledger-audit';
 
 const EXPENSE_TX_OPTIONS = { timeout: 60000, maxWait: 60000 };
 
@@ -349,6 +354,22 @@ export async function POST(request) {
       },
     }).catch(() => {});
 
+    const expLedgerRows = await prisma.ledger.findMany({
+      where: { bill_no: `EXP-${result.exp_id}` },
+      orderBy: { l_id: 'asc' },
+    });
+    if (expLedgerRows.length > 0) {
+      logLedgerRowsCreatedOrUpdated({
+        request,
+        branchId: __branchScope.branchId,
+        cause: LEDGER_AUDIT_CAUSE.EXPENSE_CREATE,
+        sourceModule: 'Expenses',
+        sourceEntityId: result.exp_id,
+        billNo: `EXP-${result.exp_id}`,
+        rows: expLedgerRows,
+      });
+    }
+
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     console.error('Error creating expense:', error);
@@ -448,6 +469,9 @@ export async function PUT(request) {
 
     const validatedUpdatedBy = await resolveUpdatedByUserId(request, updated_by, prisma);
 
+    let ledgerRemovedOnExpenseUpdate = [];
+    const expenseBillNo = `EXP-${id}`;
+
     const result = await prisma.$transaction(async (tx) => {
       // 1. Revert old account balances
       if (existingExpense.paid_from_account_id && parseFloat(existingExpense.cash_amount || 0) > 0) {
@@ -474,9 +498,13 @@ export async function PUT(request) {
         }
       }
 
-      // 2. Delete old ledger entries for this expense
+      ledgerRemovedOnExpenseUpdate = await tx.ledger.findMany({
+        where: { bill_no: expenseBillNo },
+        orderBy: { l_id: 'asc' },
+      });
+
       await tx.ledger.deleteMany({
-        where: { bill_no: `EXP-${id}` }
+        where: { bill_no: expenseBillNo },
       });
 
       // 3. Update expense record
@@ -581,6 +609,34 @@ export async function PUT(request) {
       },
     }).catch(() => {});
 
+    if (ledgerRemovedOnExpenseUpdate.length > 0) {
+      logLedgerRowsDeleted({
+        request,
+        branchId: __branchScope.branchId,
+        cause: LEDGER_AUDIT_CAUSE.EXPENSE_UPDATE_REPOST,
+        sourceModule: 'Expenses',
+        sourceEntityId: id,
+        billNo: expenseBillNo,
+        rows: ledgerRemovedOnExpenseUpdate,
+      });
+    }
+    const expLedgerAfterUpdate = await prisma.ledger.findMany({
+      where: { bill_no: expenseBillNo },
+      orderBy: { l_id: 'asc' },
+    });
+    if (expLedgerAfterUpdate.length > 0) {
+      logLedgerRowsCreatedOrUpdated({
+        request,
+        branchId: __branchScope.branchId,
+        action: AUDIT_ACTIONS.UPDATE,
+        cause: LEDGER_AUDIT_CAUSE.EXPENSE_UPDATE_REPOST,
+        sourceModule: 'Expenses',
+        sourceEntityId: id,
+        billNo: expenseBillNo,
+        rows: expLedgerAfterUpdate,
+      });
+    }
+
     return NextResponse.json(result);
   } catch (error) {
     console.error('Error updating expense:', error);
@@ -615,6 +671,12 @@ export async function DELETE(request) {
       return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
     }
 
+    const expenseBillNo = `EXP-${id}`;
+    const ledgerRemovedOnExpenseDelete = await prisma.ledger.findMany({
+      where: { bill_no: expenseBillNo },
+      orderBy: { l_id: 'asc' },
+    });
+
     await prisma.$transaction(async (tx) => {
       // Revert Cash balance
       if (expense.paid_from_account_id && parseFloat(expense.cash_amount || 0) > 0) {
@@ -642,9 +704,8 @@ export async function DELETE(request) {
         }
       }
 
-      // Delete ledger entries
       await tx.ledger.deleteMany({
-        where: { bill_no: `EXP-${id}` }
+        where: { bill_no: expenseBillNo },
       });
 
       // Delete expense
@@ -662,6 +723,18 @@ export async function DELETE(request) {
       description: `Expense #${id} was deleted.`,
       details: { exp_id: id },
     }).catch(() => {});
+
+    if (ledgerRemovedOnExpenseDelete.length > 0) {
+      logLedgerRowsDeleted({
+        request,
+        branchId: __branchScope.branchId,
+        cause: LEDGER_AUDIT_CAUSE.EXPENSE_DELETE,
+        sourceModule: 'Expenses',
+        sourceEntityId: id,
+        billNo: expenseBillNo,
+        rows: ledgerRemovedOnExpenseDelete,
+      });
+    }
 
     return NextResponse.json({ message: 'Expense deleted successfully' });
   } catch (error) {

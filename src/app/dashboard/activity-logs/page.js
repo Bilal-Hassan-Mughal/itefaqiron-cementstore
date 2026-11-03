@@ -110,6 +110,7 @@ const MODULE_OPTIONS = [
   'Day End Closing',
   'Payments',
   'Journal Entries',
+  'Ledger',
   'User Management',
   'System Settings',
   'Reports & Analytics',

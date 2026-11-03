@@ -1,6 +1,42 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { initBranchScope } from '@/lib/branch-server';
+import { AUDIT_ACTIONS } from '@/lib/audit-logger';
+import { LEDGER_AUDIT_CAUSE, logLedgerAudit } from '@/lib/ledger-audit';
+
+const SNAPSHOT_LIMIT = 300;
+
+async function snapshotBeforeDelete(where) {
+  const total = await prisma.ledger.count({ where });
+  if (total === 0) {
+    return { total: 0, rows: [], truncated: false };
+  }
+  const rows = await prisma.ledger.findMany({
+    where,
+    select: {
+      l_id: true,
+      cus_id: true,
+      bill_no: true,
+      ledger_type: true,
+      trnx_type: true,
+      debit_amount: true,
+      credit_amount: true,
+      created_at: true,
+    },
+    orderBy: { l_id: 'asc' },
+    take: SNAPSHOT_LIMIT,
+  });
+  return { total, rows, truncated: total > rows.length };
+}
+
+async function deleteManyWithSnapshot(where) {
+  const snapshot = await snapshotBeforeDelete(where);
+  if (snapshot.total === 0) {
+    return { count: 0, snapshot };
+  }
+  const result = await prisma.ledger.deleteMany({ where });
+  return { count: result.count, snapshot };
+}
 
 export async function DELETE(request) {
   const __branchScope = await initBranchScope(request);
@@ -21,121 +57,124 @@ export async function DELETE(request) {
 
     let totalDeleted = 0;
     const deletionResults = {};
+    /** @type {{ category: string, total: number, truncated: boolean, entries: object[] }[]} */
+    const auditSnapshots = [];
 
-    // Delete ALL transactions regardless of type
     if (type === 'all') {
       try {
-        const allDeletions = await prisma.ledger.deleteMany({});
-        deletionResults.total_entries = allDeletions.count;
-        totalDeleted = allDeletions.count;
-        console.log(`✅ Deleted ${allDeletions.count} ALL ledger entries`);
+        const { count, snapshot } = await deleteManyWithSnapshot({});
+        deletionResults.total_entries = count;
+        totalDeleted = count;
+        if (count > 0) {
+          auditSnapshots.push({
+            category: 'all',
+            total: snapshot.total,
+            truncated: snapshot.truncated,
+            entries: snapshot.rows,
+          });
+        }
+        console.log(`✅ Deleted ${count} ALL ledger entries`);
       } catch (err) {
         console.warn('❌ Could not delete ALL entries:', err.message);
         deletionResults.total_entries = 0;
       }
-    }
-    // Delete PURCHASE transactions
-    else if (type === 'purchase') {
+    } else if (type === 'purchase') {
       try {
-        const purchaseDeletions = await prisma.ledger.deleteMany({
-          where: {
-            trnx_type: 'PURCHASE'
-          }
+        const { count, snapshot } = await deleteManyWithSnapshot({
+          trnx_type: 'PURCHASE',
         });
-        deletionResults.purchase = purchaseDeletions.count;
-        totalDeleted += purchaseDeletions.count;
-        console.log(`✅ Deleted ${purchaseDeletions.count} PURCHASE entries`);
+        deletionResults.purchase = count;
+        totalDeleted += count;
+        if (count > 0) {
+          auditSnapshots.push({
+            category: 'purchase',
+            total: snapshot.total,
+            truncated: snapshot.truncated,
+            entries: snapshot.rows,
+          });
+        }
+        console.log(`✅ Deleted ${count} PURCHASE entries`);
       } catch (err) {
         console.warn('❌ Could not delete PURCHASE entries:', err.message);
         deletionResults.purchase = 0;
       }
 
       try {
-        const purchaseReturnDeletions = await prisma.ledger.deleteMany({
-          where: {
-            trnx_type: 'PURCHASE_RETURN'
-          }
+        const { count, snapshot } = await deleteManyWithSnapshot({
+          trnx_type: 'PURCHASE_RETURN',
         });
-        deletionResults.purchase_return = purchaseReturnDeletions.count;
-        totalDeleted += purchaseReturnDeletions.count;
-        console.log(`✅ Deleted ${purchaseReturnDeletions.count} PURCHASE_RETURN entries`);
+        deletionResults.purchase_return = count;
+        totalDeleted += count;
+        if (count > 0) {
+          auditSnapshots.push({
+            category: 'purchase_return',
+            total: snapshot.total,
+            truncated: snapshot.truncated,
+            entries: snapshot.rows,
+          });
+        }
+        console.log(`✅ Deleted ${count} PURCHASE_RETURN entries`);
       } catch (err) {
         console.warn('❌ Could not delete PURCHASE_RETURN entries:', err.message);
         deletionResults.purchase_return = 0;
       }
-    }
-    // Delete ORDER transactions (note: SUBSCRIPTION doesn't exist in enum)
-    else if (type === 'order') {
+    } else if (type === 'order') {
       console.log('ℹ️ Note: SUBSCRIPTION type does not exist in TransactionType enum');
       deletionResults.order = 0;
-    }
-    // Delete SALES transactions
-    else if (type === 'sales') {
-      try {
-        const saleDeletions = await prisma.ledger.deleteMany({
-          where: {
-            trnx_type: 'SALE'
-          }
-        });
-        deletionResults.sale = saleDeletions.count;
-        totalDeleted += saleDeletions.count;
-        console.log(`✅ Deleted ${saleDeletions.count} SALE entries`);
-      } catch (err) {
-        console.warn('❌ Could not delete SALE entries:', err.message);
-        deletionResults.sale = 0;
-      }
+    } else if (type === 'sales') {
+      const salesCategories = [
+        { key: 'sale', trnx_type: 'SALE' },
+        { key: 'sale_return', trnx_type: 'SALE_RETURN' },
+        { key: 'cash_payment', trnx_type: 'CASH_PAYMENT' },
+        { key: 'bank_payment', trnx_type: 'BANK_PAYMENT' },
+      ];
 
-      try {
-        const returnDeletions = await prisma.ledger.deleteMany({
-          where: {
-            trnx_type: 'SALE_RETURN'
+      for (const { key, trnx_type } of salesCategories) {
+        try {
+          const { count, snapshot } = await deleteManyWithSnapshot({ trnx_type });
+          deletionResults[key] = count;
+          totalDeleted += count;
+          if (count > 0) {
+            auditSnapshots.push({
+              category: key,
+              total: snapshot.total,
+              truncated: snapshot.truncated,
+              entries: snapshot.rows,
+            });
           }
-        });
-        deletionResults.sale_return = returnDeletions.count;
-        totalDeleted += returnDeletions.count;
-        console.log(`✅ Deleted ${returnDeletions.count} SALE_RETURN entries`);
-      } catch (err) {
-        console.warn('❌ Could not delete SALE_RETURN entries:', err.message);
-        deletionResults.sale_return = 0;
-      }
-
-      try {
-        const cashPaymentDeletions = await prisma.ledger.deleteMany({
-          where: {
-            trnx_type: 'CASH_PAYMENT'
-          }
-        });
-        deletionResults.cash_payment = cashPaymentDeletions.count;
-        totalDeleted += cashPaymentDeletions.count;
-        console.log(`✅ Deleted ${cashPaymentDeletions.count} CASH_PAYMENT entries`);
-      } catch (err) {
-        console.warn('❌ Could not delete CASH_PAYMENT entries:', err.message);
-        deletionResults.cash_payment = 0;
-      }
-
-      try {
-        const bankPaymentDeletions = await prisma.ledger.deleteMany({
-          where: {
-            trnx_type: 'BANK_PAYMENT'
-          }
-        });
-        deletionResults.bank_payment = bankPaymentDeletions.count;
-        totalDeleted += bankPaymentDeletions.count;
-        console.log(`✅ Deleted ${bankPaymentDeletions.count} BANK_PAYMENT entries`);
-      } catch (err) {
-        console.warn('❌ Could not delete BANK_PAYMENT entries:', err.message);
-        deletionResults.bank_payment = 0;
+          console.log(`✅ Deleted ${count} ${trnx_type} entries`);
+        } catch (err) {
+          console.warn(`❌ Could not delete ${trnx_type} entries:`, err.message);
+          deletionResults[key] = 0;
+        }
       }
     }
 
     console.log(`✅ Total deleted ${totalDeleted} ledger entries`);
+
+    if (totalDeleted > 0) {
+      logLedgerAudit({
+        request,
+        branchId: __branchScope.branchId,
+        action: AUDIT_ACTIONS.DELETE,
+        cause: LEDGER_AUDIT_CAUSE.FINANCE_DELETE_BULK,
+        entityId: type,
+        description: `Bulk ledger delete (${type}): ${totalDeleted} entr${totalDeleted === 1 ? 'y' : 'ies'} removed.`,
+        details: {
+          bulk_type: type,
+          total_deleted: totalDeleted,
+          breakdown: deletionResults,
+          snapshots: auditSnapshots,
+        },
+      });
+    }
 
     if (totalDeleted === 0) {
       return NextResponse.json({
         success: false,
         message: `No ledger entries found for type: ${type}`,
         totalDeleted: 0,
-        details: deletionResults
+        details: deletionResults,
       });
     }
 
@@ -143,15 +182,15 @@ export async function DELETE(request) {
       success: true,
       message: `Successfully deleted ${totalDeleted} ledger entries`,
       totalDeleted,
-      details: deletionResults
+      details: deletionResults,
     });
   } catch (error) {
     console.error('❌ Error deleting ledger entries:', error);
     return NextResponse.json(
-      { 
-        error: 'Failed to delete ledger entries', 
+      {
+        error: 'Failed to delete ledger entries',
         details: error.message,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
       },
       { status: 500 }
     );

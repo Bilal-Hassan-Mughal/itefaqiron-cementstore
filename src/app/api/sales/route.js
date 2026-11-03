@@ -10,6 +10,11 @@ import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
 import { fetchPaginatedSalesList } from '@/lib/sales-list-query';
 import { logActivity, AUDIT_ACTIONS, AUDIT_MODULES } from '@/lib/audit-logger';
+import {
+  LEDGER_AUDIT_CAUSE,
+  logLedgerRowsCreatedOrUpdated,
+  logLedgerRowsDeleted,
+} from '@/lib/ledger-audit';
 
 const SPECIAL_ACCOUNTS_CACHE_TTL_MS = 10 * 60_000;
 const saleLog = () => {};
@@ -2225,6 +2230,22 @@ export async function POST(request) {
       },
     }).catch(() => {});
 
+    if (result.bill_type !== 'QUOTATION') {
+      const saleLedgerRows = await prisma.ledger.findMany({
+        where: { bill_no: String(result.sale_id) },
+        orderBy: { l_id: 'asc' },
+      });
+      logLedgerRowsCreatedOrUpdated({
+        request,
+        branchId,
+        cause: LEDGER_AUDIT_CAUSE.SALE_CREATE,
+        sourceModule: 'Sales & POS',
+        sourceEntityId: result.sale_id,
+        billNo: String(result.sale_id),
+        rows: saleLedgerRows,
+      });
+    }
+
     return NextResponse.json({
       ...result,
       customer: freshCustomer || result.customer,
@@ -2348,6 +2369,7 @@ export async function PUT(request) {
     const oldOpeningBalances = {};
     let existingSale = null;
     let targetCreatedAt = new Date();
+    let ledgerRemovedOnSaleUpdate = [];
 
     const result = await prisma.$transaction(async (tx) => {
       // ═══════════════════════════════════════════
@@ -2429,6 +2451,7 @@ export async function PUT(request) {
             ledger_type: { notIn: ['Purchase', 'Purchase Return'] }
           }
         });
+        ledgerRemovedOnSaleUpdate = oldLedgerEntries;
         oldLedgerEntries.forEach(entry => affectedCusIds.add(entry.cus_id));
 
         for (const entry of oldLedgerEntries) {
@@ -3106,6 +3129,36 @@ export async function PUT(request) {
       },
     }).catch(() => {});
 
+    if (ledgerRemovedOnSaleUpdate.length > 0) {
+      logLedgerRowsDeleted({
+        request,
+        branchId,
+        cause: LEDGER_AUDIT_CAUSE.SALE_UPDATE_REPOST,
+        sourceModule: 'Sales & POS',
+        sourceEntityId: id,
+        billNo: String(id),
+        rows: ledgerRemovedOnSaleUpdate,
+      });
+    }
+    if (!isSkipLedger) {
+      const saleLedgerAfterUpdate = await prisma.ledger.findMany({
+        where: { bill_no: String(id) },
+        orderBy: { l_id: 'asc' },
+      });
+      if (saleLedgerAfterUpdate.length > 0) {
+        logLedgerRowsCreatedOrUpdated({
+          request,
+          branchId,
+          action: AUDIT_ACTIONS.UPDATE,
+          cause: LEDGER_AUDIT_CAUSE.SALE_UPDATE_REPOST,
+          sourceModule: 'Sales & POS',
+          sourceEntityId: id,
+          billNo: String(id),
+          rows: saleLedgerAfterUpdate,
+        });
+      }
+    }
+
     return NextResponse.json({
       ...result,
       customer: freshCustomer || result.customer,
@@ -3193,6 +3246,7 @@ export async function DELETE(request) {
 
     const affectedCusIds = new Set();
     let existingSale = null;
+    let ledgerRemovedOnSaleDelete = [];
 
     // Use transaction to ensure data consistency
     await prisma.$transaction(async (tx) => {
@@ -3227,6 +3281,7 @@ export async function DELETE(request) {
         where: { bill_no: String(id) }
       });
 
+      ledgerRemovedOnSaleDelete = oldLedgerEntries;
       oldLedgerEntries.forEach(entry => affectedCusIds.add(entry.cus_id));
 
       saleLog(`🗑️ DELETING SALE/ORDER: Reversing balances for ${oldLedgerEntries.length} ledger entries`);
@@ -3293,6 +3348,18 @@ export async function DELETE(request) {
         bill_type: existingSale?.bill_type,
       },
     }).catch(() => {});
+
+    if (ledgerRemovedOnSaleDelete.length > 0) {
+      logLedgerRowsDeleted({
+        request,
+        branchId,
+        cause: LEDGER_AUDIT_CAUSE.SALE_DELETE,
+        sourceModule: 'Sales & POS',
+        sourceEntityId: id,
+        billNo: String(id),
+        rows: ledgerRemovedOnSaleDelete,
+      });
+    }
 
     return NextResponse.json({ message: 'Sale deleted successfully' });
   } catch (error) {

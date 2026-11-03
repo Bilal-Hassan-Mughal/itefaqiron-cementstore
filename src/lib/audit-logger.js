@@ -14,6 +14,7 @@ export const AUDIT_MODULES = {
   DAY_END: 'Day End Closing',
   PAYMENTS: 'Payments',
   JOURNAL: 'Journal Entries',
+  LEDGER: 'Ledger',
   USERS: 'User Management',
   SYSTEM: 'System Settings',
   REPORTS: 'Reports & Analytics',

@@ -10,6 +10,11 @@ import {
 import { initBranchScope } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
 import { logActivity, AUDIT_ACTIONS, AUDIT_MODULES } from '@/lib/audit-logger';
+import {
+  LEDGER_AUDIT_CAUSE,
+  logLedgerRowsCreatedOrUpdated,
+  logLedgerRowsDeleted,
+} from '@/lib/ledger-audit';
 
 // Helper for JSON errors
 function errorResponse(message, status = 400) {
@@ -330,7 +335,12 @@ async function purgePurchaseLedgerRows(tx, purId, options = {}) {
       opening_balance: true,
       closing_balance: true,
       created_at: true,
-      bill_no: true
+      bill_no: true,
+      debit_amount: true,
+      credit_amount: true,
+      ledger_type: true,
+      trnx_type: true,
+      details: true,
     }
   });
 
@@ -1696,6 +1706,22 @@ export async function POST(request) {
       },
     }).catch(() => {});
 
+    const purchaseLedgerRows = await prisma.ledger.findMany({
+      where: getPurchaseLedgerWhere(result.purchase.pur_id),
+      orderBy: { l_id: 'asc' },
+    });
+    if (purchaseLedgerRows.length > 0) {
+      logLedgerRowsCreatedOrUpdated({
+        request,
+        branchId: __branchScope.branchId,
+        cause: LEDGER_AUDIT_CAUSE.PURCHASE_CREATE,
+        sourceModule: 'Purchases',
+        sourceEntityId: result.purchase.pur_id,
+        billNo: String(result.purchase.pur_id),
+        rows: purchaseLedgerRows,
+      });
+    }
+
     return NextResponse.json({
       ...completePurchase,
       previous_customer_balance: previousCustomerBalance
@@ -1843,6 +1869,7 @@ export async function PUT(request) {
     }).forEach((cid) => affectedCusIds.add(cid));
 
     let result;
+    let ledgerRemovedOnPurchaseUpdate = [];
     const runPutTransaction = async () =>
       prisma.$transaction(async (tx) => {
       // Preserve the purchase date and timestamp (or user-modified date)
@@ -1852,6 +1879,7 @@ export async function PUT(request) {
       const oldDetails = await tx.purchaseDetail.findMany({ where: { pur_id: id } });
 
       const removedLedgerRows = await purgePurchaseLedgerRows(tx, id, { fast: true });
+      ledgerRemovedOnPurchaseUpdate = removedLedgerRows;
       removedLedgerRows.forEach((row) => affectedCusIds.add(row.cus_id));
 
       const oldOpeningBalances = {};
@@ -2281,6 +2309,34 @@ export async function PUT(request) {
       },
     }).catch(() => {});
 
+    if (ledgerRemovedOnPurchaseUpdate.length > 0) {
+      logLedgerRowsDeleted({
+        request,
+        branchId: __branchScope.branchId,
+        cause: LEDGER_AUDIT_CAUSE.PURCHASE_UPDATE_REPOST,
+        sourceModule: 'Purchases',
+        sourceEntityId: id,
+        billNo: String(id),
+        rows: ledgerRemovedOnPurchaseUpdate,
+      });
+    }
+    const purchaseLedgerAfterUpdate = await prisma.ledger.findMany({
+      where: getPurchaseLedgerWhere(id),
+      orderBy: { l_id: 'asc' },
+    });
+    if (purchaseLedgerAfterUpdate.length > 0) {
+      logLedgerRowsCreatedOrUpdated({
+        request,
+        branchId: __branchScope.branchId,
+        action: AUDIT_ACTIONS.UPDATE,
+        cause: LEDGER_AUDIT_CAUSE.PURCHASE_UPDATE_REPOST,
+        sourceModule: 'Purchases',
+        sourceEntityId: id,
+        billNo: String(id),
+        rows: purchaseLedgerAfterUpdate,
+      });
+    }
+
     return NextResponse.json({
       ...result.purchase,
       customer,
@@ -2332,6 +2388,8 @@ export async function DELETE(request) {
     });
     deleteBillLedgerRows.forEach((entry) => affectedCusIds.add(entry.cus_id));
 
+    let ledgerRemovedOnPurchaseDelete = [];
+
     beginPurchaseWrite();
     try {
     await prisma.$transaction(async (tx) => {
@@ -2344,6 +2402,7 @@ export async function DELETE(request) {
       }
 
       const removedOnDelete = await purgePurchaseLedgerRows(tx, id);
+      ledgerRemovedOnPurchaseDelete = removedOnDelete;
       removedOnDelete.forEach((row) => affectedCusIds.add(row.cus_id));
       await syncAccountBalancesFromLatestLedger(tx, [...affectedCusIds]);
 
@@ -2383,6 +2442,18 @@ export async function DELETE(request) {
         total_bill_amount: existingPurchase.total_bill_amount,
       },
     }).catch(() => {});
+
+    if (ledgerRemovedOnPurchaseDelete.length > 0) {
+      logLedgerRowsDeleted({
+        request,
+        branchId: __branchScope.branchId,
+        cause: LEDGER_AUDIT_CAUSE.PURCHASE_DELETE,
+        sourceModule: 'Purchases',
+        sourceEntityId: id,
+        billNo: String(id),
+        rows: ledgerRemovedOnPurchaseDelete,
+      });
+    }
 
     return NextResponse.json({ message: 'Purchase deleted successfully' });
   } catch (err) {

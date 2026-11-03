@@ -4,6 +4,17 @@ import { calculateClosingBalance, ACCOUNT_NATURE } from '@/lib/ledger-helper';
 import { getNextId } from '@/lib/id-helper';
 import { initBranchScope } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
+import { logActivity, AUDIT_ACTIONS, AUDIT_MODULES } from '@/lib/audit-logger';
+import {
+  getLedgerDirectEditBlockReason,
+  ledgerEntryAuditSnapshot,
+} from '@/lib/ledger-edit-guard';
+import {
+  LEDGER_AUDIT_CAUSE,
+  logLedgerAudit,
+  logLedgerRowsDeleted,
+  logLedgerRowsCreatedOrUpdated,
+} from '@/lib/ledger-audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -445,6 +456,17 @@ export async function POST(request) {
       }
     });
 
+    logLedgerRowsCreatedOrUpdated({
+      request,
+      branchId: __branchScope.branchId,
+      action: AUDIT_ACTIONS.CREATE,
+      cause: LEDGER_AUDIT_CAUSE.FINANCE_MANUAL_CREATE,
+      sourceModule: 'Finance',
+      billNo: result.bill_no,
+      rows: [result],
+      extra: { l_id: result.l_id, cus_id: result.cus_id },
+    });
+
     return NextResponse.json(completeLedger, { status: 201 });
   } catch (err) {
     console.error('❌ Error creating ledger entry:', err);
@@ -489,12 +511,9 @@ export async function PUT(request) {
     if (!existingLedger) return errorResponse('Ledger entry not found', 404);
 
     if (direct_edit) {
-      const NON_EDITABLE_DIRECT = ['SALE', 'SALE_RETURN', 'PURCHASE', 'PURCHASE_RETURN', 'ORDER'];
-      if (NON_EDITABLE_DIRECT.includes(existingLedger.trnx_type)) {
-        return errorResponse(
-          'Sale, purchase and order ledger entries cannot be edited here. Edit the source document instead.',
-          403
-        );
+      const blockReason = getLedgerDirectEditBlockReason(existingLedger);
+      if (!blockReason.allowed) {
+        return errorResponse(blockReason.reason, 403);
       }
 
       const billRef = String(existingLedger.bill_no || '').trim().toUpperCase();
@@ -595,12 +614,34 @@ export async function PUT(request) {
           data: { cus_balance: Number(runningBalance.toFixed(2)) }
         });
 
-        return updatedEntry;
+        return {
+          updatedEntry,
+          balanceRowsRecalculated: balanceUpdates.length,
+        };
       }, LEDGER_TX_OPTIONS);
+
+      const updatedEntry = result.updatedEntry;
+
+      logLedgerAudit({
+        request,
+        branchId: __branchScope.branchId,
+        action: AUDIT_ACTIONS.UPDATE,
+        cause: LEDGER_AUDIT_CAUSE.FINANCE_DIRECT_EDIT,
+        entityId: id,
+        description: `Ledger entry #${id} direct edit (bill ${updatedEntry.bill_no || '—'}, account cus_id ${updatedEntry.cus_id}).`,
+        details: {
+          l_id: id,
+          bill_no: updatedEntry.bill_no,
+          cus_id: updatedEntry.cus_id,
+          before: ledgerEntryAuditSnapshot(existingLedger),
+          after: ledgerEntryAuditSnapshot(updatedEntry),
+          balance_rows_recalculated: result.balanceRowsRecalculated,
+        },
+      });
 
       // Return complete entry
       const completeLedger = await prisma.ledger.findUnique({
-        where: { l_id: result.l_id },
+        where: { l_id: updatedEntry.l_id },
         include: {
           customer: {
             select: {
@@ -625,13 +666,9 @@ export async function PUT(request) {
       return errorResponse('Debit and credit amounts must be non-negative');
     }
 
-    // Only payment/receiving entries may be edited here
-    const NON_EDITABLE = ['SALE', 'SALE_RETURN', 'PURCHASE', 'PURCHASE_RETURN', 'ORDER'];
-    if (NON_EDITABLE.includes(existingLedger.trnx_type)) {
-      return errorResponse(
-        'Sale, purchase and order ledger entries cannot be edited here. Edit the source document instead.',
-        403
-      );
+    const blockReason = getLedgerDirectEditBlockReason(existingLedger);
+    if (!blockReason.allowed) {
+      return errorResponse(blockReason.reason, 403);
     }
 
     // Fetch customer
@@ -642,6 +679,7 @@ export async function PUT(request) {
     if (!customer) return errorResponse('Customer not found', 404);
 
     const result = await prisma.$transaction(async (tx) => {
+      let adjustmentEntryId = null;
       // ── Calculate net change in customer balance ──
       // Old effect on balance = old_debit - old_credit
       // Desired new effect    = new_debit - new_credit
@@ -702,14 +740,37 @@ export async function PUT(request) {
           where: { cus_id },
           data: { cus_balance: newBalance }
         });
+        adjustmentEntryId = l_id_adj;
       }
 
-      return updatedLedger;
+      return { updatedLedger, adjustmentEntryId, netChange };
     }, LEDGER_TX_OPTIONS);
+
+    const { updatedLedger, adjustmentEntryId, netChange } = result;
+
+    logLedgerAudit({
+      request,
+      branchId: __branchScope.branchId,
+      action: adjustmentEntryId ? AUDIT_ACTIONS.ADJUSTMENT : AUDIT_ACTIONS.UPDATE,
+      cause: LEDGER_AUDIT_CAUSE.FINANCE_ADJUSTMENT_EDIT,
+      entityId: id,
+      description: adjustmentEntryId
+        ? `Ledger entry #${id} payment-style edit: adjustment row #${adjustmentEntryId} (bill ${updatedLedger.bill_no || '—'}).`
+        : `Ledger entry #${id} metadata updated (bill ${updatedLedger.bill_no || '—'}).`,
+      details: {
+        l_id: id,
+        bill_no: updatedLedger.bill_no,
+        cus_id,
+        net_balance_change: netChange,
+        adjustment_l_id: adjustmentEntryId,
+        before: ledgerEntryAuditSnapshot(existingLedger),
+        after: ledgerEntryAuditSnapshot(updatedLedger),
+      },
+    });
 
     // Return updated entry with relations
     const completeLedger = await prisma.ledger.findUnique({
-      where: { l_id: result.l_id },
+      where: { l_id: updatedLedger.l_id },
       include: {
         customer: {
           select: {
@@ -761,16 +822,37 @@ export async function DELETE(request) {
 
   try {
     const existingLedger = await prisma.ledger.findUnique({
-      where: { l_id: id }
+      where: { l_id: id },
+      include: {
+        customer: { select: { cus_name: true } },
+      },
     });
 
     if (!existingLedger) {
       return errorResponse('Ledger entry not found', 404);
     }
 
-    // Delete the ledger entry
     await prisma.ledger.delete({
-      where: { l_id: id }
+      where: { l_id: id },
+    });
+
+    const billLabel = existingLedger.bill_no || '—';
+    const accountLabel =
+      existingLedger.customer?.cus_name || `Account #${existingLedger.cus_id}`;
+
+    logLedgerRowsDeleted({
+      request,
+      branchId: __branchScope.branchId,
+      cause: LEDGER_AUDIT_CAUSE.FINANCE_DELETE_ROW,
+      sourceModule: 'Finance',
+      billNo: existingLedger.bill_no,
+      rows: [existingLedger],
+      extra: {
+        l_id: id,
+        cus_name: existingLedger.customer?.cus_name ?? null,
+        entry_created_at: existingLedger.created_at,
+        account_label: accountLabel,
+      },
     });
 
     return NextResponse.json({ message: 'Ledger entry deleted successfully' });

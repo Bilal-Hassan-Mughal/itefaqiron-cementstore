@@ -6,6 +6,11 @@ import { initBranchScope, resolveUpdatedByUserId } from '@/lib/branch-server';
 import { rejectIfDayClosed } from '@/lib/day-end-guard';
 import { persistPaymentLedger, recalculateLedgerBalances } from '@/lib/payment-ledger-writer';
 import { logActivity, AUDIT_ACTIONS, AUDIT_MODULES } from '@/lib/audit-logger';
+import {
+  LEDGER_AUDIT_CAUSE,
+  logLedgerRowsCreatedOrUpdated,
+  logLedgerRowsDeleted,
+} from '@/lib/ledger-audit';
 
 // GET - Fetch all payments with related data
 export async function GET(request) {
@@ -622,6 +627,16 @@ export async function POST(request) {
       },
     }).catch(() => {});
 
+    logLedgerRowsCreatedOrUpdated({
+      request,
+      branchId: __branchScope.branchId,
+      cause: LEDGER_AUDIT_CAUSE.PAYMENT_CREATE,
+      sourceModule: 'Payments',
+      sourceEntityId: result.payment_id,
+      billNo: `PAY-${result.payment_id}`,
+      rows: result.ledger_entries || [],
+    });
+
     return NextResponse.json(result);
   } catch (error) {
     console.error('Error creating payment:', error);
@@ -694,6 +709,12 @@ export async function PUT(request) {
     if (!existing) {
       return NextResponse.json({ error: 'Payment not found' }, { status: 404 });
     }
+
+    const billRefBeforeUpdate = `PAY-${paymentId}`;
+    const ledgerRowsBeforePaymentUpdate = await prisma.ledger.findMany({
+      where: { bill_no: billRefBeforeUpdate },
+      orderBy: { l_id: 'asc' },
+    });
 
     const affectedAccountIds = new Set([
       existing.account_id,
@@ -806,6 +827,47 @@ export async function PUT(request) {
         updated_balances: ledgerResult.updated_balances,
       };
     }, { timeout: 20000 });
+
+    const billRef = `PAY-${paymentId}`;
+    const partyName = result.account?.cus_name || `Account #${result.account_id}`;
+
+    logActivity({
+      request,
+      branchId: __branchScope.branchId,
+      action: AUDIT_ACTIONS.UPDATE,
+      module: AUDIT_MODULES.PAYMENTS,
+      entityId: paymentId,
+      description: `Payment #${paymentId} (${result.payment_type}) updated for ${partyName}. Net Rs ${result.net_amount ?? 0}.`,
+      details: {
+        payment_id: paymentId,
+        payment_type: result.payment_type,
+        account_id: result.account_id,
+        net_amount: result.net_amount,
+        cash_amount: result.cash_amount,
+        bank_amount: result.bank_amount,
+      },
+    }).catch(() => {});
+
+    logLedgerRowsDeleted({
+      request,
+      branchId: __branchScope.branchId,
+      cause: LEDGER_AUDIT_CAUSE.PAYMENT_UPDATE_REPOST,
+      sourceModule: 'Payments',
+      sourceEntityId: paymentId,
+      billNo: billRef,
+      rows: ledgerRowsBeforePaymentUpdate,
+    });
+
+    logLedgerRowsCreatedOrUpdated({
+      request,
+      branchId: __branchScope.branchId,
+      action: AUDIT_ACTIONS.UPDATE,
+      cause: LEDGER_AUDIT_CAUSE.PAYMENT_UPDATE_REPOST,
+      sourceModule: 'Payments',
+      sourceEntityId: paymentId,
+      billNo: billRef,
+      rows: result.ledger_entries || [],
+    });
 
     return NextResponse.json(result);
   } catch (error) {

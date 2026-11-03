@@ -1,14 +1,13 @@
-/** Ledger rows that must be edited at source document, not inline */
-export const NON_EDITABLE_LEDGER_TRNX_TYPES = new Set([
-  'SALE',
-  'SALE_RETURN',
-  'PURCHASE',
-  'PURCHASE_RETURN',
-  'ORDER',
-]);
+import {
+  isLedgerDirectEditAllowed,
+  NON_EDITABLE_LEDGER_TRNX_TYPES,
+} from '@/lib/ledger-edit-guard';
+
+/** @deprecated use NON_EDITABLE from ledger-edit-guard */
+export { NON_EDITABLE_LEDGER_TRNX_TYPES };
 
 export function canEditLedgerEntry(entry) {
-  return Boolean(entry) && !NON_EDITABLE_LEDGER_TRNX_TYPES.has(entry?.trnx_type);
+  return Boolean(entry) && isLedgerDirectEditAllowed(entry);
 }
 
 /** Group key for linked ledger rows (PAY-1, JRN-2, shared bill_no, or single row) */
