@@ -19,6 +19,7 @@ export async function GET(request) {
     const moduleName = searchParams.get('module') || '';
     const userIdRaw = searchParams.get('userId') || '';
     const search = (searchParams.get('search') || '').trim();
+    const entityId = (searchParams.get('entityId') || '').trim();
     const fromDate = searchParams.get('fromDate') || '';
     const toDate = searchParams.get('toDate') || '';
 
@@ -59,6 +60,10 @@ export async function GET(request) {
       if (Object.keys(dateFilter).length > 0) {
         where.created_at = dateFilter;
       }
+    }
+
+    if (entityId) {
+      where.entity_id = entityId;
     }
 
     // Search query across description, entity_id, or user_name

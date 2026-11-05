@@ -6,6 +6,7 @@ import {
   sumCashBankLedgerFlow,
 } from '@/lib/cash-bank-report-helper';
 import { isEmployeeExpense } from '@/lib/employee-expense-helper';
+import { fetchHrEmployeeExpenseLines } from '@/lib/hr-profit-expenses';
 
 function n(val) {
   const num = parseFloat(val);
@@ -140,6 +141,7 @@ export async function loadDayEndSnapshot(prisma, { dateStr, dayEndRecord, branch
     products,
     cashCategoryIds,
     bankCategoryIds,
+    hrExpenseLines,
   ] = await Promise.all([
     prisma.customer.findMany({
       where: {
@@ -205,7 +207,18 @@ export async function loadDayEndSnapshot(prisma, { dateStr, dayEndRecord, branch
     prisma.product.findMany({ select: { pro_stock_qnty: true, pro_cost_price: true, pro_crate: true, pro_baser_price: true } }),
     getCashCategoryIds(prisma),
     getBankCategoryIds(prisma),
+    fetchHrEmployeeExpenseLines(prisma, {
+      startDate: dateStr,
+      endDate: dateStr,
+      branchId,
+    }),
   ]);
+
+  const enrichedFinanceExpenses = expenses.map((exp) => ({
+    ...exp,
+    is_employee_expense: isEmployeeExpense(exp),
+  }));
+  const allExpenseRows = [...enrichedFinanceExpenses, ...hrExpenseLines];
 
   const cashAccounts = [];
   const bankAccounts = [];
@@ -256,10 +269,11 @@ export async function loadDayEndSnapshot(prisma, { dateStr, dayEndRecord, branch
   let otherExpenses = 0;
   let cashExpenses = 0;
   let bankExpenses = 0;
-  expenses.forEach((exp) => {
+  allExpenseRows.forEach((exp) => {
     const amt = n(exp.exp_amount);
     totalExpenses += amt;
-    if (isEmployeeExpense(exp)) {
+    const isEmp = exp.is_employee_expense ?? isEmployeeExpense(exp);
+    if (isEmp) {
       employeeExpenses += amt;
     } else {
       otherExpenses += amt;
@@ -540,7 +554,7 @@ export async function loadDayEndSnapshot(prisma, { dateStr, dayEndRecord, branch
     bankAccounts,
     sales,
     purchases,
-    expenses,
+    expenses: allExpenseRows,
     ledgerEntries,
     standaloneLedgers,
     cashLedgerEntries,
@@ -585,12 +599,20 @@ export function buildDayEndDetails(dayEndId, snapshot) {
     });
   });
   snapshot.expenses.forEach((e) => {
+    const transactionId = e.hr_transaction_id != null ? n(e.hr_transaction_id) : n(e.exp_id);
+    if (transactionId <= 0) return;
+    const bankAmt = n(e.bank_amount);
+    const cashAmt = n(e.cash_amount);
+    let paymentType = 'CASH';
+    if (bankAmt > 0 && cashAmt <= 0) paymentType = 'BANK_TRANSFER';
+    else if (String(e.payment_mode || '').toUpperCase() === 'BANK_TRANSFER') paymentType = 'BANK_TRANSFER';
+    else if (String(e.payment_mode || '').toUpperCase() === 'CHEQUE') paymentType = 'CHEQUE';
     details.push({
       day_end_id: dayEndId,
-      transaction_type: 'EXPENSE',
-      transaction_id: e.exp_id,
+      transaction_type: e.hr_source ? 'HR_EXPENSE' : 'EXPENSE',
+      transaction_id: transactionId,
       amount: n(e.exp_amount),
-      payment_type: n(e.bank_amount) > 0 && n(e.cash_amount) <= 0 ? 'BANK_TRANSFER' : 'CASH',
+      payment_type: paymentType,
       description: e.exp_title || 'Expense',
     });
   });

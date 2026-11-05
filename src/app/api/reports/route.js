@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { initBranchScope } from '@/lib/branch-server';
 import { sumSaleReportSummary } from '@/lib/sale-report-amounts';
 import { isEmployeeExpense } from '@/lib/employee-expense-helper';
+import { fetchHrEmployeeExpenseLines } from '@/lib/hr-profit-expenses';
 
 
 // Helper to parse dates in Pakistan Standard Time (UTC+5)
@@ -66,7 +67,7 @@ export async function GET(request) {
         return await getSaleReport(startDate, endDate);
 
       case 'profit-report':
-        return await getProfitReport(startDate, endDate);
+        return await getProfitReport(startDate, endDate, __branchScope.branchId);
 
       case 'purchase-report':
         return await getPurchaseReport(startDate, endDate);
@@ -1017,7 +1018,7 @@ async function getSaleReport(startDate, endDate) {
 }
 
 // Profit Report - Calculate profit from sales and returns
-async function getProfitReport(startDate, endDate) {
+async function getProfitReport(startDate, endDate, branchId = 1) {
   const whereClause = {
     bill_type: 'BILL'
   };
@@ -1083,6 +1084,12 @@ async function getProfitReport(startDate, endDate) {
       }
     })
   ]);
+
+  const hrExpenseLines = await fetchHrEmployeeExpenseLines(prisma, {
+    startDate,
+    endDate,
+    branchId,
+  });
 
   // Calculate profit for each sale
   const salesWithProfit = sales.map(sale => {
@@ -1160,19 +1167,25 @@ async function getProfitReport(startDate, endDate) {
   // Categorize expenses into employee / salary and other operating expenses
   let employeeExpenses = 0;
   let otherExpenses = 0;
-  const enrichedExpenses = expenses.map(e => {
+  const enrichedFinanceExpenses = expenses.map((e) => {
     const isEmployee = isEmployeeExpense(e);
+    return {
+      ...e,
+      is_employee_expense: isEmployee,
+    };
+  });
+
+  const enrichedExpenses = [...enrichedFinanceExpenses, ...hrExpenseLines];
+
+  for (const e of enrichedExpenses) {
+    const isEmployee = e.is_employee_expense ?? isEmployeeExpense(e);
     const amt = parseFloat(e.exp_amount || 0);
     if (isEmployee) {
       employeeExpenses += amt;
     } else {
       otherExpenses += amt;
     }
-    return {
-      ...e,
-      is_employee_expense: isEmployee
-    };
-  });
+  }
   const totalExpenses = employeeExpenses + otherExpenses;
 
   // Calculate summary

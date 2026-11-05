@@ -15,10 +15,149 @@ import {
   logLedgerRowsCreatedOrUpdated,
   logLedgerRowsDeleted,
 } from '@/lib/ledger-audit';
+import {
+  summarizePurchaseLineChanges,
+  summarizePurchaseHeaderChanges,
+  summarizeLedgerRepostByAccount,
+  fetchBillLedgerForAccount,
+  verifyLedgerRowsChain,
+  buildPurchaseEditDescription,
+  buildPurchaseEditAuditDetails,
+} from '@/lib/purchase-audit';
 
 // Helper for JSON errors
 function errorResponse(message, status = 400) {
   return NextResponse.json({ error: message }, { status });
+}
+
+function purchaseValidationError(message) {
+  const err = new Error(message);
+  err.name = 'PurchaseValidationError';
+  return err;
+}
+
+function isPurchaseValidationError(err) {
+  return err?.name === 'PurchaseValidationError' || String(err?.message || '').startsWith('Purchase validation:');
+}
+
+function formatPurchaseApiError(err, action = 'save') {
+  if (isPurchaseValidationError(err)) {
+    const msg = String(err.message).replace(/^Purchase validation:\s*/i, '').trim();
+    return { message: msg || 'Invalid purchase data.', status: 400 };
+  }
+  if (err?.code === 'P2003') {
+    return { message: 'Invalid supplier, product, or store. Refresh the page and try again.', status: 400 };
+  }
+  if (err?.code === 'P2025') {
+    return { message: 'Purchase or related record was not found.', status: 404 };
+  }
+  if (isLockWaitError(err)) {
+    return { message: 'System is busy (database lock). Wait a few seconds and try again — nothing was saved.', status: 503 };
+  }
+  if (String(err?.message || '').toLowerCase().includes('store stock')) {
+    return { message: err.message, status: 400 };
+  }
+  return {
+    message: action === 'update'
+      ? 'Purchase update failed. Your original bill was not changed.'
+      : 'Purchase could not be saved. No new bill was created.',
+    status: 500,
+  };
+}
+
+function purchaseApiErrorResponse(err, action = 'save') {
+  const { message, status } = formatPurchaseApiError(err, action);
+  return NextResponse.json(
+    { error: message, code: err?.code || undefined },
+    { status }
+  );
+}
+
+function safeDetailQty(detail) {
+  const parsed = parseFloat(detail?.qnty ?? detail?.quantity);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+/** Throws PurchaseValidationError — call before starting a DB transaction. */
+function assertPurchaseLinesValid(purchase_details, { store_id, isReturn = false }) {
+  if (!Array.isArray(purchase_details) || purchase_details.length === 0) {
+    throw purchaseValidationError('Purchase validation: Add at least one product line.');
+  }
+
+  if (!isReturn) {
+    const headerStore = store_id ? parseInt(store_id, 10) : null;
+    if (!headerStore || Number.isNaN(headerStore)) {
+      throw purchaseValidationError('Purchase validation: Select a store before saving.');
+    }
+  }
+
+  purchase_details.forEach((detail, index) => {
+    const proId = parseInt(detail?.pro_id, 10);
+    if (!proId || Number.isNaN(proId)) {
+      throw purchaseValidationError(`Purchase validation: Line ${index + 1} has an invalid product.`);
+    }
+    const qnty = safeDetailQty(detail);
+    if (!Number.isFinite(qnty) || qnty <= 0) {
+      throw purchaseValidationError(`Purchase validation: Line ${index + 1} quantity must be greater than zero.`);
+    }
+    const lineTotal = parseFloat(detail?.total_amount);
+    if (!Number.isFinite(lineTotal) || lineTotal < 0) {
+      throw purchaseValidationError(`Purchase validation: Line ${index + 1} amount is invalid.`);
+    }
+    const lineStore = detail?.store_id || store_id;
+    if (!isReturn && !lineStore) {
+      throw purchaseValidationError(`Purchase validation: Line ${index + 1} is missing a store.`);
+    }
+  });
+}
+
+async function assertPurchaseReferences(prismaClient, {
+  cus_id,
+  purchase_details,
+  bank_payment,
+  bank_account_id,
+}) {
+  const customer = await prismaClient.customer.findUnique({
+    where: { cus_id: parseInt(cus_id, 10) },
+    select: { cus_id: true },
+  });
+  if (!customer) {
+    throw purchaseValidationError('Purchase validation: Supplier not found. Reselect the supplier.');
+  }
+
+  const proIds = [...new Set(
+    purchase_details.map((d) => parseInt(d.pro_id, 10)).filter((n) => !Number.isNaN(n) && n > 0)
+  )];
+  const products = await prismaClient.product.findMany({
+    where: { pro_id: { in: proIds } },
+    select: { pro_id: true },
+  });
+  if (products.length !== proIds.length) {
+    throw purchaseValidationError('Purchase validation: One or more products no longer exist. Refresh and reselect products.');
+  }
+
+  const bankPay = parseFloat(bank_payment || 0);
+  if (bankPay > 0 && !bank_account_id) {
+    throw purchaseValidationError('Purchase validation: Select a bank account for the bank payment.');
+  }
+}
+
+async function requireStoreStockUpdate(storeId, productId, quantityChange, operation, updatedBy, tx) {
+  const ok = await updateStoreStock(storeId, productId, quantityChange, operation, updatedBy, tx);
+  if (ok !== true) {
+    throw purchaseValidationError(
+      'Purchase validation: Could not update store stock. Check store and product, then try again.'
+    );
+  }
+}
+
+async function requireBulkStoreStockUpdate(storeId, items, operation, updatedBy, tx) {
+  const ok = await bulkUpdateStoreStock(storeId, items, operation, updatedBy, tx);
+  if (ok !== true) {
+    throw purchaseValidationError(
+      'Purchase validation: Could not update store stock for this bill. Nothing was saved.'
+    );
+  }
 }
 
 /** Resolves the correct opening balance for any customer/account at a target created_at timestamp. */
@@ -248,7 +387,7 @@ async function applyPurchaseStockDeltas(byStore, updatedBy, tx) {
   if (!byStore?.size) return;
   await Promise.all(
     [...byStore.entries()].map(([storeId, items]) =>
-      bulkUpdateStoreStock(storeId, items, 'increment', updatedBy, tx)
+      requireBulkStoreStockUpdate(storeId, items, 'increment', updatedBy, tx)
     )
   );
 }
@@ -1034,6 +1173,19 @@ export async function POST(request) {
       return errorResponse('Total payment amount must be non-negative');
     }
 
+    const isReturnPost = purchase_type === 'return';
+    try {
+      assertPurchaseLinesValid(purchase_details, { store_id, isReturn: isReturnPost });
+      await assertPurchaseReferences(prisma, {
+        cus_id,
+        purchase_details,
+        bank_payment: bankPaymentAmount,
+        bank_account_id: bankAccountIdInt,
+      });
+    } catch (validationErr) {
+      return purchaseApiErrorResponse(validationErr, 'create');
+    }
+
     // Determine payment type based on split payments
     // Note: Using BANK_TRANSFER for split payments since SPLIT is not in PaymentType enum
     let actualPaymentType = 'CASH';
@@ -1127,7 +1279,10 @@ export async function POST(request) {
     }
 
     // Create purchase with details and ledger entries in a transaction
-    const result = await prisma.$transaction(async (tx) => {
+    beginPurchaseWrite();
+    let result;
+    try {
+    result = await prisma.$transaction(async (tx) => {
       // Determine if this is a return (do this first so it can be used throughout)
       const isReturn = purchase_type === 'return';
 
@@ -1245,7 +1400,14 @@ export async function POST(request) {
           const detailStoreId = detail.store_id || store_id;
           if (!detailStoreId) return;
           const stockOperation = isReturn ? 'decrement' : 'increment';
-          await updateStoreStock(detailStoreId, detailsData[index].pro_id, detailsData[index].qnty, stockOperation, updated_by, tx);
+          await requireStoreStockUpdate(
+            detailStoreId,
+            detailsData[index].pro_id,
+            detailsData[index].qnty,
+            stockOperation,
+            updated_by,
+            tx
+          );
         });
         await Promise.all(storeStockUpdatePromises);
 
@@ -1643,6 +1805,9 @@ export async function POST(request) {
         affectedCusIds
       };
     }, { maxWait: 20000, timeout: 60000 });
+    } finally {
+      endPurchaseWrite();
+    }
 
     const completePurchase = await prisma.purchase.findUnique({
       where: { pur_id: result.purchase.pur_id },
@@ -1728,7 +1893,7 @@ export async function POST(request) {
     }, { status: 201 });
   } catch (err) {
     console.error('❌ Error creating purchase:', err);
-    return errorResponse('Failed to create purchase', 500);
+    return purchaseApiErrorResponse(err, 'create');
   }
 }
 
@@ -1807,13 +1972,36 @@ export async function PUT(request) {
     // Calculate net total: exclude OUT charges (they are posted separately as external expenses)
     const net_total = safeParseFloat(total_amount) + safeParseFloat(unloading_amount) + safeParseFloat(fare_amount) + safeParseFloat(transport_amount) + safeParseFloat(labour_amount) - safeParseFloat(discount);
 
-    // Check if purchase exists
+    // Check if purchase exists (include lines for edit audit diff)
     const existingPurchase = await prisma.purchase.findUnique({
-      where: { pur_id: id }
+      where: { pur_id: id },
+      include: { purchase_details: true },
     });
 
     if (!existingPurchase) {
       return errorResponse('Purchase not found', 404);
+    }
+
+    const oldDetailsSnapshot = existingPurchase.purchase_details || [];
+    const lineChangeSummary = summarizePurchaseLineChanges(oldDetailsSnapshot, purchase_details);
+
+    if (store_id) {
+      const storeExists = await prisma.store.findUnique({ where: { storeid: safeParseInt(store_id) } });
+      if (!storeExists) {
+        return errorResponse(`Store ID ${store_id} not found. Please refresh and reselect the store.`, 400);
+      }
+    }
+
+    try {
+      assertPurchaseLinesValid(purchase_details, { store_id: store_id || existingPurchase.store_id, isReturn: false });
+      await assertPurchaseReferences(prisma, {
+        cus_id,
+        purchase_details,
+        bank_payment: bankPaymentAmt,
+        bank_account_id: bankAccountIdInt,
+      });
+    } catch (validationErr) {
+      return purchaseApiErrorResponse(validationErr, 'update');
     }
 
     // Determine target purchase date:
@@ -1942,7 +2130,7 @@ export async function PUT(request) {
           vehicle_no: vehicle_no || null,
           cus_id: parseInt(cus_id),
           pro_id: parseInt(detail.pro_id),
-          qnty: parseInt(detail.qnty || detail.quantity || 1),
+          qnty: Number(safeParseFloat(detail.qnty || detail.quantity, 1).toFixed(2)),
           unit: detail.unit || 'pcs',
           unit_rate: parseFloat(detail.unit_rate || detail.rate),
           prate: parseFloat(detail.prate || detail.unit_rate || detail.rate),
@@ -2293,20 +2481,59 @@ export async function PUT(request) {
       bankAccountIdInt ||
       (bankPaymentAmt > 0 && normalizedPaymentType === 'BANK_TRANSFER' ? credit_account_id : null);
 
+    const purchaseLedgerAfterUpdate = await prisma.ledger.findMany({
+      where: getPurchaseLedgerWhere(id),
+      orderBy: { l_id: 'asc' },
+    });
+
+    const ledgerByAccount = summarizeLedgerRepostByAccount(
+      ledgerRemovedOnPurchaseUpdate,
+      purchaseLedgerAfterUpdate
+    );
+
+    const supplierCusId = parseInt(cus_id, 10);
+    let supplierLedgerCheck = { ok: true, row_count: 0 };
+    if (supplierCusId) {
+      const supplierBillRows = await fetchBillLedgerForAccount(prisma, id, supplierCusId);
+      supplierLedgerCheck = {
+        cus_id: supplierCusId,
+        ...verifyLedgerRowsChain(supplierBillRows),
+      };
+    }
+
+    const headerChanges = summarizePurchaseHeaderChanges(existingPurchase, result.purchase);
+    const editAuditDetails = buildPurchaseEditAuditDetails({
+      purId: id,
+      beforePurchase: existingPurchase,
+      afterPurchase: result.purchase,
+      lineSummary: lineChangeSummary,
+      headerChanges,
+      removedLedgerRows: ledgerRemovedOnPurchaseUpdate,
+      newLedgerRows: purchaseLedgerAfterUpdate,
+      ledgerByAccount,
+      supplierLedgerCheck,
+      accountsRecalculated: [...affectedCusIds],
+    });
+
+    const editDescription = buildPurchaseEditDescription(
+      id,
+      lineChangeSummary,
+      headerChanges,
+      {
+        rows_removed: ledgerRemovedOnPurchaseUpdate.length,
+        rows_added: purchaseLedgerAfterUpdate.length,
+        accounts_affected: ledgerByAccount.length,
+      }
+    );
+
     logActivity({
       request,
       branchId: __branchScope.branchId,
       action: AUDIT_ACTIONS.UPDATE,
       module: AUDIT_MODULES.PURCHASES,
       entityId: id,
-      description: `Purchase #${id} was updated for supplier ID ${cus_id}. Total: Rs ${total_bill_amount || 0}.`,
-      details: {
-        pur_id: id,
-        cus_id,
-        total_bill_amount,
-        cash_payment: cashPaymentAmt,
-        bank_payment: bankPaymentAmt,
-      },
+      description: `${editDescription} Net: Rs ${result.purchase?.net_total ?? net_total}.`,
+      details: editAuditDetails,
     }).catch(() => {});
 
     if (ledgerRemovedOnPurchaseUpdate.length > 0) {
@@ -2318,12 +2545,13 @@ export async function PUT(request) {
         sourceEntityId: id,
         billNo: String(id),
         rows: ledgerRemovedOnPurchaseUpdate,
+        extra: {
+          pur_id: id,
+          line_changes: lineChangeSummary,
+          ledger_by_account: ledgerByAccount,
+        },
       });
     }
-    const purchaseLedgerAfterUpdate = await prisma.ledger.findMany({
-      where: getPurchaseLedgerWhere(id),
-      orderBy: { l_id: 'asc' },
-    });
     if (purchaseLedgerAfterUpdate.length > 0) {
       logLedgerRowsCreatedOrUpdated({
         request,
@@ -2334,6 +2562,11 @@ export async function PUT(request) {
         sourceEntityId: id,
         billNo: String(id),
         rows: purchaseLedgerAfterUpdate,
+        extra: {
+          pur_id: id,
+          supplier_ledger_check: supplierLedgerCheck,
+          ledger_by_account: ledgerByAccount,
+        },
       });
     }
 
@@ -2345,10 +2578,11 @@ export async function PUT(request) {
       cash_payment: cashPaymentAmt,
       bank_payment: bankPaymentAmt,
       previous_customer_balance: previousCustomerBalance,
+      edit_audit: editAuditDetails,
     });
   } catch (err) {
     console.error('❌ Error updating purchase:', err);
-    return errorResponse('Failed to update purchase', 500);
+    return purchaseApiErrorResponse(err, 'update');
   }
 }
 

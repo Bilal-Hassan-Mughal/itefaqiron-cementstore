@@ -25,7 +25,7 @@ function freezeClosedSummary(summary, dayEnd) {
     ...summary,
     totalSales: money(dayEnd.total_sales),
     totalPurchases: money(dayEnd.total_purchases),
-    totalExpenses: money(dayEnd.total_expenses),
+    // totalExpenses / profit breakdown: always from live snapshot (includes HR salary/advances)
     totalReceipts: money(dayEnd.total_receipts),
     totalPayments: money(dayEnd.total_payments),
     expectedCashInHand: expected,

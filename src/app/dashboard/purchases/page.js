@@ -113,6 +113,8 @@ import {
   Folder as FolderIcon,
   FolderOpen as FolderOpenIcon,
   AssignmentReturn as ReturnIcon,
+  History as HistoryIcon,
+  Refresh as RefreshIcon,
 } from '@mui/icons-material';
 
 const EMPTY_PRODUCT_FORM_DATA = {
@@ -246,6 +248,54 @@ function slimPurchaseDetailsForApi(details) {
     cost_rate: d.cost_rate,
     original_cost_rate: d.original_cost_rate,
   }));
+}
+
+function parseActivityLogDetails(raw) {
+  if (!raw) return null;
+  if (typeof raw === 'object') return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function formatPurchaseActivityLedgerSummary(details) {
+  const ledger = details?.ledger;
+  if (!ledger) return null;
+  const parts = [];
+  if (ledger.rows_removed != null || ledger.rows_added != null) {
+    parts.push(`Ledger: ${ledger.rows_removed ?? 0} deleted → ${ledger.rows_added ?? 0} added`);
+  }
+  const byAcct = ledger.by_account || [];
+  if (byAcct.length > 0) {
+    parts.push(`${byAcct.length} account(s) affected`);
+  }
+  const check = ledger.supplier_on_bill;
+  if (check && check.row_count > 0) {
+    parts.push(
+      check.ok
+        ? `Supplier bill chain OK (closing Rs ${Number(check.latest_closing_balance || 0).toLocaleString()})`
+        : 'Supplier bill ledger chain needs review'
+    );
+  }
+  return parts.join(' · ');
+}
+
+async function readPurchaseSaveError(response) {
+  try {
+    const data = await response.json();
+    if (data?.code === 'DAY_CLOSED') {
+      return data.error || 'Day end is closed for today. Re-open day end before saving purchases.';
+    }
+    if (data?.error) return data.error;
+  } catch {
+    /* ignore */
+  }
+  if (response.status === 503) {
+    return 'System is busy. Wait a moment and try again — nothing was saved.';
+  }
+  return `Could not save purchase (error ${response.status}). Nothing was saved.`;
 }
 
 function commitPurchaseDropdownOnTab(e, highlighted, applyValue, focusNext) {
@@ -911,6 +961,8 @@ function PurchasesPageContent() {
   const [vehicleMenuAnchor, setVehicleMenuAnchor] = useState(null);
   const [selectedVehicleForMenu, setSelectedVehicleForMenu] = useState(null);
   const [editingPurchase, setEditingPurchase] = useState(null);
+  const [purchaseActivityLogs, setPurchaseActivityLogs] = useState([]);
+  const [purchaseActivityLoading, setPurchaseActivityLoading] = useState(false);
   const [viewingPurchase, setViewingPurchase] = useState(null);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
 
@@ -2255,6 +2307,30 @@ function PurchasesPageContent() {
       return;
     }
 
+    if (purchaseType === 'new' && !formData.store_id) {
+      alert('Please select a store before saving');
+      return;
+    }
+
+    const calculatedTotalPreview = calculateTotalAmount();
+    if (!Number.isFinite(calculatedTotalPreview) || calculatedTotalPreview <= 0) {
+      alert('Purchase line total must be greater than zero');
+      return;
+    }
+
+    for (let i = 0; i < formData.purchase_details.length; i += 1) {
+      const line = formData.purchase_details[i];
+      const q = parseFloat(line.qnty ?? line.quantity);
+      if (!Number.isFinite(q) || q <= 0) {
+        alert(`Line ${i + 1}: quantity must be greater than zero`);
+        return;
+      }
+      if (!line.pro_id) {
+        alert(`Line ${i + 1}: missing product — remove the line or reselect the product`);
+        return;
+      }
+    }
+
     if (parseFloat(formData.bank_payment || 0) > 0 && !selectedBankAccount) {
       alert('Please select a bank account for the bank payment');
       return;
@@ -2279,7 +2355,14 @@ function PurchasesPageContent() {
       const needsStepUpAuth = hasCash || hasBank || purchaseType === 'return';
       if (needsStepUpAuth) {
         const authOk = await requireAuth();
-        if (!authOk) return;
+        if (!authOk) {
+          setSnackbar({
+            open: true,
+            message: 'Authentication cancelled — purchase was not saved.',
+            severity: 'warning',
+          });
+          return;
+        }
       }
       const url = editingPurchase ? '/api/purchases' : '/api/purchases';
       const method = editingPurchase ? 'PUT' : 'POST';
@@ -2503,12 +2586,18 @@ function PurchasesPageContent() {
           purchaseDetailCacheRef.current.set(result.pur_id, finalMerged);
           setPurchases((prev) => prev.map((p) => (p.pur_id === finalMerged.pur_id ? { ...p, ...listHeader } : p)));
           void refreshCustomersDropdown();
+          void loadPurchaseActivityLogs(result.pur_id);
           setEditingPurchase(null);
           applyFreshPurchaseForm({ silent: true });
           refreshReceiptFromServer(result.pur_id);
+          const ledgerNote = result.edit_audit
+            ? formatPurchaseActivityLedgerSummary(result.edit_audit)
+            : '';
           setSnackbar({
             open: true,
-            message: `✅ Purchase #${result.pur_id} updated — invoice preview open`,
+            message: ledgerNote
+              ? `✅ Purchase #${result.pur_id} updated. ${ledgerNote}`
+              : `✅ Purchase #${result.pur_id} updated — invoice preview open`,
             severity: 'success',
           });
         } else if (!wasEditing && result?.pur_id) {
@@ -2530,10 +2619,12 @@ function PurchasesPageContent() {
       } else {
         setReceiptDialogOpen(false);
         setCurrentBillData(null);
-        const errorData = await response.json().catch(() => ({}));
+        const errMsg = await readPurchaseSaveError(response);
         setSnackbar({
           open: true,
-          message: errorData.error || 'Failed to save purchase',
+          message: editingPurchase
+            ? `${errMsg} (Original bill #${editingPurchase.pur_id} is unchanged.)`
+            : errMsg,
           severity: 'error',
         });
       }
@@ -2541,7 +2632,13 @@ function PurchasesPageContent() {
       setReceiptDialogOpen(false);
       setCurrentBillData(null);
       console.error('Error saving purchase:', error);
-      setSnackbar({ open: true, message: 'Failed to save purchase', severity: 'error' });
+      setSnackbar({
+        open: true,
+        message: editingPurchase
+          ? `Network or server error — purchase #${editingPurchase.pur_id} was not updated.`
+          : 'Network or server error — no purchase was created.',
+        severity: 'error',
+      });
     } finally {
       purchaseSubmitInFlightRef.current = false;
       setIsSubmitting(false);
@@ -2638,6 +2735,40 @@ function PurchasesPageContent() {
     setCustomerSearchTerm(customer?.cus_name || purchase.customer?.cus_name || '');
   }, [customers]);
 
+  const loadPurchaseActivityLogs = useCallback(async (purId) => {
+    if (!purId) {
+      setPurchaseActivityLogs([]);
+      return;
+    }
+    setPurchaseActivityLoading(true);
+    try {
+      const params = new URLSearchParams({
+        entityId: String(purId),
+        limit: '25',
+      });
+      const res = await fetch(`/api/activity-logs?${params.toString()}`);
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) {
+        setPurchaseActivityLogs(json.data || []);
+      } else {
+        setPurchaseActivityLogs([]);
+      }
+    } catch (err) {
+      console.warn('Failed to load purchase activity logs', err);
+      setPurchaseActivityLogs([]);
+    } finally {
+      setPurchaseActivityLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (editingPurchase?.pur_id) {
+      void loadPurchaseActivityLogs(editingPurchase.pur_id);
+    } else {
+      setPurchaseActivityLogs([]);
+    }
+  }, [editingPurchase?.pur_id, loadPurchaseActivityLogs]);
+
   const handleEdit = async (purchase) => {
     setCurrentView('create');
     setEditPurchaseLoading(true);
@@ -2655,6 +2786,7 @@ function PurchasesPageContent() {
       }
       setEditingPurchase(full);
       applyPurchaseToForm(full);
+      void loadPurchaseActivityLogs(full.pur_id);
     } catch (error) {
       console.error('Error loading purchase for edit:', error);
       setSnackbar({
@@ -3927,6 +4059,14 @@ function PurchasesPageContent() {
                         ? 'Create Purchase Return'
                         : 'Create New Purchase'}
                   </h2>
+                  {editingPurchase ? (
+                    <Chip
+                      label={`Editing #${editingPurchase.pur_id}`}
+                      size="small"
+                      color="info"
+                      sx={{ fontWeight: 700 }}
+                    />
+                  ) : null}
                   {hasDraft && !editingPurchase && (
                     <Chip
                       label="Draft Saved"
@@ -3948,6 +4088,89 @@ function PurchasesPageContent() {
             </div>
           </div>
         </div>
+
+        {editingPurchase ? (
+          <Card variant="outlined" sx={{ borderColor: '#e2e8f0', bgcolor: '#f8fafc' }}>
+            <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 1 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <HistoryIcon sx={{ color: '#64748b', fontSize: 20 }} />
+                  <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#334155' }}>
+                    Activity & ledger history — Purchase #{editingPurchase.pur_id}
+                  </Typography>
+                </Box>
+                <IconButton
+                  size="small"
+                  title="Refresh activity log"
+                  onClick={() => loadPurchaseActivityLogs(editingPurchase.pur_id)}
+                  disabled={purchaseActivityLoading}
+                >
+                  {purchaseActivityLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
+                </IconButton>
+              </Box>
+              <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mb: 1 }}>
+                Edits repost ledger rows for this bill. Below: what changed, which accounts were affected, and supplier bill balance check.
+              </Typography>
+              {purchaseActivityLoading && purchaseActivityLogs.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">Loading activity…</Typography>
+              ) : purchaseActivityLogs.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">No activity recorded yet for this purchase.</Typography>
+              ) : (
+                <Stack spacing={1} sx={{ maxHeight: 220, overflow: 'auto' }}>
+                  {purchaseActivityLogs.map((log) => {
+                    const details = parseActivityLogDetails(log.details);
+                    const ledgerSummary = formatPurchaseActivityLedgerSummary(details);
+                    const lineChanges = details?.line_changes;
+                    const lineBits = [];
+                    if (lineChanges?.products_added?.length) {
+                      lineBits.push(`+${lineChanges.products_added.length} product(s)`);
+                    }
+                    if (lineChanges?.products_removed?.length) {
+                      lineBits.push(`−${lineChanges.products_removed.length} product(s)`);
+                    }
+                    if (lineChanges?.products_qty_changed?.length) {
+                      lineBits.push(`${lineChanges.products_qty_changed.length} qty change(s)`);
+                    }
+                    return (
+                      <Box
+                        key={log.log_id}
+                        sx={{
+                          px: 1.25,
+                          py: 1,
+                          borderRadius: 1,
+                          bgcolor: '#fff',
+                          border: '1px solid #e2e8f0',
+                        }}
+                      >
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
+                          <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                            {log.module} · {log.action}
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: '#64748b' }}>
+                            {log.user_name || 'System'} · {formatDatePK(log.created_at)} {formatTimePK(log.created_at)}
+                          </Typography>
+                        </Box>
+                        <Typography variant="body2" sx={{ color: '#475569', mt: 0.25 }}>
+                          {log.description}
+                        </Typography>
+                        {(ledgerSummary || lineBits.length > 0) ? (
+                          <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: '#0369a1', fontWeight: 600 }}>
+                            {[lineBits.join(', '), ledgerSummary].filter(Boolean).join(' · ')}
+                          </Typography>
+                        ) : null}
+                        {details?.ledger?.by_account?.length ? (
+                          <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: '#64748b' }}>
+                            Accounts: {details.ledger.by_account.map((a) => `#${a.cus_id} (Δ ${Number(a.net_effect_delta || 0).toFixed(0)})`).join(', ')}
+                          </Typography>
+                        ) : null}
+                      </Box>
+                    );
+                  })}
+                </Stack>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
 
           {/* Quick actions toolbar */}
           <Box sx={{ ...PURCHASE_PAGE_CARD_SX, px: { xs: 1.5, md: 2 }, py: 1.25 }}>
