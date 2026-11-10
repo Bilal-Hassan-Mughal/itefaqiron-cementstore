@@ -1,3 +1,5 @@
+// Optional PM2 template. On VPS, keep your existing process name, port, and env —
+// edit only on the server or match what is already running (pm2 list / pm2 describe).
 module.exports = {
   apps: [
     {

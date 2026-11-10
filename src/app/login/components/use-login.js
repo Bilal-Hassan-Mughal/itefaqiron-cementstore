@@ -10,22 +10,25 @@ export function useLoginRedirect() {
 
   return useCallback((user) => {
     persistSessionUser(user);
+    let path = '/dashboard';
     if (isHqUser(user)) {
       clearActiveBranch();
       setHqPosMode(false);
-      router.push('/dashboard/hq');
+      path = '/dashboard/hq';
     } else if (user.branch) {
       setActiveBranch(user.branch);
-      router.push('/dashboard');
     } else if (user.branch_id) {
       setActiveBranch({
         branch_id: user.branch_id,
         branch_name: user.branch?.branch_name || 'Branch',
         branch_code: user.branch?.branch_code || '',
       });
-      router.push('/dashboard');
+    }
+    // Full navigation after login avoids soft-route chunk races on VPS/nginx.
+    if (typeof window !== 'undefined') {
+      window.location.assign(path);
     } else {
-      router.push('/dashboard');
+      router.push(path);
     }
   }, [router]);
 }

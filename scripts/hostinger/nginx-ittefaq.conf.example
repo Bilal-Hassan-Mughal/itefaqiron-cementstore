@@ -1,0 +1,34 @@
+# REFERENCE ONLY — do not copy over the live VPS nginx config as-is.
+# Your server may already use other sites, ports, and SSL. Merge only what you need.
+#
+# Rule: proxy ALL app paths (including /_next/static/*) to the Node port THIS app
+# already listens on (see: pm2 describe <app> or your start script). Example below
+# uses placeholder 3001 — replace with YOUR port if different.
+#
+# sudo nginx -t && sudo systemctl reload nginx
+
+server {
+    listen 80;
+    server_name example.yourdomain.com;
+
+    client_max_body_size 50m;
+
+    location / {
+        # ← SET THIS to your existing Next/PM2 listen port (do not pick a new port
+        #    if another service already uses it on this VPS).
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 300s;
+        proxy_buffering off;
+    }
+}
+
+# Chunk/login issues: verify chunk URLs return 200 (same build as HTML), and use
+# current app code for chunk-error-recovery (reload cap). App code deploy does not
+# require nginx port changes.
