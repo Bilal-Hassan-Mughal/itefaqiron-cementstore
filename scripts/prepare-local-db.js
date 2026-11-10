@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Local XAMPP/MariaDB setup — does NOT modify prisma/schema.prisma.
+ * Local MariaDB/MySQL setup — does NOT modify prisma/schema.prisma.
  *
  * Imported SQL dumps already contain tables + foreign keys. Prisma db push
  * fails on MariaDB because it tries to re-add constraints that already exist.
@@ -36,7 +36,7 @@ async function main() {
     console.log(`Tables: ${tableCount}`);
 
     if (tableCount === 0) {
-      console.error('\nNo tables found. Import your .sql backup into XAMPP first.');
+      console.error('\nNo tables found. Import your .sql backup into local MySQL first.');
       process.exit(1);
     }
 
@@ -84,7 +84,7 @@ async function main() {
 
       if (pendingFk > 0 && fkRows.length > 0) {
         console.log(`\nPrisma reports ${pendingFk} foreign key(s) to add, but ${fkRows.length} already exist in MariaDB.`);
-        console.log('This is normal for imported XAMPP databases — skip "db push".');
+        console.log('This is normal for imported MariaDB dumps — skip "db push".');
         console.log('\nIf db push keeps failing, run:');
         console.log('  node scripts/prepare-local-db.js --sync');
       } else if (pendingFk > 0) {

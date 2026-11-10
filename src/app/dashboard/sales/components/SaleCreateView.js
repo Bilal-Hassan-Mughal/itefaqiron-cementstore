@@ -48,7 +48,11 @@ import DashboardLayout from '@/app/dashboard/components/dashboard-layout';
 import DateFilterInput from '@/app/dashboard/components/date-filter-input';
 import { BRAND, COMPANY } from '@/lib/brand-theme';
 import { useSalesContext } from './SalesContext';
-import { SaleCustomerDropdownListbox } from './SaleDropdownListbox';
+import {
+  SaleCustomerDropdownListbox,
+  SaleProductDropdownListbox,
+  createSaleProductRenderOption,
+} from './SaleDropdownListbox';
 import {
   SALE_ENTRY_ROW1_SX,
   SALE_ENTRY_ROW1_RETURN_SX,
@@ -176,6 +180,11 @@ export default function SaleCreateView() {
     setShowAddProductSubCategoryPopup,
     currentScreenIndex,
   } = ctx;
+
+  const renderSaleProductOption = React.useMemo(
+    () => createSaleProductRenderOption({ visibleCrates, toggleVisibleCrate, fmtRateQty }),
+    [visibleCrates, toggleVisibleCrate, fmtRateQty]
+  );
 
   return (
     <DashboardLayout>
@@ -875,57 +884,20 @@ export default function SaleCreateView() {
                     getOptionLabel={(option) => option.pro_title || ''}
                     getOptionKey={(option) => option.pro_id}
                     filterOptions={filterSaleProducts}
+                    slots={{ listbox: SaleProductDropdownListbox }}
                     slotProps={{
-                      listbox: {
+                      popper: {
                         sx: {
-                          height: 240,
-                          maxHeight: 240,
-                          overflowY: 'auto',
-                          overscrollBehavior: 'contain',
-                          py: 0,
-                          '& .MuiAutocomplete-option': {
-                            minHeight: 36,
-                            height: 36,
-                            py: 0,
-                            alignItems: 'center',
-                          },
+                          ...SALE_DROPDOWN_POPPER_SX,
+                          width: '100%',
                         },
+                        modifiers: [{ name: 'flip', enabled: false }],
                       },
                       paper: {
                         sx: { width: '100%', minWidth: 280, mt: 0.5 },
                       },
-                      popper: {
-                        modifiers: [
-                          { name: 'flip', enabled: false },
-                        ],
-                      },
                     }}
-                    renderOption={(props, option) => {
-                      const { key, ...optionProps } = props;
-                      return (
-                        <li key={option.pro_id ?? key} {...optionProps} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                          <Typography noWrap sx={{ fontWeight: 500, flex: 1, minWidth: 0 }}>
-                            {option.pro_title}
-                          </Typography>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
-                            {visibleCrates.includes(option.pro_id) && (
-                              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                                {option.pro_cost_price ? 'PKR ' + fmtRateQty(option.pro_cost_price) : 'N/A'}
-                              </Typography>
-                            )}
-                            <IconButton
-                              size="small"
-                              tabIndex={-1}
-                              onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
-                              onClick={(e) => { e.stopPropagation(); e.preventDefault(); toggleVisibleCrate(option.pro_id); }}
-                              aria-label={visibleCrates.includes(option.pro_id) ? 'Hide purchase rate' : 'Show purchase rate'}
-                            >
-                              <VisibilityIcon fontSize="small" />
-                            </IconButton>
-                          </Box>
-                        </li>
-                      );
-                    }}
+                    renderOption={renderSaleProductOption}
                     value={formSelectedProduct ?? null}
                     onChange={(event, newValue) => {
                       handleProductSelect(newValue);

@@ -128,22 +128,37 @@ function payPanelAccentSx(method) {
 const fieldSxPay = {
   ...HR_FIELD_SX,
   width: '100%',
-  '& .MuiInputLabel-root': { color: '#64748b', fontWeight: 600 },
+  display: 'block',
+  mb: 0.25,
+  '& .MuiInputLabel-root': {
+    color: '#64748b',
+    fontWeight: 600,
+    fontSize: '0.8125rem',
+    lineHeight: 1.2,
+    '&.MuiInputLabel-shrink': {
+      transform: 'translate(14px, -9px) scale(0.78)',
+      bgcolor: '#ffffff',
+      px: 0.6,
+    },
+  },
   '& .MuiInputLabel-root.Mui-focused': { color: PRIMARY },
   '& .MuiOutlinedInput-root': {
     ...HR_FIELD_SX['& .MuiOutlinedInput-root'],
-    minHeight: 42,
+    minHeight: 44,
     borderRadius: '11px',
     bgcolor: '#ffffff',
     color: NAVY,
     transition: 'box-shadow 0.2s ease, border-color 0.2s ease',
-    '& input': { color: NAVY },
+    '& .MuiOutlinedInput-input, & .MuiAutocomplete-input': {
+      py: 1.15,
+      color: NAVY,
+    },
     '& fieldset': { borderColor: '#cbd5e1' },
     '&:hover fieldset': { borderColor: '#94a3b8' },
     '&.Mui-focused fieldset': { borderColor: PRIMARY, borderWidth: 2 },
     '&.Mui-focused': { boxShadow: '0 0 0 3px rgba(26, 85, 227, 0.12)' },
   },
-  '& .MuiFormHelperText-root': { fontSize: '0.68rem', mt: 0.5, fontWeight: 600, color: '#64748b' },
+  '& .MuiFormHelperText-root': { fontSize: '0.68rem', mt: 0.35, mb: 0, fontWeight: 600, color: '#64748b' },
 };
 
 const fieldSxPayAmount = {
@@ -156,7 +171,13 @@ const fieldSxPayAmount = {
     '&.Mui-focused fieldset': { borderColor: '#f59e0b', borderWidth: 2 },
     '&.Mui-focused': { boxShadow: '0 0 0 3px rgba(245, 158, 11, 0.15)' },
   },
-  '& .MuiInputLabel-root': { color: '#b45309', fontWeight: 700 },
+  '& .MuiInputLabel-root': {
+    color: '#b45309',
+    fontWeight: 700,
+    '&.MuiInputLabel-shrink': {
+      bgcolor: '#fffbf7',
+    },
+  },
   '& .MuiInputLabel-root.Mui-focused': { color: '#d97706' },
 };
 
@@ -496,9 +517,14 @@ export default function SalaryAdvanceTab({ onBackToHub }) {
       }
       const data = await res.json();
       showSnack(`Advance issued: ${fmtAmt(amount)} to ${selectedEmployee?.emp_name || 'employee'}`);
+      const balBefore = parseFloat(
+        selectedEmployee?.ledger_balance ?? selectedEmployee?.account_balance ?? 0
+      );
       setVoucherAdvance({
         ...data,
         payment_reference: payload.payment_reference ?? data.payment_reference ?? null,
+        balance_before: balBefore,
+        balance_after: Number((balBefore + amount).toFixed(2)),
         employee: {
           ...selectedEmployee,
           ...data.employee,
@@ -1143,17 +1169,16 @@ export default function SalaryAdvanceTab({ onBackToHub }) {
                 </Typography>
               </Box>
             </Stack>
-            <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', mb: 0.45 }}>
-              Advance date
-            </Typography>
             <TextField
               fullWidth
               size="small"
+              label="Advance date"
               type="date"
               value={form.advance_date}
               onChange={(e) => setForm((f) => ({ ...f, advance_date: e.target.value }))}
               inputProps={{ lang: 'en-GB' }}
-              sx={fieldSxPay}
+              InputLabelProps={{ shrink: true }}
+              sx={{ ...fieldSxPay, mb: 0.75 }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
@@ -1168,12 +1193,16 @@ export default function SalaryAdvanceTab({ onBackToHub }) {
             sx={{
               flex: 1,
               minHeight: 0,
+              overflowX: 'hidden',
               overflowY: 'auto',
+              WebkitOverflowScrolling: 'touch',
               px: 1.35,
               py: 1.15,
+              pb: 1.5,
+              scrollbarGutter: 'stable',
             }}
           >
-            <Stack spacing={0.95}>
+            <Stack spacing={1.15}>
               <ToggleButtonGroup
                 exclusive
                 fullWidth
@@ -1197,7 +1226,7 @@ export default function SalaryAdvanceTab({ onBackToHub }) {
                 <ToggleButton value="PARTIAL">Split</ToggleButton>
               </ToggleButtonGroup>
 
-              <Stack spacing={0.9}>
+              <Stack spacing={1.25}>
               <Autocomplete
                 options={employeeOptions}
                 loading={employeesLoading}
@@ -1211,6 +1240,8 @@ export default function SalaryAdvanceTab({ onBackToHub }) {
                     {...params}
                     label="Employee"
                     placeholder="Search staff…"
+                    margin="dense"
+                    InputLabelProps={{ shrink: true }}
                     sx={fieldSxPay}
                     InputProps={{
                       ...params.InputProps,
@@ -1242,13 +1273,15 @@ export default function SalaryAdvanceTab({ onBackToHub }) {
 
               {form.paymentMethod === 'PARTIAL' ? (
                 <>
-                  <Grid container spacing={1}>
+                  <Grid container spacing={1.25}>
                     <Grid size={6}>
                       <TextField
                         fullWidth
                         size="small"
                         label="Cash amount"
                         type="number"
+                        margin="dense"
+                        InputLabelProps={{ shrink: true }}
                         value={form.cash_amount}
                         onChange={(e) => setForm((f) => ({ ...f, cash_amount: e.target.value }))}
                         InputProps={{ startAdornment: <InputAdornment position="start">Rs</InputAdornment> }}
@@ -1264,6 +1297,8 @@ export default function SalaryAdvanceTab({ onBackToHub }) {
                         size="small"
                         label="Bank amount"
                         type="number"
+                        margin="dense"
+                        InputLabelProps={{ shrink: true }}
                         value={form.bank_amount}
                         onChange={(e) => setForm((f) => ({ ...f, bank_amount: e.target.value }))}
                         InputProps={{ startAdornment: <InputAdornment position="start">Rs</InputAdornment> }}
@@ -1281,6 +1316,8 @@ export default function SalaryAdvanceTab({ onBackToHub }) {
                   size="small"
                   label="Advance amount"
                   type="number"
+                  margin="dense"
+                  InputLabelProps={{ shrink: true }}
                   value={form.amount}
                   onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
                   InputProps={{
@@ -1305,6 +1342,8 @@ export default function SalaryAdvanceTab({ onBackToHub }) {
                     <TextField
                       {...params}
                       label="Cash account"
+                      margin="dense"
+                      InputLabelProps={{ shrink: true }}
                       sx={fieldSxPay}
                       helperText={
                         form.paid_from_account_id
@@ -1338,6 +1377,8 @@ export default function SalaryAdvanceTab({ onBackToHub }) {
                     <TextField
                       {...params}
                       label="Bank account"
+                      margin="dense"
+                      InputLabelProps={{ shrink: true }}
                       sx={fieldSxPay}
                       helperText={
                         form.bank_account_id
@@ -1365,10 +1406,10 @@ export default function SalaryAdvanceTab({ onBackToHub }) {
                 size="small"
                 label="Reason (optional)"
                 placeholder="Emergency, medical…"
+                margin="dense"
+                InputLabelProps={{ shrink: true }}
                 value={form.reason}
                 onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
-                multiline
-                minRows={2}
                 sx={fieldSxPay}
               />
               <TextField
@@ -1376,6 +1417,8 @@ export default function SalaryAdvanceTab({ onBackToHub }) {
                 size="small"
                 label="Reference (optional)"
                 placeholder="Cheque / slip no."
+                margin="dense"
+                InputLabelProps={{ shrink: true }}
                 value={form.payment_reference}
                 onChange={(e) => setForm((f) => ({ ...f, payment_reference: e.target.value }))}
                 sx={fieldSxPay}

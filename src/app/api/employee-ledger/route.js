@@ -215,6 +215,8 @@ export async function GET(request) {
         emp_name: emp.emp_name,
         designation: emp.designation,
         department: emp.department || '',
+        emp_phone: emp.emp_phone || null,
+        emp_address: emp.emp_address || null,
         opening_balance: parseFloat(emp.opening_balance || 0),
         starting_balance: parseFloat(emp.opening_balance || 0),
       },

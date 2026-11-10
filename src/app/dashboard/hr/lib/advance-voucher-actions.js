@@ -135,19 +135,59 @@ export async function enrichAdvanceForVoucher(advance, ctx = {}) {
     ];
   }
 
+  const empAdvanceBill = `EMP-ADV-${advance.advance_id}`;
+  let balanceBefore = advance.balance_before;
+  let balanceAfter = advance.balance_after;
   let employeeLedgerBalance = employee.ledger_balance;
+
+  const hasBal =
+    balanceBefore != null &&
+    balanceAfter != null &&
+    !Number.isNaN(parseFloat(balanceBefore));
+
   try {
     const elRes = await fetch(`/api/employee-ledger?emp_id=${advance.emp_id}`);
     if (elRes.ok) {
       const elData = await elRes.json();
+      const apiEmp = elData?.employee;
+      if (apiEmp) {
+        employee = {
+          ...employee,
+          emp_name: apiEmp.emp_name ?? employee.emp_name,
+          designation: apiEmp.designation ?? employee.designation,
+          department: apiEmp.department ?? employee.department,
+          emp_phone: employee.emp_phone ?? apiEmp.emp_phone,
+          emp_address: employee.emp_address ?? apiEmp.emp_address,
+        };
+      }
       if (elData?.closing_balance != null) {
         employeeLedgerBalance = elData.closing_balance;
       } else if (elData?.ledger_balance != null) {
         employeeLedgerBalance = elData.ledger_balance;
       }
+
+      if (!hasBal) {
+        const entries = Array.isArray(elData?.entries) ? elData.entries : [];
+        const line = entries.find(
+          (r) =>
+            String(r.bill_no) === empAdvanceBill ||
+            (String(r.trnx_type || '').toUpperCase() === 'ADVANCE' &&
+              String(r.bill_no || '').includes(String(advance.advance_id)))
+        );
+        if (line && line.opening_balance != null && line.closing_balance != null) {
+          balanceBefore = parseFloat(line.opening_balance);
+          balanceAfter = parseFloat(line.closing_balance);
+        }
+      }
     }
   } catch {
     /* optional */
+  }
+
+  const amt = parseFloat(advance.amount || 0);
+  if (!hasBal && balanceBefore == null && balanceAfter == null && amt > 0 && employeeLedgerBalance != null) {
+    balanceAfter = parseFloat(employeeLedgerBalance);
+    balanceBefore = Number((balanceAfter - amt).toFixed(2));
   }
 
   return {
@@ -155,9 +195,11 @@ export async function enrichAdvanceForVoucher(advance, ctx = {}) {
     ledger_bill_no: billNo,
     employee: {
       ...employee,
-      ledger_balance: employeeLedgerBalance ?? employee.ledger_balance,
+      ledger_balance: balanceAfter ?? employeeLedgerBalance ?? employee.ledger_balance,
     },
-    employee_ledger_balance_after: employeeLedgerBalance,
+    balance_before: balanceBefore ?? advance.balance_before,
+    balance_after: balanceAfter ?? advance.balance_after,
+    employee_ledger_balance_after: balanceAfter ?? employeeLedgerBalance,
     payment_lines: paymentLines,
     payment_method_label: resolvePaymentMethodLabel(advance),
     payment_reference: advance.payment_reference || referenceFromLedger || null,

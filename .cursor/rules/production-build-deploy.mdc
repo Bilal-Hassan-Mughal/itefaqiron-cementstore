@@ -7,37 +7,28 @@ alwaysApply: true
 
 ## VPS / ports — do not disturb existing setup
 
-- **The live Hostinger VPS has its own** nginx, PM2, ports, and `.env`. Repo files are **guidance only**.
-- **Never** change in code or docs (unless the user explicitly asks): listening ports, `proxy_pass` targets, PM2 app names, `server_name`, SSL vhosts, or other services sharing the same VPS.
-- **Never** commit hard-coded production URLs/ports that force the VPS to match the repo. Use placeholders in examples (`NEXT_PORT`, `127.0.0.1:<PORT>`).
-- Deploy on VPS = **`git pull` → `npm ci` → `npm run build` → restart only this app’s existing PM2 process** (use the **name already on the server**, e.g. from `pm2 list`). Do not add new PM2 apps or new listeners without user approval.
-- **nginx**: if proxy rules need a fix, describe the **minimal** change; user edits `/etc/nginx/` on the VPS. Do **not** overwrite their full site config from repo templates.
+- **Hostinger VPS** keeps its own nginx, PM2, ports, and `.env`. Repo changes must not force new ports or replace server configs.
+- Deploy on VPS: **`git pull` → `npm ci` → `npm run build` → `pm2 restart`** (existing process name from `pm2 list`).
 
-## Build command (app code only)
+## Environments
 
-- Production build: `npm run build` → `prisma generate` + **`next build --webpack`** (WebSdk alias in `next.config.mjs`).
-- Do **not** switch default build to Turbopack-only without equivalent `WebSdk` resolveAlias.
-- Local test: `npm run start:local` / `prod:local` — **does not** dictate VPS port.
+| | Command | Where |
+|--|---------|--------|
+| Develop | `npm run dev` | PC, port 3000, real `.env` DB |
+| Test production build locally | `npm run build` then `npm run start` | PC, port 3000 |
+| Live users | `npm run build` + PM2 **`next start`** | Hostinger — same as before |
 
-## Runtime pattern (conceptual)
+## Build
 
-- Next.js **production** = Node (`next start`), not PHP/htdocs.
-- nginx should proxy **all** paths (including `/_next/static/*`) to **whatever port this app already uses on that VPS**. No mixed static copy of `.next` + Node HTML from another build.
+- `npm run build` → `prisma generate` (or `npm run generate:safe` on Windows if DLL locked) + **`next build --webpack`**.
+- Do not switch to Turbopack-only without `WebSdk` alias.
 
 ## Client bootstrap (do not regress)
 
-- **`chunk-error-recovery.js`**: max **2** auto-reloads per tab; no unbounded reload on chunk errors.
+- **`chunk-error-recovery.js`**: max **2** auto-reloads; no infinite reload loop.
 - **`use-login.js`**: full navigation after login (`window.location.assign`).
-- **`next.config.mjs`**: no-cache on `/`, `/login`, `/dashboard/*` HTML.
 
-## Forbidden without explicit user request
+## Pre-push
 
-- Changing `ecosystem.config.js` ports, hosts, or adding processes.
-- Replacing or auto-deploying `scripts/hostinger/*.conf` onto the VPS.
-- Unbounded `window.location.reload()` on chunk/script errors.
-
-## Pre-push checklist
-
-1. `npm run build` succeeds.
-2. If touching auth/layout: no login refresh loop.
-3. Infra edits stay in examples under `scripts/hostinger/` and match **existing** VPS ports when documented.
+1. `npm run build` succeeds on your PC.
+2. Push only app code from the repo (no local-only server configs).

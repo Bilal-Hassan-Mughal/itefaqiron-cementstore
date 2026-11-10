@@ -400,6 +400,8 @@ export const SALE_ENTRY_ROW2_SX = {
 
 export const SALE_DROPDOWN_LINE = '1px solid #c5c5c5';
 export const SALE_CUSTOMER_DROPDOWN_GRID = '32px minmax(270px, 2.7fr) 110px minmax(100px, 1fr) 130px';
+/** Product picker — product name + cost reveal (eye), same bordered table style as accounts. */
+export const SALE_PRODUCT_DROPDOWN_GRID = 'minmax(0, 1fr) 96px';
 
 export const saleDropdownRowStyle = (columns) => ({
   display: 'grid',

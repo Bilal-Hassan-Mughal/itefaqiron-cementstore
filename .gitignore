@@ -40,16 +40,6 @@ fingerprint-matcher/publish/
 # Misc local scratch (optional dev scripts)
 scratch/
 
-# Local XAMPP / Apache build test (your PC only — not for Hostinger)
-scripts/Start-Ittefaq-Build-Test.bat
-scripts/xampp-htdocs-shortcut.ps1
-scripts/LOCAL-APACHE-BUILD-TEST.txt
-scripts/xampp-apache-build-test.conf.example
-scripts/run-xampp-local-prod.ps1
-scripts/xampp-check-env.js
-scripts/xampp/
-ecosystem.config.local.js
-
 # Accidental local files
 concurrently
 dotnet
