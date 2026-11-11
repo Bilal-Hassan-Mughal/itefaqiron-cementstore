@@ -51,8 +51,9 @@ export async function GET(request) {
       // Try using Prisma relation
       try {
         stores = await prisma.store.findMany({
+          where: { branch_id: branchId },
           include: {
-            storeStocks: {
+            store_stocks: {
               include: {
                 product: {
                   select: {

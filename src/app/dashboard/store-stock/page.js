@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import DashboardLayout from '../components/dashboard-layout';
 import { usePinAuth } from '../../hooks/usePinAuth';
 import BiometricAuthDialog from '../components/BiometricAuthDialog';
@@ -35,10 +35,9 @@ import {
   DialogContent,
   DialogActions,
   IconButton,
-  Tooltip,
   Stack,
-  Divider,
-  InputAdornment
+  InputAdornment,
+  Avatar,
 } from '@mui/material';
 
 import {
@@ -48,6 +47,8 @@ import {
   TransferWithinAStation as TransferIcon,
   Add as AddIcon,
   Edit as EditIcon,
+  Close as CloseIcon,
+  TrendingFlat as TrendingFlatIcon,
   Refresh as RefreshIcon,
   Search as SearchIcon,
   FilterList as FilterIcon,
@@ -59,6 +60,568 @@ import {
 } from '@mui/icons-material';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { BRAND } from '@/lib/brand-theme';
+
+const STOCK_UI = {
+  border: '1px solid #dce3ed',
+  headBg: '#e8effd',
+  headColor: '#1347c4',
+  sectionLabel: '#64748b',
+  accent: BRAND.primary.blue,
+  cardRadius: '14px',
+};
+
+const sectionTitleSx = {
+  fontWeight: 800,
+  fontSize: '0.95rem',
+  color: '#0f172a',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 1,
+  pb: 1.25,
+  mb: 2,
+  borderBottom: `2px solid ${STOCK_UI.headBg}`,
+  letterSpacing: '0.02em',
+};
+
+const tableGridBorder = '#dce3ed';
+const tableHeadDivider = '#b8c9e8';
+
+const tableHeadCellSx = {
+  fontWeight: 800,
+  fontSize: '0.7rem',
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+  color: STOCK_UI.headColor,
+  bgcolor: STOCK_UI.headBg,
+  borderBottom: `2px solid ${tableHeadDivider}`,
+  borderRight: `1px solid ${tableHeadDivider}`,
+  py: 1.35,
+  px: 1.5,
+  whiteSpace: 'nowrap',
+  lineHeight: 1.2,
+  '&:last-of-type': { borderRight: 'none' },
+};
+
+const tableBodyCellSx = {
+  borderBottom: `1px solid ${tableGridBorder}`,
+  borderRight: `1px solid ${tableGridBorder}`,
+  py: 1.15,
+  px: 1.5,
+  fontSize: '0.8125rem',
+  verticalAlign: 'middle',
+  lineHeight: 1.35,
+  '&:last-of-type': { borderRight: 'none' },
+};
+
+const COL = {
+  store: { width: '14%', minWidth: 120 },
+  product: { width: '34%', minWidth: 200 },
+  qty: { width: '12%', minWidth: 108 },
+  status: { width: '14%', minWidth: 112 },
+  unit: { width: '8%', minWidth: 72 },
+  actions: { width: '10%', minWidth: 96 },
+};
+
+function formatStockQty(val) {
+  const n = parseFloat(val);
+  if (Number.isNaN(n)) return '—';
+  if (n % 1 === 0) return n.toLocaleString('en-US');
+  return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function formatUnit(unit) {
+  if (unit == null || unit === '') return '—';
+  const s = String(unit).trim();
+  if (!s || s.toUpperCase() === 'NULL' || s === '—') return '—';
+  return s;
+}
+
+function productSubtitle(product) {
+  if (!product) return null;
+  const title = (product.pro_title || '').trim();
+  const desc = (product.pro_description || '').trim();
+  if (!desc || desc.toUpperCase() === 'NULL') return null;
+  if (desc.toLowerCase() === title.toLowerCase()) return null;
+  return desc;
+}
+
+function getStockStatus(current, min) {
+  const q = parseFloat(current);
+  if (Number.isNaN(q)) return { label: '—', color: 'default' };
+  if (q < 0) return { label: 'Negative', color: 'error' };
+  if (q === 0) return { label: 'Out of Stock', color: 'error' };
+  const minVal = parseFloat(min);
+  if (!Number.isNaN(minVal) && q <= minVal) return { label: 'Low Stock', color: 'warning' };
+  return { label: 'In Stock', color: 'success' };
+}
+
+const editDialogReadOnlySx = {
+  '& .MuiOutlinedInput-root': {
+    borderRadius: '10px',
+    bgcolor: '#f8fafc',
+    '& fieldset': { borderColor: '#e2e8f0' },
+    '&:hover fieldset': { borderColor: '#cbd5e1' },
+    '&.Mui-disabled fieldset': { borderColor: '#e2e8f0' },
+  },
+  '& .MuiInputBase-input': {
+    fontWeight: 700,
+    fontSize: '0.875rem',
+    color: '#0f172a',
+    cursor: 'default',
+    WebkitTextFillColor: '#0f172a',
+  },
+  '& .MuiInputLabel-root': { fontWeight: 600, color: '#64748b' },
+};
+
+const editDialogQtyHighlightSx = {
+  ...editDialogReadOnlySx,
+  '& .MuiInputBase-input': {
+    fontWeight: 800,
+    fontSize: '1rem',
+    fontVariantNumeric: 'tabular-nums',
+    color: STOCK_UI.accent,
+    WebkitTextFillColor: STOCK_UI.accent,
+  },
+};
+
+function EditStockAdjustDialog({ open, item, updating, onClose, onSave, onValidationError }) {
+  const [adjQty, setAdjQty] = useState('');
+
+  useEffect(() => {
+    if (open) setAdjQty('');
+  }, [open, item?.store_stock_id]);
+
+  const postQty = useMemo(() => {
+    if (!item) return 0;
+    const base = parseFloat(item.stock_quantity || 0);
+    const adj = parseFloat(adjQty);
+    if (Number.isNaN(adj) || adjQty === '') return base;
+    return Number((base + adj).toFixed(4));
+  }, [item, adjQty]);
+
+  const currentQty = parseFloat(item?.stock_quantity);
+  const currentNegative = !Number.isNaN(currentQty) && currentQty < 0;
+
+  const handleSave = () => {
+    const n = parseFloat(adjQty);
+    if (adjQty === '' || Number.isNaN(n)) {
+      onValidationError?.('Please enter a valid stock adjustment quantity');
+      return;
+    }
+    if (n === 0) {
+      onValidationError?.('Adjustment quantity cannot be zero');
+      return;
+    }
+    onSave(n);
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="sm"
+      fullWidth
+      className="no-print"
+      keepMounted={false}
+      TransitionProps={{ timeout: 180 }}
+      slotProps={{
+        backdrop: {
+          sx: { backgroundColor: 'rgba(15, 23, 42, 0.45)' },
+        },
+      }}
+      PaperProps={{
+        elevation: 0,
+        sx: {
+          borderRadius: '16px',
+          border: `1px solid ${tableHeadDivider}`,
+          boxShadow: '0 24px 48px -12px rgba(15, 23, 42, 0.32)',
+          overflow: 'hidden',
+        },
+      }}
+    >
+      <DialogTitle
+        sx={{
+          m: 0,
+          px: 2.5,
+          py: 2,
+          bgcolor: '#ffffff',
+          borderBottom: `1px solid ${STOCK_UI.border}`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 1.5,
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
+          <Avatar sx={{ width: 40, height: 40, bgcolor: STOCK_UI.headBg, color: STOCK_UI.accent }}>
+            <EditIcon fontSize="small" />
+          </Avatar>
+          <Box>
+            <Typography sx={{ fontWeight: 800, fontSize: '1.02rem', color: '#0f172a' }}>
+              Adjust stock quantity
+            </Typography>
+            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
+              PIN required before saving
+            </Typography>
+          </Box>
+        </Box>
+        <IconButton
+          aria-label="Close"
+          onClick={onClose}
+          disabled={updating}
+          size="small"
+          sx={{ border: `1px solid ${STOCK_UI.border}`, borderRadius: '10px' }}
+        >
+          <CloseIcon fontSize="small" />
+        </IconButton>
+      </DialogTitle>
+
+      <DialogContent sx={{ px: 2.5, py: 2.25, bgcolor: '#f8fafc' }}>
+        {item && (
+          <Stack spacing={2}>
+            <Box
+              sx={{
+                p: 0.5,
+                borderRadius: '12px',
+                bgcolor: '#fff',
+                border: `1px solid ${STOCK_UI.border}`,
+              }}
+            >
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5, p: 1.5 }}>
+                <TextField
+                  label="Store"
+                  value={item.store?.store_name || '—'}
+                  size="small"
+                  fullWidth
+                  disabled
+                  sx={editDialogReadOnlySx}
+                />
+                <TextField
+                  label="Existing stock"
+                  value={formatStockQty(item.stock_quantity)}
+                  size="small"
+                  fullWidth
+                  disabled
+                  sx={{
+                    ...editDialogQtyHighlightSx,
+                    '& .MuiInputBase-input': {
+                      ...editDialogQtyHighlightSx['& .MuiInputBase-input'],
+                      color: currentNegative ? '#b91c1c' : STOCK_UI.accent,
+                      WebkitTextFillColor: currentNegative ? '#b91c1c' : STOCK_UI.accent,
+                    },
+                  }}
+                />
+                <TextField
+                  label="Product"
+                  value={item.product?.pro_title || '—'}
+                  size="small"
+                  fullWidth
+                  disabled
+                  sx={{ ...editDialogReadOnlySx, gridColumn: '1 / -1' }}
+                />
+                <TextField
+                  label="Product ID"
+                  value={item.product?.pro_id != null ? String(item.product.pro_id) : '—'}
+                  size="small"
+                  fullWidth
+                  disabled
+                  sx={editDialogReadOnlySx}
+                />
+                <TextField
+                  label="Unit"
+                  value={formatUnit(item.product?.pro_unit)}
+                  size="small"
+                  fullWidth
+                  disabled
+                  sx={editDialogReadOnlySx}
+                />
+              </Box>
+            </Box>
+
+            <Box
+              sx={{
+                p: 1.75,
+                borderRadius: '12px',
+                bgcolor: '#ffffff',
+                border: `1px solid ${STOCK_UI.headBg}`,
+              }}
+            >
+              <TextField
+                label="Add or subtract quantity"
+                placeholder="e.g. 5 or -5"
+                type="number"
+                fullWidth
+                size="small"
+                autoFocus
+                value={adjQty}
+                onChange={(e) => setAdjQty(e.target.value)}
+                inputProps={{ step: 'any' }}
+                helperText="Use minus to reduce stock. Negative balances are allowed."
+                disabled={updating}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSave();
+                  }
+                }}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: '10px',
+                    bgcolor: '#fff',
+                    '&.Mui-focused fieldset': { borderColor: STOCK_UI.accent, borderWidth: 2 },
+                  },
+                  '& .MuiInputBase-input': { fontWeight: 700, fontVariantNumeric: 'tabular-nums' },
+                }}
+              />
+
+              <Box
+                sx={{
+                  mt: 1.75,
+                  py: 1.1,
+                  px: 1.25,
+                  borderRadius: '10px',
+                  bgcolor: '#f1f5f9',
+                  border: `1px solid ${STOCK_UI.border}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexWrap: 'wrap',
+                  gap: 1,
+                }}
+              >
+                <Chip size="small" label={formatStockQty(item.stock_quantity)} sx={{ fontWeight: 700, bgcolor: '#fff' }} />
+                <Typography sx={{ color: '#64748b', fontWeight: 800, fontSize: '0.85rem' }}>+</Typography>
+                <Chip
+                  size="small"
+                  color="primary"
+                  variant={adjQty === '' ? 'outlined' : 'filled'}
+                  label={adjQty === '' ? '0' : adjQty}
+                  sx={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}
+                />
+                <TrendingFlatIcon sx={{ color: '#94a3b8', fontSize: 18 }} />
+                <Chip
+                  size="small"
+                  label={formatStockQty(postQty)}
+                  sx={{
+                    fontWeight: 800,
+                    fontVariantNumeric: 'tabular-nums',
+                    bgcolor: postQty < 0 ? '#fee2e2' : postQty === 0 ? '#f1f5f9' : '#dcfce7',
+                    color: postQty < 0 ? '#b91c1c' : postQty === 0 ? '#64748b' : '#15803d',
+                  }}
+                />
+              </Box>
+
+              <TextField
+                label="New quantity after adjustment"
+                value={formatStockQty(postQty)}
+                size="small"
+                fullWidth
+                disabled
+                sx={{
+                  mt: 1.5,
+                  ...editDialogReadOnlySx,
+                  '& .MuiInputBase-input': {
+                    fontWeight: 800,
+                    fontSize: '1.05rem',
+                    fontVariantNumeric: 'tabular-nums',
+                    color: postQty < 0 ? '#b91c1c' : postQty === 0 ? '#64748b' : '#15803d',
+                    WebkitTextFillColor: postQty < 0 ? '#b91c1c' : postQty === 0 ? '#64748b' : '#15803d',
+                  },
+                }}
+              />
+            </Box>
+
+            {postQty < 0 && (
+              <Alert severity="info" variant="outlined" sx={{ borderRadius: '10px', py: 0.35, fontSize: '0.8rem' }}>
+                New stock will be negative — allowed for corrections and back-dated sales.
+              </Alert>
+            )}
+          </Stack>
+        )}
+      </DialogContent>
+
+      <DialogActions sx={{ px: 2.5, py: 1.75, bgcolor: '#fff', borderTop: `1px solid ${STOCK_UI.border}`, gap: 1 }}>
+        <Button
+          onClick={onClose}
+          disabled={updating}
+          variant="outlined"
+          sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '10px', borderColor: '#cbd5e1' }}
+        >
+          Cancel
+        </Button>
+        <Button
+          onClick={handleSave}
+          variant="contained"
+          disabled={updating}
+          startIcon={updating ? <CircularProgress size={16} color="inherit" /> : null}
+          sx={{
+            textTransform: 'none',
+            fontWeight: 800,
+            bgcolor: STOCK_UI.accent,
+            borderRadius: '10px',
+            minWidth: 148,
+            boxShadow: 'none',
+            '&:hover': { bgcolor: '#1347c4' },
+          }}
+        >
+          {updating ? 'Saving…' : 'Save adjustment'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+const StoreStockDataTable = memo(function StoreStockDataTable({ rows, totalCount, loading, onEdit }) {
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  return (
+    <TableContainer
+      component={Paper}
+      variant="outlined"
+      sx={{
+        width: '100%',
+        borderRadius: '12px',
+        border: `1px solid ${tableHeadDivider}`,
+        overflow: 'auto',
+        maxHeight: { xs: 'none', lg: 'calc(100vh - 300px)' },
+        '@media print': {
+          width: '100% !important',
+          maxWidth: '100% !important',
+          minWidth: '100% !important',
+          margin: '0 !important',
+          padding: '0 !important',
+          maxHeight: 'none !important',
+        },
+      }}
+    >
+      <Table
+        size="small"
+        stickyHeader
+        sx={{
+          width: '100%',
+          tableLayout: 'fixed',
+          borderCollapse: 'separate',
+          borderSpacing: 0,
+        }}
+      >
+        <TableHead>
+          <TableRow>
+            <TableCell sx={{ ...tableHeadCellSx, ...COL.store }}>Store</TableCell>
+            <TableCell sx={{ ...tableHeadCellSx, ...COL.product }}>Product</TableCell>
+            <TableCell sx={{ ...tableHeadCellSx, ...COL.qty, textAlign: 'right' }}>Current Stock</TableCell>
+            <TableCell sx={{ ...tableHeadCellSx, ...COL.status, textAlign: 'center' }}>Status</TableCell>
+            <TableCell sx={{ ...tableHeadCellSx, ...COL.unit, textAlign: 'center' }}>Unit</TableCell>
+            <TableCell sx={{ ...tableHeadCellSx, ...COL.actions, textAlign: 'center' }} className="no-print">
+              Actions
+            </TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={6} align="center" sx={{ ...tableBodyCellSx, py: 5, color: '#64748b', borderRight: 'none' }}>
+                {totalCount === 0 ? 'No stock found' : 'No products match your filters'}
+              </TableCell>
+            </TableRow>
+          ) : (
+            rows.map((item, rowIdx) => {
+              const status = getStockStatus(item.stock_quantity, item.min_stock);
+              const rowBg = rowIdx % 2 === 0 ? '#ffffff' : '#f8fafc';
+              const subtitle = productSubtitle(item.product);
+              return (
+                <TableRow
+                  key={`${item.store_stock_id}-${item.store?.storeid || 'all'}`}
+                  hover
+                  sx={{
+                    bgcolor: rowBg,
+                    '&:hover': { bgcolor: '#f1f5f9' },
+                  }}
+                >
+                  <TableCell sx={{ ...tableBodyCellSx, ...COL.store }}>
+                    <Typography variant="body2" sx={{ fontWeight: 600, color: '#334155' }}>
+                      {item.store?.store_name || '—'}
+                    </Typography>
+                  </TableCell>
+                  <TableCell sx={{ ...tableBodyCellSx, ...COL.product }}>
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        fontWeight: 700,
+                        color: '#0f172a',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                      }}
+                    >
+                      {item.product?.pro_title || '—'}
+                    </Typography>
+                    {subtitle ? (
+                      <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.25 }}>
+                        {subtitle}
+                      </Typography>
+                    ) : (
+                      <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mt: 0.25 }}>
+                        ID {item.product?.pro_id ?? '—'}
+                      </Typography>
+                    )}
+                  </TableCell>
+                  <TableCell align="right" sx={{ ...tableBodyCellSx, ...COL.qty }}>
+                    <Typography
+                      component="span"
+                      variant="body2"
+                      sx={{
+                        fontWeight: 800,
+                        fontVariantNumeric: 'tabular-nums',
+                        color: parseFloat(item.stock_quantity) < 0 ? '#b91c1c' : '#0f172a',
+                      }}
+                    >
+                      {formatStockQty(item.stock_quantity)}
+                    </Typography>
+                  </TableCell>
+                  <TableCell align="center" sx={{ ...tableBodyCellSx, ...COL.status }}>
+                    <Chip label={status.label} color={status.color} size="small" variant="outlined" sx={{ fontWeight: 700, fontSize: '0.7rem', height: 26 }} />
+                  </TableCell>
+                  <TableCell align="center" sx={{ ...tableBodyCellSx, ...COL.unit, fontWeight: 600, color: '#475569' }}>
+                    {formatUnit(item.product?.pro_unit)}
+                  </TableCell>
+                  <TableCell align="center" sx={{ ...tableBodyCellSx, ...COL.actions }} className="no-print">
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => onEdit(item)}
+                      startIcon={<EditIcon sx={{ fontSize: 16 }} />}
+                      sx={{
+                        textTransform: 'none',
+                        fontWeight: 700,
+                        fontSize: '0.75rem',
+                        borderColor: '#cbd5e1',
+                        color: STOCK_UI.accent,
+                        minWidth: 72,
+                        py: 0.35,
+                        '&:hover': { borderColor: STOCK_UI.accent, bgcolor: STOCK_UI.headBg },
+                      }}
+                    >
+                      Edit
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })
+          )}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+});
 
 export default function StoreStockPage() {
   const { requireAuth, authDialogOpen, handleAuthSuccess, handleAuthCancel } = usePinAuth();
@@ -72,7 +635,6 @@ export default function StoreStockPage() {
   const [editStockDialog, setEditStockDialog] = useState(false);
   const [updatingStock, setUpdatingStock] = useState(false);
   const [editingStockItem, setEditingStockItem] = useState(null);
-  const [editStockQuantity, setEditStockQuantity] = useState('');
   const [transferData, setTransferData] = useState({
     fromStore: '',
     toStore: '',
@@ -236,11 +798,24 @@ export default function StoreStockPage() {
     }
   };
 
-  const openEditStockDialog = (stockItem) => {
-    setEditingStockItem(stockItem);
-    setEditStockQuantity('0');
+  const closeEditStockDialog = useCallback(({ force = false } = {}) => {
+    if (updatingStock && !force) return;
+    setEditStockDialog(false);
+    setTimeout(() => setEditingStockItem(null), 180);
+  }, [updatingStock]);
+
+  const openEditStockDialog = useCallback((stockItem) => {
+    setEditingStockItem({
+      store_stock_id: stockItem.store_stock_id,
+      store_id: stockItem.store_id ?? stockItem.store?.storeid,
+      pro_id: stockItem.pro_id ?? stockItem.product?.pro_id,
+      stock_quantity: stockItem.stock_quantity,
+      min_stock: stockItem.min_stock,
+      store: stockItem.store,
+      product: stockItem.product,
+    });
     setEditStockDialog(true);
-  };
+  }, []);
 
   const getCurrentUserId = () => {
     try {
@@ -253,23 +828,11 @@ export default function StoreStockPage() {
     }
   };
 
-  const handleUpdateStock = async () => {
+  const handleUpdateStock = useCallback(async (adjQty) => {
     if (!editingStockItem) return;
 
-    const adjQty = parseFloat(editStockQuantity);
-    if (Number.isNaN(adjQty)) {
-      showSnackbar('Please enter a valid stock adjustment quantity', 'error');
-      return;
-    }
-
-    if (adjQty === 0) {
-      showSnackbar('Adjustment quantity cannot be zero', 'error');
-      return;
-    }
-
-    const currentQty = parseFloat(editingStockItem?.stock_quantity || 0);
-    if (currentQty + adjQty < 0) {
-      showSnackbar('Post-adjustment stock quantity cannot be negative', 'error');
+    if (Number.isNaN(adjQty) || adjQty === 0) {
+      showSnackbar(adjQty === 0 ? 'Adjustment quantity cannot be zero' : 'Please enter a valid stock adjustment quantity', 'error');
       return;
     }
 
@@ -294,9 +857,7 @@ export default function StoreStockPage() {
 
       if (response.ok) {
         showSnackbar('Stock adjusted successfully', 'success');
-        setEditStockDialog(false);
-        setEditingStockItem(null);
-        setEditStockQuantity('');
+        closeEditStockDialog({ force: true });
         if (selectedStore) {
           await loadStoreStock(selectedStore);
           await loadLowStockProducts(selectedStore);
@@ -313,7 +874,7 @@ export default function StoreStockPage() {
     } finally {
       setUpdatingStock(false);
     }
-  };
+  }, [closeEditStockDialog, editingStockItem, requireAuth, selectedStore]);
 
   const showSnackbar = (message, severity = 'success') => {
     setSnackbar({ open: true, message, severity });
@@ -321,12 +882,6 @@ export default function StoreStockPage() {
 
   const handleCloseSnackbar = () => {
     setSnackbar({ ...snackbar, open: false });
-  };
-
-  const getStockStatus = (current, min) => {
-    if (current <= 0) return { label: 'Out of Stock', color: 'error' };
-    if (current <= min) return { label: 'Low Stock', color: 'warning' };
-    return { label: 'In Stock', color: 'success' };
   };
 
   // Filter store stock based on search criteria
@@ -436,7 +991,7 @@ export default function StoreStockPage() {
         String(i + 1),
         item.store?.store_name || '-',
         item.product?.pro_title || '-',
-        item.product?.pro_unit || '-',
+        formatUnit(item.product?.pro_unit),
         fmtNum(qty),
         fmtNum(min),
         status,
@@ -639,9 +1194,10 @@ export default function StoreStockPage() {
             border-collapse: collapse !important;
           }
           .print-content .MuiTableCell-root {
-            padding: 8px 4px !important;
-            border: 1px solid #000 !important;
+            padding: 8px 6px !important;
+            border: 1px solid #333 !important;
             box-sizing: border-box !important;
+            vertical-align: middle !important;
           }
           .print-content .MuiTableHead-root .MuiTableCell-root {
             font-weight: bold !important;
@@ -699,16 +1255,47 @@ export default function StoreStockPage() {
             maxWidth: '100% !important' 
           } 
         }}>
-          <Box className="no-print">
-          <Typography variant="h4" component="h1" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <InventoryIcon color="primary" />
-            Store Stock Management
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
-            Manage inventory across multiple stores
-          </Typography>
+          <Box
+            className="no-print"
+            sx={{
+              pb: 2,
+              mb: 1,
+              borderBottom: `3px solid ${STOCK_UI.accent}`,
+            }}
+          >
+            <Typography
+              variant="h4"
+              component="h1"
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1.5,
+                fontWeight: 800,
+                color: '#0f172a',
+                fontSize: { xs: '1.35rem', md: '1.6rem' },
+              }}
+            >
+              <Box
+                sx={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: '12px',
+                  bgcolor: STOCK_UI.headBg,
+                  color: STOCK_UI.accent,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <InventoryIcon />
+              </Box>
+              Store Stock Management
+            </Typography>
+            <Typography variant="body2" sx={{ color: STOCK_UI.sectionLabel, mt: 0.75, ml: 0.5 }}>
+              Manage inventory across multiple stores
+            </Typography>
+          </Box>
         </Box>
-                        </Box>
 
         {/* Low Stock Alert */}
         {lowStockProducts.length > 0 && (
@@ -724,10 +1311,13 @@ export default function StoreStockPage() {
         )}
 
         {/* Filter Section */}
-        <Card sx={{ mb: 3 }} className="no-print">
-            <CardContent>
-            <Typography variant="h6" sx={{ mb: 2, fontWeight: 'semibold', display: 'flex', alignItems: 'center', gap: 1 }}>
-              <FilterIcon />
+        <Card
+          sx={{ mb: 3, borderRadius: STOCK_UI.cardRadius, border: STOCK_UI.border, boxShadow: '0 1px 4px rgba(15,23,42,0.06)' }}
+          className="no-print"
+        >
+            <CardContent sx={{ pt: 2.25, pb: 2 }}>
+            <Typography component="div" sx={sectionTitleSx}>
+              <FilterIcon sx={{ color: STOCK_UI.accent, fontSize: 20 }} />
               Filter Stock
             </Typography>
             <Grid container spacing={2} alignItems="center">
@@ -851,160 +1441,84 @@ export default function StoreStockPage() {
         </Box>
 
         {/* Store Stock Table */}
-        <Card className="print-content" sx={{ '@media print': { width: '100%', maxWidth: '100%', margin: 0, padding: 0 } }}>
-          <CardContent sx={{ '@media print': { width: '100%', maxWidth: '100%', padding: '5px !important', margin: 0 } }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }} className="no-print">
-                <Typography variant="h6">
-                {selectedStore 
-                  ? `Stock for ${stores.find(s => s.storeid === parseInt(selectedStore))?.store_name}`
-                  : 'All Store Stock'}
+        <Card
+          className="print-content"
+          sx={{
+            borderRadius: STOCK_UI.cardRadius,
+            border: STOCK_UI.border,
+            boxShadow: '0 1px 4px rgba(15,23,42,0.06)',
+            '@media print': { width: '100%', maxWidth: '100%', margin: 0, padding: 0 },
+          }}
+        >
+          <CardContent sx={{ pt: 2.25, pb: 2, '@media print': { width: '100%', maxWidth: '100%', padding: '5px !important', margin: 0 } }}>
+            <Box
+              className="no-print"
+              sx={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                justifyContent: 'space-between',
+                alignItems: 'flex-end',
+                gap: 2,
+                pb: 1.5,
+                mb: 1.5,
+                borderBottom: `2px solid ${STOCK_UI.headBg}`,
+              }}
+            >
+              <Box>
+                <Typography sx={{ fontWeight: 800, fontSize: '0.95rem', color: '#0f172a' }}>
+                  {selectedStore
+                    ? `Stock for ${stores.find(s => s.storeid === parseInt(selectedStore))?.store_name}`
+                    : 'All Store Stock'}
                 </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <Typography variant="body2" color="text.secondary" className="no-print">
-                  {filteredStoreStock.length} products
+                <Typography variant="body2" sx={{ color: STOCK_UI.sectionLabel, mt: 0.35 }}>
+                  {filteredStoreStock.length} products shown
                 </Typography>
+              </Box>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                 <Button
                   variant="contained"
+                  size="small"
                   startIcon={<PdfIcon />}
                   onClick={handleDownloadPdf}
                   disabled={filteredStoreStock.length === 0}
-                  className="no-print"
-                  sx={{
-                    bgcolor: '#e11d48',
-                    '&:hover': { bgcolor: '#be123c' }
-                  }}
+                  sx={{ bgcolor: '#e11d48', fontWeight: 700, textTransform: 'none', boxShadow: 'none', '&:hover': { bgcolor: '#be123c' } }}
                 >
                   PDF
                 </Button>
                 <Button
                   variant="contained"
+                  size="small"
                   startIcon={<SendIcon />}
                   onClick={openWhatsAppModal}
                   disabled={filteredStoreStock.length === 0}
-                  className="no-print"
-                  sx={{
-                    bgcolor: '#16a34a',
-                    '&:hover': { bgcolor: '#15803d' }
-                  }}
+                  sx={{ bgcolor: '#16a34a', fontWeight: 700, textTransform: 'none', boxShadow: 'none', '&:hover': { bgcolor: '#15803d' } }}
                 >
                   WhatsApp PDF
                 </Button>
                 <Button
                   variant="contained"
+                  size="small"
                   startIcon={<PrintIcon />}
                   onClick={() => window.print()}
-                  className="no-print"
                   sx={{
-                    bgcolor: '#1976d2',
-                    '&:hover': { bgcolor: '#1565c0' }
+                    bgcolor: STOCK_UI.accent,
+                    fontWeight: 700,
+                    textTransform: 'none',
+                    boxShadow: 'none',
+                    '&:hover': { bgcolor: '#1347c4' },
                   }}
                 >
                   Print Report
                 </Button>
-              </Box>
-              </Box>
+              </Stack>
+            </Box>
 
-              {loading ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                  <CircularProgress />
-                </Box>
-              ) : (
-                <TableContainer 
-                  component={Paper} 
-                  variant="outlined" 
-                  sx={{ 
-                    width: '100%', 
-                    '@media print': { 
-                      width: '100% !important', 
-                      maxWidth: '100% !important',
-                      minWidth: '100% !important',
-                      margin: '0 !important',
-                      padding: '0 !important'
-                    } 
-                  }}
-                >
-                  <Table sx={{ 
-                    width: '100%',
-                    tableLayout: 'fixed',
-                    '@media print': { 
-                      width: '100% !important', 
-                      minWidth: '100% !important',
-                      maxWidth: '100% !important',
-                      tableLayout: 'fixed !important',
-                      margin: '0 !important',
-                      borderCollapse: 'collapse !important'
-                    } 
-                  }}>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell sx={{ fontWeight: 'bold' }}>Store</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold' }}>Product</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold' }}>Current Stock</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold' }}>Status</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold' }}>Unit</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold' }} className="no-print">Actions</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {filteredStoreStock.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
-                            {storeStock.length === 0 ? 'No stock found' : 'No products match your filters'}
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        filteredStoreStock.map((item) => {
-                        const status = getStockStatus(item.stock_quantity, item.min_stock);
-                        return (
-                            <TableRow key={`${item.store_stock_id}-${item.store?.storeid || 'all'}`} hover>
-                              <TableCell>
-                                <Typography variant="body2" sx={{ fontWeight: 'medium' }}>
-                                  {item.store?.store_name || 'N/A'}
-                                </Typography>
-                              </TableCell>
-                            <TableCell>
-                              <Typography variant="body2" sx={{ fontWeight: 'medium' }}>
-                                {item.product?.pro_title || 'N/A'}
-                              </Typography>
-                              {item.product?.pro_description && (
-                                <Typography variant="caption" color="text.secondary" display="block">
-                                  {item.product.pro_description}
-                                </Typography>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                                {item.stock_quantity}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Chip
-                                label={status.label}
-                                color={status.color}
-                                size="small"
-                                variant="outlined"
-                              />
-                            </TableCell>
-                              <TableCell>{item.product?.pro_unit || 'N/A'}</TableCell>
-                              <TableCell className="no-print">
-                                <Tooltip title="Edit Stock">
-                                  <IconButton
-                                    size="small"
-                                    onClick={() => openEditStockDialog(item)}
-                                    color="primary"
-                                  >
-                                    <EditIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                              </TableCell>
-                          </TableRow>
-                        );
-                        })
-                      )}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              )}
+              <StoreStockDataTable
+                rows={filteredStoreStock}
+                totalCount={storeStock.length}
+                loading={loading}
+                onEdit={openEditStockDialog}
+              />
             </CardContent>
           </Card>
 
@@ -1080,52 +1594,14 @@ export default function StoreStockPage() {
           </DialogActions>
         </Dialog>
 
-        {/* Edit Stock Dialog */}
-        <Dialog open={editStockDialog} onClose={() => setEditStockDialog(false)} maxWidth="sm" fullWidth className="no-print">
-          <DialogTitle>Edit Stock Quantity</DialogTitle>
-          <DialogContent>
-            <Stack spacing={2} sx={{ mt: 1 }}>
-              <TextField
-                label="Store"
-                value={editingStockItem?.store?.store_name || 'N/A'}
-                fullWidth
-                disabled
-              />
-              <TextField
-                label="Product"
-                value={editingStockItem?.product?.pro_title || 'N/A'}
-                fullWidth
-                disabled
-              />
-              <TextField
-                label="Existing Stock"
-                value={parseFloat(editingStockItem?.stock_quantity || 0)}
-                fullWidth
-                disabled
-              />
-              <TextField
-                label="Stock to Add / Subtract (e.g. 5 or -5)"
-                type="number"
-                fullWidth
-                value={editStockQuantity}
-                onChange={(e) => setEditStockQuantity(e.target.value)}
-                inputProps={{ step: '0.01' }}
-              />
-              <TextField
-                label="Post Quantity to Update"
-                value={parseFloat(editingStockItem?.stock_quantity || 0) + (parseFloat(editStockQuantity) || 0)}
-                fullWidth
-                disabled
-              />
-            </Stack>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setEditStockDialog(false)} disabled={updatingStock}>Cancel</Button>
-            <Button onClick={handleUpdateStock} variant="contained" disabled={updatingStock}>
-              {updatingStock ? 'Updating...' : 'Update Stock'}
-            </Button>
-          </DialogActions>
-        </Dialog>
+        <EditStockAdjustDialog
+          open={editStockDialog}
+          item={editingStockItem}
+          updating={updatingStock}
+          onClose={() => closeEditStockDialog()}
+          onSave={handleUpdateStock}
+          onValidationError={(msg) => showSnackbar(msg, 'error')}
+        />
 
         {/* WhatsApp Share Modal */}
         <Dialog

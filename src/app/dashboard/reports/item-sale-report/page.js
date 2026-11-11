@@ -1,10 +1,13 @@
 'use client';
 
 import { TailwindDateInput } from '../../components/date-filter-input';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '../../components/dashboard-layout';
 import ReportPageHeader from '../../components/report-page-header';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { COMPANY, BRAND } from '@/lib/brand-theme';
 
 export default function ItemSaleReport() {
   const router = useRouter();
@@ -141,7 +144,114 @@ export default function ItemSaleReport() {
     border: '1px solid #ccc', padding: '5px 8px', textAlign: align, fontSize: 13, ...extra,
   });
 
-  const handlePrint = () => window.print();
+  const canExportLedger = Boolean(selectedProduct) && !loading;
+
+  const buildLedgerTableBody = useCallback(() => {
+    const openingRow = [
+      '',
+      'Opening',
+      'Opening Stock',
+      fmtQty(openingStock),
+      '-',
+      '-',
+      '-',
+      '-',
+      '-',
+      fmtQty(openingStock),
+      '-',
+      '-',
+    ];
+    const dataRows = details.map((row, i) => [
+      String(i + 1),
+      fmtDate(row.date),
+      `${row.accountTitle || '-'}${row.billNo ? ` (${row.billNo})` : ''}`,
+      fmtQty(row.preStock),
+      row.purchaseQty > 0 ? fmtQty(row.purchaseQty) : '-',
+      row.purchaseReturnQty > 0 ? fmtQty(row.purchaseReturnQty) : '-',
+      row.saleQty > 0 ? fmtQty(row.saleQty) : '-',
+      row.saleReturnQty > 0 ? fmtQty(row.saleReturnQty) : '-',
+      row.adjustmentQty !== 0
+        ? (row.adjustmentQty > 0 ? `+${fmtQty(row.adjustmentQty)}` : fmtQty(row.adjustmentQty))
+        : '-',
+      fmtQty(row.updatedStock),
+      fmtAmt(row.amount),
+      typeLabel[row.type] || row.type || '-',
+    ]);
+    const rows = [openingRow, ...dataRows];
+    if (details.length > 0) {
+      rows.push([
+        '',
+        'Total',
+        '',
+        '',
+        fmtQty(totals.purchase),
+        fmtQty(totals.purchaseReturn),
+        fmtQty(totals.sale),
+        fmtQty(totals.saleReturn),
+        totals.adjustment !== 0
+          ? (totals.adjustment > 0 ? `+${fmtQty(totals.adjustment)}` : fmtQty(totals.adjustment))
+          : '-',
+        '',
+        fmtAmt(totals.amount),
+        '',
+      ]);
+    }
+    return rows;
+  }, [details, openingStock, totals, fmtDate, fmtQty, fmtAmt, typeLabel]);
+
+  const handleDownloadPdf = useCallback(() => {
+    if (!canExportLedger || !selectedProduct) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    doc.text(COMPANY.name, pageW / 2, 32, { align: 'center' });
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    doc.text('ITEM STOCK LEDGER', pageW / 2, 48, { align: 'center' });
+    doc.setFontSize(9);
+    doc.text(`Item: ${selectedProduct.pro_title} (#${selectedProduct.pro_id})`, 40, 64);
+    doc.text(`Period: ${startDate} — ${endDate}`, 40, 76);
+    doc.text(`Generated: ${new Date().toLocaleString('en-GB')}`, 40, 88);
+
+    const head = [[
+      '#', 'Date', 'Account / Bill No.', 'Pre Stock', 'Purchase', 'Pur. Return',
+      'Sale', 'Sale Return', 'Adjustment', 'Updated Stock', 'Amount', 'Type',
+    ]];
+
+    autoTable(doc, {
+      startY: 98,
+      head,
+      body: buildLedgerTableBody(),
+      styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak', valign: 'middle' },
+      headStyles: { fillColor: [44, 62, 80], textColor: 255, fontStyle: 'bold' },
+      footStyles: { fillColor: [44, 62, 80], textColor: 255 },
+      columnStyles: {
+        0: { cellWidth: 22 },
+        1: { cellWidth: 58 },
+        2: { cellWidth: 120 },
+        3: { halign: 'right' },
+        4: { halign: 'right' },
+        5: { halign: 'right' },
+        6: { halign: 'right' },
+        7: { halign: 'right' },
+        8: { halign: 'right' },
+        9: { halign: 'right' },
+        10: { halign: 'right' },
+        11: { halign: 'center' },
+      },
+      theme: 'grid',
+      margin: { left: 28, right: 28 },
+    });
+
+    const safeName = String(selectedProduct.pro_title || 'item').replace(/[^\w\-]+/g, '-').slice(0, 40);
+    doc.save(`item-stock-ledger-${selectedProduct.pro_id}-${safeName}-${startDate}.pdf`);
+  }, [buildLedgerTableBody, canExportLedger, endDate, selectedProduct, startDate]);
+
+  const handlePrint = () => {
+    if (!canExportLedger) return;
+    window.print();
+  };
   const handlePrintBill = () => {
     const el = document.getElementById('bill-modal-print-area');
     if (!el) return;
@@ -176,7 +286,59 @@ export default function ItemSaleReport() {
           .print-header { display: block !important; }
         }
         .print-header { display: none; }
+        .print-only { display: none; }
+        @media print { .print-only { display: inline !important; } }
         .bill-badge:hover { background: #1a4fa0 !important; color: white !important; cursor: pointer; text-decoration: underline; }
+        .item-ledger-toolbar {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: nowrap;
+          overflow-x: auto;
+          padding: 10px 14px;
+          border-bottom: 2px solid #e8effd;
+          background: #f8fafc;
+          -webkit-overflow-scrolling: touch;
+        }
+        .item-ledger-toolbar .toolbar-label {
+          font-size: 12px;
+          font-weight: 800;
+          color: #64748b;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
+        .item-ledger-toolbar .toolbar-divider {
+          width: 1px;
+          height: 30px;
+          background: #cbd5e1;
+          flex-shrink: 0;
+          margin: 0 2px;
+        }
+        .item-ledger-toolbar .toolbar-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-shrink: 0;
+        }
+        .item-ledger-toolbar-btn {
+          border: none;
+          padding: 7px 16px;
+          font-size: 13px;
+          font-weight: 700;
+          border-radius: 8px;
+          white-space: nowrap;
+          flex-shrink: 0;
+          cursor: pointer;
+        }
+        .item-ledger-toolbar-btn:disabled {
+          cursor: not-allowed;
+          opacity: 0.45;
+        }
+        @media (max-width: 640px) {
+          .item-ledger-toolbar { flex-wrap: wrap; row-gap: 10px; overflow-x: visible; }
+        }
       `}</style>
 
       <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#f5f5f5', fontFamily: 'Arial, sans-serif' }}>
@@ -194,7 +356,7 @@ export default function ItemSaleReport() {
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
           {/* LEFT: Product list */}
-          <div className="no-print" style={{ width: 300, borderRight: '2px solid #bbb', background: '#fff', display: 'flex', flexDirection: 'column' }}>
+          <div className="no-print item-ledger-sidebar" style={{ width: 300, borderRight: '2px solid #bbb', background: '#fff', display: 'flex', flexDirection: 'column' }}>
             <fieldset style={{ margin: 8, border: '1px solid #aaa', padding: '6px 8px' }}>
               <legend style={{ fontSize: 14, fontWeight: 700, color: '#333' }}>Products</legend>
               <div style={{ fontSize: 13, color: '#c0392b', marginBottom: 4 }}>Select Product:</div>
@@ -232,16 +394,58 @@ export default function ItemSaleReport() {
           {/* RIGHT */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#fff' }}>
 
-            {/* Date range */}
-            <div className="no-print" style={{ padding: '8px 14px', borderBottom: '1px solid #ccc', display: 'flex', alignItems: 'center', gap: 12, background: '#f9f9f9' }}>
-              <span style={{ fontSize: 15, fontWeight: 700, color: '#c0392b' }}>From:</span>
-              <TailwindDateInput value={startDate} onChange={setStartDate} />
-              <span style={{ fontSize: 15, fontWeight: 700, color: '#c0392b' }}>To:</span>
-              <TailwindDateInput value={endDate} onChange={setEndDate} />
-              <button onClick={handleApply} disabled={loading || !selectedProduct}
-                style={{ background: '#316ac5', color: 'white', border: 'none', padding: '5px 18px', cursor: 'pointer', fontSize: 14, borderRadius: 2, opacity: !selectedProduct ? 0.5 : 1 }}>
-                {loading ? 'Loading...' : 'Show'}
-              </button>
+            {/* Date range + actions — single toolbar row */}
+            <div className="no-print item-ledger-toolbar">
+              <span className="toolbar-label">From</span>
+              <TailwindDateInput
+                value={startDate}
+                onChange={setStartDate}
+                className="!w-[142px] shrink-0"
+                inputClassName="w-[142px] px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 shadow-sm"
+              />
+              <span className="toolbar-label">To</span>
+              <TailwindDateInput
+                value={endDate}
+                onChange={setEndDate}
+                className="!w-[142px] shrink-0"
+                inputClassName="w-[142px] px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 shadow-sm"
+              />
+              <span className="toolbar-divider" aria-hidden />
+              <div className="toolbar-actions">
+                <button
+                  type="button"
+                  className="item-ledger-toolbar-btn"
+                  onClick={handleApply}
+                  disabled={loading || !selectedProduct}
+                  style={{
+                    background: BRAND.primary.blue,
+                    color: '#fff',
+                    opacity: !selectedProduct ? 0.5 : 1,
+                  }}
+                >
+                  {loading ? 'Loading…' : 'Show'}
+                </button>
+                <button
+                  type="button"
+                  className="item-ledger-toolbar-btn"
+                  onClick={handlePrint}
+                  disabled={!canExportLedger}
+                  title={!selectedProduct ? 'Select a product first' : 'Print ledger'}
+                  style={{ background: BRAND.primary.blue, color: '#fff' }}
+                >
+                  Print
+                </button>
+                <button
+                  type="button"
+                  className="item-ledger-toolbar-btn"
+                  onClick={handleDownloadPdf}
+                  disabled={!canExportLedger}
+                  title={!selectedProduct ? 'Select a product first' : 'Download PDF'}
+                  style={{ background: '#e11d48', color: '#fff' }}
+                >
+                  Download PDF
+                </button>
+              </div>
             </div>
 
             {/* Letterhead: visible in print; hidden on screen via CSS */}
@@ -300,7 +504,7 @@ export default function ItemSaleReport() {
                     </tr>
 
                     {details.length === 0 ? (
-                      <tr>
+                      <tr className="no-print">
                         <td colSpan={12} style={{ padding: 20, textAlign: 'center', color: '#999', border: '1px solid #ddd', fontSize: 14 }}>
                           No transactions in selected date range
                         </td>
@@ -383,13 +587,22 @@ export default function ItemSaleReport() {
             </div>
 
             {/* Bottom buttons */}
-            <div className="no-print" style={{ padding: '8px 12px', borderTop: '1px solid #ccc', display: 'flex', justifyContent: 'flex-end', gap: 10, background: '#f5f5f5' }}>
-              <button onClick={handlePrint} disabled={!selectedProduct || details.length === 0}
-                style={{ background: '#eee', border: '2px outset #bbb', padding: '6px 24px', cursor: 'pointer', fontSize: 14, minWidth: 90 }}>
-                Print
-              </button>
-              <button onClick={() => router.back()}
-                style={{ background: '#eee', border: '2px outset #bbb', padding: '6px 24px', cursor: 'pointer', fontSize: 14, minWidth: 90 }}>
+            <div className="no-print" style={{ padding: '10px 14px', borderTop: '2px solid #e8effd', display: 'flex', justifyContent: 'flex-end', background: '#f8fafc' }}>
+              <button
+                type="button"
+                onClick={() => router.back()}
+                style={{
+                  background: '#fff',
+                  color: '#334155',
+                  border: '1px solid #cbd5e1',
+                  padding: '7px 22px',
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  borderRadius: 8,
+                  minWidth: 90,
+                }}
+              >
                 Exit
               </button>
             </div>
