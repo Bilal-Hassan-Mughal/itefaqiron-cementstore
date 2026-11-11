@@ -122,8 +122,11 @@ export function buildPendingBalanceWhatsAppPreview({
     .join('\n');
 }
 
+/** Calendar day in Pakistan — matches server APIs on Vercel (UTC) and local PC. */
+export const BUSINESS_TZ = 'Asia/Karachi';
+
 export function localDateInputValue(date = new Date()) {
-  return date.toLocaleDateString('en-CA');
+  return date.toLocaleDateString('en-CA', { timeZone: BUSINESS_TZ });
 }
 
 export function customerWhatsAppPhone(customer) {

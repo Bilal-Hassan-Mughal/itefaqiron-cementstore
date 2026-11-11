@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import {
   buildPendingBalanceWhatsAppMessage,
   buildPendingBalanceWhatsAppPreview,
@@ -46,6 +47,9 @@ function dispatchReminderUpdated() {
 }
 
 export default function PaymentPromiseReminderFab({ user }) {
+  const pathname = usePathname();
+  const onMainDashboard = pathname === '/dashboard';
+
   const canUse = useMemo(
     () => Boolean(user && canStaffAccessPath(user, '/dashboard/payment-promises')),
     [user],
@@ -70,9 +74,16 @@ export default function PaymentPromiseReminderFab({ user }) {
     try {
       const summaryRes = await fetch('/api/dashboard/payment-promise-summary', { cache: 'no-store' });
       const summary = summaryRes.ok ? await summaryRes.json() : null;
+      if (!summaryRes.ok || summary?.error) {
+        setItems([]);
+        setSentItems([]);
+        setReadyCount(0);
+        setOpen(false);
+        return;
+      }
       const toSend = summary?.readyToSend || 0;
 
-      if (summary && !summary.error) {
+      if (summary) {
         setReadyCount(toSend);
         setQueueMeta((m) => ({
           ...m,
@@ -208,7 +219,7 @@ export default function PaymentPromiseReminderFab({ user }) {
     [items],
   );
 
-  if (!canUse || !bootstrapped) return null;
+  if (!onMainDashboard || !canUse || !bootstrapped || readyCount <= 0) return null;
 
   return (
     <>
