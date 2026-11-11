@@ -17,8 +17,8 @@ export const COMPANY = {
 
 export const POWERED_BY = {
   label: 'Powered By',
-  name: 'RAPIDTECHPRO',
-  nameShort: 'RTP',
+  name: 'AL-JANNAT SYSTEMS',
+  nameShort: 'AJS',
 };
 
 export const BRAND = {
