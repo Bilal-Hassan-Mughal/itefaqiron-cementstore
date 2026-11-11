@@ -59,6 +59,7 @@ model Branch {
   employees           Employee[]
   hr_settings         HrSettings[]
   activity_logs       ActivityLog[]
+  customer_payment_promises CustomerPaymentPromise[]
 
   @@map("branches")
 }
@@ -235,6 +236,7 @@ model Customer {
   payments_cash         Payment[]          @relation("PaymentCashAccount")
   payments_bank         Payment[]          @relation("PaymentBankAccount")
   payment_details       PaymentDetail[]
+  payment_promises      CustomerPaymentPromise[]
 
   @@index([branch_id], map: "customers_branch_id_fkey")
   @@index([city_id], map: "customers_city_id_fkey")
@@ -242,6 +244,28 @@ model Customer {
   @@index([cus_type], map: "customers_cus_type_fkey")
   @@index([updated_by], map: "customers_updated_by_fkey")
   @@map("customers")
+}
+
+model CustomerPaymentPromise {
+  promise_id          Int       @id @default(autoincrement())
+  branch_id           Int       @default(1)
+  cus_id              Int
+  promised_pay_date   DateTime  @db.Date
+  promised_amount     Decimal?  @db.Decimal(18, 2)
+  note                String?   @db.Text
+  status              String    @default("ACTIVE")
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+  created_by          Int?
+  fulfilled_at        DateTime?
+  whatsapp_reminder_sent_at DateTime?
+  whatsapp_reminder_sent_by Int?
+  customer            Customer  @relation(fields: [cus_id], references: [cus_id], onDelete: Cascade)
+  branch              Branch    @relation(fields: [branch_id], references: [branch_id])
+
+  @@index([branch_id], map: "customer_payment_promises_branch_id_fkey")
+  @@index([cus_id, status], map: "customer_payment_promises_cus_status_idx")
+  @@map("customer_payment_promises")
 }
 
 model Categories {

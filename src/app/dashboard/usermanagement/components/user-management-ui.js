@@ -12,7 +12,8 @@ import {
 
 /** Excel-style grid tokens */
 export const XL = {
-  wrap: 'overflow-auto border border-slate-300 rounded-lg bg-white shadow-sm',
+  wrap: 'border border-slate-300 rounded-lg bg-white shadow-sm',
+  wrapScroll: 'overflow-auto border border-slate-300 rounded-lg bg-white shadow-sm',
   table: 'w-full border-collapse text-xs table-fixed min-w-[640px]',
   th: 'border border-slate-300 bg-[#1A55E3] text-white font-bold text-[10px] uppercase tracking-wide px-2 py-2 text-left sticky top-0 z-10',
   thCenter: 'border border-slate-300 bg-[#1A55E3] text-white font-bold text-[10px] uppercase tracking-wide px-1 py-2 text-center sticky top-0 z-10',
@@ -187,6 +188,8 @@ export function AccessExcelGrid({
   showSummary = true,
   readOnly = false,
   maxHeight = '420px',
+  /** When true, grid fills parent flex area and scrolls inside the table body */
+  fillAvailable = false,
 }) {
   const sections = getPagesBySection();
   const selectedSet = new Set(normalizeAllowedModules(selected));
@@ -207,24 +210,39 @@ export function AccessExcelGrid({
 
   let rowNum = 0;
 
+  const useFlexFill = fillAvailable || maxHeight === '100%';
+  const rootClass = useFlexFill ? 'flex flex-col flex-1 min-h-0 h-full gap-2' : 'space-y-2';
+  const shellClass = useFlexFill
+    ? `${XL.wrap} flex flex-col flex-1 min-h-0 overflow-hidden`
+    : `${XL.wrapScroll}`;
+  const shellStyle = useFlexFill ? undefined : { maxHeight };
+  const bodyClass = useFlexFill
+    ? 'flex-1 min-h-0 overflow-y-auto overscroll-contain'
+    : 'overflow-y-auto overscroll-contain';
+  const bodyStyle = useFlexFill ? { minHeight: 120 } : { maxHeight: `calc(${maxHeight} - 42px)` };
+
   return (
-    <div className="space-y-2">
+    <div className={rootClass}>
       {showSummary && (
-        <AccessSummaryBar
-          selected={selected}
-          onSectionClick={onSectionChange}
-        />
+        <div className={useFlexFill ? 'shrink-0' : undefined}>
+          <AccessSummaryBar
+            selected={selected}
+            onSectionClick={onSectionChange}
+          />
+        </div>
       )}
       {onSectionChange && (
-        <UmSectionTabs
-          sections={PAGE_SECTIONS}
-          active={activeSection}
-          onChange={onSectionChange}
-          counts={sectionCounts}
-        />
+        <div className={useFlexFill ? 'shrink-0' : undefined}>
+          <UmSectionTabs
+            sections={PAGE_SECTIONS}
+            active={activeSection}
+            onChange={onSectionChange}
+            counts={sectionCounts}
+          />
+        </div>
       )}
-    <div className={XL.wrap} style={{ maxHeight }}>
-      <div className={XL.toolbar}>
+    <div className={shellClass} style={shellStyle}>
+      <div className={`${XL.toolbar} shrink-0`}>
         <span className="text-[10px] font-bold text-slate-600 mr-auto tabular-nums">
           {activeSection === 'all' ? `${selectedCount} / ${totalPages}` : `${sectionCounts[activeSection]?.granted ?? 0} / ${sectionCounts[activeSection]?.total ?? 0}`} pages selected
           {activeSection !== 'all' && <span className="text-slate-400 font-normal ml-1">· {activeSection}</span>}
@@ -245,7 +263,7 @@ export function AccessExcelGrid({
           </button>
         )}
       </div>
-      <div className="overflow-auto" style={{ maxHeight: `calc(${maxHeight} - 42px)` }}>
+      <div className={bodyClass} style={bodyStyle}>
         <table className={XL.table}>
           <thead>
             <tr>

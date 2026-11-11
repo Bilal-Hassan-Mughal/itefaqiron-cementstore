@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { formatDatePK } from '@/lib/date-helper';
 import {
   Box,
@@ -70,15 +70,26 @@ import {
   AttachMoney as AttachMoneyIcon
 } from '@mui/icons-material';
 import { useRouter } from 'next/navigation';
-import { Plus, Edit, Trash2, Check, X, Phone, Mail, MapPin, User, Building, CreditCard, Calendar, Search, Loader2, Users, TrendingUp, TrendingDown, Wallet, DollarSign, Filter, ArrowUp, ArrowUpDown, RotateCcw, ChevronDown, ChevronUp, SlidersHorizontal, ExternalLink, Tag, FileText, Languages, Info, Hash, Sparkles } from 'lucide-react';
+import { Plus, Edit, Trash2, Check, X, Phone, Mail, MapPin, User, Building, CreditCard, Calendar, CalendarClock, Search, Loader2, Users, TrendingUp, TrendingDown, Wallet, DollarSign, Filter, ArrowUp, ArrowUpDown, RotateCcw, ChevronDown, ChevronUp, SlidersHorizontal, ExternalLink, Tag, FileText, Languages, Info, Hash, Sparkles } from 'lucide-react';
 import { Fragment } from 'react';
 import DashboardLayout from '../components/dashboard-layout';
+import AccountPaymentPromiseDialog from '../components/AccountPaymentPromiseDialog';
+import { formatPromiseDate } from '@/lib/account-payment-promise';
 import { openAccountLedgerTab, FINANCE_LEDGER_PATH } from '@/lib/ledger-tabs';
 
 const fmtAmt = (val) => {
   const n = parseFloat(val || 0);
   if (n % 1 === 0) return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
+const ACCOUNTS_THEME = {
+  pageBg: '#f1f5f9',
+  headBg: '#e8effd',
+  headText: '#1347c4',
+  navy: '#0f172a',
+  border: '#dce3ed',
+  accent: '#1A55E3',
 };
 
 const EMPTY_CUSTOMER_FORM = {
@@ -145,7 +156,6 @@ export default function CustomersPage() {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [balanceFilter, setBalanceFilter] = useState('all');
   const [activityFilter, setActivityFilter] = useState('all');
-  const [filtersExpanded, setFiltersExpanded] = useState(true);
 
   // Print
   const tableRef = useRef(null);
@@ -157,6 +167,29 @@ export default function CustomersPage() {
     severity: 'success'
   });
 
+  const [promiseByCusId, setPromiseByCusId] = useState({});
+  const [promiseDialogCustomer, setPromiseDialogCustomer] = useState(null);
+
+  const fetchActivePromises = async () => {
+    try {
+      const res = await fetch('/api/customers/payment-promise?summary=active', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      setPromiseByCusId(data.byCusId || {});
+    } catch (err) {
+      console.error('fetchActivePromises', err);
+    }
+  };
+
+  const handlePromiseMapChange = ({ cusId, active }) => {
+    setPromiseByCusId((prev) => {
+      const next = { ...prev };
+      if (active) next[cusId] = active;
+      else delete next[cusId];
+      return next;
+    });
+  };
+
   const openNewCustomerForm = () => {
     setEditingCustomer(null);
     setFormData({ ...EMPTY_CUSTOMER_FORM });
@@ -166,6 +199,7 @@ export default function CustomersPage() {
   // Load configuration details from API on mount
   useEffect(() => {
     fetchStaticData();
+    fetchActivePromises();
   }, []);
 
   // Header "Add Customer" → ?action=add or open-customer-form event
@@ -271,6 +305,7 @@ export default function CustomersPage() {
         setTotalReceivables(data.stats?.totalReceivables || 0);
         setTotalPayables(data.stats?.totalPayables || 0);
         setNetBalance(data.stats?.netBalance || 0);
+        fetchActivePromises();
       } else {
         console.error('Failed to fetch customers');
         setSnackbar({
@@ -348,10 +383,6 @@ export default function CustomersPage() {
     balanceFilter !== 'all',
     activityFilter !== 'all',
   ].filter(Boolean).length;
-
-  const setQuickBalanceFilter = (value) => {
-    setBalanceFilter((prev) => (prev === value ? 'all' : value));
-  };
 
   const handleAddCustomer = async (e) => {
     e.preventDefault();
@@ -625,6 +656,7 @@ export default function CustomersPage() {
   // Clear all filters
   const clearFilters = () => {
     setSearchTerm('');
+    setDebouncedSearch('');
     setMinAmount('');
     setDebouncedMinAmount('');
     setTypeFilter('all');
@@ -635,28 +667,96 @@ export default function CustomersPage() {
     setSortOrder('asc');
   };
 
+  const activeFilterChips = useMemo(() => {
+    const chips = [];
+    if (debouncedSearch.trim()) {
+      chips.push({
+        key: 'search',
+        label: `Search: “${debouncedSearch.trim()}”`,
+        onClear: () => { setSearchTerm(''); setDebouncedSearch(''); },
+      });
+    }
+    if (debouncedMinAmount && !Number.isNaN(parseFloat(debouncedMinAmount))) {
+      chips.push({
+        key: 'minAmount',
+        label: `Balance ≥ Rs. ${fmtAmt(debouncedMinAmount)}`,
+        onClear: () => { setMinAmount(''); setDebouncedMinAmount(''); },
+      });
+    }
+    if (typeFilter !== 'all') {
+      const t = customerTypes.find((x) => x.cus_type_id === typeFilter);
+      chips.push({
+        key: 'type',
+        label: `Type: ${t?.cus_type_title || typeFilter}`,
+        onClear: () => setTypeFilter('all'),
+      });
+    }
+    if (categoryFilter !== 'all') {
+      chips.push({
+        key: 'category',
+        label: `Category: ${categoryFilter}`,
+        onClear: () => setCategoryFilter('all'),
+      });
+    }
+    if (balanceFilter !== 'all') {
+      const labels = {
+        positive: 'Receivable (+)',
+        negative: 'Payable (−)',
+        zero: 'Zero balance',
+        'non-zero': 'Has balance',
+      };
+      chips.push({
+        key: 'balance',
+        label: `Balance: ${labels[balanceFilter] || balanceFilter}`,
+        onClear: () => setBalanceFilter('all'),
+      });
+    }
+    if (activityFilter !== 'all') {
+      const labels = {
+        '1month': 'Active ≤ 1 month',
+        '1to3months': 'Active 1–3 months',
+        '3to6months': 'Active 3–6 months',
+        over6months: 'Inactive > 6 months',
+      };
+      chips.push({
+        key: 'activity',
+        label: labels[activityFilter] || activityFilter,
+        onClear: () => setActivityFilter('all'),
+      });
+    }
+    return chips;
+  }, [
+    debouncedSearch,
+    debouncedMinAmount,
+    typeFilter,
+    categoryFilter,
+    balanceFilter,
+    activityFilter,
+    customerTypes,
+  ]);
+
   const getTypeColor = (typeId) => {
     const customerType = customerTypes.find(type => type.cus_type_id === typeId);
     const title = (customerType?.cus_type_title || '').toLowerCase();
     if (title.includes('cash')) {
-      return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      return 'bg-amber-50 text-amber-900 border-amber-200';
     }
     if (title.includes('supplier')) {
-      return 'bg-red-100 text-red-800 border-red-200';
+      return 'bg-rose-50 text-rose-900 border-rose-200';
     }
     if (title.includes('bank')) {
-      return 'bg-indigo-100 text-indigo-800 border-indigo-200';
+      return 'bg-indigo-50 text-indigo-900 border-indigo-200';
     }
     if (title.includes('transport')) {
-      return 'bg-teal-100 text-teal-800 border-teal-200';
+      return 'bg-teal-50 text-teal-900 border-teal-200';
     }
     if (title.includes('builders') || title.includes('iron')) {
-      return 'bg-orange-100 text-orange-800 border-orange-200';
+      return 'bg-orange-50 text-orange-900 border-orange-200';
     }
     if (title) {
-      return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+      return 'bg-emerald-50 text-emerald-900 border-emerald-200';
     }
-    return 'bg-gray-100 text-gray-800 border-gray-200';
+    return 'bg-slate-100 text-slate-700 border-slate-200';
   };
 
   const getBalanceColor = (balance) => {
@@ -668,35 +768,38 @@ export default function CustomersPage() {
 
   const getActivityRowClass = (customer) => {
     const balance = parseFloat(customer.cus_balance);
-    if (balance <= 0) return 'bg-white hover:bg-slate-50';
+    if (balance <= 0) return '';
     const now = new Date();
     const lastActivity = customer.updated_at ? new Date(customer.updated_at) : new Date(customer.created_at);
     const diffDays = (now - lastActivity) / (1000 * 60 * 60 * 24);
-    if (diffDays <= 30) return 'bg-emerald-50/80 hover:bg-emerald-100/80';
-    if (diffDays <= 90) return 'bg-blue-50/80 hover:bg-blue-100/80';
-    if (diffDays <= 180) return 'bg-amber-50/80 hover:bg-amber-100/80';
-    return 'bg-rose-50/80 hover:bg-rose-100/80';
+    if (diffDays <= 30) return 'border-l-[3px] border-l-emerald-500';
+    if (diffDays <= 90) return 'border-l-[3px] border-l-sky-500';
+    if (diffDays <= 180) return 'border-l-[3px] border-l-amber-500';
+    return 'border-l-[3px] border-l-rose-500';
   };
 
   const getBalanceMeta = (balance) => {
     const bal = parseFloat(balance) || 0;
     if (bal > 0) {
       return {
-        amountClass: 'text-emerald-700',
-        badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+        amountClass: 'text-emerald-800',
+        badgeClass: 'bg-emerald-600 text-white border-emerald-700',
+        cellClass: 'bg-emerald-50/50',
         label: 'Receivable',
       };
     }
     if (bal < 0) {
       return {
-        amountClass: 'text-rose-700',
-        badgeClass: 'bg-rose-100 text-rose-800 border-rose-200',
+        amountClass: 'text-rose-800',
+        badgeClass: 'bg-rose-600 text-white border-rose-700',
+        cellClass: 'bg-rose-50/50',
         label: 'Payable',
       };
     }
     return {
-      amountClass: 'text-slate-500',
-      badgeClass: 'bg-slate-100 text-slate-600 border-slate-200',
+      amountClass: 'text-slate-600',
+      badgeClass: 'bg-slate-200 text-slate-700 border-slate-300',
+      cellClass: 'bg-slate-50/80',
       label: 'Settled',
     };
   };
@@ -809,7 +912,56 @@ export default function CustomersPage() {
 
   return (
     <DashboardLayout>
-      <div className="w-full bg-slate-100 pb-6">
+      <style jsx global>{`
+        .accounts-page-shell { max-width: 100%; overflow-x: hidden; }
+        .accounts-data-table {
+          table-layout: fixed;
+          width: 100%;
+          border-collapse: collapse;
+        }
+        .accounts-data-table th,
+        .accounts-data-table td {
+          border-right: 1px solid #e2e8f0;
+          border-bottom: 1px solid #e2e8f0;
+          vertical-align: middle;
+          overflow: hidden;
+        }
+        .accounts-data-table thead th {
+          border-color: #b8c9e8;
+          background: #e8effd;
+          color: #1347c4;
+        }
+        .accounts-data-table th:last-child,
+        .accounts-data-table td:last-child { border-right: none; }
+        .accounts-filter-grid .MuiFormControl-root,
+        .accounts-filter-grid .MuiAutocomplete-root { min-width: 0; }
+        .accounts-filter-compact .MuiOutlinedInput-root,
+        .accounts-filter-compact .MuiInputBase-root {
+          border-radius: 8px;
+          background: #fff;
+          min-height: 38px;
+        }
+        .accounts-filter-compact .MuiInputLabel-root {
+          font-weight: 600;
+          font-size: 0.72rem;
+        }
+        .accounts-filter-compact .MuiInputBase-input {
+          font-size: 0.8125rem;
+          font-weight: 600;
+          padding-top: 8px;
+          padding-bottom: 8px;
+        }
+        .accounts-filter-compact .MuiFormHelperText-root { display: none; }
+        .accounts-account-cell { min-width: 0; }
+        .accounts-account-cell .account-primary {
+          font-size: 0.8125rem;
+          font-weight: 800;
+          color: #0f172a;
+          line-height: 1.25;
+        }
+        .accounts-account-cell .account-primary:hover { color: #1A55E3; }
+      `}</style>
+      <div className="w-full max-w-full overflow-x-hidden pb-6 accounts-page-shell" style={{ background: ACCOUNTS_THEME.pageBg }}>
         {/* Top actions — New Account left (original position), Print right */}
         <div className="px-4 sm:px-6 pt-2 md:pt-4">
           <div className="flex items-center justify-between gap-4">
@@ -840,6 +992,21 @@ export default function CustomersPage() {
             </Button>
             <Button
               variant="outlined"
+              onClick={() => router.push('/dashboard/payment-promises')}
+              startIcon={<CalendarClock className="w-4 h-4" />}
+              sx={{
+                borderColor: '#c5d4f0',
+                color: '#1347c4',
+                fontWeight: 800,
+                borderRadius: 2,
+                px: 2.5,
+                ml: 2,
+              }}
+            >
+              Promise reminders
+            </Button>
+            <Button
+              variant="outlined"
               onClick={handlePrint}
               startIcon={<span style={{ fontSize: 18 }}>🖨️</span>}
               sx={{
@@ -867,21 +1034,33 @@ export default function CustomersPage() {
               { title: 'Net Balance', val: netBalance, color: 'amber', icon: Wallet, currency: true },
             ].map((stat) => {
               const Icon = stat.icon;
-              const colorMap = {
-                blue: 'from-blue-50 to-indigo-100 border-blue-200 text-blue-800',
-                emerald: 'from-emerald-50 to-teal-100 border-emerald-200 text-emerald-800',
-                rose: 'from-rose-50 to-red-100 border-rose-200 text-rose-800',
-                amber: 'from-amber-50 to-orange-100 border-amber-200 text-amber-900',
+              const accentMap = {
+                blue: { bar: 'border-l-[#1A55E3]', icon: 'text-[#1A55E3] bg-[#e8effd]', sub: 'text-slate-500' },
+                emerald: { bar: 'border-l-emerald-600', icon: 'text-emerald-700 bg-emerald-50', sub: 'text-emerald-700/70' },
+                rose: { bar: 'border-l-rose-600', icon: 'text-rose-700 bg-rose-50', sub: 'text-rose-700/70' },
+                amber: { bar: 'border-l-amber-500', icon: 'text-amber-800 bg-amber-50', sub: 'text-amber-800/70' },
               };
+              const accent = accentMap[stat.color];
+              const netClass = stat.title === 'Net Balance'
+                ? (netBalance >= 0 ? 'text-emerald-800' : 'text-rose-800')
+                : 'text-slate-900';
               return (
-                <div key={stat.title} className={`bg-gradient-to-br ${colorMap[stat.color]} border rounded-2xl p-4 shadow-sm`}>
+                <div
+                  key={stat.title}
+                  className={`bg-white border border-slate-200 rounded-xl p-4 shadow-sm border-l-4 ${accent.bar}`}
+                >
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider opacity-70">{stat.title}</p>
-                    <Icon className="w-4 h-4 opacity-60" />
+                    <p className={`text-[10px] font-extrabold uppercase tracking-widest ${accent.sub}`}>{stat.title}</p>
+                    <span className={`p-1.5 rounded-lg ${accent.icon}`}>
+                      <Icon className="w-4 h-4" />
+                    </span>
                   </div>
-                  <p className="text-xl sm:text-2xl font-black mt-2 tabular-nums">
-                    {stat.currency && <span className="text-xs font-semibold opacity-60 mr-1">Rs.</span>}
-                    {stat.val.toLocaleString()}
+                  <p className={`text-lg sm:text-xl font-black mt-2 tabular-nums leading-tight ${netClass}`}>
+                    {stat.currency && <span className="text-[11px] font-bold text-slate-400 mr-1">Rs.</span>}
+                    {(stat.title === 'Net Balance' ? Math.abs(stat.val) : stat.val).toLocaleString()}
+                    {stat.title === 'Net Balance' && netBalance < 0 && (
+                      <span className="text-[10px] font-bold text-rose-600 ml-1">DR</span>
+                    )}
                   </p>
                 </div>
               );
@@ -889,175 +1068,137 @@ export default function CustomersPage() {
           </div>
         </div>
 
-        {/* Filters Toolbar */}
-        <div className="flex-shrink-0 px-4 sm:px-6 py-3">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-            <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <SlidersHorizontal className="w-4 h-4 text-slate-500" />
-                <span className="text-sm font-bold text-slate-800">Search &amp; Filters</span>
+        {/* Filters — thin bar */}
+        <div className="flex-shrink-0 px-4 sm:px-6 py-2">
+          <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-3 py-1.5 border-b border-slate-100 flex items-center justify-between gap-2 bg-slate-50/80">
+              <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <SlidersHorizontal className="w-3.5 h-3.5 text-[#1A55E3]" />
+                Filters
                 {activeFilterCount > 0 && (
-                  <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                    {activeFilterCount} active
-                  </span>
+                  <span className="text-[10px] font-bold text-[#1347c4]">({activeFilterCount})</span>
                 )}
-              </div>
-              <div className="flex items-center gap-2">
-                {activeFilterCount > 0 && (
-                  <button
-                    type="button"
-                    onClick={clearFilters}
-                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" /> Clear all
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setFiltersExpanded((p) => !p)}
-                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                >
-                  {filtersExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                  {filtersExpanded ? 'Hide' : 'Show'} filters
-                </button>
-              </div>
+              </span>
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="text-[11px] font-bold text-slate-500 hover:text-rose-600 px-2 py-0.5 rounded-md hover:bg-rose-50 transition-colors"
+              >
+                Reset
+              </button>
             </div>
 
-            <div className="px-4 sm:px-5 py-4 space-y-4">
-              {/* Main Search */}
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search by name, phone, address, reference, city, or balance (e.g. 50000)..."
-                  className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white transition-all"
+            <div className="accounts-filter-compact px-3 py-2 space-y-2">
+              <div className="flex flex-col lg:flex-row lg:items-center gap-2">
+                <div className="relative flex-1 min-w-0">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Search name, phone, address…"
+                    className="w-full h-9 pl-8 pr-2 text-sm font-medium border border-slate-200 rounded-lg bg-white focus:border-[#1A55E3] focus:ring-1 focus:ring-[#1A55E3]/30 outline-none"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-1 lg:shrink-0">
+                  {[
+                    { id: 'all', label: 'All' },
+                    { id: 'positive', label: '+Recv' },
+                    { id: 'negative', label: '−Pay' },
+                    { id: 'zero', label: 'Zero' },
+                    { id: 'non-zero', label: 'Non-zero' },
+                  ].map((chip) => {
+                    const active = balanceFilter === chip.id;
+                    return (
+                      <button
+                        key={chip.id}
+                        type="button"
+                        onClick={() => setBalanceFilter(chip.id)}
+                        className={`h-9 px-2 rounded-lg text-[10px] font-bold border transition-colors ${
+                          active
+                            ? 'bg-[#1A55E3] text-white border-[#1A55E3]'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        {chip.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 min-w-0">
+                <Autocomplete
+                  size="small"
+                  options={[
+                    { value: 'all', label: 'All Types' },
+                    ...customerTypes.map((type) => ({ value: type.cus_type_id, label: type.cus_type_title })),
+                  ]}
+                  getOptionLabel={(option) => option.label}
+                  value={(() => {
+                    if (typeFilter === 'all') return { value: 'all', label: 'All Types' };
+                    const selected = customerTypes.find((type) => type.cus_type_id === typeFilter);
+                    return selected ? { value: selected.cus_type_id, label: selected.cus_type_title } : { value: 'all', label: 'All Types' };
+                  })()}
+                  onChange={(event, newValue) => setTypeFilter(newValue ? newValue.value : 'all')}
+                  renderInput={(params) => <TextField {...params} label="Type" />}
+                />
+                <Autocomplete
+                  size="small"
+                  options={[
+                    { value: 'all', label: 'All Categories' },
+                    ...customerCategories.map((category) => ({ value: category.cus_cat_title, label: category.cus_cat_title })),
+                  ]}
+                  getOptionLabel={(option) => option.label}
+                  value={{ value: categoryFilter, label: categoryFilter === 'all' ? 'All Categories' : categoryFilter }}
+                  onChange={(event, newValue) => setCategoryFilter(newValue ? newValue.value : 'all')}
+                  renderInput={(params) => <TextField {...params} label="Category" />}
+                />
+                <TextField
+                  size="small"
+                  label="Min balance"
+                  placeholder="50000"
+                  type="number"
+                  value={minAmount}
+                  onChange={(e) => setMinAmount(e.target.value)}
+                />
+                <Autocomplete
+                  size="small"
+                  options={[
+                    { value: 'all', label: 'All Activity' },
+                    { value: '1month', label: '≤ 1 Month' },
+                    { value: '1to3months', label: '1–3 Months' },
+                    { value: '3to6months', label: '3–6 Months' },
+                    { value: 'over6months', label: '> 6 Months' },
+                  ]}
+                  getOptionLabel={(option) => option.label}
+                  value={{
+                    value: activityFilter,
+                    label:
+                      activityFilter === 'all' ? 'All Activity' :
+                      activityFilter === '1month' ? '≤ 1 Month' :
+                      activityFilter === '1to3months' ? '1–3 Months' :
+                      activityFilter === '3to6months' ? '3–6 Months' :
+                      activityFilter === 'over6months' ? '> 6 Months' : 'All Activity',
+                  }}
+                  onChange={(event, newValue) => setActivityFilter(newValue ? newValue.value : 'all')}
+                  renderInput={(params) => <TextField {...params} label="Activity" />}
                 />
               </div>
 
-              {/* Quick balance chips */}
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mr-1">Quick:</span>
-                {[
-                  { id: 'positive', label: 'Receivable (+)', cls: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
-                  { id: 'negative', label: 'Payable (−)', cls: 'bg-rose-100 text-rose-800 border-rose-300' },
-                  { id: 'zero', label: 'Zero Balance', cls: 'bg-slate-100 text-slate-700 border-slate-300' },
-                  { id: 'non-zero', label: 'Has Balance', cls: 'bg-blue-100 text-blue-800 border-blue-300' },
-                ].map((chip) => (
-                  <button
-                    key={chip.id}
-                    type="button"
-                    onClick={() => setQuickBalanceFilter(chip.id)}
-                    className={`px-3 py-1 rounded-full text-[11px] font-bold border transition-all ${
-                      balanceFilter === chip.id ? `${chip.cls} ring-2 ring-offset-1 ring-blue-400` : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    {chip.label}
-                  </button>
-                ))}
-              </div>
-
-              {filtersExpanded && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 pt-1">
-                  <Autocomplete
-                    fullWidth
-                    size="small"
-                    options={[
-                      { value: 'all', label: 'All Types' },
-                      ...customerTypes.map((type) => ({ value: type.cus_type_id, label: type.cus_type_title })),
-                    ]}
-                    getOptionLabel={(option) => option.label}
-                    value={(() => {
-                      if (typeFilter === 'all') return { value: 'all', label: 'All Types' };
-                      const selected = customerTypes.find((type) => type.cus_type_id === typeFilter);
-                      return selected ? { value: selected.cus_type_id, label: selected.cus_type_title } : { value: 'all', label: 'All Types' };
-                    })()}
-                    onChange={(event, newValue) => setTypeFilter(newValue ? newValue.value : 'all')}
-                    renderInput={(params) => (
-                      <TextField {...params} label="Account Type" placeholder="All types" />
-                    )}
-                  />
-                  <Autocomplete
-                    fullWidth
-                    size="small"
-                    options={[
-                      { value: 'all', label: 'All Categories' },
-                      ...customerCategories.map((category) => ({ value: category.cus_cat_title, label: category.cus_cat_title })),
-                    ]}
-                    getOptionLabel={(option) => option.label}
-                    value={{ value: categoryFilter, label: categoryFilter === 'all' ? 'All Categories' : categoryFilter }}
-                    onChange={(event, newValue) => setCategoryFilter(newValue ? newValue.value : 'all')}
-                    renderInput={(params) => (
-                      <TextField {...params} label="Category" placeholder="All categories" />
-                    )}
-                  />
-                  <TextField
-                    fullWidth
-                    size="small"
-                    label="Min Balance"
-                    placeholder="e.g. 50000"
-                    type="number"
-                    value={minAmount}
-                    onChange={(e) => setMinAmount(e.target.value)}
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <TrendingUp size={16} className="text-slate-400" />
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
-                  <Autocomplete
-                    fullWidth
-                    size="small"
-                    options={[
-                      { value: 'all', label: 'All Balances' },
-                      { value: 'positive', label: 'Positive (+)' },
-                      { value: 'negative', label: 'Negative (−)' },
-                      { value: 'zero', label: 'Zero' },
-                      { value: 'non-zero', label: 'Non-Zero' },
-                    ]}
-                    getOptionLabel={(option) => option.label}
-                    value={{
-                      value: balanceFilter,
-                      label:
-                        balanceFilter === 'all' ? 'All Balances' :
-                        balanceFilter === 'positive' ? 'Positive (+)' :
-                        balanceFilter === 'negative' ? 'Negative (−)' :
-                        balanceFilter === 'zero' ? 'Zero' :
-                        balanceFilter === 'non-zero' ? 'Non-Zero' : 'All Balances',
-                    }}
-                    onChange={(event, newValue) => setBalanceFilter(newValue ? newValue.value : 'all')}
-                    renderInput={(params) => (
-                      <TextField {...params} label="Balance Status" />
-                    )}
-                  />
-                  <Autocomplete
-                    fullWidth
-                    size="small"
-                    options={[
-                      { value: 'all', label: 'All Activity' },
-                      { value: '1month', label: '≤ 1 Month' },
-                      { value: '1to3months', label: '1–3 Months' },
-                      { value: '3to6months', label: '3–6 Months' },
-                      { value: 'over6months', label: '> 6 Months' },
-                    ]}
-                    getOptionLabel={(option) => option.label}
-                    value={{
-                      value: activityFilter,
-                      label:
-                        activityFilter === 'all' ? 'All Activity' :
-                        activityFilter === '1month' ? '≤ 1 Month' :
-                        activityFilter === '1to3months' ? '1–3 Months' :
-                        activityFilter === '3to6months' ? '3–6 Months' :
-                        activityFilter === 'over6months' ? '> 6 Months' : 'All Activity',
-                    }}
-                    onChange={(event, newValue) => setActivityFilter(newValue ? newValue.value : 'all')}
-                    renderInput={(params) => (
-                      <TextField {...params} label="Last Activity" />
-                    )}
-                  />
+              {activeFilterChips.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1 pt-0.5 border-t border-slate-100">
+                  {activeFilterChips.map((chip) => (
+                    <button
+                      key={chip.key}
+                      type="button"
+                      onClick={chip.onClear}
+                      className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md bg-slate-100 text-[10px] font-semibold text-slate-600 hover:bg-rose-100 hover:text-rose-700"
+                    >
+                      <span className="max-w-[160px] truncate">{chip.label}</span>
+                      <X className="w-3 h-3" />
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
@@ -1066,57 +1207,68 @@ export default function CustomersPage() {
 
         {/* Accounts Table */}
         <div className="px-4 sm:px-6 pb-4">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-            <div className="px-4 sm:px-5 py-3 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Accounts List</h2>
-                <span className="bg-blue-100 text-blue-800 text-xs px-2.5 py-0.5 rounded-full font-bold">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden max-w-full">
+            <div className="px-4 sm:px-5 py-2.5 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-widest">Accounts List</h2>
+                <span className="bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded-md font-bold tabular-nums">
                   {totalCustomers} total
                 </span>
                 {isFetching && <Loader2 className="w-4 h-4 animate-spin text-blue-600" />}
               </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-[11px] font-semibold text-slate-500 tabular-nums">
                 Showing {showingFrom}–{showingTo} of {totalCustomers} · Page {page} of {totalPages}
               </p>
             </div>
 
-            <div className="overflow-x-auto relative" ref={tableRef}>
+            <div className="overflow-hidden relative max-w-full" ref={tableRef}>
               {isFetching && (
                 <div className="absolute inset-0 bg-white/70 z-10 flex items-center justify-center">
                   <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
                 </div>
               )}
 
-              <table className="w-full text-sm border-collapse min-w-[960px]">
+              <table className="accounts-data-table w-full text-sm">
+                <colgroup>
+                  <col style={{ width: '3.5%' }} />
+                  <col style={{ width: '24%' }} />
+                  <col style={{ width: '10%' }} />
+                  <col style={{ width: '12%' }} />
+                  <col style={{ width: '10%' }} />
+                  <col style={{ width: '9%' }} />
+                  <col style={{ width: '13%' }} />
+                  <col style={{ width: '8.5%' }} />
+                  <col style={{ width: '10%' }} />
+                </colgroup>
                 <thead className="sticky top-0 z-[1]">
-                  <tr className="bg-slate-900 text-slate-100 text-[11px] font-bold uppercase tracking-wider">
-                    <th className="px-3 py-3 w-12 text-center border-r border-slate-800">#</th>
+                  <tr className="text-[10px] font-extrabold uppercase tracking-wider">
+                    <th className="px-2 py-2.5 text-center">#</th>
                     <th
-                      className="px-4 py-3 text-left border-r border-slate-800 cursor-pointer select-none"
+                      className="px-2 py-2.5 text-left cursor-pointer select-none"
                       onClick={() => handleSort('cus_name')}
                     >
                       <span className="inline-flex items-center gap-1">Account Name {renderSortIndicator('cus_name')}</span>
                     </th>
-                    <th className="px-4 py-3 text-left border-r border-slate-800 w-44">Phone</th>
-                    <th className="px-4 py-3 text-left border-r border-slate-800 min-w-[140px]">Address</th>
-                    <th className="px-4 py-3 text-center border-r border-slate-800 w-28">Type</th>
-                    <th className="px-4 py-3 text-left border-r border-slate-800 w-32">Category</th>
+                    <th className="px-2 py-2.5 text-left">Phone</th>
+                    <th className="px-2 py-2.5 text-left">Address</th>
+                    <th className="px-2 py-2.5 text-center">Type</th>
+                    <th className="px-2 py-2.5 text-left">Category</th>
                     <th
-                      className="px-4 py-3 text-right border-r border-slate-800 w-36 cursor-pointer select-none text-blue-300"
+                      className="px-2 py-2.5 text-right cursor-pointer select-none"
                       onClick={() => handleSort('cus_balance')}
                     >
                       <span className="inline-flex items-center justify-end gap-1 w-full">Balance {renderSortIndicator('cus_balance')}</span>
                     </th>
                     <th
-                      className="px-4 py-3 text-center border-r border-slate-800 w-28 cursor-pointer select-none"
+                      className="px-2 py-2.5 text-center cursor-pointer select-none"
                       onClick={() => handleSort('created_at')}
                     >
                       <span className="inline-flex items-center justify-center gap-1">Created {renderSortIndicator('created_at')}</span>
                     </th>
-                    <th className="px-3 py-3 text-center w-24">Actions</th>
+                    <th className="px-2 py-2.5 text-center">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody>
                   {customers.length === 0 && !isFetching ? (
                     <tr>
                       <td colSpan={9} className="px-6 py-16 text-center">
@@ -1135,109 +1287,144 @@ export default function CustomersPage() {
                       return (
                         <tr
                           key={customer.cus_id}
-                          className={`transition-colors ${getActivityRowClass(customer)}`}
+                          className={`transition-colors even:bg-white odd:bg-slate-50/70 hover:bg-[#f0f6ff] ${getActivityRowClass(customer)}`}
                         >
-                          <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400 border-r border-slate-100/80">
+                          <td className="px-2 py-2 text-center text-[11px] font-bold text-slate-400 tabular-nums">
                             {customer.sequentialId}
                           </td>
-                          <td className="px-4 py-3 border-r border-slate-100/80">
-                            <div className="flex items-center gap-3 min-w-[180px]">
-                              <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white font-black text-sm flex items-center justify-center shadow-sm">
-                                {(customer.cus_name || '?').charAt(0).toUpperCase()}
+                          <td className="px-2 py-2.5">
+                            <div className="accounts-account-cell flex items-stretch gap-2 min-w-0">
+                              <div className="flex shrink-0 flex-col items-center justify-center w-11 rounded-lg border border-[#c5d4f0] bg-[#e8effd] text-[#1347c4] py-1 px-1">
+                                <span className="text-[8px] font-extrabold uppercase tracking-wide text-[#64748b]">ID</span>
+                                <span className="text-[11px] font-black tabular-nums leading-none mt-0.5">{customer.cus_id}</span>
                               </div>
-                              <div className="min-w-0 flex-1">
+                              <div className="min-w-0 flex-1 border-l border-slate-200 pl-2.5 py-0.5">
                                 <button
                                   type="button"
                                   onClick={(e) => handleOpenLedger(customer, e)}
-                                  className="font-bold text-slate-900 text-sm leading-snug text-left hover:text-blue-700 hover:underline block w-full truncate"
+                                  className="account-primary text-left hover:underline block w-full truncate"
                                   title={`Open ledger: ${customer.cus_name}`}
                                 >
                                   {customer.cus_name || '—'}
                                 </button>
                                 {customer.name_urdu && (
-                                  <p className="text-xs text-slate-500 truncate mt-0.5" dir="rtl">{customer.name_urdu}</p>
+                                  <p className="text-[10px] font-semibold text-slate-500 truncate mt-0.5 leading-tight" dir="rtl" title={customer.name_urdu}>
+                                    {customer.name_urdu}
+                                  </p>
                                 )}
-                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1">
-                                  <span className="text-[10px] font-semibold text-slate-400">ID {customer.cus_id}</span>
+                                <div className="flex flex-wrap items-center gap-1 mt-1.5 min-w-0">
+                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5">
+                                    <Hash className="w-2.5 h-2.5" />
+                                    #{customer.sequentialId}
+                                  </span>
                                   {customer.cus_reference && (
-                                    <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-                                      Ref: {customer.cus_reference}
+                                    <span
+                                      className="inline-flex max-w-full text-[9px] font-bold text-[#1347c4] bg-[#e8effd] border border-[#c5d4f0] rounded px-1.5 py-0.5 truncate"
+                                      title={customer.cus_reference}
+                                    >
+                                      Ref {customer.cus_reference}
+                                    </span>
+                                  )}
+                                  {(customer.city?.city_name) && (
+                                    <span className="text-[9px] font-semibold text-slate-500 truncate" title={customer.city.city_name}>
+                                      {customer.city.city_name}
                                     </span>
                                   )}
                                 </div>
                               </div>
                             </div>
                           </td>
-                          <td className="px-4 py-3 border-r border-slate-100/80">
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-1.5">
-                                <Phone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                                <span className="text-sm font-medium text-slate-800 tabular-nums">
+                          <td className="px-2 py-2">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1 min-w-0">
+                                <Phone className="w-3 h-3 text-slate-400 shrink-0" />
+                                <span className="text-xs font-semibold text-slate-800 tabular-nums truncate" title={customer.cus_phone_no || ''}>
                                   {customer.cus_phone_no || '—'}
                                 </span>
                               </div>
                               {customer.cus_phone_no2 && (
-                                <div className="flex items-center gap-1.5 text-slate-500">
-                                  <Phone className="w-3 h-3 flex-shrink-0 opacity-60" />
-                                  <span className="text-xs tabular-nums">{customer.cus_phone_no2}</span>
+                                <div className="flex items-center gap-1 text-slate-500 mt-0.5 min-w-0">
+                                  <Phone className="w-2.5 h-2.5 shrink-0 opacity-60" />
+                                  <span className="text-[10px] tabular-nums truncate">{customer.cus_phone_no2}</span>
                                 </div>
                               )}
                             </div>
                           </td>
-                          <td className="px-4 py-3 border-r border-slate-100/80">
-                            <div className="flex items-start gap-1.5 max-w-[200px]">
-                              <MapPin className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
-                              <span className="text-xs text-slate-600 leading-relaxed line-clamp-2" title={customer.cus_address || ''}>
+                          <td className="px-2 py-2">
+                            <div className="flex items-start gap-1 min-w-0">
+                              <MapPin className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
+                              <span className="text-[11px] text-slate-600 leading-snug line-clamp-2 break-words" title={customer.cus_address || ''}>
                                 {customer.cus_address || customer.city?.city_name || '—'}
                               </span>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-center border-r border-slate-100/80">
-                            <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide border ${typeClass}`}>
+                          <td className="px-2 py-2 text-center">
+                            <span className={`inline-block max-w-full truncate px-1.5 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wide border ${typeClass}`} title={typeTitle}>
                               {typeTitle}
                             </span>
                           </td>
-                          <td className="px-4 py-3 border-r border-slate-100/80">
-                            <span className="text-xs font-semibold text-slate-700">{categoryTitle}</span>
+                          <td className="px-2 py-2">
+                            <span className="text-[11px] font-semibold text-slate-700 line-clamp-2 break-words">{categoryTitle}</span>
                           </td>
-                          <td className="px-4 py-3 text-right border-r border-slate-100/80 tabular-nums">
-                            <p className={`font-black text-base ${balanceMeta.amountClass}`}>
+                          <td className={`px-2 py-2 text-right tabular-nums ${balanceMeta.cellClass || ''}`}>
+                            <p className={`font-extrabold text-sm leading-tight ${balanceMeta.amountClass}`}>
                               Rs. {fmtAmt(customer.cus_balance)}
                             </p>
-                            <span className={`inline-block mt-1 text-[9px] font-bold uppercase px-2 py-0.5 rounded-full border ${balanceMeta.badgeClass}`}>
+                            <span className={`inline-block mt-1 text-[8px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md border ${balanceMeta.badgeClass}`}>
                               {balanceMeta.label}
                             </span>
+                            {promiseByCusId[customer.cus_id] && (
+                              <span
+                                className="inline-flex items-center gap-0.5 mt-1 text-[8px] font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5"
+                                title="Payment commitment — auto balance reminders paused"
+                              >
+                                <CalendarClock className="w-2.5 h-2.5 shrink-0" />
+                                Pay {formatPromiseDate(promiseByCusId[customer.cus_id].promised_pay_date)}
+                              </span>
+                            )}
                           </td>
-                          <td className="px-4 py-3 text-center border-r border-slate-100/80">
-                            <span className="text-xs font-medium text-slate-600 whitespace-nowrap">
+                          <td className="px-2 py-2 text-center">
+                            <span className="text-[11px] font-semibold text-slate-600 tabular-nums">
                               {formatDatePK(customer.created_at)}
                             </span>
                           </td>
-                          <td className="px-3 py-3">
-                            <div className="flex items-center justify-center gap-1">
+                          <td className="px-1.5 py-2">
+                            <div className="inline-flex items-center justify-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm mx-auto">
                               <button
                                 type="button"
                                 onClick={() => handleOpenLedger(customer)}
                                 title="Open ledger"
-                                className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"
+                                className="p-1 rounded-md text-[#1A55E3] hover:bg-[#e8effd] transition-colors"
                               >
-                                <ExternalLink className="w-4 h-4" />
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPromiseDialogCustomer(customer)}
+                                title="Payment commitment / WhatsApp balance"
+                                className={`p-1 rounded-md transition-colors ${
+                                  promiseByCusId[customer.cus_id]
+                                    ? 'text-amber-700 bg-amber-50 hover:bg-amber-100'
+                                    : 'text-emerald-700 hover:bg-emerald-50'
+                                }`}
+                              >
+                                <CalendarClock className="w-3.5 h-3.5" />
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleEditCustomer(customer)}
                                 title="Edit account"
-                                className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition-colors"
+                                className="p-1 rounded-md text-indigo-700 hover:bg-indigo-50 transition-colors"
                               >
-                                <Edit className="w-4 h-4" />
+                                <Edit className="w-3.5 h-3.5" />
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleDeleteCustomer(customer.cus_id)}
                                 title="Delete account"
-                                className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 transition-colors"
+                                className="p-1 rounded-md text-rose-600 hover:bg-rose-50 transition-colors"
                               >
-                                <Trash2 className="w-4 h-4" />
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
                           </td>
@@ -1248,16 +1435,16 @@ export default function CustomersPage() {
                 </tbody>
                 {customers.length > 0 && (
                   <tfoot>
-                    <tr className="bg-slate-900 text-white font-bold text-xs">
-                      <td colSpan={6} className="px-4 py-3 text-right uppercase tracking-wider border-r border-slate-700 text-slate-300">
+                    <tr className="bg-[#e8effd] text-[#0f172a] font-bold text-[10px]">
+                      <td colSpan={6} className="px-2 py-2.5 text-right uppercase tracking-wider text-slate-600">
                         Page total ({customers.length} shown)
                       </td>
-                      <td className="px-4 py-3 text-right border-r border-slate-700 tabular-nums">
-                        <span className={`font-black text-base ${getBalanceMeta(customers.reduce((s, c) => s + parseFloat(c.cus_balance || 0), 0)).amountClass}`}>
+                      <td className="px-2 py-2.5 text-right tabular-nums bg-white/60">
+                        <span className={`font-black text-sm ${getBalanceMeta(customers.reduce((s, c) => s + parseFloat(c.cus_balance || 0), 0)).amountClass}`}>
                           Rs. {fmtAmt(customers.reduce((s, c) => s + parseFloat(c.cus_balance || 0), 0))}
                         </span>
                       </td>
-                      <td colSpan={2} className="px-4 py-3" />
+                      <td colSpan={2} className="px-2 py-2.5" />
                     </tr>
                   </tfoot>
                 )}
@@ -2370,6 +2557,13 @@ export default function CustomersPage() {
           </DialogActions>
         </Dialog>
       </div>
+
+      <AccountPaymentPromiseDialog
+        open={Boolean(promiseDialogCustomer)}
+        customer={promiseDialogCustomer}
+        onClose={() => setPromiseDialogCustomer(null)}
+        onChanged={handlePromiseMapChange}
+      />
 
       <style jsx global>{`
         .blink-button-strong {

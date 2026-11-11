@@ -58,6 +58,7 @@ export const SYSTEM_PAGES = [
   { id: 'customercategory', name: 'Account Categories', section: 'Accounts', path: '/dashboard/customercategory' },
   { id: 'customer-types', name: 'Account Types', section: 'Accounts', path: '/dashboard/customer-types', adminOnly: true },
   { id: 'customers', name: 'Accounts', section: 'Accounts', path: '/dashboard/customers' },
+  { id: 'payment-promises', name: 'Payment Promises', section: 'Accounts', path: '/dashboard/payment-promises' },
 
   { id: 'categories', name: 'Category Management', section: 'Products', path: '/dashboard/categories' },
   { id: 'sub-categories', name: 'Sub Category Management', section: 'Products', path: '/dashboard/subcategories' },
@@ -132,7 +133,7 @@ export const LEGACY_MODULE_TO_PAGES = {
   store_management: ['stores'],
   store_stock: ['store-stock'],
   stock_transfer: ['stock-transfer'],
-  customers: ['customercategory', 'customer-types', 'customers'],
+  customers: ['customercategory', 'customer-types', 'customers', 'payment-promises'],
   products: ['categories', 'sub-categories', 'products'],
   sales: ['orders', 'new-sale', 'sales', 'sales-v2', 'sales-v2-quick', 'hold-bills', 'sales-analytics'],
   sale_returns: ['sale-returns', 'loaders', 'quotations'],
@@ -154,7 +155,7 @@ export const LEGACY_MODULE_TO_PAGES = {
   activity_logs: ['activity-logs'],
   system: ['usermanagement', 'stores', 'store-stock', 'stock-transfer', 'settings', 'import', 'activity-logs'],
   system_settings: ['usermanagement', 'stores', 'store-stock', 'stock-transfer', 'settings', 'import', 'activity-logs'],
-  accounts: ['customercategory', 'customer-types', 'customers'],
+  accounts: ['customercategory', 'customer-types', 'customers', 'payment-promises'],
   stores_stock: ['stores', 'store-stock', 'stock-transfer'],
   cash_day_end: ['day-end', 'day-end-history', 'cash-report', 'bank-report'],
 };
@@ -188,6 +189,7 @@ const PATH_PAGE_RULES = [
   { prefix: '/dashboard/customercategory', pageIds: ['customercategory'] },
   { prefix: '/dashboard/customer-types', pageIds: ['customer-types'] },
   { prefix: '/dashboard/customers', pageIds: ['customers'] },
+  { prefix: '/dashboard/payment-promises', pageIds: ['payment-promises', 'customers'] },
   { prefix: '/dashboard/categories', pageIds: ['categories'] },
   { prefix: '/dashboard/subcategories', pageIds: ['sub-categories'] },
   { prefix: '/dashboard/products', pageIds: ['products'] },

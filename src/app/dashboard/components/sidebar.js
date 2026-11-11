@@ -77,7 +77,7 @@ const PURCHASE_IDS = new Set(['purchases', 'new-purchase', 'purchase-list', 'pur
 const INVENTORY_IDS = new Set(['products', 'categories', 'sub-categories', 'store-stock', 'stock-transfer', 'stores', 'cargo']);
 const OPERATIONS_IDS = new Set(['day-end', 'day-end-history', 'cash-report', 'bank-report', 'bank-accounts']);
 const FINANCE_IDS = new Set(['expenses', 'expense-titles', 'journal', 'internal-transfer', 'adjustment-management']);
-const ACCOUNTS_IDS = new Set(['customercategory', 'customer-types', 'customers']);
+const ACCOUNTS_IDS = new Set(['customercategory', 'customer-types', 'customers', 'payment-promises']);
 
 const getNavFn = (item) => {
   const { id, category } = item;
@@ -104,6 +104,7 @@ const ROUTE_MAP = {
   'customercategory': '/dashboard/customercategory',
   'customer-types': '/dashboard/customer-types',
   'customers': '/dashboard/customers',
+  'payment-promises': '/dashboard/payment-promises',
   'categories': '/dashboard/categories',
   'sub-categories': '/dashboard/subcategories',
   'products': '/dashboard/products',
@@ -211,6 +212,7 @@ export default function Sidebar({
     { id: 'customercategory', name: 'Account Categories', icon: LabelIcon, category: 'customer-management', parent: 'Accounts' },
     { id: 'customer-types', name: 'Account Types', icon: LabelIcon, category: 'customer-management', parent: 'Accounts', adminOnly: true },
     { id: 'customers', name: 'Accounts', icon: PeopleIcon, category: 'customer-management', parent: 'Accounts' },
+    { id: 'payment-promises', name: 'Payment Promises', icon: CalendarIcon, category: 'customer-management', parent: 'Accounts' },
 
     { id: 'categories', name: 'Category Management', icon: FolderIcon, category: 'product-management', parent: 'Product Management' },
     { id: 'sub-categories', name: 'Sub Category Management', icon: FolderOpenIcon, category: 'product-management', parent: 'Product Management' },
@@ -310,6 +312,7 @@ export default function Sidebar({
       { path: '/dashboard/usermanagement', id: 'usermanagement', category: 'system' },
       { path: '/dashboard/customercategory', id: 'customercategory', category: 'customer-management' },
       { path: '/dashboard/customers', id: 'customers', category: 'customer-management' },
+      { path: '/dashboard/payment-promises', id: 'payment-promises', category: 'customer-management' },
       { path: '/dashboard/categories', id: 'categories', category: 'product-management' },
       { path: '/dashboard/subcategories', id: 'sub-categories', category: 'product-management' },
       { path: '/dashboard/products', id: 'products', category: 'product-management' },

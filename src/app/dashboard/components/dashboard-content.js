@@ -7,6 +7,7 @@ import {
   canViewAnyDashboardAnalytics,
   filterDashboardShortcuts,
   canViewDashboardLowStock,
+  canStaffAccessPath,
 } from '@/lib/staff-access';
 import {
   eachPkDate,
@@ -49,6 +50,7 @@ import {
   AlertTriangle,
   Maximize2,
   Minimize2,
+  MessageCircle,
 } from 'lucide-react';
 import {
   SHORTCUT_PALETTE,
@@ -1130,6 +1132,25 @@ export default function DashboardContent({ activeTab }) {
     [dashboardUser, permVersion]
   );
 
+  const showPromiseQuickEntry = useMemo(
+    () => Boolean(dashboardUser && canStaffAccessPath(dashboardUser, '/dashboard/payment-promises')),
+    [dashboardUser, permVersion],
+  );
+
+  const quickEntryWithPromises = useMemo(() => {
+    const list = [...quickEntryActions];
+    if (!showPromiseQuickEntry) return list;
+    list.push({
+      id: 'payment-promise-reminders',
+      title: "Today's promises",
+      subtitle: 'Open payment promise queue',
+      icon: MessageCircle,
+      tone: 'neutral',
+      path: '/dashboard/payment-promises',
+    });
+    return list;
+  }, [quickEntryActions, showPromiseQuickEntry]);
+
   const fetchMonthlyWidget = async (filters, setRows, setLoading, key) => {
     setLoading(true);
     try {
@@ -1611,6 +1632,7 @@ export default function DashboardContent({ activeTab }) {
     const topProductsSaleTotal = topProductsSaleData.slice(0, 15).reduce((s, r) => s + Number(r.amount || r.balance || 0), 0);
 
     return (
+      <>
       <div className="space-y-6 max-w-[1400px] mx-auto">
         {!analyticsWidgets.any && !analyticsWidgets.kpi && (
           <div className={`${CARD} p-5 md:p-6`}>
@@ -1622,7 +1644,7 @@ export default function DashboardContent({ activeTab }) {
         )}
 
         {/* Modules + Quick Entry */}
-        <div className={`grid grid-cols-1 gap-5 ${quickEntryActions.length > 0 ? 'xl:grid-cols-[1fr_300px]' : ''}`}>
+        <div className={`grid grid-cols-1 gap-5 ${quickEntryWithPromises.length > 0 ? 'xl:grid-cols-[1fr_300px]' : ''}`}>
           {/* Business Modules */}
           <div className={`${CARD} overflow-hidden`}>
             <div className="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50/80 to-white">
@@ -1661,35 +1683,67 @@ export default function DashboardContent({ activeTab }) {
           </div>
 
           {/* Quick Entry Panel */}
-          {quickEntryActions.length > 0 && (
+          {quickEntryWithPromises.length > 0 && (
           <div className={`${CARD} overflow-hidden`}>
             <div className="px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50/80 to-white">
               <h3 className="text-base font-extrabold text-slate-900 tracking-tight">Quick Entry</h3>
               <p className="text-xs text-slate-500 mt-0.5 font-medium">High-priority actions</p>
             </div>
             <div className="p-4 space-y-3 bg-gradient-to-b from-white to-slate-50/50">
-              {quickEntryActions.map((action, index) => {
+              {quickEntryWithPromises.map((action) => {
                 const isPrimary = action.tone === 'blue' || action.tone === 'green';
+                const isCompact = Boolean(action.compact);
                 const toneStyle = QUICK_ENTRY_TONES[action.tone] || QUICK_ENTRY_TONES.neutral;
                 return (
                   <button
-                    key={index}
+                    key={action.id || action.path}
                     type="button"
                     onClick={() => handleQuickActionClick(action.path)}
-                    className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-left transition-all duration-200 ${toneStyle.className}`}
+                    className={`w-full flex items-center gap-2.5 text-left transition-all duration-200 ${
+                      isCompact
+                        ? 'px-3 py-2 rounded-lg border border-slate-200/80 bg-white hover:border-slate-300 shadow-sm hover:shadow'
+                        : `gap-3 px-4 py-3.5 rounded-xl ${toneStyle.className}`
+                    }`}
                   >
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${isPrimary ? 'bg-white/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]' : 'bg-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]'}`}>
-                      <action.icon className={`w-4 h-4 ${isPrimary ? 'text-white' : 'text-slate-600'}`} strokeWidth={2.25} />
+                    <div
+                      className={`flex items-center justify-center flex-shrink-0 ${
+                        isCompact
+                          ? 'w-8 h-8 rounded-lg bg-slate-100 text-slate-600'
+                          : `w-9 h-9 rounded-xl ${isPrimary ? 'bg-white/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]' : 'bg-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]'}`
+                      }`}
+                    >
+                      <action.icon
+                        className={`${isCompact ? 'w-3.5 h-3.5' : 'w-4 h-4'} ${isPrimary ? 'text-white' : 'text-slate-600'}`}
+                        strokeWidth={2.25}
+                      />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className={`text-sm font-bold leading-tight ${isPrimary ? 'text-white' : 'text-slate-900'}`}>{action.title}</p>
-                      <p className={`text-[11px] mt-0.5 truncate ${isPrimary ? 'text-white/85' : 'text-slate-500'}`}>{action.subtitle}</p>
+                      <p
+                        className={`font-bold leading-tight ${isCompact ? 'text-xs text-slate-900' : `text-sm ${isPrimary ? 'text-white' : 'text-slate-900'}`}`}
+                      >
+                        {action.title}
+                      </p>
+                      <p
+                        className={`mt-0.5 leading-snug truncate ${isCompact ? 'text-[10px] text-slate-500 font-medium' : `text-[11px] ${isPrimary ? 'text-white/85' : 'text-slate-500'}`}`}
+                      >
+                        {action.subtitle}
+                      </p>
                     </div>
-                    {!isPrimary && (
+                    {action.badge != null && action.badge > 0 ? (
+                      <span
+                        className={`shrink-0 min-w-[1.65rem] h-7 px-1.5 rounded-md flex items-center justify-center text-xs font-black tabular-nums ${
+                          isCompact
+                            ? 'bg-rose-600 text-white shadow-sm'
+                            : 'bg-amber-100 text-amber-900 border border-amber-200'
+                        }`}
+                      >
+                        {action.badge}
+                      </span>
+                    ) : !isPrimary ? (
                       <svg className="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                       </svg>
-                    )}
+                    ) : null}
                   </button>
                 );
               })}
@@ -2480,6 +2534,7 @@ export default function DashboardContent({ activeTab }) {
           );
         })()}
       </div>
+      </>
     );
   }
 

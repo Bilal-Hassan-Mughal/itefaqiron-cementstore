@@ -17,8 +17,8 @@ export const COMPANY = {
 
 export const POWERED_BY = {
   label: 'Powered By',
-  name: 'RAPIDTECHPRO',
-  nameShort: 'RTP',
+  name: 'AL-JANNAT SYSTEMS',
+  nameShort: 'AJS',
 };
 
 export const BRAND = {
@@ -159,6 +159,10 @@ export const QUICK_ENTRY_TONES = {
   },
   green: {
     className: 'text-white border-0 shadow-[0_4px_0_#00a868,0_8px_24px_rgba(0,210,132,0.35)] hover:shadow-[0_2px_0_#00a868,0_12px_32px_rgba(0,210,132,0.4)] hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_4px_0_#00a868,0_4px_12px_rgba(0,210,132,0.3)] bg-gradient-to-b from-[#00D284] to-[#00b872]',
+  },
+  amber: {
+    className:
+      'text-white border-0 shadow-[0_4px_0_#b45309,0_8px_24px_rgba(245,158,11,0.35)] hover:shadow-[0_2px_0_#b45309,0_12px_32px_rgba(245,158,11,0.4)] hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_4px_0_#b45309,0_4px_12px_rgba(245,158,11,0.3)] bg-gradient-to-b from-[#f59e0b] to-[#d97706]',
   },
   neutral: {
     className: 'bg-white border border-slate-200/80 text-slate-800 shadow-[0_2px_8px_rgba(15,23,42,0.06)] hover:shadow-[0_8px_24px_rgba(15,23,42,0.1)] hover:-translate-y-0.5 hover:border-slate-300',

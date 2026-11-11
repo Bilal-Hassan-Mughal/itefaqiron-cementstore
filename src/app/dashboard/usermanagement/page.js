@@ -752,8 +752,8 @@ export default function UserManagementPage() {
                   </div>
                 </div>
 
-                <div className="p-4 flex-1 min-h-0 overflow-hidden">
-                  <p className="text-[10px] font-bold uppercase text-slate-500 mb-2">
+                <div className="p-4 flex-1 min-h-0 flex flex-col gap-2 overflow-hidden border-t border-slate-100 bg-white">
+                  <p className="text-[10px] font-bold uppercase text-slate-500 shrink-0">
                     Page access — all system modules ({totalPageCount} pages)
                   </p>
                   <AccessExcelGrid
@@ -766,7 +766,7 @@ export default function UserManagementPage() {
                     roleLabel={getRoleDisplayName(formData.role)}
                     activeSection={accessSectionFilter}
                     onSectionChange={setAccessSectionFilter}
-                    maxHeight="50vh"
+                    fillAvailable
                   />
                 </div>
 
@@ -795,7 +795,7 @@ export default function UserManagementPage() {
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="p-4 overflow-y-auto space-y-3">
+              <div className="p-4 flex-1 min-h-0 flex flex-col gap-2 overflow-hidden">
                 <AccessSummaryBar
                   selected={resolveUserModules(viewAccessUser)}
                   onSectionClick={setViewAccessSection}
@@ -806,7 +806,7 @@ export default function UserManagementPage() {
                   onSectionChange={setViewAccessSection}
                   showSummary={false}
                   readOnly
-                  maxHeight="45vh"
+                  fillAvailable
                 />
               </div>
               <div className="px-4 py-3 border-t border-slate-200 flex justify-end gap-2 shrink-0">

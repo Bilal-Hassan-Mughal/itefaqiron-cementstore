@@ -17,6 +17,7 @@ import Header from './header';
 import Sidebar from './sidebar';
 import ClientOnly from './client-only';
 import { SIDEBAR_WIDTH } from '@/lib/brand-theme';
+import PaymentPromiseReminderFab from './PaymentPromiseReminderFab';
 
 const COLLAPSED_WIDTH = SIDEBAR_WIDTH.collapsed;
 const EXPANDED_WIDTH = SIDEBAR_WIDTH.expanded;
@@ -206,6 +207,16 @@ export default function DashboardLayout({ children }) {
       </Suspense>
     )}
     <style>{`
+      .munshi-ji-dock {
+        right: max(12px, env(safe-area-inset-right, 0px));
+        left: auto;
+      }
+      @media (min-width: 640px) {
+        .munshi-ji-dock { right: 20px; }
+      }
+      @media (min-width: 900px) {
+        .munshi-ji-dock { right: 24px; }
+      }
       @media print {
         .no-print { display: none !important; }
         body { overflow: visible !important; background: white !important; }
@@ -222,7 +233,16 @@ export default function DashboardLayout({ children }) {
         <CircularProgress size={80} />
       </Box>
     }>
-      <Box className="dashboard-layout-root" sx={{ display: 'flex', height: '100vh', maxHeight: '100vh', overflow: 'hidden', bgcolor: 'background.default' }}>
+      <Box
+        className="dashboard-layout-root"
+        sx={{
+          display: 'flex',
+          height: '100vh',
+          maxHeight: '100vh',
+          overflow: 'hidden',
+          bgcolor: 'background.default',
+        }}
+      >
         {/* Sidebar — hidden when printing */}
         <Box sx={{ '@media print': { display: 'none !important' } }}>
           <Suspense fallback={null}>
@@ -327,6 +347,7 @@ export default function DashboardLayout({ children }) {
             {children}
           </Box>
         </Box>
+        <PaymentPromiseReminderFab user={user} />
       </Box>
     </ClientOnly>
     </>

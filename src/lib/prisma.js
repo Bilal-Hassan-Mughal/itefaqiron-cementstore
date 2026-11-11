@@ -45,6 +45,7 @@ const MODEL_TABLE = {
   HrSettings: 'hr_settings',
   Payment: 'payments',
   ActivityLog: 'activity_logs',
+  CustomerPaymentPromise: 'customer_payment_promises',
 };
 
 function createExtendedClient(base, { useBranchIdFilter }) {

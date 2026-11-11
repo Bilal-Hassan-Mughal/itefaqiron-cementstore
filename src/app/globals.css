@@ -880,3 +880,96 @@ input[type="number"]::placeholder,
 #payment-receipt-preview .remaining-balance-bar * {
   color: #ffffff !important;
 }
+
+/* Futuristic AI Munshi (dashboard) */
+@keyframes ai-munshi-float-keyframes {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2.5px);
+  }
+}
+
+.ai-munshi-float {
+  animation: ai-munshi-float-keyframes 3.4s ease-in-out infinite;
+}
+
+@keyframes ai-munshi-orbit-keyframes {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ai-munshi-orbit-slow {
+  transform-origin: 44px 44px;
+  animation: ai-munshi-orbit-keyframes 11s linear infinite;
+}
+
+.ai-munshi-orbit-rev {
+  transform-origin: 44px 44px;
+  animation: ai-munshi-orbit-keyframes 16s linear infinite reverse;
+}
+
+@keyframes ai-munshi-core-pulse-keyframes {
+  0%,
+  100% {
+    opacity: 0.82;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+.ai-munshi-core-pulse {
+  transform-origin: 44px 44px;
+  animation: ai-munshi-core-pulse-keyframes 2.6s ease-in-out infinite;
+}
+
+@keyframes ai-munshi-wave-keyframes {
+  0%,
+  100% {
+    transform: scaleY(0.55);
+    opacity: 0.75;
+  }
+  50% {
+    transform: scaleY(1.18);
+    opacity: 1;
+  }
+}
+
+.ai-munshi-wave-1 {
+  transform-origin: 44px 44px;
+  animation: ai-munshi-wave-keyframes 1.2s ease-in-out infinite;
+}
+
+.ai-munshi-wave-2 {
+  transform-origin: 44px 44px;
+  animation: ai-munshi-wave-keyframes 1.2s ease-in-out 0.2s infinite;
+}
+
+.ai-munshi-wave-3 {
+  transform-origin: 44px 44px;
+  animation: ai-munshi-wave-keyframes 1.2s ease-in-out 0.4s infinite;
+}
+
+@keyframes ai-munshi-text-fade-keyframes {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ai-munshi-text-fade {
+  animation: ai-munshi-text-fade-keyframes 0.35s ease-out;
+}
