@@ -123,6 +123,33 @@ const COL = {
   actions: { width: '10%', minWidth: 96 },
 };
 
+const COL_ADJ = {
+  date: { width: '11%', minWidth: 100 },
+  store: { width: '11%', minWidth: 96 },
+  product: { width: '18%', minWidth: 140 },
+  change: { width: '8%', minWidth: 72 },
+  before: { width: '8%', minWidth: 72 },
+  after: { width: '8%', minWidth: 72 },
+  description: { width: '22%', minWidth: 160 },
+  user: { width: '10%', minWidth: 88 },
+};
+
+function formatAdjustmentDescription(val) {
+  const s = val != null ? String(val).trim() : '';
+  if (!s) return '—';
+  if (s.toLowerCase() === 'manual adjustment') return '—';
+  return s;
+}
+
+function formatAdjDelta(val) {
+  const n = parseFloat(val);
+  if (Number.isNaN(n)) return '—';
+  const formatted = formatStockQty(Math.abs(n));
+  if (n > 0) return `+${formatted}`;
+  if (n < 0) return `-${formatted}`;
+  return formatted;
+}
+
 function formatStockQty(val) {
   const n = parseFloat(val);
   if (Number.isNaN(n)) return '—';
@@ -135,15 +162,6 @@ function formatUnit(unit) {
   const s = String(unit).trim();
   if (!s || s.toUpperCase() === 'NULL' || s === '—') return '—';
   return s;
-}
-
-function productSubtitle(product) {
-  if (!product) return null;
-  const title = (product.pro_title || '').trim();
-  const desc = (product.pro_description || '').trim();
-  if (!desc || desc.toUpperCase() === 'NULL') return null;
-  if (desc.toLowerCase() === title.toLowerCase()) return null;
-  return desc;
 }
 
 function getStockStatus(current, min) {
@@ -187,9 +205,13 @@ const editDialogQtyHighlightSx = {
 
 function EditStockAdjustDialog({ open, item, updating, onClose, onSave, onValidationError }) {
   const [adjQty, setAdjQty] = useState('');
+  const [adjDescription, setAdjDescription] = useState('');
 
   useEffect(() => {
-    if (open) setAdjQty('');
+    if (open) {
+      setAdjQty('');
+      setAdjDescription('');
+    }
   }, [open, item?.store_stock_id]);
 
   const postQty = useMemo(() => {
@@ -213,7 +235,7 @@ function EditStockAdjustDialog({ open, item, updating, onClose, onSave, onValida
       onValidationError?.('Adjustment quantity cannot be zero');
       return;
     }
-    onSave(n);
+    onSave(n, adjDescription);
   };
 
   return (
@@ -372,6 +394,29 @@ function EditStockAdjustDialog({ open, item, updating, onClose, onSave, onValida
                     '&.Mui-focused fieldset': { borderColor: STOCK_UI.accent, borderWidth: 2 },
                   },
                   '& .MuiInputBase-input': { fontWeight: 700, fontVariantNumeric: 'tabular-nums' },
+                }}
+              />
+
+              <TextField
+                label="Description"
+                placeholder="e.g. physical count correction, damaged goods, opening balance"
+                fullWidth
+                size="small"
+                multiline
+                minRows={2}
+                maxRows={4}
+                value={adjDescription}
+                onChange={(e) => setAdjDescription(e.target.value)}
+                disabled={updating}
+                inputProps={{ maxLength: 500 }}
+                helperText="Optional — appears in Stock adjustment history below (not in the stock list)"
+                sx={{
+                  mt: 1.5,
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: '10px',
+                    bgcolor: '#fff',
+                    '&.Mui-focused fieldset': { borderColor: STOCK_UI.accent, borderWidth: 2 },
+                  },
                 }}
               />
 
@@ -534,7 +579,6 @@ const StoreStockDataTable = memo(function StoreStockDataTable({ rows, totalCount
             rows.map((item, rowIdx) => {
               const status = getStockStatus(item.stock_quantity, item.min_stock);
               const rowBg = rowIdx % 2 === 0 ? '#ffffff' : '#f8fafc';
-              const subtitle = productSubtitle(item.product);
               return (
                 <TableRow
                   key={`${item.store_stock_id}-${item.store?.storeid || 'all'}`}
@@ -564,15 +608,9 @@ const StoreStockDataTable = memo(function StoreStockDataTable({ rows, totalCount
                     >
                       {item.product?.pro_title || '—'}
                     </Typography>
-                    {subtitle ? (
-                      <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.25 }}>
-                        {subtitle}
-                      </Typography>
-                    ) : (
-                      <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mt: 0.25 }}>
-                        ID {item.product?.pro_id ?? '—'}
-                      </Typography>
-                    )}
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mt: 0.25 }}>
+                      ID {item.product?.pro_id ?? '—'}
+                    </Typography>
                   </TableCell>
                   <TableCell align="right" sx={{ ...tableBodyCellSx, ...COL.qty }}>
                     <Typography
@@ -623,6 +661,102 @@ const StoreStockDataTable = memo(function StoreStockDataTable({ rows, totalCount
   );
 });
 
+const StockAdjustmentHistoryTable = memo(function StockAdjustmentHistoryTable({ rows, loading }) {
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+        <CircularProgress size={28} />
+      </Box>
+    );
+  }
+
+  return (
+    <TableContainer
+      component={Paper}
+      variant="outlined"
+      sx={{
+        width: '100%',
+        borderRadius: '12px',
+        border: `1px solid ${tableHeadDivider}`,
+        overflow: 'auto',
+        maxHeight: { xs: 'none', lg: 'min(420px, 50vh)' },
+      }}
+    >
+      <Table size="small" stickyHeader sx={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'separate', borderSpacing: 0 }}>
+        <TableHead>
+          <TableRow>
+            <TableCell sx={{ ...tableHeadCellSx, ...COL_ADJ.date }}>Date</TableCell>
+            <TableCell sx={{ ...tableHeadCellSx, ...COL_ADJ.store }}>Store</TableCell>
+            <TableCell sx={{ ...tableHeadCellSx, ...COL_ADJ.product }}>Product</TableCell>
+            <TableCell sx={{ ...tableHeadCellSx, ...COL_ADJ.change, textAlign: 'right' }}>Change</TableCell>
+            <TableCell sx={{ ...tableHeadCellSx, ...COL_ADJ.before, textAlign: 'right' }}>Before</TableCell>
+            <TableCell sx={{ ...tableHeadCellSx, ...COL_ADJ.after, textAlign: 'right' }}>After</TableCell>
+            <TableCell sx={{ ...tableHeadCellSx, ...COL_ADJ.description }}>Description</TableCell>
+            <TableCell sx={{ ...tableHeadCellSx, ...COL_ADJ.user }}>By</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={8} align="center" sx={{ ...tableBodyCellSx, py: 4, color: '#64748b', borderRight: 'none' }}>
+                No manual stock adjustments found for the current filters
+              </TableCell>
+            </TableRow>
+          ) : (
+            rows.map((row) => {
+              const chg = parseFloat(row.quantity);
+              const chgColor = Number.isNaN(chg) ? '#64748b' : chg > 0 ? '#15803d' : chg < 0 ? '#b91c1c' : '#64748b';
+              const desc = formatAdjustmentDescription(row.description ?? row.reference);
+              const when = row.created_at
+                ? new Date(row.created_at).toLocaleString('en-GB', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : '—';
+              return (
+                <TableRow key={row.adjustment_id} hover>
+                  <TableCell sx={{ ...tableBodyCellSx, ...COL_ADJ.date, fontSize: '0.75rem', color: '#475569' }}>{when}</TableCell>
+                  <TableCell sx={{ ...tableBodyCellSx, ...COL_ADJ.store, fontWeight: 600 }}>{row.store?.store_name || '—'}</TableCell>
+                  <TableCell sx={{ ...tableBodyCellSx, ...COL_ADJ.product, fontWeight: 600, wordBreak: 'break-word' }}>
+                    {row.product?.pro_title || `ID ${row.pro_id}`}
+                  </TableCell>
+                  <TableCell align="right" sx={{ ...tableBodyCellSx, ...COL_ADJ.change, fontWeight: 800, color: chgColor, fontVariantNumeric: 'tabular-nums' }}>
+                    {formatAdjDelta(row.quantity)}
+                  </TableCell>
+                  <TableCell align="right" sx={{ ...tableBodyCellSx, ...COL_ADJ.before, fontVariantNumeric: 'tabular-nums' }}>
+                    {formatStockQty(row.pre_quantity)}
+                  </TableCell>
+                  <TableCell align="right" sx={{ ...tableBodyCellSx, ...COL_ADJ.after, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                    {formatStockQty(row.post_quantity)}
+                  </TableCell>
+                  <TableCell
+                    sx={{
+                      ...tableBodyCellSx,
+                      ...COL_ADJ.description,
+                      fontWeight: 400,
+                      color: desc === '—' ? '#94a3b8' : '#0f172a',
+                      wordBreak: 'break-word',
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
+                    {desc}
+                  </TableCell>
+                  <TableCell sx={{ ...tableBodyCellSx, ...COL_ADJ.user, fontSize: '0.75rem', color: '#475569' }}>
+                    {row.updated_by_user?.full_name || '—'}
+                  </TableCell>
+                </TableRow>
+              );
+            })
+          )}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+});
+
 export default function StoreStockPage() {
   const { requireAuth, authDialogOpen, handleAuthSuccess, handleAuthCancel } = usePinAuth();
   const [stores, setStores] = useState([]);
@@ -655,6 +789,41 @@ export default function StoreStockPage() {
   const [whatsAppError, setWhatsAppError] = useState('');
   const [whatsAppSuccess, setWhatsAppSuccess] = useState('');
 
+  const [stockAdjustments, setStockAdjustments] = useState([]);
+  const [adjustmentsLoading, setAdjustmentsLoading] = useState(false);
+
+  const effectiveStoreFilter = selectedStore || filterStore;
+
+  const filteredStockAdjustments = useMemo(() => {
+    if (!searchTerm.trim()) return stockAdjustments;
+    const q = searchTerm.toLowerCase();
+    return stockAdjustments.filter((row) => {
+      const title = (row.product?.pro_title || '').toLowerCase();
+      const desc = String(row.description ?? row.reference ?? '').toLowerCase();
+      return title.includes(q) || desc.includes(q);
+    });
+  }, [stockAdjustments, searchTerm]);
+
+  const loadStockAdjustments = useCallback(async () => {
+    setAdjustmentsLoading(true);
+    try {
+      const params = new URLSearchParams({ adjustments: 'true', limit: '250' });
+      if (effectiveStoreFilter) params.set('store_id', effectiveStoreFilter);
+      const response = await fetch(`/api/store-stock?${params.toString()}`);
+      if (response.ok) {
+        const data = await response.json();
+        setStockAdjustments(Array.isArray(data) ? data : []);
+      } else {
+        setStockAdjustments([]);
+      }
+    } catch (error) {
+      console.error('Error loading stock adjustments:', error);
+      setStockAdjustments([]);
+    } finally {
+      setAdjustmentsLoading(false);
+    }
+  }, [effectiveStoreFilter]);
+
   // Load initial data
   useEffect(() => {
     loadStores();
@@ -671,6 +840,10 @@ export default function StoreStockPage() {
       loadAllStock();
     }
   }, [selectedStore]);
+
+  useEffect(() => {
+    loadStockAdjustments();
+  }, [loadStockAdjustments]);
 
   const loadStores = async () => {
     try {
@@ -828,7 +1001,7 @@ export default function StoreStockPage() {
     }
   };
 
-  const handleUpdateStock = useCallback(async (adjQty) => {
+  const handleUpdateStock = useCallback(async (adjQty, description) => {
     if (!editingStockItem) return;
 
     if (Number.isNaN(adjQty) || adjQty === 0) {
@@ -841,6 +1014,7 @@ export default function StoreStockPage() {
 
     try {
       setUpdatingStock(true);
+      const descTrim = description != null ? String(description).trim() : '';
       const response = await fetch('/api/store-stock', {
         method: 'POST',
         headers: {
@@ -851,13 +1025,22 @@ export default function StoreStockPage() {
           product_id: editingStockItem.pro_id || editingStockItem.product?.pro_id,
           quantity: adjQty,
           operation: 'adjust',
-          updated_by: getCurrentUserId()
+          updated_by: getCurrentUserId(),
+          description: descTrim || undefined,
         }),
       });
 
       if (response.ok) {
+        const result = await response.json();
+        if (result?.adjustment) {
+          setStockAdjustments((prev) => [
+            result.adjustment,
+            ...prev.filter((r) => r.adjustment_id !== result.adjustment.adjustment_id),
+          ]);
+        }
         showSnackbar('Stock adjusted successfully', 'success');
         closeEditStockDialog({ force: true });
+        await loadStockAdjustments();
         if (selectedStore) {
           await loadStoreStock(selectedStore);
           await loadLowStockProducts(selectedStore);
@@ -874,7 +1057,7 @@ export default function StoreStockPage() {
     } finally {
       setUpdatingStock(false);
     }
-  }, [closeEditStockDialog, editingStockItem, requireAuth, selectedStore]);
+  }, [closeEditStockDialog, editingStockItem, loadStockAdjustments, requireAuth, selectedStore]);
 
   const showSnackbar = (message, severity = 'success') => {
     setSnackbar({ open: true, message, severity });
@@ -892,8 +1075,9 @@ export default function StoreStockPage() {
 
     return storeStock.filter(item => {
       // Search filter - by product name
-      const matchesSearch = searchTerm === '' || 
-        (item.product?.pro_title && item.product.pro_title.toLowerCase().includes(searchTerm.toLowerCase()));
+      const q = searchTerm.toLowerCase();
+      const matchesSearch = searchTerm === '' ||
+        (item.product?.pro_title && item.product.pro_title.toLowerCase().includes(q));
 
       // Product filter
       const matchesProduct = filterProduct === '' || 
@@ -1521,6 +1705,53 @@ export default function StoreStockPage() {
               />
             </CardContent>
           </Card>
+
+        <Card
+          className="no-print"
+          sx={{
+            mt: 3,
+            borderRadius: STOCK_UI.cardRadius,
+            border: STOCK_UI.border,
+            boxShadow: '0 1px 4px rgba(15,23,42,0.06)',
+          }}
+        >
+          <CardContent sx={{ pt: 2.25, pb: 2 }}>
+            <Box
+              sx={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                justifyContent: 'space-between',
+                alignItems: 'flex-end',
+                gap: 1.5,
+                pb: 1.5,
+                mb: 1.5,
+                borderBottom: `2px solid ${STOCK_UI.headBg}`,
+              }}
+            >
+              <Box>
+                <Typography sx={{ ...sectionTitleSx, mb: 0, pb: 0, borderBottom: 'none' }}>
+                  <EditIcon sx={{ color: STOCK_UI.accent, fontSize: 20 }} />
+                  Stock adjustment history
+                </Typography>
+                <Typography variant="body2" sx={{ color: STOCK_UI.sectionLabel, mt: 0.5 }}>
+                  Manual quantity edits with descriptions
+                  {effectiveStoreFilter ? ` — ${stores.find((s) => s.storeid === parseInt(effectiveStoreFilter, 10))?.store_name || 'filtered store'}` : ' — all stores'}
+                </Typography>
+              </Box>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<RefreshIcon />}
+                onClick={loadStockAdjustments}
+                disabled={adjustmentsLoading}
+                sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '10px' }}
+              >
+                Refresh
+              </Button>
+            </Box>
+            <StockAdjustmentHistoryTable rows={filteredStockAdjustments} loading={adjustmentsLoading} />
+          </CardContent>
+        </Card>
 
         {/* Print Footer */}
         <Box className="print-footer" sx={{ display: 'none', '@media print': { display: 'block' } }}>

@@ -351,6 +351,7 @@ export async function getStoreStockSummary(storeId, prismaClient = null) {
                 pro_id: true,
                 pro_title: true,
                 pro_unit: true,
+                pro_description: true,
                 pro_sale_price: true,
                 pro_cost_price: true
               }
@@ -383,6 +384,7 @@ export async function getStoreStockSummary(storeId, prismaClient = null) {
             p.pro_id as product_pro_id,
             p.pro_title as product_pro_title,
             p.pro_unit as product_pro_unit,
+            p.pro_description as product_pro_description,
             p.pro_sale_price as product_pro_sale_price,
             p.pro_cost_price as product_pro_cost_price
           FROM store_stocks ss
@@ -405,6 +407,7 @@ export async function getStoreStockSummary(storeId, prismaClient = null) {
             pro_id: row.product_pro_id,
             pro_title: row.product_pro_title,
             pro_unit: row.product_pro_unit,
+            pro_description: row.product_pro_description,
             pro_sale_price: row.product_pro_sale_price,
             pro_cost_price: row.product_pro_cost_price
           }

@@ -191,6 +191,7 @@ const SALE_LIST_SELECT = {
   sale_details: {
     select: {
       sale_detail_id: true,
+      size: true,
       qnty: true,
       unit_rate: true,
       total_amount: true,

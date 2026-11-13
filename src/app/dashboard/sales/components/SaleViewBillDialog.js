@@ -27,7 +27,13 @@ import {
 } from '@mui/icons-material';
 import { formatDatePK, formatTimePK, getCreatedByName } from '@/lib/date-helper';
 import { COMPANY } from '@/lib/brand-theme';
-import { SALE_INVOICE_PRINT, INVOICE_STORE_PHONE_LINE, getLinkedOriginalSaleId } from './sale-utils';
+import {
+  SALE_INVOICE_PRINT,
+  INVOICE_STORE_PHONE_LINE,
+  getLinkedOriginalSaleId,
+  normalizeSaleDetailsForReceipt,
+  getSaleDetailLineDescription,
+} from './sale-utils';
 import { useSalesContext } from './SalesContext';
 import { formatCustomerPhoneDisplay } from '@/lib/whatsapp-local';
 
@@ -247,8 +253,10 @@ export default function SaleViewBillDialog() {
               <Box sx={{ px: 3, py: 2 }}>
                 {/* Product Details Table - Full Width */}
                 {(() => {
-                  const details = selectedBill?.sale_details ? getSaleDetailsInAddOrder(selectedBill.sale_details) : [];
-                  const hasAnySize = details.some(d => d.size && String(d.size).trim() !== '');
+                  const details = selectedBill?.sale_details
+                    ? normalizeSaleDetailsForReceipt(getSaleDetailsInAddOrder(selectedBill.sale_details))
+                    : [];
+                  const hasAnySize = details.some((d) => getSaleDetailLineDescription(d) !== '');
                   const totalQty = details.reduce((sum, d) => sum + (parseFloat(d.qnty) || 0), 0);
                   const totalItemAmt = details.reduce((sum, d) => sum + (parseFloat(d.total_amount) || 0), 0);
                   return (
@@ -274,7 +282,7 @@ export default function SaleViewBillDialog() {
                                   <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{index + 1}</TableCell>
                                   <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="left">{detail.product?.pro_title || detail.product?.pro_name || detail.product?.prod_name || detail.pro_title || 'N/A'}</TableCell>
                                   {hasAnySize && (
-                                    <TableCell className="cell-normal" sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'normal !important', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="center">{detail.size || '—'}</TableCell>
+                                    <TableCell className="cell-normal" sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'normal !important', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="center">{getSaleDetailLineDescription(detail) || '—'}</TableCell>
                                   )}
                                   <TableCell sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{detail.qnty || 0}</TableCell>
                                   <TableCell className="cell-normal" sx={{ px: 1.25, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'normal !important', color: '#000000', verticalAlign: 'middle' }} align="center">{parseFloat(detail.unit_rate || 0).toFixed(2)}</TableCell>

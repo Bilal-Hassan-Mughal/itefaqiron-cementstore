@@ -119,6 +119,7 @@ import {
   findCatalogProduct,
   getCartLineCostRate,
   buildSaleReceiptBill,
+  normalizeSaleDetailsForReceipt,
   resolveSaleReceiptBalances,
   SALE_INVOICE_PRINT,
   SALE_PRODUCT_LIST_LIMIT,
@@ -3806,7 +3807,8 @@ export default function SalesPageContent() {
         }))
       } : {
         ...saleData,
-        notes: notesVal
+        notes: notesVal,
+        sale_details: normalizeSaleDetailsForReceipt(saleData.sale_details),
       };
 
       console.log('ðŸ’° Fresh data with payments:', formattedData);
@@ -3818,7 +3820,8 @@ export default function SalesPageContent() {
       // Fallback to using the data from the list if API call fails
       setSelectedBill({
         ...sale,
-        notes: sale.notes || sale.reference || ''
+        notes: sale.notes || sale.reference || '',
+        sale_details: normalizeSaleDetailsForReceipt(sale.sale_details),
       });
       setViewBillDialog(true);
     }
@@ -3865,7 +3868,8 @@ export default function SalesPageContent() {
         }))
       } : {
         ...saleData,
-        notes: notesVal
+        notes: notesVal,
+        sale_details: normalizeSaleDetailsForReceipt(saleData.sale_details),
       };
 
       console.log('ðŸ’° Fresh data with payments:', formattedData);
@@ -3877,7 +3881,8 @@ export default function SalesPageContent() {
       // Fallback to using the data from the list if API call fails
       setSelectedBill({
         ...sale,
-        notes: sale.notes || sale.reference || ''
+        notes: sale.notes || sale.reference || '',
+        sale_details: normalizeSaleDetailsForReceipt(sale.sale_details),
       });
       setViewBillDialog(true);
     }
@@ -4483,7 +4488,11 @@ export default function SalesPageContent() {
         })),
       };
     }
-    return { ...data, notes: data.notes || data.reference || null };
+    return {
+      ...data,
+      notes: data.notes || data.reference || null,
+      sale_details: normalizeSaleDetailsForReceipt(data.sale_details),
+    };
   };
 
   // Handle print bill with mode (A4 or Thermal or Existing)

@@ -27,6 +27,8 @@ import {
   resolveSaleReturnReceiptAmounts,
   INVOICE_STORE_PHONE_LINE,
   getLinkedOriginalSaleId,
+  normalizeSaleDetailsForReceipt,
+  getSaleDetailLineDescription,
 } from './sale-utils';
 import { formatCustomerPhoneDisplay } from '@/lib/whatsapp-local';
 import { useSalesContext } from './SalesContext';
@@ -377,8 +379,10 @@ export default function SaleReceiptDialog() {
               {/* Product Table */}
               <Box sx={{ px: 2, py: 2 }}>
                 {(() => {
-                  const details = currentBillData?.sale_details ? getSaleDetailsInAddOrder(currentBillData.sale_details) : [];
-                  const hasAnySize = details.some(d => d.size && String(d.size).trim() !== '');
+                  const details = currentBillData?.sale_details
+                    ? normalizeSaleDetailsForReceipt(getSaleDetailsInAddOrder(currentBillData.sale_details))
+                    : [];
+                  const hasAnySize = details.some((d) => getSaleDetailLineDescription(d) !== '');
                   const totalQty = details.reduce((sum, d) => sum + (parseFloat(d.qnty) || 0), 0);
                   const totalItemAmt = details.reduce((sum, d) => sum + (parseFloat(d.total_amount) || 0), 0);
                   return (
@@ -404,7 +408,7 @@ export default function SaleReceiptDialog() {
                                   <TableCell sx={{ px: 0.75, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{index + 1}</TableCell>
                                   <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="left">{detail.product?.pro_title || detail.pro_title || 'N/A'}</TableCell>
                                   {hasAnySize && (
-                                    <TableCell className="cell-normal" sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'normal !important', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="center">{detail.size || '—'}</TableCell>
+                                    <TableCell className="cell-normal" sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.9rem', fontWeight: 'normal !important', color: '#000000', wordBreak: 'break-word', whiteSpace: 'pre-wrap', verticalAlign: 'middle' }} align="center">{getSaleDetailLineDescription(detail) || '—'}</TableCell>
                                   )}
                                   <TableCell sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtRateQty(detail.qnty)}</TableCell>
                                   <TableCell className="cell-normal" sx={{ px: 1, py: 0.75, borderRight: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', fontSize: '0.95rem', fontWeight: 'normal !important', color: '#000000', verticalAlign: 'middle' }} align="center">{fmtRateQty(detail.unit_rate)}</TableCell>

@@ -1146,6 +1146,7 @@ export async function GET(request) {
                   sale_id: detailSaleId,
                   pro_id: detail.pro_id ? Number(detail.pro_id) : null,
                   vehicle_no: detail.vehicle_no,
+                  size: detail.size != null ? String(detail.size) : null,
                   qnty: detail.qnty ? Number(detail.qnty) : 0,
                   unit: detail.unit,
                   unit_rate: detail.unit_rate ? Number(detail.unit_rate) : 0,

@@ -65,6 +65,10 @@ import {
   validateLedgerTransactionDrafts,
   validatePaymentUpdatePayload,
 } from './payment-form-utils';
+import {
+  getSaleDetailLineDescription,
+  normalizeSaleDetailsForReceipt,
+} from '../sales/components/sale-utils';
 
 const isBenignFetchError = (error) => {
   const name = error?.name || '';
@@ -1924,7 +1928,10 @@ function FinancePageContent() {
         return;
       }
       const sale = await res.json();
-      setViewingSale(sale);
+      setViewingSale({
+        ...sale,
+        sale_details: normalizeSaleDetailsForReceipt(sale.sale_details),
+      });
       setViewSaleDialogOpen(true);
     } catch (err) {
       console.error('Error fetching sale for viewer:', err);
@@ -6695,23 +6702,33 @@ function FinancePageContent() {
               {/* Product Table and Payment Summary - Full Width */}
               <Box sx={{ px: 3, py: 2 }}>
                 {/* Product Details Table - Full Width */}
+                {(() => {
+                  const details = normalizeSaleDetailsForReceipt(viewingSale.sale_details);
+                  const hasAnySize = details.some((d) => getSaleDetailLineDescription(d) !== '');
+                  return (
                 <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
                   <Table size="small">
                     <TableHead>
                       <TableRow sx={{ bgcolor: '#9e9e9e' }}>
                         <TableCell sx={{ fontWeight: 'bold', color: 'white', py: 1, px: 1, border: '1px solid #bbb' }}>S#</TableCell>
                         <TableCell sx={{ fontWeight: 'bold', color: 'white', py: 1, px: 1, border: '1px solid #bbb' }}>Product Name</TableCell>
+                        {hasAnySize && (
+                          <TableCell sx={{ fontWeight: 'bold', color: 'white', py: 1, px: 1, border: '1px solid #bbb' }} align="center">Description</TableCell>
+                        )}
                         <TableCell sx={{ fontWeight: 'bold', color: 'white', py: 1, px: 1, border: '1px solid #bbb' }} align="right">Qty</TableCell>
                         <TableCell sx={{ fontWeight: 'bold', color: 'white', py: 1, px: 1, border: '1px solid #bbb' }} align="right">Rate</TableCell>
                         <TableCell sx={{ fontWeight: 'bold', color: 'white', py: 1, px: 1, border: '1px solid #bbb' }} align="right">Amount</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {viewingSale.sale_details && viewingSale.sale_details.length > 0 ? (
-                        viewingSale.sale_details.map((detail, index) => (
+                      {details.length > 0 ? (
+                        details.map((detail, index) => (
                           <TableRow key={detail.sale_detail_id || index}>
                             <TableCell sx={{ px: 1, border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: 600 }}>{index + 1}</TableCell>
-                            <TableCell sx={{ px: 1, border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: 600 }}>{detail.product?.pro_title || detail.product?.pro_name || detail.product?.prod_name || 'N/A'}</TableCell>
+                            <TableCell sx={{ px: 1, border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: 600, wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>{detail.product?.pro_title || detail.product?.pro_name || detail.product?.prod_name || 'N/A'}</TableCell>
+                            {hasAnySize && (
+                              <TableCell sx={{ px: 1, border: '1px solid #ddd', fontSize: '0.9rem', fontWeight: 400, wordBreak: 'break-word', whiteSpace: 'pre-wrap' }} align="center">{getSaleDetailLineDescription(detail) || '—'}</TableCell>
+                            )}
                             <TableCell sx={{ px: 1, border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtAmt(detail.qnty || 0)}</TableCell>
                             <TableCell sx={{ px: 1, border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtAmt(detail.unit_rate)}</TableCell>
                             <TableCell sx={{ px: 1, border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: 600 }} align="right">{fmtAmt(detail.total_amount)}</TableCell>
@@ -6719,7 +6736,7 @@ function FinancePageContent() {
                         ))
                       ) : (
                         <TableRow>
-                          <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                          <TableCell colSpan={hasAnySize ? 6 : 5} align="center" sx={{ py: 4 }}>
                             No items found
                           </TableCell>
                         </TableRow>
@@ -6727,6 +6744,8 @@ function FinancePageContent() {
                     </TableBody>
                   </Table>
                 </TableContainer>
+                  );
+                })()}
 
                 {/* Payment Summary - Below Product Details */}
                 <Box sx={{ mt: 2, width: '100%', display: 'flex', justifyContent: 'space-between', gap: 2 }}>
@@ -7173,6 +7192,11 @@ function FinancePageContent() {
                     <Typography sx={{ fontSize: '11px', fontWeight: 'bold', color: '#000', wordBreak: 'break-word' }}>
                       {d.product?.pro_title || 'Item'}
                     </Typography>
+                    {getSaleDetailLineDescription(d) ? (
+                      <Typography sx={{ fontSize: '10px', color: '#000', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
+                        {getSaleDetailLineDescription(d)}
+                      </Typography>
+                    ) : null}
                     <Box sx={{ display: 'flex', alignItems: 'center', color: '#000' }}>
                       <Box sx={{ flex: 1 }} />
                       <Typography sx={{ fontSize: '11px', width: '35px', textAlign: 'center', color: '#000' }}>

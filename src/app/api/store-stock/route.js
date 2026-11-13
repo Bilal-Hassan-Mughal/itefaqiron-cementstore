@@ -21,6 +21,46 @@ export async function GET(request) {
     // Support both pro_id and product_id for backward compatibility
     const productId = searchParams.get('product_id') || searchParams.get('pro_id');
     const lowStock = searchParams.get('low_stock');
+    const adjustmentsList = searchParams.get('adjustments');
+
+    if (adjustmentsList === 'true' || adjustmentsList === '1') {
+      const proIdFilter = searchParams.get('pro_id') || searchParams.get('product_id');
+      const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '200', 10) || 200, 1), 500);
+      const where = {
+        store: { branch_id: branchId },
+      };
+      if (storeId) where.store_id = parseInt(storeId, 10);
+      if (proIdFilter) where.pro_id = parseInt(proIdFilter, 10);
+
+      const rows = await prisma.stockAdjustment.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        take: limit,
+        include: {
+          store: { select: { storeid: true, store_name: true } },
+          product: { select: { pro_id: true, pro_title: true, pro_unit: true } },
+          updated_by_user: { select: { user_id: true, full_name: true } },
+        },
+      });
+
+      return NextResponse.json(
+        rows.map((row) => ({
+          adjustment_id: row.adjustment_id,
+          store_id: row.store_id,
+          pro_id: row.pro_id,
+          quantity: row.quantity,
+          pre_quantity: row.pre_quantity,
+          post_quantity: row.post_quantity,
+          created_at: row.created_at,
+          updated_by: row.updated_by,
+          reference: row.reference,
+          description: row.reference,
+          store: row.store,
+          product: row.product,
+          updated_by_user: row.updated_by_user,
+        }))
+      );
+    }
 
     // Get specific product stock in a store
     if (storeId && productId) {
@@ -127,7 +167,8 @@ export async function GET(request) {
           ss.stock_quantity,
           p.pro_id as product_pro_id,
           p.pro_title as product_pro_title,
-          p.pro_unit as product_pro_unit
+          p.pro_unit as product_pro_unit,
+          p.pro_description as product_pro_description
         FROM stores s
         LEFT JOIN store_stocks ss ON s.storeid = ss.store_id
         LEFT JOIN products p ON ss.pro_id = p.pro_id
@@ -158,7 +199,8 @@ export async function GET(request) {
             product: {
               pro_id: row.product_pro_id,
               pro_title: row.product_pro_title,
-              pro_unit: row.product_pro_unit
+              pro_unit: row.product_pro_unit,
+              pro_description: row.product_pro_description
             }
           });
         }
@@ -180,20 +222,21 @@ export async function POST(request) {
 
   try {
     const body = await request.json();
-    const { store_id, product_id, quantity, operation = 'set', updated_by } = body;
+    const { store_id, product_id, quantity, operation = 'set', updated_by, description, reference } = body;
 
     if (!store_id || !product_id || quantity === undefined) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
     let updatedStock;
+    let adjustmentLog = null;
     if (operation === 'adjust') {
       const storeIdInt = parseInt(store_id);
       const productIdInt = parseInt(product_id);
       const adjQty = parseFloat(quantity);
 
       // Perform transaction to ensure atomic update and logging
-      updatedStock = await prisma.$transaction(async (tx) => {
+      const txResult = await prisma.$transaction(async (tx) => {
         // Find existing store stock
         let storeStock = await tx.storeStock.findUnique({
           where: {
@@ -235,8 +278,11 @@ export async function POST(request) {
           });
         }
 
+        const descRaw = (description ?? reference ?? '').toString().trim();
+        const referenceText = descRaw ? descRaw.slice(0, 500) : null;
+
         // Create stock adjustment log
-        await tx.stockAdjustment.create({
+        const adjustment = await tx.stockAdjustment.create({
           data: {
             store_id: storeIdInt,
             pro_id: productIdInt,
@@ -244,12 +290,19 @@ export async function POST(request) {
             pre_quantity: preQty,
             post_quantity: postQty,
             updated_by: updated_by || null,
-            reference: 'Manual Adjustment'
-          }
+            reference: referenceText,
+          },
+          include: {
+            store: { select: { storeid: true, store_name: true } },
+            product: { select: { pro_id: true, pro_title: true, pro_unit: true } },
+            updated_by_user: { select: { user_id: true, full_name: true } },
+          },
         });
 
-        return res;
+        return { stock: res, adjustment };
       });
+      updatedStock = txResult.stock;
+      adjustmentLog = txResult.adjustment;
     } else {
       updatedStock = await updateStoreStock(
         parseInt(store_id), 
@@ -263,7 +316,24 @@ export async function POST(request) {
     return NextResponse.json({
       success: true,
       message: 'Store stock updated successfully',
-      data: updatedStock
+      data: updatedStock,
+      adjustment: adjustmentLog
+        ? {
+            adjustment_id: adjustmentLog.adjustment_id,
+            store_id: adjustmentLog.store_id,
+            pro_id: adjustmentLog.pro_id,
+            quantity: adjustmentLog.quantity,
+            pre_quantity: adjustmentLog.pre_quantity,
+            post_quantity: adjustmentLog.post_quantity,
+            created_at: adjustmentLog.created_at,
+            updated_by: adjustmentLog.updated_by,
+            reference: adjustmentLog.reference,
+            description: adjustmentLog.reference,
+            store: adjustmentLog.store,
+            product: adjustmentLog.product,
+            updated_by_user: adjustmentLog.updated_by_user,
+          }
+        : null,
     });
   } catch (error) {
     console.error('Error updating store stock:', error);

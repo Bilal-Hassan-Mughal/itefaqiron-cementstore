@@ -31,6 +31,21 @@ export const getCartLineCostRate = (cartRow, catalog) => {
 
 // ─── Bill Builder ────────────────────────────────────────────────────────────
 
+/** Line description on invoice (size / legacy fields). */
+export function getSaleDetailLineDescription(detail) {
+  if (!detail) return '';
+  const raw = detail.size ?? detail.line_description ?? detail.description ?? '';
+  return String(raw).trim();
+}
+
+/** Ensure sale_details from list API / DB always carry `size` for receipt reprint. */
+export function normalizeSaleDetailsForReceipt(details) {
+  return (details || []).map((d) => {
+    const size = getSaleDetailLineDescription(d) || null;
+    return { ...d, size };
+  });
+}
+
 export function buildSaleReceiptBill({
   saleId = null,
   billNumber = null,
