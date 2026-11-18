@@ -3295,6 +3295,13 @@ export async function DELETE(request) {
         where: { bill_no: String(id) }
       });
 
+      const ledgerLeft = await tx.ledger.count({
+        where: { bill_no: String(id) },
+      });
+      if (ledgerLeft > 0) {
+        throw new Error(`Ledger cleanup incomplete for sale #${id}`);
+      }
+
       // Reverse loader balance
       if (existingSale.loader_id && parseFloat(existingSale.shipping_amount || 0) > 0) {
         await tx.loader.update({

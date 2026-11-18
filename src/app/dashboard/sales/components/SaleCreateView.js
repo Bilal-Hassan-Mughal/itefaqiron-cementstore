@@ -22,7 +22,8 @@ import {
   MenuItem,
   Chip,
   Paper,
-  Container
+  Container,
+  Divider,
 } from '@mui/material';
 import ReceiptIcon from '@mui/icons-material/Receipt';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
@@ -71,7 +72,11 @@ import {
   getFocusedAutocompleteOption,
   EMPTY_PAYMENT_DATA,
   getCartLineCostRate,
-  paymentInputValue
+  paymentInputValue,
+  getProjectedCustomerBalanceAfterSale,
+  SALE_BANK_AUTOCOMPLETE_SX,
+  SALE_PAYMENT_FIELDS_GRID_SX,
+  SALE_CREATE_HEADER_ACTIONS_SX,
 } from './sale-utils';
 
 export default function SaleCreateView() {
@@ -191,8 +196,18 @@ export default function SaleCreateView() {
       <Container maxWidth={false} sx={{ py: 1 }}>
 
         {/* Page Header */}
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 1.5,
+            mb: 2,
+            minWidth: 0,
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
             <IconButton
               onClick={() => setCurrentView('list')}
               sx={{
@@ -203,60 +218,66 @@ export default function SaleCreateView() {
             >
               <SearchIcon />
             </IconButton>
-            <Box>
-              <Typography variant="h5" component="h1" sx={{ fontWeight: 'bold', color: billType === 'SALE_RETURN' ? '#d32f2f' : editingSale ? '#1565c0' : 'text.primary' }}>
-                {editingSale ? `Edit Sale #${editingSale.bill_number || editingSale.sale_id}` : billType === 'SALE_RETURN' ? 'Return Sale' : 'Create New Sale'}
+            {(editingSale || billType === 'SALE_RETURN') ? (
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="h6" component="h1" sx={{ fontWeight: 700, lineHeight: 1.2, color: billType === 'SALE_RETURN' ? '#d32f2f' : '#1565c0' }}>
+                  {editingSale ? `Edit Sale #${editingSale.bill_number || editingSale.sale_id}` : 'Return Sale'}
+                </Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'block' } }}>
+                  {editingSale ? 'Ledger adjusts on save' : 'Pick invoice to return'}
+                </Typography>
+              </Box>
+            ) : (
+              <Typography variant="h6" component="h1" sx={{ fontWeight: 700, whiteSpace: 'nowrap', color: 'text.primary' }}>
+                Sales
               </Typography>
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                {editingSale ? 'Update sale details — ledger will be adjusted automatically' : billType === 'SALE_RETURN' ? 'Select an invoice to return items' : 'Select products and create sale order'}
-              </Typography>
-            </Box>
+            )}
           </Box>
 
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-            {/* Network Status Badge */}
+          <Box sx={{ ...SALE_CREATE_HEADER_ACTIONS_SX, flex: '1 1 auto', minWidth: 0 }}>
             <Chip
               icon={isOnline ? <WifiIcon style={{ color: '#2e7d32' }} /> : <WifiOffIcon style={{ color: '#d32f2f' }} />}
               label={isOnline ? (offlineQueueCount > 0 ? `Online (${offlineQueueCount} Pending)` : 'Online') : `Offline Mode (${offlineQueueCount} Pending)`}
               color={!isOnline || offlineQueueCount > 0 ? 'warning' : 'success'}
               variant={!isOnline || offlineQueueCount > 0 ? 'filled' : 'outlined'}
               size="small"
-              sx={{ fontWeight: 'bold', px: 0.5 }}
+              sx={{ fontWeight: 'bold', height: 34 }}
             />
             {offlineQueueCount > 0 && (
               <Button variant="contained" size="small"
                 startIcon={isSyncingOffline ? <CircularProgress size={16} color="inherit" /> : <SyncIcon />}
                 onClick={triggerAutoSync} disabled={isSyncingOffline || !isOnline}
-                sx={{ bgcolor: '#ed6c02', color: 'white', fontWeight: 'bold', '&:hover': { bgcolor: '#e65100' } }}
+                sx={{ bgcolor: '#ed6c02', color: 'white', fontWeight: 'bold', flexShrink: 0, '&:hover': { bgcolor: '#e65100' } }}
                 title="Upload pending offline bills to online server"
               >
                 {isSyncingOffline ? 'Syncing...' : `Sync Offline (${offlineQueueCount})`}
               </Button>
             )}
-            <Button variant="outlined" startIcon={<ReceiptIcon />}
+            <Divider orientation="vertical" flexItem sx={{ alignSelf: 'stretch', my: 0.25, flexShrink: 0 }} />
+            <Button variant="outlined" size="small" startIcon={<ReceiptIcon />}
               onClick={() => setLoadQuotationDialogOpen(true)}
-              sx={{ mr: 2, borderColor: '#ed6c02', color: '#ed6c02', '&:hover': { borderColor: '#e65100', backgroundColor: '#fff3e0' } }}
+              sx={{ borderColor: '#ed6c02', color: '#ed6c02', '&:hover': { borderColor: '#e65100', backgroundColor: '#fff3e0' } }}
             >Load Quotation</Button>
-            <Button variant="outlined" startIcon={<ListAltIcon />}
+            <Button variant="outlined" size="small" startIcon={<ListAltIcon />}
               onClick={openLoadOrderDialog}
-              sx={{ mr: 2, borderColor: '#1976d2', color: '#1976d2', '&:hover': { borderColor: '#115293', backgroundColor: '#e3f2fd' } }}
+              sx={{ borderColor: '#1976d2', color: '#1976d2', '&:hover': { borderColor: '#115293', backgroundColor: '#e3f2fd' } }}
             >Load Order</Button>
-            <Button variant="outlined" startIcon={<AddIcon />}
+            <Button variant="outlined" size="small" startIcon={<AddIcon />}
               onClick={handleOpenCustomerPopup}
               sx={{ borderColor: '#6f42c1', color: '#6f42c1', '&:hover': { borderColor: '#5a2d91', backgroundColor: '#f8f5ff' } }}
             >Create Customer</Button>
-            <Button variant="outlined" startIcon={<PackageIcon />}
+            <Button variant="outlined" size="small" startIcon={<PackageIcon />}
               onClick={() => setShowAddProductPopup(true)}
               sx={{ borderColor: 'info.main', color: 'info.main', '&:hover': { borderColor: 'info.dark', backgroundColor: 'info.light', color: 'info.dark' } }}
             >Add Product</Button>
-            <Button variant="outlined" startIcon={<FolderIcon />}
+            <Button variant="outlined" size="small" startIcon={<FolderIcon />}
               onClick={() => setShowAddProductCategoryPopup(true)}
               sx={{ borderColor: 'success.main', color: 'success.main', '&:hover': { borderColor: 'success.dark', backgroundColor: 'success.light', color: 'success.dark' } }}
-            >Add Product Category</Button>
-            <Button variant="outlined" startIcon={<FolderOpenIcon />}
+            >Add Category</Button>
+            <Button variant="outlined" size="small" startIcon={<FolderOpenIcon />}
               onClick={() => setShowAddProductSubCategoryPopup(true)}
               sx={{ borderColor: 'secondary.main', color: 'secondary.main', '&:hover': { borderColor: 'secondary.dark', backgroundColor: 'secondary.light', color: 'secondary.dark' } }}
-            >Add Product Sub Category</Button>
+            >Add Sub Category</Button>
           </Box>
         </Box>
 
@@ -1447,15 +1468,14 @@ export default function SaleCreateView() {
                   display: 'flex',
                   flexDirection: 'column'
                 }}>
-                  {/* First Row - CASH, BANK, BANK ACCOUNT, TOTAL CASH RECEIVED */}
-                  <Grid container spacing={1} sx={{ mb: 2 }}>
-                    <Grid item xs={3}>
-                      <Box>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', mb: 1 }}>
-                          <Typography variant="body2" sx={{ fontWeight: 'medium', color: 'text.secondary' }}>
+                  {/* Payment amounts & bank — equal-width columns */}
+                  <Box sx={SALE_PAYMENT_FIELDS_GRID_SX}>
+                      <Box sx={{ width: '100%', minWidth: 0, height: '100%' }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', mb: 0.75, minHeight: 28 }}>
+                          <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary', letterSpacing: 0.3 }}>
                             CASH
                           </Typography>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
                             Bal: {fmtAmt(customers.find(c => c.cus_name === 'Cash Account')?.cus_balance ?? 0)}
                           </Typography>
                         </Box>
@@ -1471,6 +1491,7 @@ export default function SaleCreateView() {
                             bgcolor: '#2e7d32',
                             borderRadius: 1,
                             '& .MuiOutlinedInput-root': {
+                              minHeight: 40,
                               color: 'white !important',
                               WebkitTextFillColor: 'white !important',
                               '& fieldset': {
@@ -1500,12 +1521,12 @@ export default function SaleCreateView() {
                           placeholder="0"
                         />
                       </Box>
-                    </Grid>
-                    <Grid item xs={3}>
-                      <Box>
-                        <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                          BANK
-                        </Typography>
+                      <Box sx={{ width: '100%', minWidth: 0, height: '100%' }}>
+                        <Box sx={{ mb: 0.75, minHeight: 28, display: 'flex', alignItems: 'flex-end' }}>
+                          <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary', letterSpacing: 0.3 }}>
+                            BANK
+                          </Typography>
+                        </Box>
                         <TextField
                           fullWidth
                           size="small"
@@ -1530,6 +1551,7 @@ export default function SaleCreateView() {
                           }}
                           sx={{
                             bgcolor: 'white',
+                            '& .MuiOutlinedInput-root': { minHeight: 40 },
                             '& .MuiInputBase-input': {
                               padding: '8px',
                               fontWeight: 'bold',
@@ -1546,21 +1568,45 @@ export default function SaleCreateView() {
                           placeholder="0"
                         />
                       </Box>
-                    </Grid>
-                    <Grid item xs={3}>
-                      <Box>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', mb: 1 }}>
-                          <Typography variant="body2" sx={{ fontWeight: 'medium', color: 'text.secondary' }}>
+                      <Box sx={{ width: '100%', minWidth: 0, height: '100%' }}>
+                        <Box sx={{ mb: 0.75, minHeight: 28, display: 'flex', alignItems: 'flex-end' }}>
+                          <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary', letterSpacing: 0.3, lineHeight: 1.15 }}>
+                            TOTAL CASH RECEIVED
+                          </Typography>
+                        </Box>
+                        <TextField
+                          fullWidth
+                          size="small"
+                          type="number"
+                          value={Number(paymentData.totalCashReceived).toFixed(0)}
+                          sx={{
+                            bgcolor: '#f5f5f5',
+                            '& .MuiOutlinedInput-root': { minHeight: 40 },
+                            '& .MuiInputBase-input': {
+                              padding: '8px',
+                              fontWeight: 'bold',
+                              color: '#000000 !important',
+                              WebkitTextFillColor: '#000000 !important'
+                            }
+                          }}
+                          disabled
+                        />
+                      </Box>
+                      <Box sx={{ width: '100%', minWidth: 0, height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', mb: 0.75, minHeight: 28, gap: 0.5 }}>
+                          <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary', letterSpacing: 0.3 }}>
                             BANK ACCOUNT
                           </Typography>
                           {paymentData.bankAccountId && (
-                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
                               Bal: {fmtAmt(bankAccounts.find(a => a.cus_id === paymentData.bankAccountId)?.cus_balance ?? 0)}
                             </Typography>
                           )}
                         </Box>
                         <Autocomplete
+                          fullWidth
                           size="small"
+                          sx={SALE_BANK_AUTOCOMPLETE_SX}
                           options={bankAccounts || []}
                           getOptionLabel={(option) => option.cus_name || ''}
                           value={bankAccounts.find(account => account.cus_id === paymentData.bankAccountId) || null}
@@ -1591,13 +1637,17 @@ export default function SaleCreateView() {
                           renderInput={(params) => (
                             <TextField
                               {...params}
+                              fullWidth
                               placeholder="Select Bank"
                               onFocus={(e) => e.target.select()}
                               sx={{
+                                width: '100%',
                                 bgcolor: 'white',
+                                '& .MuiFormControl-root, & .MuiOutlinedInput-root': { width: '100%' },
                                 '& .MuiInputBase-input': {
-                                  padding: '8px',
+                                  padding: '8px 28px 8px 0',
                                   fontWeight: 'bold',
+                                  minWidth: 0,
                                   color: '#000000',
                                   WebkitTextFillColor: '#000000 !important'
                                 }
@@ -1606,56 +1656,103 @@ export default function SaleCreateView() {
                           )}
                         />
                       </Box>
-                    </Grid>
-                    <Grid item xs={3}>
-                      <Box>
-                        <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                          TOTAL CASH RECEIVED
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          size="small"
-                          type="number"
-                          value={Number(paymentData.totalCashReceived).toFixed(0)}
-                          sx={{
-                            bgcolor: '#f5f5f5',
-                            '& .MuiInputBase-input': {
-                              padding: '8px',
-                              fontWeight: 'bold',
-                              color: '#000000 !important',
-                              WebkitTextFillColor: '#000000 !important'
-                            }
-                          }}
-                          disabled
-                        />
-                      </Box>
-                    </Grid>
-                  </Grid>
+                  </Box>
 
-                  {/* Fourth Row - NOTES */}
-                  <Box sx={{ mb: 2 }}>
-                    <Typography variant="body2" sx={{ mb: 1, fontWeight: 'medium', color: 'text.secondary' }}>
-                      NOTES
-                    </Typography>
-                    <TextField
-                      fullWidth
-                      multiline
-                      rows={2}
-                      size="small"
-                      value={paymentData.notes ?? ''}
-                      onChange={(e) => handlePaymentDataChange('notes', e.target.value)}
-                      onFocus={(e) => e.target.select()}
-                      sx={{
-                        bgcolor: 'white',
-                        '& .MuiInputBase-input': {
-                          padding: '8px',
-                          fontWeight: 'bold',
-                          color: '#000000',
-                          WebkitTextFillColor: '#000000 !important'
-                        }
-                      }}
-                      placeholder="Enter any notes..."
-                    />
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: 1.5,
+                      alignItems: 'flex-end',
+                      pt: 0.25,
+                    }}
+                  >
+                    <Box sx={{ width: { xs: '100%', sm: 168 }, flexShrink: 0 }}>
+                      <Typography variant="caption" sx={{ display: 'block', mb: 0.75, fontWeight: 700, color: 'text.secondary', letterSpacing: 0.3 }}>
+                        NOTES
+                      </Typography>
+                      <TextField
+                        fullWidth
+                        multiline
+                        minRows={2}
+                        maxRows={3}
+                        size="small"
+                        value={paymentData.notes ?? ''}
+                        onChange={(e) => handlePaymentDataChange('notes', e.target.value)}
+                        onFocus={(e) => e.target.select()}
+                        sx={{
+                          bgcolor: 'white',
+                          '& .MuiInputBase-root': {
+                            alignItems: 'flex-start',
+                            minHeight: 56,
+                          },
+                          '& .MuiInputBase-input': {
+                            padding: '6px 8px',
+                            fontWeight: 600,
+                            fontSize: '0.875rem',
+                            color: '#000000',
+                            WebkitTextFillColor: '#000000 !important',
+                            lineHeight: 1.3,
+                          },
+                        }}
+                        placeholder="Notes..."
+                      />
+                    </Box>
+
+                    {formSelectedCustomer
+                      && isCustomerAccount(formSelectedCustomer, customerCategories)
+                      && billType !== 'SALE_RETURN'
+                      && billType !== 'QUOTATION' && (
+                      <>
+                        <Box
+                          sx={{
+                            flex: '1 1 200px',
+                            minWidth: { xs: '100%', sm: 200 },
+                            maxWidth: { sm: 280 },
+                          }}
+                        >
+                          <Typography
+                            variant="caption"
+                            sx={{ display: 'block', mb: 0.75, fontWeight: 700, color: 'text.secondary', letterSpacing: 0.35, textTransform: 'uppercase' }}
+                          >
+                            Promise reminder
+                          </Typography>
+                          <DateFilterInput
+                            label="Due date"
+                            value={paymentData.promisedPayDate ?? ''}
+                            onChange={(val) => handlePaymentDataChange('promisedPayDate', val)}
+                            fullWidth
+                            size="small"
+                            sx={{
+                              bgcolor: 'white',
+                              '& .MuiInputBase-input': { fontWeight: 600, minHeight: 40 },
+                            }}
+                          />
+                        </Box>
+                        <Box
+                          sx={{
+                            flex: '0 0 auto',
+                            pb: 0.65,
+                            px: 1,
+                            minWidth: 120,
+                            borderLeft: { sm: '1px solid' },
+                            borderColor: { sm: 'divider' },
+                            pl: { sm: 1.5 },
+                          }}
+                        >
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.2, whiteSpace: 'nowrap' }}>
+                            Bal. after bill
+                          </Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 700, color: 'primary.dark', lineHeight: 1.3 }}>
+                            {fmtAmt(getProjectedCustomerBalanceAfterSale(formSelectedCustomer, {
+                              grandTotal: calculateGrandTotal(),
+                              cashAmount: parseFloat(paymentData.cash) || 0,
+                              bankAmount: parseFloat(paymentData.bank) || 0,
+                            }))}
+                          </Typography>
+                        </Box>
+                      </>
+                    )}
                   </Box>
                 </Box>
 

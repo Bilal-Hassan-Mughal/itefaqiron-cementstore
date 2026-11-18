@@ -163,6 +163,8 @@ import {
   resolveSaleReturnReceiptAmounts,
   buildReturnDetailsFromCart,
   getLinkedOriginalSaleId,
+  saveCustomerPaymentPromiseFromSale,
+  getProjectedCustomerBalanceAfterSale,
 } from './sale-utils';
 import SaleDropdownListbox, { SaleCustomerDropdownListbox } from './SaleDropdownListbox';
 
@@ -676,6 +678,38 @@ export default function SalesPageContent() {
       fetchBankAccounts(customers);
     }
   }, [customers, customerCategories, customerTypes]);
+
+  // Pre-fill active payment promise when a customer account is selected
+  useEffect(() => {
+    const customer = formSelectedCustomer;
+    const cusId = customer?.cus_id;
+    if (!cusId || !isCustomerAccount(customer, customerCategories)) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/customers/payment-promise?cus_id=${cusId}`, { cache: 'no-store' });
+        if (cancelled || !res.ok) return;
+        const data = await res.json();
+        const active = data.active;
+        if (active?.promised_pay_date) {
+          const iso = getPkDateString(active.promised_pay_date);
+          setPaymentData((prev) => ({
+            ...prev,
+            promisedPayDate: iso,
+          }));
+        } else {
+          setPaymentData((prev) => ({ ...prev, promisedPayDate: '' }));
+        }
+      } catch {
+        /* optional preload */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [formSelectedCustomer?.cus_id, customerCategories]);
 
   // Ledger state
   const [ledgerDialogOpen, setLedgerDialogOpen] = useState(false);
@@ -1650,6 +1684,8 @@ export default function SalesPageContent() {
   // Save bill to database
   const handleSaveBill = async (bypass = false) => {
     if (isSavingBillRef.current) return;
+    beginSaving();
+    try {
     const bypassLossCheck = (bypass === true);
     // Pre-auth validation â€” check these before triggering biometric/PIN
     if ((parseFloat(paymentData.bank || 0)) > 0 && !paymentData.bankAccountId) {
@@ -1684,14 +1720,12 @@ export default function SalesPageContent() {
       }
     }
 
-    const hasCash = parseFloat(paymentData.cash || 0) > 0;
-    const hasBank = parseFloat(paymentData.bank || 0) > 0;
-    if (hasCash || hasBank) {
-      const authOk = await requireAuth();
-      if (!authOk) return;
-    }
-    beginSaving();
-    try {
+      const hasCash = parseFloat(paymentData.cash || 0) > 0;
+      const hasBank = parseFloat(paymentData.bank || 0) > 0;
+      if (hasCash || hasBank) {
+        const authOk = await requireAuth();
+        if (!authOk) return;
+      }
       // If bill type is SALE_RETURN, process it as a return
       if (billType === 'SALE_RETURN') {
         // Customer is required if no invoice is selected
@@ -1999,8 +2033,6 @@ export default function SalesPageContent() {
       const isEditing = !!editingSale;
       const cartItems = getCartItemsInAddOrder();
 
-      beginSaving();
-
       // Use PUT when editing an existing sale, POST for new
       const apiBody = isEditing
         ? {
@@ -2118,7 +2150,6 @@ export default function SalesPageContent() {
 
         setCurrentBillData(billDataForPrint);
         setReceiptDialogOpen(true);
-        endSaving();
 
         void (async () => {
           if (!savedSaleId) return;
@@ -2136,6 +2167,33 @@ export default function SalesPageContent() {
             /* local receipt is enough */
           }
         })();
+
+        let promiseSnackSuffix = '';
+        if (
+          billType === 'BILL'
+          && formSelectedCustomer
+          && isCustomerAccount(formSelectedCustomer, customerCategories)
+          && String(paymentData.promisedPayDate || '').trim()
+        ) {
+          const promiseRes = await saveCustomerPaymentPromiseFromSale({
+            customer: formSelectedCustomer,
+            customerCategories,
+            promisedPayDate: paymentData.promisedPayDate,
+            accountBalanceAfterSale: Number((
+              parseFloat(formSelectedCustomer.cus_balance || 0)
+              + parseFloat(grandTotal || 0)
+              - cashAmount
+              - bankAmount
+            ).toFixed(2)),
+            note: paymentData.notes,
+            createdBy: getCurrentUserId(),
+          });
+          if (promiseRes.ok) {
+            promiseSnackSuffix = ' Payment promise reminder set.';
+          } else if (promiseRes.error) {
+            promiseSnackSuffix = ` (Promise reminder not saved: ${promiseRes.error})`;
+          }
+        }
 
         const draftIdToDelete = currentDraftId;
         const orderIdToFinalize = loadedOrderId;
@@ -2184,7 +2242,7 @@ export default function SalesPageContent() {
           setBillType('BILL');
           setCurrentView('list');
           fetchData({ mode: 'list', silent: true });
-          showSnackbar('Sale updated successfully! Ledger adjusted.', 'success');
+          showSnackbar(`Sale updated successfully! Ledger adjusted.${promiseSnackSuffix}`, 'success');
           return;
         }
 
@@ -2205,7 +2263,7 @@ export default function SalesPageContent() {
           setCurrentScreenIndex(previousIndex);
           restoreScreenState(previousState);
 
-          showSnackbar(`âœ… Sale created! Restored previous screen (${previousState.customerName})`, 'success');
+          showSnackbar(`âœ… Sale created! Restored previous screen (${previousState.customerName}).${promiseSnackSuffix}`, 'success');
         } else {
           // No previous screen - clear form to start fresh
           console.log('âœ… Sale created! No previous screen, clearing form...');
@@ -2220,7 +2278,7 @@ export default function SalesPageContent() {
           // Reset screen stack for next sale only if we're at index 0
           setScreenStack([]);
           setCurrentScreenIndex(-1);
-          showSnackbar('âœ… Sale created! Form cleared for next entry', 'success');
+          showSnackbar(`âœ… Sale created! Form cleared for next entry.${promiseSnackSuffix}`, 'success');
         }
       } else if (response) {
         if (!isEditing) {

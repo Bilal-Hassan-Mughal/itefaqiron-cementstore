@@ -282,6 +282,7 @@ export const EMPTY_PAYMENT_DATA = {
   labour: '',
   deliveryCharges: '',
   notes: '',
+  promisedPayDate: '',
   isLoadedOrder: false,
 };
 
@@ -295,8 +296,140 @@ export const normalizePaymentData = (data) => ({
   labour: data?.labour ?? EMPTY_PAYMENT_DATA.labour,
   deliveryCharges: data?.deliveryCharges ?? EMPTY_PAYMENT_DATA.deliveryCharges,
   notes: data?.notes ?? EMPTY_PAYMENT_DATA.notes,
+  promisedPayDate: data?.promisedPayDate ?? EMPTY_PAYMENT_DATA.promisedPayDate,
   isLoadedOrder: data?.isLoadedOrder ?? EMPTY_PAYMENT_DATA.isLoadedOrder,
 });
+
+/** Customer ledger balance after this bill (prev + grand total − cash − bank). */
+/** Full-width bank account Autocomplete in the sale payment row */
+export const SALE_BANK_AUTOCOMPLETE_SX = {
+  width: '100%',
+  maxWidth: '100%',
+  alignSelf: 'stretch',
+  '&.MuiAutocomplete-root': {
+    width: '100%',
+    display: 'flex',
+  },
+  '& .MuiFormControl-root': {
+    width: '100%',
+    flex: '1 1 auto',
+    minWidth: 0,
+  },
+  '& .MuiOutlinedInput-root': {
+    width: '100%',
+    minHeight: 40,
+  },
+  '& .MuiAutocomplete-inputRoot': {
+    width: '100%',
+    minHeight: 40,
+    flexWrap: 'nowrap',
+    padding: '0 8px !important',
+  },
+  '& .MuiAutocomplete-input': {
+    minWidth: '0 !important',
+    flex: '1 1 auto',
+    width: '0 !important',
+  },
+  '& .MuiAutocomplete-endAdornment': {
+    position: 'absolute',
+    right: 6,
+  },
+};
+
+export const SALE_CREATE_ACTION_BTN_SX = {
+  textTransform: 'none',
+  fontWeight: 600,
+  fontSize: '0.8125rem',
+  py: 0.55,
+  px: 1.35,
+  minHeight: 34,
+  lineHeight: 1.25,
+  whiteSpace: 'nowrap',
+};
+
+export const SALE_CREATE_HEADER_ACTIONS_SX = {
+  display: 'flex',
+  flexDirection: 'row',
+  flexWrap: 'nowrap',
+  alignItems: 'center',
+  gap: 1,
+  width: { xs: '100%', md: 'auto' },
+  maxWidth: '100%',
+  overflowX: 'auto',
+  overflowY: 'hidden',
+  pb: 0.25,
+  justifyContent: { xs: 'flex-start', md: 'flex-end' },
+  WebkitOverflowScrolling: 'touch',
+  '& .MuiButton-root': SALE_CREATE_ACTION_BTN_SX,
+  '& .MuiButton-outlined': { bgcolor: 'background.paper', flexShrink: 0 },
+  '& .MuiChip-root': { flexShrink: 0 },
+};
+
+/** @deprecated use SALE_CREATE_HEADER_ACTIONS_SX — single toolbar row */
+export const SALE_CREATE_TOOLBAR_ROW_SX = SALE_CREATE_HEADER_ACTIONS_SX;
+
+export const SALE_PAYMENT_FIELDS_GRID_SX = {
+  mb: 1.5,
+  width: '100%',
+  display: 'grid',
+  gridTemplateColumns: {
+    xs: 'repeat(2, minmax(0, 1fr))',
+    sm: 'repeat(4, minmax(0, 1fr))',
+  },
+  gap: 1.5,
+  alignItems: 'start',
+};
+
+export function getProjectedCustomerBalanceAfterSale(customer, { grandTotal, cashAmount, bankAmount }) {
+  const prev = parseFloat(customer?.cus_balance ?? 0) || 0;
+  const gt = parseFloat(grandTotal ?? 0) || 0;
+  const cash = parseFloat(cashAmount ?? 0) || 0;
+  const bank = parseFloat(bankAmount ?? 0) || 0;
+  return Number((prev + gt - cash - bank).toFixed(2));
+}
+
+/** After a successful sale bill save — optional Munshi / payment-promise queue entry. */
+export async function saveCustomerPaymentPromiseFromSale({
+  customer,
+  customerCategories,
+  promisedPayDate,
+  accountBalanceAfterSale,
+  note,
+  createdBy,
+}) {
+  const dateStr = String(promisedPayDate || '').trim().slice(0, 10);
+  if (!dateStr || !customer?.cus_id) return { skipped: true };
+  if (!isCustomerAccount(customer, customerCategories)) return { skipped: true };
+
+  let promisedAmountNum = null;
+  if (accountBalanceAfterSale != null && !Number.isNaN(parseFloat(accountBalanceAfterSale))) {
+    promisedAmountNum = parseFloat(accountBalanceAfterSale);
+  }
+
+  try {
+    const res = await fetch('/api/customers/payment-promise', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cus_id: customer.cus_id,
+        promised_pay_date: dateStr,
+        promised_amount: promisedAmountNum,
+        note: note?.trim() || null,
+        created_by: createdBy != null ? createdBy : null,
+      }),
+    });
+    if (res.ok) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('payment-promise-reminder-updated'));
+      }
+      return { ok: true };
+    }
+    const data = await res.json().catch(() => ({}));
+    return { ok: false, error: data.error || 'Failed to save payment promise' };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'Failed to save payment promise' };
+  }
+}
 
 export const EMPTY_PRODUCT_FORM_DATA = {
   quantity: '',
