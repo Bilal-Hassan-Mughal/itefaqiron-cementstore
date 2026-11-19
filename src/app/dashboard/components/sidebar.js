@@ -150,6 +150,8 @@ const ROUTE_MAP = {
   'purchase-details': '/dashboard/purchases',
   'super-order': '/dashboard/super-order',
   'rebate-report': '/dashboard/reports/rebate',
+  'rebate-history': '/dashboard/reports/rebate/history',
+  'supplier-ledger': '/dashboard/reports/supplier-ledger',
   'balance-sheet': '/dashboard/reports/balance-sheet',
   'stores': '/dashboard/stores',
   'store-stock': '/dashboard/store-stock',
